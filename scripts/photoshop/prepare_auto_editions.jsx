@@ -62,6 +62,20 @@ var SCAutoEditionsPreparation = (function () {
                 if (l.typename === "LayerSet") named(l, name, found);
             }
         }
+        function visibleRole(container, name) {
+            var matches = [];
+            named(container, name, matches);
+            if (matches.length === 1) return matches[0];
+            // Retain hidden same-name layers in the PSD. The live role must
+            // still be unique and top-level, as in the Python preflight.
+            var visible = [];
+            for (var i = 0; i < matches.length; i++) {
+                if (matches[i].visible) visible.push(matches[i]);
+            }
+            if (visible.length !== 1 || visible[0].parent !== container)
+                throw Error("ambiguous_roles");
+            return visible[0];
+        }
         function box(l) {
             var b = l.bounds;
             return [b[0].as("px"), b[1].as("px"), b[2].as("px"), b[3].as("px")];
@@ -98,10 +112,8 @@ var SCAutoEditionsPreparation = (function () {
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }
             if (doc.mode !== DocumentMode.RGB || doc.bitsPerChannel !== BitsPerChannelType.EIGHT)
                 throw Error("colour_conversion_requires_approval");
-            var numbers = [], plaques = [];
-            named(doc, r.number_layer_name, numbers); named(doc, r.plaque_layer_name, plaques);
-            if (numbers.length !== 1 || plaques.length !== 1) throw Error("ambiguous_roles");
-            layer = numbers[0]; plaque = plaques[0];
+            layer = visibleRole(doc, r.number_layer_name);
+            plaque = visibleRole(doc, r.plaque_layer_name);
             if (layer.kind !== LayerKind.TEXT || !layer.visible || layer.allLocked || !plaque.visible)
                 throw Error("uneditable_or_hidden_role");
             if (layer.parent !== doc || plaque.parent !== doc)
@@ -183,9 +195,13 @@ var SCAutoEditionsPreparation = (function () {
             var total = r.edition_total, w = doc.width.as("px"), h = doc.height.as("px");
             if (w * h > 110000000) throw Error("canvas_exceeds_worker_limit");
             var originalBounds = box(layer), plaqueBounds = box(plaque), region = originalBounds.slice(0);
+            var width = m[2].length, totalWidth = String(total).length;
+            // Keep the source padding. A naturally wider final number still
+            // has to fit the same plaque during the full-range bounds scan.
+            var growsByOne = totalWidth === width + 1 && m[2].charAt(0) !== "0";
+            if (totalWidth > width && !growsByOne) throw Error("number_width_requires_review");
             function replace(n) {
-                var digits = String(n); while (digits.length < m[2].length) digits = "0" + digits;
-                if (digits.length !== m[2].length) throw Error("number_width_requires_review");
+                var digits = String(n); while (digits.length < width) digits = "0" + digits;
                 timed("number_text_update_ms",function(){layer.textItem.contents = m[1] + digits + m[3] + m[4] + m[5];});
             }
             // Measure every actual rendering; no assumed template badge position.

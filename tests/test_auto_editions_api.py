@@ -17,6 +17,50 @@ def request(method='GET',body=None,origin='https://os.test',query='allocation_id
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retry_revalidates_legacy_size_failure_and_returns_real_state(self):
+        jobs=Mock()
+        jobs.read.return_value=dict(status='Blocked',error_code='source_changed',attempts=1)
+        jobs.retry.return_value=dict(status='Queued',attempts=1)
+        with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'job_for',return_value=({'id':'current'},None)) as resolver,patch.object(api.runtime,'stores',return_value=(None,jobs)),patch.object(api.runtime,'start_worker'):
+            response=await api.retry(request('POST'))
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(json.loads(response.body)['status'],'Queued')
+        resolver.assert_called_once_with(42)
+        jobs.retry.assert_called_once_with('current','va')
+
+    async def test_retry_changed_allocation_stops_before_queue_access(self):
+        with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'job_for',side_effect=ValueError('Allocation cancelled')),patch.object(api.runtime,'stores') as stores:
+            self.assertEqual((await api.retry(request('POST'))).status_code,409)
+        stores.assert_not_called()
+
+    async def test_duplicate_retry_returns_ready_instead_of_claiming_queued(self):
+        jobs=Mock();jobs.read.return_value=dict(status='Ready')
+        jobs.retry.return_value=dict(status='Ready')
+        with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'job_for',return_value=({'id':'current'},None)),patch.object(api.runtime,'stores',return_value=(None,jobs)),patch.object(api.runtime,'start_worker'):
+            response=await api.retry(request('POST'))
+        self.assertEqual(json.loads(response.body)['status'],'Ready')
+        jobs.enqueue.assert_not_called()
+
+    async def test_download_preserves_bytes_above_old_64_mib_limit(self):
+        from pathlib import Path
+        import hashlib
+        from auto_editions_asset_cache import output_assets
+        chunk=b'x'*(1024*1024);count=65
+        digest=hashlib.sha256()
+        for _ in range(count):digest.update(chunk)
+        output=dict(file_id='id:large',revision='rev',bytes=len(chunk)*count,sha256=digest.hexdigest())
+        stream=Mock();stream.iter_content.return_value=iter([chunk]*count)
+        assets=Mock();assets.output_response.return_value=(dict(id='id:large',rev='rev',size=output['bytes']),stream)
+        row=dict(status='Ready',result=dict(output=output,filename='001-of-100.jpg',retained=True))
+        with patch.object(api,'stored_current',return_value=(VA,{'id':'a'*64},assets,row)),patch.object(api.runtime,'stores',return_value=(None,Mock())),patch.object(output_assets,'copy',return_value=False),patch.object(output_assets,'remember'):
+            response=await api.download(request(query='allocation_id=42&job_id='+'a'*64))
+            self.assertEqual(response.status_code,200)
+            try:
+                self.assertEqual(Path(response.path).stat().st_size,output['bytes'])
+                self.assertEqual(api.ae.file_hash(response.path),output['sha256'])
+            finally:await response.background()
+        stream.close.assert_called_once()
+
     async def test_disabled_feature_does_not_touch_cloud(self):
         with patch.object(api.runtime,'enabled',return_value=False),patch.object(api.runtime,'job_for') as cloud:
             self.assertEqual((await api.start(request('POST'))).status_code,409)

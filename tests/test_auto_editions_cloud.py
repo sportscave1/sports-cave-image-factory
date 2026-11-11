@@ -159,3 +159,28 @@ def test_archive_download_uses_supported_revision_path():
     assert assets.output_response({'revision':'abc123'})==({'id':'id:exact','rev':'abc123'},stream)
     integration.team_space_client.return_value.files_download.assert_called_once_with('rev:abc123')
     with pytest.raises(ValueError):assets.output_response({'revision':'../../bad'})
+
+
+@pytest.mark.parametrize('size,allowed',[(64*1024*1024+1,True),
+                                       (128*1024*1024,True),
+                                       (128*1024*1024+1,False)])
+def test_full_quality_output_limit_without_reencoding(tmp_path,monkeypatch,size,allowed):
+    job=cloud.confirmed_job(*prepared(tmp_path))
+    def render(manifest,root,number,path):
+        # Sparse file exercises the real guard without allocating a huge image.
+        with path.open('wb') as output:output.truncate(size)
+        return dict(sha256='exact-encoder-output',render_timings={})
+    monkeypatch.setattr(ae,'render_jpg',render)
+    from auto_editions_asset_cache import output_assets
+    monkeypatch.setattr(output_assets,'remember',lambda *args:None)
+    from unittest.mock import Mock
+    storage=Mock()
+    storage.timings={}
+    storage.publish_output.return_value={'sha256':'exact-encoder-output'}
+    if allowed:
+        assert cloud.execute(job,storage)['sha256']=='exact-encoder-output'
+        storage.publish_output.assert_called_once()
+    else:
+        with pytest.raises(cloud.PreparationBlocked) as error:cloud.execute(job,storage)
+        assert error.value.code=='output_too_large'
+        storage.publish_output.assert_not_called()

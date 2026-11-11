@@ -112,6 +112,7 @@ INTERNAL_LINK_TARGETS = (
     ("target-soccer", "Soccer", "https://www.sportscaveshop.com/collections/soccer"),
     ("target-nba", "NBA / Basketball", "https://www.sportscaveshop.com/collections/nba"),
     ("target-cricket", "Cricket", "https://www.sportscaveshop.com/collections/cricket"),
+    ("target-darts", "Darts", "https://www.sportscaveshop.com/collections/darts-wall-art"),
     (
         "target-motor-racing",
         "Motor Racing",

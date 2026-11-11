@@ -11,11 +11,15 @@ import time
 
 import auto_editions as ae
 
-MAX_OUTPUT_BYTES=64*1024*1024
+# Keep the original JPEG encoder and pixels. Stay below Dropbox's 150 MB
+# single-upload ceiling while allowing detailed full-resolution artwork.
+MAX_OUTPUT_BYTES=128*1024*1024
 
 
 class PreparationBlocked(ValueError):
-    pass
+    def __init__(self,message,*,code='preparation_blocked'):
+        super().__init__(message)
+        self.code=code
 
 
 def confirmed_job(unit, mapping, metadata, preparation):
@@ -37,7 +41,7 @@ def confirmed_job(unit, mapping, metadata, preparation):
         raise PreparationBlocked('An existing verified PSD mapping is required.')
     source = ae.source_identity(unit.get('shopify_product_gid'), metadata)
     if source != manifest['source'] or mapping.get('dropbox_file_id') != source['file_id']:
-        raise PreparationBlocked('Mapping or Dropbox revision changed; prepare and approve again.')
+        raise PreparationBlocked('Mapping or Dropbox revision changed; prepare and approve again.',code='source_changed')
     number, total = unit.get('edition_number'), unit.get('edition_total')
     if (type(number) is not int or type(total) is not int or not 1 <= number <= total
             or total != manifest['edition_total']):
@@ -117,7 +121,7 @@ class DropboxAssets:
             self.timings['review_provider_transfer_ms']=self.timings.get('review_provider_transfer_ms',0)+(time.perf_counter()-phase)*1000
             self.timings['review_provider_bytes']=self.timings.get('review_provider_bytes',0)+length
             if length!=size or ae.file_hash(destination)!=asset['sha256']:
-                raise PreparationBlocked('Prepared Dropbox asset checksum changed.')
+                raise PreparationBlocked('Prepared Dropbox asset checksum changed.',code='asset_invalid')
         finally:
             response.close()
         try:prepared_assets.remember(asset['sha256'],destination)
@@ -174,7 +178,7 @@ class DropboxAssets:
         phase=time.monotonic()
         if not metadata:
             try:
-                # Output is bounded at 64 MiB, below Dropbox's single-upload
+                # Output is bounded at 128 MiB, below Dropbox's single-upload
                 # limit. Keep immutable add/cancel semantics and SDK auth reuse.
                 metadata=self.integration.upload_local_file(self.token,destination,path,conflict='cancel',simple_limit=MAX_OUTPUT_BYTES)
             except Exception:
@@ -268,11 +272,11 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
     started=time.monotonic();timings={}
     manifest = ae.validate_manifest(job['manifest'])
     if ae.fingerprint(manifest) != job['preparation_hash']:
-        raise PreparationBlocked('Preparation changed while queued.')
+        raise PreparationBlocked('Preparation changed while queued.',code='source_changed')
     if manifest['dimensions'][0]*manifest['dimensions'][1] > max_pixels:
         raise PreparationBlocked('This layout exceeds the verified worker memory budget.')
     if ae.fingerprint(job['identity']) != job['id'] or job['identity']['preparation'] != job['preparation_hash']:
-        raise PreparationBlocked('Queued job identity changed.')
+        raise PreparationBlocked('Queued job identity changed.',code='source_changed')
     if job['number'] != job['identity']['number'] or job['total'] != manifest['edition_total']:
         raise PreparationBlocked('Queued edition changed.')
     with tempfile.TemporaryDirectory(prefix='sc-edition-') as folder:
@@ -293,12 +297,12 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
             check=job['production']
             if (job['identity'].get('production_policy')!=ae.fingerprint(check)
                     or not current_certificate(check,manifest,standards())):
-                raise PreparationBlocked('Production policy changed while queued.')
+                raise PreparationBlocked('Production policy changed while queued.',code='source_changed')
             verify_output(path,check['evidence']['output'])
             rendered['print_ready']=True
         timings['compose_encode_validate_ms']=round((time.monotonic()-step)*1000)
         if path.stat().st_size>MAX_OUTPUT_BYTES:
-            raise PreparationBlocked('Rendered output exceeds the verified download limit.')
+            raise PreparationBlocked('Rendered output exceeds the verified download limit.',code='output_too_large')
         step=time.monotonic();output=assets.publish_output(job,path)
         timings['archive_and_verify_ms']=round((time.monotonic()-step)*1000)
         if output.get('sha256') != rendered['sha256']:

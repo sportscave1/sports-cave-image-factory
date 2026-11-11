@@ -2,11 +2,15 @@
 
 No network, file transfers, Shopify writes, or edition mutations.
 """
+from product_sport_tags import EDITION_TAG_RULES
+
 import json
 import re
 from difflib import SequenceMatcher
 
-VERSION = 'compact-upload-v1'
+VERSION = 'compact-upload-v2-edition-ownership'
+
+EDITION_SYNC_RULES = """Edition Ops owns all sports_cave edition metafields. Uploads must not create, update or delete sports_cave.edition_enabled, edition_archived, edition_status, edition totals/numbers/counters or sold-out flags, including through product create/update inputs. In particular, never set edition_enabled=false as a temporary publication, missing-PSD or setup-pending safeguard, and never force it true to bypass a deliberate restriction. Leave missing edition fields absent so the normal OS webhook can initialize them; preserve existing fields unchanged. Observe the storefront's existing unavailable state without writing flags or changing the theme, inventory or checkout to manufacture that state. PSD attachment is independent of automatic edition registration. If setup is pending, report it and return to Mapping; do not disable the edition. These ownership rules override conflicting saved upload requirements and supplied metafield values."""
 FIELDS = (
     'product_name', 'design_name', 'sport_category', 'sport', 'subjects', 'athletes',
     'team', 'event', 'product_context', 'research', 'customer_facing_title',
@@ -28,7 +32,7 @@ Dropbox temporary links are single-use: download each directly without a prelimi
 
 Continue through the selected upload workflow using available supported tools. If one step fails, retain completed work, retry recoverable failures and report the specific unfinished step. Do not declare the transfer impossible merely because Dropbox returns download links."""
 
-COPY = """Title/H1: use the supplied customer title or generate Subject — Short Design Hook (two subjects: Subject 1 vs Subject 2 — Hook). Preserve a strong design name; use a grounded 2–6-word hook. Target 35–55 characters, maximum 60 including spaces/punctuation; count and rewrite rather than truncate. Wall Art is optional within that limit. Avoid colon separators, keyword stuffing and repeated subject names.
+COPY = """Title/H1: required format ARTWORK NAME – ATHLETE / RIVALRY / TEAM / EVENT Wall Art. Original edition/design name first, one spaced en dash (–), verified subject, mandatory Wall Art suffix. Example: The Nuke – Luke Littler Wall Art. Preserve the original name, essential edition identifiers and design meaning; never invent or improve a name or guess a subject. If identity is uncertain, leave an existing title unchanged and flag it for review; request verified identity for new products. Target 35–55 characters, maximum 60 including spaces/punctuation; calculate the actual count using code. Remove only optional filler; never truncate, rename the edition or drop Wall Art to fit. If a faithful title cannot fit, flag the conflict for review without writing that title. Validate the format and count again immediately before a title write; read back the persisted title. These naming rules override conflicting saved title instructions. For title-only edits, write only product ID and title; preserve handles/URLs and all other product fields. Separate SEO instructions remain unchanged.
 Description: approximately 45–70 words, shorter when stronger; 3–4 compact blocks with a bold 3–7-word hook, one supported sporting moment, and fan/collector meaning. Use <p>, <strong>, and <em> only where useful; no headings, lists, tables, CSS or visual narration. Preserve supplied history and sizing/frame facts. No stock slogans, career summaries, room lists, fake hype or invented facts/specifications.
 Use the confirmed edition limit only. For a confirmed worldwide run, end with <p>Limited to N worldwide.</p>, substituting the confirmed N. If the run is not worldwide, use its confirmed scope; if non-limited or unknown, omit scarcity and report the missing fact. Finish exactly with <p>Real fans remember this. Own the moment.</p> and nothing after it. Never assume 100, remaining quantities, signatures, licensing or no-reprint claims.
 SEO title: 50–60 characters, maximum 60; principal commercial keyword near the start, subject and Wall Art, optional sport/brand if space permits. Meta description: 145–160 characters where practical; subject, keyword once, confirmed collector intent and relevant use; no store URL, emoji, hashtags or keyword lists. New handle: lowercase hyphenated subject-wall-art; no random numbers.
@@ -36,7 +40,7 @@ Alt text: unique per image, usually 80–140 characters, accessibility first; de
 
 CLASSIFICATION = """Classification defaults: vendor Sports Cave; product type Framed Art; exact taxonomy label Prints in Posters, Prints, & Visual Artwork; gift card false; condition New.
 Use Shopify-accepted values for supported category metafields only (art movement/style/authenticity, frame material/style, colour, material, orientation, painting medium, print edition type, rarity, signature placement, sports logo, suitable space, theme, printing method). Google Shopping where supported: condition New, custom product true, Adult/Unisex only if required. Report optional unsupported metadata as incomplete and continue.
-Use 8–16 relevant tags from confirmed facts, including applicable Collector Series, Sports Wall Art, Framed Sports Art and Man Cave Wall Art; Limited Edition and Limited Edition Sports Prints only when confirmed. Merge the required sport and operation tags with existing tags. No unproven Best Seller/Popular/Featured/performance tags.
+Aim for 8–16 descriptive tags when supported by confirmed facts, including applicable Collector Series, Sports Wall Art, Framed Sports Art and Man Cave Wall Art; Limited Edition and Limited Edition Sports Prints only when confirmed. No unproven Best Seller/Popular/Featured/performance tags.
 Apply every selected collection, deduplicated by stable ID, preserving legitimate memberships. Resolve missing selections from relevant existing sport, Collector Series, subject/team/event/era/country collections and verified facts; include all relevant matches, not just the first. Curated merchandising collections require explicit eligibility/selection. Use manual assignments for manual collections and actual rules for automated collections; do not change rules or invent tags to force membership."""
 
 SIZES = (
@@ -93,7 +97,10 @@ def template_additions(saved, default):
     removed = re.compile(
         r'stop before|before any Shopify write|mandatory.*(?:preflight|report)|'
         r'rollback|roll back|restore.*(?:draft|DRAFT)|all.*checks.*(?:before|pass)|'
-        r'request.*permission|ask.*permission|local Python|backend hook', re.I)
+        r'request.*permission|ask.*permission|local Python|backend hook|'
+        r'edition_enabled|edition_archived|disabled purchasing|'
+        r'(?:disable|block|prevent).*(?:purchas|checkout)|'
+        r'(?:purchas|checkout).*(?:disable|block|prevent)', re.I)
     for action, _, _, start, end in SequenceMatcher(None, before, after, autojunk=False).get_opcodes():
         if action not in ('insert', 'replace'):
             continue
@@ -173,6 +180,9 @@ def build(selected, filename, source, metadata, additions=None):
     from product_upload_intake import MODES
     from product_upload_source import prompt_section
     m = dict(metadata or {})
+    if m.get('customer_facing_title'):
+        from product_title_rules import apply_rules
+        apply_rules('', m)  # Shared explicit-title validation before prompt handoff.
     if source and source.get('upload_id') and not m.get('operation_tag'):
         from product_upload_identity import tag
         m['operation_tag'] = tag(source['upload_id'])
@@ -188,6 +198,12 @@ def build(selected, filename, source, metadata, additions=None):
     context = {k: m[k] for k in context_keys if m.get(k) not in (None, '', [])}
     context['PSD reference'] = filename
     context['confirmed_edition_limit'] = limit if limit is not None else 'Not saved; use confirmed product facts only'
+    verified = m.get('verified_collection_facts') or {}
+    tag_evidence = {k: verified[k] for k in ('sport', 'sports', 'sub_sport', 'league',
+                    'athletes', 'teams', 'events', 'years', 'competition_context')
+                    if k in verified}
+    if tag_evidence:
+        context['verified_classification_facts'] = tag_evidence
     if 'limited_edition' in m: context['limited_edition'] = m['limited_edition']
     if 'worldwide' in m: context['worldwide'] = m['worldwide']
     if not m.get('customer_facing_title'):
@@ -205,7 +221,8 @@ def build(selected, filename, source, metadata, additions=None):
         ('\nUpdate scope: ' + str(scope) if is_update else '') +
         '\nReuse the saved Shopify product ID or the product with this operation tag on retries; never create duplicates. Add the operation tag in the initial create/update, preserving other tags.' +
         (f'\nAdd edition-limit tag sc-edition-limit-{limit}.' if limit is not None and m.get('limited_edition') is not False
-         else '\nAdd sc-edition-limit-N only when N is confirmed; no assumed edition limit.'),
+         else '\nAdd sc-edition-limit-N only when N is confirmed; no assumed edition limit.') +
+        '\n' + EDITION_SYNC_RULES,
         '2. DROPBOX FOLDER AND ORDERED WEBP MANIFEST\n' +
         (prompt_section(source).strip() if source else 'No saved Dropbox folder: use the original WEBP attachments. Standard approved order: 1 Black frame; 2 Man cave; 3 Office; 4 Living room; 5 Size guide; 6 Oak frame; 7 White frame; 8 Unframed. Use an explicitly approved differing manifest if supplied.'),
         '3. RETRIEVAL AND SHOPIFY MEDIA TRANSFER\n' +
@@ -215,12 +232,22 @@ def build(selected, filename, source, metadata, additions=None):
     ]
     supplied_copy = {k: m[k] for k in ('customer_facing_title', 'pricing_update', 'rewrite_description', 'change_handle', 'description_html', 'seo_title', 'meta_description', 'vendor',
                      'product_type', 'category', 'metafields', 'selected_collections', 'existing_tags', 'tags') if k in m}
+    # Saved metadata is input to an external uploader, not permission to mirror
+    # OS-owned state. Preserve unrelated category/custom fields in the brief.
+    if isinstance(supplied_copy.get('metafields'), list):
+        supplied_copy['metafields'] = [field for field in supplied_copy['metafields']
+                                     if not (isinstance(field, dict)
+                                             and field.get('namespace') == 'sports_cave'
+                                             and (str(field.get('key', '')).startswith('edition_')
+                                                  or field.get('key') in {'is_sold_out', 'remaining_count',
+                                                                         'sold_count', 'last_assigned_edition',
+                                                                         'next_edition_number'}))]
     sport = sport_requirements(m)
     copy_rules = COPY
     classification_rules = CLASSIFICATION
     if is_update and not full:
         copy_rules = COPY[COPY.index('Alt text:'):COPY.index(' Open Graph:')]
-        classification_rules = 'Add only required sport/operation tags, preserving all existing tags and collections.'
+        classification_rules = 'Add the required classification and operation tags; preserve existing tags and collections.'
         if m.get('customer_facing_title'):
             copy_rules = COPY[:COPY.index('Description:')] + copy_rules
         if m.get('rewrite_description'):
@@ -228,14 +255,15 @@ def build(selected, filename, source, metadata, additions=None):
     elif full:
         classification_rules = CLASSIFICATION[:CLASSIFICATION.index('Apply every selected collection')] + 'Apply only explicitly selected collection changes; otherwise preserve existing memberships.'
     sections.append('4. PRODUCT COPY, SEO AND CLASSIFICATION\nAlways describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.\n' +
-        ('Media-only update: preserve title, handle, description, product SEO, vendor/type/category, metafields and collections. Apply replacement-image alt text and additive sport/operation tags; apply an explicitly supplied customer title or selected description edit if listed below.\n'
+        ('Media-only update: preserve title, handle, description, product SEO, vendor/type/category, metafields and collections. Apply replacement-image alt text and additive tags; apply an explicitly supplied customer title or selected description edit if listed below.\n'
          if is_update and not full else '') +
         ('Full standardisation: apply only the selected title/description edits listed below; preserve the handle unless explicitly changed (retain redirects). Preserve existing collections unless selected collection changes are requested.\n'
          if full else '') +
         copy_rules + '\n' + classification_rules +
         ('\nSaved values/selections: ' + encoded(supplied_copy) if supplied_copy else '') +
         '\nRelevant sport tags and collection matching hints: ' + encoded(sport) +
-        '\nIf classification conflicts, preserve established tags and report only the uncertain additions; continue other supported work.' + extra(4))
+        extra(4) + '\n' + EDITION_TAG_RULES +
+        '\nApply this classification in every mode, including when a saved prompt limits additions to sport tags.')
     rows = variant_rows(m)
     table = ['Frame | Size | Price AUD | Compare-at AUD | Saving | Approx. discount | SKU',
              '--- | --- | --- | --- | --- | --- | ---']
@@ -287,7 +315,7 @@ def build(selected, filename, source, metadata, additions=None):
     sections.append('7. SELECTED-MODE PUBLICATION OR UPDATE\n' + publication +
         ('\nExplicitly selected publication changes: ' + encoded(m['publication_settings']) + '. Apply only these requested changes.' if is_update and m.get('publication_settings') else '') +
         '\nRetain completed work on partial failure; retry the same product. Incidental or unsupported checks do not trigger rollback to Draft or unpublishing.' + extra(7))
-    edition_result = (' Pending edition setup alone does not block Live publication; preserve its archived/unavailable message and disabled purchasing until normal setup completes. For a published product awaiting setup report PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING; do not claim it is ready to purchase.' if selected == 'LIVE' else ' Preserve existing purchasing restrictions until normal edition setup completes.')
+    edition_result = (' Pending edition setup alone does not block Live publication. An unavailable storefront message is an observation, not an instruction to disable the product. For a published product awaiting setup report PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING; do not claim it is ready to purchase.' if selected == 'LIVE' else ' Preserve existing edition state; do not write setup-pending purchase restrictions.')
     sections.append('8. COMPLETION CHECK AND RETURN TO MAPPING\n'
         'Read the resulting product once to check the requested copy/SEO/classification, actual saved image count/order, 16 variants and permitted prices/SKUs/inventory, frame mappings, tags/collections and selected publication result. Report completed work and specific unfinished items without claiming unverified success; no separate preflight report or QA matrix.\n'
         'Return exact product title, admin URL, stable product ID/handle and a brief result. Then return to Product Uploads → Mapping to open Edition Ops. Find the product and use Add / Attach PSD manually. Eligible products sync automatically without a PSD; if not found, report sync pending. Mapping must not create another product or move files.\n'

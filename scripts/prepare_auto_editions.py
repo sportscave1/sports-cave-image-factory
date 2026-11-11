@@ -25,8 +25,17 @@ def native_cleanup_uncertain(output):
 def native_dispatch(run, script, output):
     # A preflight cleanup receipt cannot prove a subsequent RPC closed its doc.
     status=Path(output)/'native-status.json'
+    prior_cleanup_uncertain = status.exists() and native_cleanup_uncertain(output)
     if status.exists():status.replace(Path(output)/'preflight-native-status.json')
-    return run(script)
+    from scripts.photoshop_dispatch import PhotoshopMethodUnavailable
+    try:
+        return run(script)
+    except PhotoshopMethodUnavailable:
+        # Lookup failed before Invoke. A missing native receipt here does not
+        # indicate an open Photoshop document from this dispatch.
+        if not prior_cleanup_uncertain:
+            (Path(output)/'photoshop-dispatch.json').unlink(missing_ok=True)
+        raise
 
 
 def select_export_strategy():

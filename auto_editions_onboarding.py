@@ -49,7 +49,11 @@ def detect_roles(inspection,total,*,source=None):
         raise NeedsRepair('The edition number is nested, locked or not independently editable.')
     if type(total) is not int or not 1 <= total <= 1000 or int(match[4]) != total:
         raise NeedsRepair('PSD edition total differs from the authoritative product edition limit.')
-    if len(str(total)) > len(match[2]):
+    digits = match[2]
+    width = len(digits)
+    # Keep minimum padding; Photoshop verifies every rendered bound.
+    grows_by_one = len(str(total)) == width + 1 and not digits.startswith('0')
+    if len(str(total)) > width and not grows_by_one:
         raise NeedsRepair('Existing number formatting cannot hold the full edition range unchanged.')
     fonts = number.get('fonts', [])
     if not fonts or any(f.get('installed') is not True for f in fonts):

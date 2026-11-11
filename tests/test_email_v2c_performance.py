@@ -119,6 +119,40 @@ class PerformanceContracts(unittest.TestCase):
         self.assertEqual(len([c for c in self.provider.calls if c[0]=='flag']), count)
 
 
+    def test_read_flag_preserves_reader_cache_revision(self):
+        before = self.w.model()
+        message = self.w.state['threads'][0]['messages'][0]
+        self.w.message_action('mark_read' if message['unread'] else 'mark_unread', message)
+        after = self.w.model()
+        self.assertGreater(after['mailbox_version'], before['mailbox_version'])
+        self.assertEqual(after['reader_version'], before['reader_version'])
+        self.w._refresh_rows(membership_changed=True)
+        self.assertGreater(self.w.model()['reader_version'], after['reader_version'])
+
+
+class ReaderCallback(unittest.TestCase):
+    def test_only_current_reader_events_run_before_the_fragment(self):
+        import support_email_page as page
+        workspace = Mock(state={})
+        event = {'id': 'test', 'action': 'open_thread'}
+        session = {'support-email-desktop': event, 'current_page': 'Email', 'navigation_epoch': 2,
+                   'support_email_workspace': workspace.state}
+        with patch.object(page.st, 'session_state', session):
+            page._handle_reader_event(workspace, 1)
+            page._handle_reader_event(Mock(state={}), 2)
+            workspace.handle.assert_not_called()
+            session['current_page'] = 'Orders'
+            page._handle_reader_event(workspace, 2)
+            session['current_page'] = 'Email'
+            session['support-email-desktop'] = {'action': 'send'}
+            page._handle_reader_event(workspace, 2)
+            workspace.handle.assert_not_called()
+            session['support-email-desktop'] = event
+            page._handle_reader_event(workspace, 2)
+        workspace.handle.assert_called_once_with(event)
+        self.assertEqual(workspace.state['navigation_epoch'], 2)
+
+
 class Completion(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.future = Future()

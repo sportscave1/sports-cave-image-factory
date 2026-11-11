@@ -1,5 +1,6 @@
 """The actual send controller with durable SQL and fake SMTP/IMAP only."""
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from email import policy
 from email.parser import BytesParser
 import os
@@ -11,7 +12,7 @@ from tests import test_support_email_v2 as v2
 from tests.email_v2_fixtures import CONFIG, USER, MailboxFixture
 from tests.test_email_durable_delivery import Connection
 from support_email_compose import default_settings, make_attachment
-from support_email_durable import DurableRegistry, MailStore
+from support_email_durable import DurableRegistry, MailStore, OutboxWorker
 from support_email_provider import MailboxError
 from support_email_workspace import Workspace, reference_key
 import support_email_smtp as smtp
@@ -91,27 +92,49 @@ class DurableController(unittest.TestCase):
                 for name,value in [('load_email_settings',(default_settings(),None)),('load_metadata',{}),('load_orders',[]),('load_assignees',[])]:
                     stack.enter_context(patch.object(store,name,return_value=value))
                 stack.enter_context(patch.object(store,'audit'))
+                config = replace(CONFIG, address=f'fixture-{uuid.uuid4()}@example.test')
                 imap=MailboxFixture(3); provider=Mock(); provider.submit.return_value={'status':'accepted'}
                 registry=DurableRegistry(MailStore(connect=Connection)); state={}
-                w=Workspace(state,USER,CONFIG,v2.SMTP_CONFIG,imap=imap,smtp=provider,registry=registry)
+                w=Workspace(state,USER,config,v2.SMTP_CONFIG,imap=imap,smtp=provider,registry=registry)
                 w.load(); w.open_thread(state['threads'][0]['thread_key'])
                 w.handle({'id':str(uuid.uuid4()),'action':'compose','mode':mode,'message_key':state['active_message']})
                 draft=state['draft']; draft.update(to='test@example.test',cc='cc@example.test',bcc='hidden@example.test',
                     subject='Exact durable test',html='<p>Exact sent body</p>')
                 draft['attachments']=[make_attachment('proof.txt',b'attachment proof')]
-                op=draft['operation_id']; w.send(op); w.advance_send(op); w.advance_send(op)
-                self.assertEqual(state['folder'],w.roles['sent'])
+                op=draft['operation_id']
+                w.send(op)
+                registry.send_pool.shutdown(wait=True)
+                w.advance_send(op)
+                self.assertEqual(state['folder'], w.roles['sent'])
+                self.assertTrue(w.model()['sent_folder_load_pending'])
+                self.assertEqual(state['sent_focus'], state['send_result']['message_id'])
                 self.assertEqual(state['view'],'mail');self.assertIsNone(state['draft'])
                 self.assertEqual(state['send_stage'],'SENT')
                 self.assertEqual(state['send_result']['status'],'accepted')
-                self.assertEqual(len(imap.appended),1); provider.submit.assert_called_once()
-                self.assertIn('Exact sent body',str(w.model()['messages']))
+                self.assertFalse(imap.appended)
+                self.assertIn('Exact sent body', w.model()['last_sent']['html'])
+                w.handle({'id':str(uuid.uuid4()), 'action':'load_sent_after_send'})
+                self.assertFalse(w.model()['sent_folder_load_pending'])
+                self.assertIsNone(state['selected'])
+                state['unresolved_receipts'] = [{'operation_id': op}]
+                with registry.store.transaction() as cur:
+                    cur.execute("UPDATE support_email_outbox SET due_at=now() WHERE operation_id=%s", (op,))
+                self.assertTrue(OutboxWorker(config, v2.SMTP_CONFIG, registry).tick(imap, provider))
+                w.check_sent(automatic=True, operation_id=op)
+                self.assertEqual(w.model()['last_sent']['copy']['status'], 'appended')
+                self.assertEqual(w.model()['unresolved_receipts'], [])
+                self.assertTrue(w.model()['sent_folder_load_pending'])
+                w.handle({'id':str(uuid.uuid4()), 'action':'load_sent_after_send'})
+                self.assertEqual(state['conversation'][0]['message_id'], state['send_result']['message_id'])
+                self.assertFalse(state.get('sent_focus'))
+                self.assertEqual(len(imap.appended),1)
+                provider.submit.assert_called_once()
                 parsed=BytesParser(policy=policy.default).parsebytes(imap.appended[0])
                 self.assertEqual(parsed['Message-ID'],state['send_result']['message_id'])
                 if mode!='new':self.assertTrue(parsed['In-Reply-To'])
                 self.assertEqual(list(parsed.iter_attachments())[0].get_payload(decode=True),b'attachment proof')
                 self.assertIn('hidden@example.test',provider.submit.call_args.args[0]['recipients'])
-                restart=Workspace({},USER,CONFIG,v2.SMTP_CONFIG,imap=imap,smtp=provider,registry=DurableRegistry(MailStore(connect=Connection)))
+                restart=Workspace({},USER,config,v2.SMTP_CONFIG,imap=imap,smtp=provider,registry=DurableRegistry(MailStore(connect=Connection)))
                 restart.load();restart.state['folder']=w.roles['sent'];restart.load(force=True)
                 self.assertEqual(len(restart.state['threads']),1)
                 self.assertEqual(restart.state['threads'][0]['messages'][0]['message_id'],parsed['Message-ID'])

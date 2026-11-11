@@ -4,7 +4,7 @@ import unittest
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch,Mock,MagicMock,call
-from product_quiz import DEFAULT,validate,classify,digest
+from product_quiz import DEFAULT, SPORT_COLLECTIONS, validate, classify, digest
 from product_quiz_publish import sync,publish,revert,compile_catalogue,snippets
 from product_quiz_api import clean
 from uuid import uuid4
@@ -104,8 +104,49 @@ class QuizContracts(unittest.TestCase):
         fixture=row();fixture['status']='DRAFT';self.assertEqual(classify(fixture)['status'],'Excluded')
         fixture=row(edition={'exhausted':True});self.assertEqual(classify(fixture)['status'],'Excluded')
         self.assertEqual(classify(row(),{'excluded':True,'reason':'Owner choice'})['reason'],'Owner choice')
-        fixture=row(title='Unclassified design',sport='Unknown',subject='Unknown');self.assertEqual(classify(fixture)['status'],'Needs details')
+        fixture=row(title='Unclassified design',sport='Unknown',subject='Unknown')
+        self.assertEqual(classify(fixture)['reason'],'No sport classification yet')
         self.assertEqual(classify(fixture,{'sports':['Tennis'],'subjects':['Verified player']})['status'],'Eligible')
+
+    def test_shopify_tags_and_sport_only_editions(self):
+        fixture=row(title='The Finals',sport='Unknown',subject='Unknown',
+                    tags=['SC_SPORT_BASKETBALL','Team: Los Angeles Lakers','moment: Championship','Showtime','INTERNAL_IMPORT'],
+                    edition={'next_number':23,'total':100})
+        product=classify(fixture)
+        self.assertEqual(product['sports'],['Basketball'])
+        self.assertEqual(product['subjects'],['Los Angeles Lakers'])
+        self.assertEqual(product['preferences'],['Championship'])
+        self.assertEqual(product['keywords'],['Showtime'])
+        self.assertEqual((product['next_number'],product['edition_total']),(23,100))
+        darts=classify(row(title='The Final Double',sport='Darts Wall Art',subject='Unknown'))
+        self.assertEqual((darts['status'],darts['sports'],darts['subjects']),('Eligible',['Darts'],[]))
+        tagged = classify(row(title='The Last Shot',sport='Unknown',subject='Unknown',tags=[
+            'SC_LEAGUE_NBA','SC_SUBJECT_MICHAEL_JORDAN','SC_TEAM_CHICAGO_BULLS',
+            'SC_EVENT_NBA_FINALS','SC_YEAR_1998','SC_FORMAT_DUO','SC_THEME_CHAMPIONSHIP',
+        ]))
+        self.assertEqual(tagged['sports'],['Basketball'])
+        self.assertEqual(tagged['subjects'],['Chicago Bulls','Michael Jordan'])
+        self.assertEqual(tagged['preferences'],['1998','Championship','Duo','NBA Finals'])
+
+    def test_catalogue_uses_edition_ops_and_admits_new_rows_after_shopify_snapshot(self):
+        from datetime import datetime, timezone
+        from product_quiz_store import QuizStore
+        store=QuizStore()
+        ledger=lambda pid, **fields: dict(shopify_product_gid='gid://shopify/Product/'+pid,
+            product_title='Ledger title',active=True,sold_out=False,remaining_count=78,
+            next_edition_number=23,edition_total=100,**fields)
+        mirror=[row(pid,synced_at=datetime(2026,11,10,12,30,tzinfo=timezone.utc))
+                for pid in ('1','2','4')]
+        mirror[2]['synced_at']=datetime(2026,11,10,10,tzinfo=timezone.utc)
+        with patch('supabase_backend.list_edition_products_read_only',return_value=[ledger('1'),ledger('3'),ledger('4')]), \
+             patch.object(store,'q',return_value=mirror), patch.object(store,'get_state',
+                return_value={'ids':[], 'started_at':'2026-11-10T12:00:00+00:00'}):
+            rows=store.catalogue_rows()
+        self.assertEqual([r['shopify_product_id'].split('/')[-1] for r in rows],['1','3','4'])
+        self.assertEqual(rows[0]['edition']['next_number'],23)
+        self.assertFalse(rows[0]['edition']['deleted'])
+        self.assertTrue(rows[2]['edition']['deleted'])
+        self.assertEqual(classify(rows[1])['status'],'Excluded')
 
     def test_selling_policy_does_not_use_quantity_alone(self):
         from product_quiz_worker import selling_policy
@@ -132,6 +173,16 @@ class QuizContracts(unittest.TestCase):
         self.assertIn('Cricket',assets.objects['catalogue.json']['sports'])
         store.rows[0]['status']='ARCHIVED';sync(store,assets)
         self.assertNotIn('Basketball',assets.objects['catalogue.json']['sports'])
+
+    def test_empty_collections_are_searchable_and_unclassified_editions_are_discoverable(self):
+        store=MemoryStore();assets=MemoryAssets()
+        store.rows=[row(title='New Edition',sport='Unknown',subject='Unknown')]
+        sync(store,assets)
+        index=assets.objects['catalogue.json']
+        self.assertEqual(set(index['sport_options']),set(SPORT_COLLECTIONS))
+        self.assertIn('NBA',index['sport_options']['Basketball'])
+        self.assertEqual(index['sports'],{})
+        self.assertEqual(len(assets.objects[index['unclassified'][0]]['products']),1)
 
     @patch('product_quiz_publish.asset_base',return_value='https://assets.example.test')
     def test_draft_publish_revert_and_failures(self,_base):
@@ -260,10 +311,14 @@ render_page({'role':'admin','is_active':True},store=st.session_state['fixture_st
 ''',default_timeout=10).run()
         self.assertEqual(list(app.exception),[])
         self.assertEqual([t.label for t in app.tabs],['Questions & answers','Matching rules','Catalogue','Appearance','Preview & publish','Analytics','Install'])
-        next(t for t in app.text_input if t.label=='Title').set_value('Your next edition')
+        next(t for t in app.text_input if t.label=='Question when story choices are available').set_value('What era do you collect?')
         next(b for b in app.button if b.label=='Save draft').click().run()
         self.assertEqual(list(app.exception),[])
-        self.assertEqual(app.session_state['fixture_store'].draft()['config']['appearance']['title'],'Your next edition')
+        saved=app.session_state['fixture_store'].draft()['config']
+        self.assertEqual(saved['appearance']['title'],'Find your next edition')
+        self.assertEqual(saved['appearance']['intro'],'')
+        self.assertEqual(saved['questions'][2]['label'],'What era do you collect?')
+        self.assertEqual(saved['rules']['max_results'],1)
 
 
 if __name__=='__main__': unittest.main()

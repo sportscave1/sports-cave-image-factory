@@ -23,7 +23,7 @@ TAGS = dict(zip(
      'SC_SPORT_COMBAT', 'SC_SPORT_WWE', 'SC_SPORT_ATHLETICS', 'SC_SPORT_OLYMPICS',
      'SC_SPORT_SURFING', 'SC_CATEGORY_APPAREL')))
 TAGS.update({name: 'SC_SPORT_' + name.upper().replace(' ', '_') for name in
-             ('Motocross', 'Rally', 'Motorcycle Road Racing', 'Rally Raid', 'IndyCar')})
+             ('Motocross', 'Rally', 'Motorcycle Road Racing', 'Rally Raid', 'IndyCar', 'Darts')})
 MOTOR_CHILDREN = {'Formula One', 'NASCAR', 'V8 Supercars', 'MotoGP',
                   'Motocross', 'Rally', 'Motorcycle Road Racing', 'Rally Raid', 'IndyCar'}
 OTHER_MOTOR = {'Sports Car Racing',
@@ -35,7 +35,7 @@ ALIASES = {
     'NASCAR': (), 'V8 Supercars': ('australian touring car championship', 'atcc', 'australian supercars', 'bathurst 1000'),
     'MotoGP': ('motorcycle grand prix', '500cc grand prix'),
     'Basketball': ('nba',), 'NFL': ('american football',), 'Baseball': ('mlb',),
-    'Ice Hockey': ('nhl',), 'Cricket': (), 'Football': ('soccer', 'association football'),
+    'Ice Hockey': ('nhl',), 'Cricket': (), 'Darts': (), 'Football': ('soccer', 'association football'),
     'Rugby League': ('nrl',), 'Rugby Union': (),
     'AFL': ('australian rules football', 'australian football', 'aussie rules'),
     'Tennis': (), 'Golf': (), 'Horse Racing': ('thoroughbred racing',),
@@ -223,6 +223,12 @@ def classify_product(product, *, verified_facts=None):
 START = 'SPORTS CAVE AUTOMATIC SPORT TAGGING — V2'
 END = 'END SPORTS CAVE AUTOMATIC SPORT TAGGING'
 
+EDITION_TAG_RULES = """SPORTS CAVE EDITION CLASSIFICATION TAGS
+For each edition, add every distinct value supported by its images, verified facts or relevant exact collections. Include multiple values per family for a duo or career tribute where supported. Skip guesses, unrelated biography and inapplicable values.
+Examples: sport SC_SPORT_BASKETBALL (keep the existing mapping and parent tags); league/series SC_LEAGUE_NBA; athlete/driver/horse SC_SUBJECT_MICHAEL_JORDAN; represented team SC_TEAM_CHICAGO_BULLS; depicted event SC_EVENT_BATHURST_1000; sporting year SC_YEAR_1998; content format SC_FORMAT_QUOTE or SC_FORMAT_DUO; theme SC_THEME_RIVALRY or SC_THEME_CHAMPIONSHIP. A duo alone does not establish rivalry.
+Use canonical names, uppercase ASCII and single underscores. Preserve existing tags and add to saved custom, descriptive, operation and edition-limit tags. The descriptive tag count does not cap classification tags.
+Include tags on create. For updates, read current tags on the exact product and add only missing tags. Verify every intended addition on the same ID in the final read-back. Report conflicts or unverified tags, preserve collection membership during tagging and continue other supported work."""
+
 
 def apply_prompt_rules(prompt, metadata=None):
     """One generated policy for all three existing SOPs, including saved templates."""
@@ -236,7 +242,7 @@ def apply_prompt_rules(prompt, metadata=None):
     advisory = json.dumps({'required_tags': preview.required_tags, 'review': preview.review}, ensure_ascii=False)
     rules = f'''{START}
 Applies to UPLOAD TO DRAFT, UPLOAD & PUBLISH LIVE and Update existing product,
-including Media Update Mode: sport-tag additions are the only extra permitted change.
+including Media Update Mode: required additive tags are the only extra permitted change.
 Use the existing complete collection selector and fresh product read. Identify ALL
 sports actually depicted, not every competition in a subject's biography. Exact
 sport collections are primary evidence; supplement incomplete selections with
@@ -260,22 +266,26 @@ WWE also requires Combat. Multiple depicted sports require every supported tag.
 Olympics is cross-sport: require genuine Olympic context; swimming is not Athletics.
 Champion, GOAT, Racing, Legend and Final alone never establish a sport.
 
+{EDITION_TAG_RULES}
+These additive tagging rules also apply when the template says to leave existing
+tags unchanged. Preserve the template's non-tag scope.
+
 ADDITIVE SAVE AND READ-BACK GATE
-Before the normal create/update, derive required tags using this shared mapping;
+Before the normal create/update, derive required sport tags using this shared mapping;
 merge them with existing unrelated tags, deduplicate, never remove established tags.
 The existing products/create and products/update backend hook independently uses
 product_sport_tags.classify_product and product_sport_tag_sync.sync_product_sport_tags.
 It adds only missing tags with tagsAdd and verifies by fresh read. It is asynchronous,
 not proof of completion merely because a webhook was accepted. This exported prompt
 does not invoke local Python. Do not invent a connector endpoint or claim that it does.
-After saving, read this SAME product ID and verify every required tag is present;
+After saving, read this SAME product ID and verify every required sport tag is present;
 use bounded rereads for webhook completion. On timeout/userError/readback failure,
 report SPORT TAGGING UNVERIFIED and exact product ID; never report complete success.
 Reconcile the same ID/handle before retry; never recreate a product for a tagging error.
 If metadata conflicts, or old sport tags appear wrong, preserve them, write no uncertain
 tags and report SPORT CLASSIFICATION REVIEW REQUIRED with evidence and a separate
 controlled-correction recommendation. Unknown sport requires review, not a guessed tag.
-Do not activate a new Draft or pass Live staging QA with unresolved tagging checks.
+Do not activate a new Draft or pass Live staging QA with unresolved sport tagging checks.
 For an existing product preserve status/publications and all non-tag scope safeguards.
 Do not change variants, images, prices, inventory, copy, collections, edition numbers,
 certificates, customer segments or consent as a side effect of tagging.

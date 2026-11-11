@@ -68,6 +68,7 @@ class SMTPProvider:
             report_progress(progress, 45, "Connecting securely…")
             stage='connect'
             conn = self.connection_factory(cfg.host, cfg.port, context=ssl.create_default_context(), timeout=cfg.timeout)
+            connected_at = time.monotonic()
             conn.set_debuglevel(0)
             stage='greeting'
             code, _ = conn.ehlo()
@@ -76,6 +77,7 @@ class SMTPProvider:
             report_progress(progress, 60, "Authenticating mail server…")
             stage='authentication'
             conn.login(cfg.address, cfg.password)
+            authenticated_at = time.monotonic()
             maximum = str(getattr(conn, "esmtp_features", {}).get("size", ""))
             if maximum.isdigit() and len(mime["bytes"]) > int(maximum):
                 return {"status": "rejected", "notice": "Message exceeds the mail server size limit. Remove an attachment."}
@@ -105,11 +107,16 @@ class SMTPProvider:
             # This is a response deadline, not a retry of an ambiguous delivery.
             if getattr(conn, 'sock', None) is not None:
                 conn.sock.settimeout(cfg.data_timeout)
+            data_at = time.monotonic()
             code, _ = conn.data(mime["bytes"])
             if code == 250:
+                accepted_at = time.monotonic()
                 known_accepted=True
                 stage='accepted'
                 report_progress(progress, 100, "Sent")
+                LOGGER.info("email_smtp_accepted operation_id=%s connect_ms=%.1f auth_ms=%.1f envelope_ms=%.1f data_ms=%.1f",
+                            operation_id, (connected_at-started)*1000, (authenticated_at-connected_at)*1000,
+                            (data_at-authenticated_at)*1000, (accepted_at-data_at)*1000)
                 return {"status": "accepted", "notice": "Mail server accepted the email."}
             return {"status": "rejected", "retryable":400<=code<500,
                     "error_category":"PROVIDER_4XX" if code<500 else "PROVIDER_5XX",

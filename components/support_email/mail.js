@@ -25,10 +25,11 @@
   }
   function sendStatus(m) {
     const status=m.send_result?.status;
-    if(m.send_stage==='VALIDATING')return '<div>Validating email…</div>';
-    if(status==='in_progress')return `<div>${m.send_result?.transport_status==='queued'?'Queued securely':'Submitting to mail server…'}</div>`;
+    if(m.send_stage==='VALIDATING')return '<div>Sending email…</div>';
+    if(status==='in_progress')return `<div>Sending email… <small>${m.send_result?.transport_status==='queued'?'Queued securely':'Submitting to mail server…'}</small></div>`;
     if(m.sent_view_pending&&!m.draft)return '<div>Opening sent email…</div>';
     if(m.send_stage==='CONFIRMING_SENT_COPY'&&(m.last_sent?.checks||0)>=3) return '<div class="send-uncertain">Email sent. Sent-copy confirmation is taking longer than expected.</div><small>Your message will not be sent again. Check the Sent copy to continue.</small>';
+    if(m.durable_drafts&&status==='accepted'&&m.send_stage==='SAVING_SENT_COPY')return '<div class="send-success">&#10003; Sent</div>';
     if(['SAVING_SENT_COPY','CONFIRMING_SENT_COPY'].includes(m.send_stage)) return '<div class="send-success">Accepted by mail server — confirming Sent copy…</div>';
     if(m.send_stage==='VALIDATION_FAILED') return `<div class="send-failed">${esc(m.notice||'Email was not sent. Review the draft and try again.')}</div>`;
     if(status==='accepted') return '';
@@ -41,7 +42,7 @@
   function sendFeedback(m) {
     const content=sendStatus(m);
     if(!content)return '';
-    const active=m.sent_view_pending||m.send_result?.status==='in_progress'||m.send_stage==='SAVING_SENT_COPY'||
+    const active=m.send_stage==='VALIDATING'||m.sent_view_pending||m.send_result?.status==='in_progress'||(m.send_stage==='SAVING_SENT_COPY'&&!m.durable_drafts)||
       (m.send_stage==='CONFIRMING_SENT_COPY'&&(m.last_sent?.checks||0)<3)||
       (m.send_result?.status==='unknown'&&(m.uncertain_checks||0)<6);
     const check=m.send_result?.status==='unknown'&&(m.uncertain_checks||0)>=6;
@@ -55,7 +56,21 @@
     if(!sent?.operation_id)return '';
     const copy=sent.copy||{}, saved=['present','appended'].includes(copy.status);
     const preview=sent.html?`<details><summary>View sent message</summary><p>To: ${esc(sent.to)}</p><div class="message-body">${sent.html}</div></details>`:'';
-    return `<div class="sent-receipt" role="status"><span class="send-success">✓ Sent</span> <span>${esc(sent.subject)}</span>${saved?'':`<span class="send-pending">Accepted by the mail server; ${copy.status==='pending'?'the Sent-folder copy is not visible yet.':'the Sent-folder copy could not be saved or verified.'} ${esc(copy.notice||'')}</span><button type="button" data-action="${copy.retryable?'retry_sent_copy':'check_sent'}" data-operation="${esc(sent.operation_id)}">${copy.retryable?'Retry saving Sent copy':'Check Sent copy'}</button>`}${sent.draft_warning?`<span>${esc(sent.draft_warning)}</span>`:''}${preview}${saved?`<button type="button" data-action="dismiss_receipt" data-operation="${esc(sent.operation_id)}">Dismiss</button>`:''}</div>`;
+    return `<div class="sent-receipt" role="status" data-operation="${esc(sent.operation_id)}"><span class="send-success">✓ Sent</span> <span>${esc(sent.subject)}</span>${saved?'':`<span class="send-pending">Accepted by the mail server; ${['pending','attempting'].includes(copy.status)?'syncing the Sent-folder copy.':'the Sent-folder copy could not be saved or verified.'} ${esc(copy.notice||'')}</span><button type="button" data-action="${copy.retryable?'retry_sent_copy':'check_sent'}" data-operation="${esc(sent.operation_id)}">${copy.retryable?'Retry saving Sent copy':'Check Sent copy'}</button>`}${sent.draft_cleanup_pending?'<span>Saved draft cleanup pending.</span>':''}${sent.draft_warning?`<span>${esc(sent.draft_warning)}</span>`:''}${preview}${saved&&!sent.draft_cleanup_pending?`<button type="button" data-action="dismiss_receipt" data-operation="${esc(sent.operation_id)}">Dismiss</button>`:''}</div>`;
+  }
+  function deliveryHistory(m,open=false){
+    const prior=m.pending_sent||[];
+    const shown=new Set([m.last_sent?.operation_id,m.send_result?.operation_id,...prior.map(item=>item.operation_id)]);
+    const unresolved=(m.unresolved_receipts||[]).filter(item=>!shown.has(item.operation_id));
+    if(!prior.length&&!unresolved.length)return '';
+    const rows=unresolved.map(r=>{
+      const status=r.status==='accepted'?'Mail server accepted · Sent copy pending':
+        r.status==='unknown'?'Outcome unverified · Do not resend':
+        r.transport_status==='queued'?'Queued securely':'Submitting to mail server';
+      return `<div class="sent-receipt"><span>${esc(status)}</span><time>${esc(r.created_label||'')}</time><small>${esc(r.operation_id)}</small></div>`;
+    }).join('');
+    const refresh=unresolved.length?'<button type="button" data-action="refresh_recovery">Refresh delivery history</button>':'';
+    return `<details class="delivery-history" ${open?'open':''}><summary>Earlier send receipts (${prior.length+unresolved.length})</summary>${prior.map(last_sent=>sentReceipt({last_sent})).join('')}${rows}${refresh}</details>`;
   }
   function createViewCache(limit=20,byteLimit=8*1024*1024){
     const entries=new Map();let bytes=0;
@@ -164,7 +179,7 @@
     announce();
     return ()=>{stopped=true;if(timer!==null)cancel(timer);};
   }
-  if (typeof module !== 'undefined') {module.exports={componentHandshake,bindEmailFrame,readerStamp,patchReadFlags,searchKnownRows,safeReaderView,patchImagePermission,receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
+  if (typeof module !== 'undefined') {module.exports={componentHandshake,bindEmailFrame,readerStamp,patchReadFlags,searchKnownRows,safeReaderView,patchImagePermission,receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,deliveryHistory,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
@@ -231,18 +246,27 @@
   function scheduleSentCheck(){
     clearTimeout(sentTimer);
     if(model.send_result?.status==='unknown'&&(model.uncertain_checks||0)<6&&!busy){sentTimer=setTimeout(()=>emit('auto_check_sent'),10000);return;}
-    const sent=model.last_sent;
-    if(!sent?.operation_id||!['pending','unknown','failed','attempting'].includes(sent.copy?.status)||sent.checks>=3||busy)return;
+    if(busy)return;
+    const sent=[model.last_sent,...(model.pending_sent||[])].find(item=>item?.operation_id&&item.checks<3&&
+      (item.draft_cleanup_pending||['pending','unknown','failed','attempting'].includes(item.copy?.status)));
+    if(!sent)return;
     sentTimer=setTimeout(()=>emit('auto_check_sent',{operation_id:sent.operation_id}),[6000,12000,24000][sent.checks||0]);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sentTimer));
-  let sendTimer=null;
+  let sendTimer=null, sendingOperation='', sendStarted=0;
   function scheduleSendStage(){
     clearTimeout(sendTimer);
     if(busy||!model.send_result?.operation_id||!['SENDING','SAVING_SENT_COPY'].includes(model.send_stage))return;
     const operation_id=model.send_result.operation_id;
-    // Only continue the operation created by an explicit Send click, after painting its real stage.
-    sendTimer=setTimeout(()=>emit('advance_send',{operation_id}),Math.max(100,model.send_result.retry_delay_ms||100));
+    const now=Date.now();
+    const first=operation_id!==sendingOperation;
+    if(first){sendingOperation=operation_id;sendStarted=now;}
+    let delay=Math.max(100,model.send_result.retry_delay_ms||100);
+    // Check early for a fast acceptance, then fall back to the normal cadence.
+    // Respect a future retry time for temporarily rejected messages.
+    if(delay<=500&&now-sendStarted<1000)delay=first?100:200;
+    if(model.send_stage==='SAVING_SENT_COPY')delay=100;
+    sendTimer=setTimeout(()=>emit('advance_send',{operation_id}),delay);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sendTimer));
   let reconnectTimer=null;
@@ -269,13 +293,13 @@
   function emit(action, values={}) {
     const selecting=['open_thread','open_message'].includes(action);
     if (busy) {
-      if(selecting || ['folder','search','compose','settings','close_composer','resume_composer','context'].includes(action) || ['open_thread','open_message','resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','sync_index','auto_check_sent','autosave_draft','live_check','load_mail_metadata','mark_visible_read','contact_search'].includes(pendingAction)){
+      if(selecting || ['folder','search','compose','settings','close_composer','resume_composer','context'].includes(action) || ['open_thread','open_message','resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','load_sent_after_send','sync_index','auto_check_sent','advance_send','autosave_draft','live_check','load_mail_metadata','mark_visible_read','contact_search'].includes(pendingAction)){
         queued={action,values};
         if(selecting) optimistic(action,values);
       }
       return;
     }
-    const draft=snapshot();
+    const draft=action==='advance_send'?undefined:snapshot();
     if(['refresh','mark_read','mark_unread','star','unstar','archive','move','copy','trash','junk','confirm_delete_forever','mark_folder_read','bulk_action','restore'].includes(action))folderViews.clear();
     if(action==='folder'){
       const cached=folderViews.get(folderKey(model,values.folder));
@@ -297,7 +321,7 @@
     }
     if(selecting) optimistic(action,values);
     else if(['send','discard_draft','attach','remove_attachment','forward_attachment','save_draft'].includes(action)){root.classList.add('busy');freeze();}
-    if (!selecting && !['resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','sync_index','auto_check_sent','autosave_draft','live_check','load_mail_metadata','mark_visible_read'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Downloading attachment…':action==='refresh'?'Refreshing…':'Working…';
+    if (!selecting && !['resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','load_sent_after_send','sync_index','auto_check_sent','advance_send','autosave_draft','live_check','load_mail_metadata','mark_visible_read'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Downloading attachment…':action==='refresh'?'Refreshing…':'Working…';
     if(['reconnect','retry_connection'].includes(action)&&$('notice'))$('notice').innerHTML=recoveryFeedback(model,true);
     post('streamlit:setComponentValue',{value:{id:pending,action,...values,draft},dataType:'json'});
   }
@@ -318,7 +342,8 @@
     };
     wait();
   }
-  const viewKey=(m,key)=>JSON.stringify([m.reader_scope,m.mailbox,m.mailbox_version,key]);
+  const readerVersion=m=>m.reader_version??m.mailbox_version;
+  const viewKey=(m,key)=>JSON.stringify([m.reader_scope,m.mailbox,readerVersion(m),key]);
   function markSelection(){
     root.querySelectorAll('.conversation').forEach(e=>{const active=e.dataset.key===model.selected;e.classList.toggle('selected',active);e.setAttribute('aria-selected',String(active));});
   }
@@ -508,7 +533,7 @@
     if(next.folder!==model.folder||next.reader_scope!==model.reader_scope){clearTimeout(searchTimer);searchText=null;}
     const wasFrozen=busy&&['send','discard_draft','attach','remove_attachment','forward_attachment','save_draft'].includes(pendingAction);
     const selectionChanged=next.selected!==model.selected;
-    if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
+    if(readerVersion(next)!==readerVersion(model)||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
     if(next.reader_scope!==model.reader_scope||next.error||(['live_check','sync_index'].includes(pendingAction)&&next.mailbox_version!==model.mailbox_version))folderViews.clear();
     model=next;
@@ -530,14 +555,27 @@
       const cached=threadView(safeReaderView(model.messages),model.folder);
       views.put(viewKey(model,model.selected),cached?{...cached,scrollTop:root.querySelector('.reading-scroll')?.scrollTop||0}:cached);
     }
-    if(queued){const action=queued;queued=null;emit(action.action,action.values);return;}
+    if(queued){
+      const action=queued;queued=null;
+      if(action.action==='send'){
+        if(model.draft?.operation_id===action.values.operation_id)send();
+      }else emit(action.action,action.values);
+      if(busy)return;
+    }
     root.classList.remove('busy');
     scheduleSentCheck();
     scheduleSendStage();
     if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true"></div><div class="statusbar"></div><div class="delivery-receipt"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
     $('send-status').innerHTML=sendFeedback(model);
     if(model.send_result?.status==='rejected')submitted.delete(model.send_result.operation_id);
-    root.querySelector('.delivery-receipt').innerHTML=(model.pending_sent||[]).map(last_sent=>sentReceipt({last_sent})).join('')+(model.send_stage==='CONFIRMING_SENT_COPY'?'':sentReceipt(model));
+    const receipts=root.querySelector('.delivery-receipt');
+    const historyOpen=receipts.querySelector('.delivery-history')?.open;
+    const expandedPreviews=new Set([...receipts.querySelectorAll('.sent-receipt details[open]')]
+      .map(details=>details.closest('.sent-receipt').dataset.operation));
+    receipts.innerHTML=(model.send_stage==='CONFIRMING_SENT_COPY'?'':sentReceipt(model))+deliveryHistory(model,historyOpen);
+    receipts.querySelectorAll('.sent-receipt details').forEach(details=>{
+      details.open=expandedPreviews.has(details.closest('.sent-receipt').dataset.operation);
+    });
     const toolbarKey=JSON.stringify([model.configured,model.query,model.field]);
     if(wasFrozen||toolbarKey!==toolbarStamp){
       root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
@@ -545,15 +583,14 @@
     }
     const health=model.sync_health||{}, reconnecting=Boolean(model.error||model.live_error||model.recovery?.state==='stopped'||health.state==='RECONNECTING');
     const attention=['authentication','configuration','tls'].includes(health.category)||model.recovery?.state==='stopped';
-    const status=!model.configured?'Not configured':attention?'Mailbox connection needs attention':reconnecting?(model.threads?.length?'Reconnecting · showing last synced mail':'Mailbox unavailable · retrying automatically'):model.initial_load_pending||model.read_pending||health.state==='SYNCING'?'Syncing…':'Connected';
+    const status=!model.configured?'Not configured':attention?'Mailbox connection needs attention':reconnecting?(model.threads?.length?'Reconnecting · showing last synced mail':'Mailbox unavailable · retrying automatically'):model.initial_load_pending||model.read_pending||model.sent_folder_load_pending||health.state==='SYNCING'?'Syncing…':'Connected';
     root.querySelector('.statusbar').innerHTML=`<span title="${esc(health.diagnosis||'Mail source: VentraIP IMAP')}"><span class="dot ${status==='Connected'?'':'off'}"></span>${esc(status)} · ${esc(model.mailbox)}${model.refreshed?' · Last synced: '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status">${attention?esc(health.diagnosis||'')+' <button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':esc(model.recovery?.state||model.live_error?health.diagnosis||'':model.notice||health.diagnosis||'')}</span>`;
     if(model.recoverable_drafts?.length)root.querySelector('.statusbar').insertAdjacentHTML('beforeend',`<details><summary>${model.recoverable_drafts.length} saved drafts</summary>${model.recoverable_drafts.map(d=>button(esc(d.subject||'(No subject)'),'open_local_draft',`data-draft="${esc(d.draft_id)}"`)).join('')}</details>`);
     if(recoveryDrafts.length)root.querySelector('.statusbar').insertAdjacentHTML('beforeend',`<details><summary>Recover unsaved edits (${recoveryDrafts.length})</summary>${recoveryDrafts.map(d=>button('Recover copy: '+esc(d.subject||'(No subject)'),'recover_local_edits',`data-draft="${esc(d.id)}"`)+button('Download edits','export_draft_text',`data-draft="${esc(d.id)}"`)).join('')}</details>`);
-    if(model.unresolved_receipts?.length)root.querySelector('.delivery-receipt').insertAdjacentHTML('beforeend',model.unresolved_receipts.map(r=>`<div class="sent-receipt">${esc(r.status==='accepted'?'Accepted by mail server; Sent copy '+r.copy_status:r.status==='unknown'?(r.notice||'Unknown send outcome. Do not resend.'):r.transport_status==='queued'?'Saved send is queued. Do not resend.':'Saved send is submitting. Do not resend.')} <small>${esc(r.operation_id)}</small>${button('Refresh status','refresh_recovery')}</div>`).join(''));
     scheduleReconnect();
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder,model.initial_load_pending]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}
-    const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,Boolean(model.live_error),model.limit,model.initial_load_pending,model.local_drafts,model.filters,model.read_pending,model.bulk_result]);
+    const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,Boolean(model.live_error),model.limit,model.initial_load_pending,model.local_drafts,model.filters,model.read_pending,model.sent_folder_load_pending,model.bulk_result]);
     if(wasFrozen||listKey!==listStamp){const node=root.querySelector('.listpane'),top=node.querySelector('.conversations')?.scrollTop||0;node.outerHTML=conversations();root.querySelector('.conversations').scrollTop=oldFolder===model.folder&&oldQuery===model.query?top:0;listStamp=listKey;}
     if(oldFolder!==model.folder||oldQuery!==model.query)mobileReading=model.view==='compose';
     root.querySelector('.workspace').className=`workspace ${collapsed?'collapsed':''} ${mobileReading?'show-reading':''}`;
@@ -604,6 +641,8 @@
     clearTimeout(historyTimer);
     if(model.initial_load_pending){
       historyTimer=setTimeout(()=>{if(!busy&&model.initial_load_pending)emit('load_initial_mailbox');},0);
+    }else if(model.sent_folder_load_pending){
+      historyTimer=setTimeout(()=>{if(!busy&&model.sent_folder_load_pending)emit('load_sent_after_send');},0);
     }else if(model.body_pending&&model.view==='mail'&&!model.error){
       const message_key=model.body_pending;
       // One bounded request awaits the existing worker's completion. Cached
@@ -630,8 +669,12 @@
     mobileReading=true;emit('compose',{mode,message_key:model.active_message});
   }
   function send(){
-    if(!model.draft||busy||locked(model)||!model.smtp_configured||!model.settings_available)return;
+    if(!model.draft||locked(model)||!model.smtp_configured||!model.settings_available)return;
     const id=model.draft.operation_id;if(submitted.has(id))return;
+    if(busy){
+      if(['autosave_draft','auto_check_sent'].includes(pendingAction))queued={action:'send',values:{operation_id:id}};
+      return;
+    }
     submitted.add(id);emit('send',{operation_id:id});
   }
   function closeReplyPrompts() {

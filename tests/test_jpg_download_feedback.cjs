@@ -8,7 +8,7 @@ const expected=crypto.createHash('sha256');for(let i=0;i<chunks;i++)expected.upd
 const expectedHash=expected.digest('hex');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
- let mode='success',starts=0,files=0,completed=0,aborted=0,releaseFirstFile=false;
+ let mode='success',starts=0,retries=0,files=0,completed=0,aborted=0,releaseFirstFile=false;
  const server=http.createServer(async(req,res)=>{
   const u=new URL(req.url,'http://localhost'),id=u.searchParams.get('allocation_id');
   const json=(value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
@@ -21,7 +21,10 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
    starts++;if(mode==='timeout'){req.on('close',()=>aborted++);return;}
    await delay(200);return json(mode==='prepareFail'?{error:'Preparation unavailable fixture'}:{job_id:job,status:'Queued'},mode==='prepareFail'?503:200);
   }
-  if(u.pathname==='/api/auto-editions/state'){await delay(200);return json({job_id:job,status:'Ready',filename});}
+  if(u.pathname==='/api/auto-editions/retry'){retries++;await delay(200);return json({job_id:job,status:'Queued'});}
+  if(u.pathname==='/api/auto-editions/state'){await delay(200);return json(['blocked','exhausted'].includes(mode)?
+   {job_id:job,status:'Blocked',error_code:'output_too_large',error_message:'The full-quality JPG exceeds the download size limit.',retryable:mode!=='exhausted'}:
+   {job_id:job,status:'Ready',filename});}
   if(u.pathname==='/api/auto-editions/file'){
    files++;assert.equal(u.searchParams.get('job_id'),job);const token=u.searchParams.get('download_token');assert.match(token,/^[a-f0-9]{32}$/);
    if(mode==='handoffTimeout')return;
@@ -107,6 +110,23 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
   const fallback=page.waitForEvent('download');await page.locator('#retry').click();await page.locator('#retry').evaluate(e=>e.click());
   const fallbackDownload=await fallback;await page.locator('#state').filter({hasText:'Download started'}).waitFor();await fallbackDownload.path();
   assert.equal(starts,fallbackStarts);assert.equal(await page.locator('#state').getAttribute('class'),'');
+  // A worker failure needs a real, bounded retry rather than endless state reads.
+  mode='blocked';await page.goto(origin+'/auto-editions/download?allocation_id=42');
+  await page.getByText('The full-quality JPG exceeds the download size limit.',{exact:true}).waitFor();
+  const blockedStarts=starts,blockedRetries=retries;mode='success';
+  const resumed=page.waitForEvent('download');await page.locator('#retry').click();await resumed;
+  await page.locator('#state').filter({hasText:'Download started'}).waitFor();
+  assert.equal(starts,blockedStarts);assert.equal(retries,blockedRetries+1);
+  mode='exhausted';await page.goto(origin+'/auto-editions/download?allocation_id=42');
+  await page.getByText('The full-quality JPG exceeds the download size limit.',{exact:true}).waitFor();
+  assert.equal(await page.locator('#retry').isVisible(),false);
+  // The Orders inline action also surfaces the real failure and uses /retry.
+  mode='blocked';await page.goto(origin+'/?page=orders');
+  await page.getByRole('link',{name:'Download JPG',exact:true}).click();
+  await page.getByRole('alert').getByText('The full-quality JPG exceeds the download size limit.',{exact:true}).waitFor();
+  const inlineRetries=retries;mode='success';const inlineResumed=page.waitForEvent('download');
+  await page.getByRole('alert').getByRole('button',{name:'Retry',exact:true}).click();await inlineResumed;
+  await page.getByText('Download started',{exact:true}).waitFor();assert.equal(retries,inlineRetries+1);
   await context.close();
   console.log('PASS: immediate feedback, staged handoff before body completion, exact bytes/name, duplicates, responsive controls, preparation/transfer Retry, request timeout, navigation and standalone fallback.');
  }finally{releaseFirstFile=true;await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
