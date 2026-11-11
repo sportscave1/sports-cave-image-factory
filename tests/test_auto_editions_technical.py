@@ -442,3 +442,31 @@ def test_replacement_handoff_preserves_restricted_or_unrelated_layouts(flow,faul
     assert technical.Technical(d.connect).run_one(assets,local_root=root)=='Failed'
     assert rows(sql,'auto_edition_layouts')==before and protected(sql)==protected_before
     assert not any(a['event']=='technical_layout_superseded' for a in rows(sql,'auto_edition_onboarding_audit'))
+
+
+def test_updated_source_handoff_issues_new_test_certificate(flow):
+    from tests.test_auto_editions_reset import snapshot
+    d,sql,original,assets,root=flow
+    assert technical.Technical(d.connect).run_one(assets,local_root=root)=='Cloud Ready'
+    sql.execute('UPDATE auto_edition_onboarding SET edition_total=%s,lease_until=NULL',(original['manifest']['edition_total'],))
+    old_layout=deepcopy(rows(sql,'auto_edition_layouts')[0])
+    q=rows(sql,'auto_edition_onboarding')[0]
+    previous=snapshot(q)
+    source={**q['source'],'revision':'b2','content_hash':'b'*64}
+    record=deepcopy(original)
+    record['manifest']['source']=source
+    record['manifest']['reset_request_id']='new-source-request'
+    digest=ae.fingerprint(record['manifest']);record['hash']=digest
+    for proof in record['proofs']:proof['preparation_hash']=digest
+    record['receipts']['preparation_hash']=digest
+    pending=dict(id='new-source-request',stage='Complete',actor='auto-editions-v15',
+        source=source,updated_source=source,previous=previous,preparation_hash=digest)
+    q.update(source=source,preparation_hash=digest,replacement=pending)
+    Preparations(d.connect).save(record['manifest'],record['proofs'],record['receipts'],'host')
+    value=technical.certificate(record)
+    sql.execute("INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail) VALUES(%s,'auto-editions-v15','reset_requested',%s::jsonb)",
+        (PID,json.dumps(dict(request_id=pending['id'],previous=previous))))
+    technical.supersede_replaced_test_layout(sql,q,record,[old_layout],value)
+    result=rows(sql,'auto_edition_layouts')[0]
+    assert result['preparation_hash']==digest and result['approval']==value
+    assert not value.get('visual_approved') and not value.get('print_ready')

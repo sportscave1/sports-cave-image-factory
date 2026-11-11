@@ -114,6 +114,8 @@ def test_recovery_checkpoint_and_pagination_only_after_success(state):
         return {'orders':{'nodes':[],'pageInfo':{'hasNextPage':False}}},'2026-04'
     history.side_effect=api
     onboarding.reconcile(db)
+    assert not rows(sql,'edition_products')
+    onboarding.drain(db)
     assert len(rows(sql,'edition_products'))==1
     checkpoint=db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)
     assert checkpoint.get('checkpoint')
@@ -346,3 +348,50 @@ def test_invalid_or_conflicting_explicit_limit_never_falls_back(state,tags):
     deliver()
     assert not rows(sql,'edition_products')
     assert rows(sql,'webhook_events')[0]['status']=='pending'
+
+
+def test_scan_persists_all_receipts_without_processing_poison_product(state,monkeypatch):
+    sql,p,api=state
+    api.return_value=({'products':{'nodes':[{'id':PID,'updatedAt':'2026-11-11T00:00:00Z'},
+        {'id':'gid://shopify/Product/999','updatedAt':'2026-11-11T00:00:01Z'}],
+        'pageInfo':{'hasNextPage':False}}},'2026-04')
+    process=Mock(side_effect=RuntimeError('Throttled'))
+    monkeypatch.setattr(onboarding,'process_receipt',process)
+    onboarding.reconcile(db)
+    process.assert_not_called()
+    assert len(rows(sql,'webhook_events'))==2
+    assert db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)['checkpoint']
+    onboarding.drain(db)
+    assert process.call_count==2
+    assert all(r['status']=='failed' for r in rows(sql,'webhook_events'))
+
+
+def test_new_delivery_priority_with_reserved_retry_capacity(state,monkeypatch):
+    sql,p,api=state
+    for i in range(12):
+        sql.execute("INSERT INTO webhook_events(webhook_id,topic,status,payload,received_at) VALUES(%s,'products/update','received','{}',now())",('fresh-'+str(i),))
+    sql.execute("INSERT INTO webhook_events(webhook_id,topic,status,payload,received_at) VALUES('old-retry','products/update','pending','{}',now()-interval '1 day')")
+    processed=[]
+    monkeypatch.setattr(onboarding,'process_receipt',lambda row,*a:processed.append(row['webhook_id']))
+    onboarding.drain(db,limit=5)
+    assert all(e.startswith('fresh-') for e in processed[:4])
+    assert processed[4]=='old-retry'
+
+
+def test_scan_receipt_failure_retains_checkpoint_and_replay_is_idempotent(state,monkeypatch):
+    sql,p,api=state
+    api.return_value=({'products':{'nodes':[{'id':PID,'updatedAt':'2026-11-11T00:00:00Z'},
+        {'id':'gid://shopify/Product/999','updatedAt':'2026-11-11T00:00:01Z'}],
+        'pageInfo':{'hasNextPage':False}}},'2026-04')
+    claim=db.claim_product_create_webhook_receipt
+    def interrupted(payload,*args,**kwargs):
+        if payload['id']=='999':raise ConnectionError('receipt storage unavailable')
+        return claim(payload,*args,**kwargs)
+    monkeypatch.setattr(db,'claim_product_create_webhook_receipt',interrupted)
+    with pytest.raises(ConnectionError):onboarding.reconcile(db)
+    assert len(rows(sql,'webhook_events'))==1
+    assert not db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)
+    monkeypatch.setattr(db,'claim_product_create_webhook_receipt',claim)
+    onboarding.reconcile(db)
+    assert len(rows(sql,'webhook_events'))==2
+    assert db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)['checkpoint']

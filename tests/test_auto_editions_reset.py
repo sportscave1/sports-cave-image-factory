@@ -526,3 +526,35 @@ def test_reset_pending_status_overrides_current_v16_certificate(monkeypatch,stag
 def test_combined_release_retains_reset_and_quality_routes():
     paths={route[0] for route in status.ROUTES}
     assert {'/api/auto-editions/status/reset','/api/auto-editions/status/recheck'} <= paths
+
+
+def test_updated_mapped_source_prepares_once_preserving_generation(design,tmp_path):
+    d,sql,reset,old=design
+    before=protected(sql);active=snapshot(selected(sql))
+    fresh=asset(rev='b2',content_hash='b'*64)
+    sql.execute("UPDATE auto_edition_discovery SET next_check_at=now()+interval '15 minutes'")
+    tick((d,sql),[fresh],metadata=fresh)
+    pending=selected(sql)['replacement']
+    assert pending['stage']=='Queued' and pending['source']==ae.source_identity(PID,fresh)
+    assert snapshot(selected(sql))==active and protected(sql)==before
+    sql.execute("UPDATE auto_edition_discovery SET next_check_at=now()")
+    tick((d,sql),[fresh],metadata=fresh)
+    assert selected(sql)['replacement']==pending
+    job=d.queue.claim('host')
+    complete(design,job['lease_token'],tmp_path)
+    assert selected(sql)['replacement']['stage']=='Complete'
+    assert selected(sql)['source']==ae.source_identity(PID,fresh)
+    assert protected(sql)==before
+
+
+@pytest.mark.parametrize('kind',['deferred','busy','manual','changed_again'])
+def test_updated_source_respects_holds_and_freshness(design,kind):
+    d,sql,reset,old=design
+    if kind=='deferred':sql.execute('UPDATE auto_edition_onboarding SET priority=0 WHERE product_gid=%s',(PID,))
+    if kind=='busy':sql.execute("UPDATE auto_edition_onboarding SET status='Preparing' WHERE product_gid=%s",(PID,))
+    if kind=='manual':sql.execute("UPDATE auto_edition_onboarding SET replacement='{\"manual_required\":true}' WHERE product_gid=%s",(PID,))
+    before=selected(sql)
+    fresh=asset(rev='b2',content_hash='b'*64)
+    sql.execute('UPDATE auto_edition_discovery SET next_check_at=now()')
+    tick((d,sql),[fresh],metadata=asset(rev='c3',content_hash='c'*64) if kind=='changed_again' else fresh)
+    assert selected(sql)==before

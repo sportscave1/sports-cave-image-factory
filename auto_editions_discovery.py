@@ -76,6 +76,7 @@ class Discovery:
         with self.connect() as conn, conn.cursor() as cur:
             self.fence(cur, token)
             changed = False
+            changed_ids = []
             for entry in page.get('entries', []):
                 path = str(entry.get('path_lower') or entry.get('path_display') or '').casefold()
                 # Deleted/moved originals invalidate metadata only, never mappings.
@@ -91,17 +92,26 @@ class Discovery:
                         name_key=excluded.name_key,path_lower=excluded.path_lower,metadata=excluded.metadata""",
                         (entry['id'], psd.filename_key(entry['name'][:-4]), path, json.dumps(entry)))
                     changed = True
+                    changed_ids.append(entry['id'])
             cur.execute("""UPDATE auto_edition_discovery_cursor SET cursor=%s,complete=%s WHERE id=1""",
                         (page['cursor'], not page['has_more']))
             if changed:
                 cur.execute("""UPDATE auto_edition_discovery SET next_check_at=now()
-                    WHERE status<>'Mapped'""")
+                    WHERE status<>'Mapped' OR product_gid IN (
+                        SELECT shopify_product_gid FROM product_psd_mappings
+                        WHERE dropbox_file_id=ANY(%s))""", (changed_ids,))
 
     def pending(self, token, limit=10):
         with self.connect() as conn, conn.cursor() as cur:
             self.fence(cur, token)
-            cur.execute("""SELECT * FROM auto_edition_discovery WHERE status<>'Mapped'
-                AND next_check_at<=now() ORDER BY next_check_at,product_gid LIMIT %s""", (limit,))
+            cur.execute("""SELECT d.* FROM auto_edition_discovery d
+                WHERE next_check_at<=now() AND (status<>'Mapped' OR EXISTS(
+                    SELECT 1 FROM auto_edition_onboarding q
+                    JOIN auto_edition_source_inventory i ON i.file_id=q.file_id
+                    WHERE q.product_gid=d.product_gid AND q.priority>0 AND q.source IS NOT NULL
+                      AND (q.source->>'revision' IS DISTINCT FROM i.metadata->>'rev'
+                        OR q.source->>'content_hash' IS DISTINCT FROM i.metadata->>'content_hash')))
+                ORDER BY next_check_at,product_gid LIMIT %s""", (limit,))
             return [dict(r) for r in cur.fetchall()]
 
     def reset_inventory(self, token):
@@ -186,6 +196,15 @@ class Discovery:
                 file_id = existing['dropbox_file_id']
                 status, reason, identity = 'Mapped', '', None
                 self.queue.enqueue_cursor(cur,pid,file_id,ACTOR)
+                cur.execute('SELECT metadata FROM auto_edition_source_inventory WHERE file_id=%s',(file_id,))
+                found=cur.fetchone()
+                candidate=(found or {}).get('metadata')
+                if candidate:
+                    if metadata is None:return candidate
+                    if (psd.approved_file(metadata) and
+                            ae.source_identity(pid,candidate)==ae.source_identity(pid,metadata)):
+                        from auto_editions_reset import queue_updated_source
+                        queue_updated_source(cur,pid,existing,metadata,ACTOR)
             else:
                 cur.execute("SELECT to_jsonb(q)->'replacement'->>'manual_required' AS manual_required FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
                 reset=cur.fetchone()

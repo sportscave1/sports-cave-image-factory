@@ -36,7 +36,7 @@ def repair_candidate(cur,pid,pending):
     new association: the mapping, retained generation and exact source must
     still be the ones accepted by the repair service.
     """
-    source=pending.get('expected_source')
+    source=pending.get('updated_source') or pending.get('expected_source')
     if not source:
         from auto_editions_discovery import Discovery
         return Discovery.candidate(cur,pid,rematch=True)
@@ -47,7 +47,8 @@ def repair_candidate(cur,pid,pending):
     same_mapping=json.dumps(_record(mapping) if mapping else None,sort_keys=True,default=str)==json.dumps(pending.get('mapping_before'),sort_keys=True,default=str)
     if (not mapping or not same_mapping
             or mapping['dropbox_file_id']!=source.get('file_id')
-            or not row or snapshot(row)!=pending.get('previous') or row.get('source')!=source):
+            or not row or snapshot(row)!=pending.get('previous')
+            or (not pending.get('updated_source') and row.get('source')!=source)):
         return None,'Needs mapping review','Pinned repair mapping or retained design changed.'
     cur.execute('SELECT shopify_product_gid FROM product_psd_mappings WHERE dropbox_file_id=%s',(source['file_id'],))
     owners=cur.fetchall()
@@ -58,6 +59,30 @@ def repair_candidate(cur,pid,pending):
     if not meta or not psd.approved_file(meta) or ae.source_identity(pid,meta)!=source:
         return None,'Needs mapping review','Pinned repair source identity or approved location changed.'
     return meta,'Mapped',''
+
+
+def queue_updated_source(cur,pid,mapping,metadata,actor):
+    """Retain the active generation while preparing one exact revised original."""
+    source=ae.source_identity(pid,metadata)
+    cur.execute('SELECT *,lease_until>now() AS owned FROM auto_edition_onboarding WHERE product_gid=%s FOR UPDATE',(pid,))
+    row=cur.fetchone();pending=(row or {}).get('replacement') or {}
+    if (not row or not row.get('source') or row['source']==source
+            or row['file_id']!=source['file_id'] or row['priority']<=0
+            or row['status']=='Preparing' or row.get('owned')
+            or pending.get('stage') in BUSY or pending.get('manual_required')
+            or (row.get('reset_cancellation') or {}).get('stage') in ('Cancelling','Confirmed')
+            or pending.get('source')==source):
+        return False
+    replacement=dict(id=str(uuid.uuid4()),actor=actor,stage='Queued',attempts=0,reason='',
+        previous=snapshot(row),mapping_before=_record(mapping),updated_source=source,
+        source=source,file_id=source['file_id'])
+    chosen,_,_=repair_candidate(cur,pid,replacement)
+    if not chosen:return False
+    save(cur,pid,replacement)
+    Queue.audit(cur,pid,actor,'reset_requested',dict(request_id=replacement['id'],previous=snapshot(row)))
+    Queue.audit(cur,pid,actor,'reset_queued',dict(request_id=replacement['id'],
+        reason='Updated mapped PSD revision; previous generation retained.',verified_source=source))
+    return True
 
 
 class Reset:
