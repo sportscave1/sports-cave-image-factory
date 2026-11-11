@@ -104,16 +104,13 @@ Built for serious collectors.
 Made for fans who know why it matters.
 
 Secure yours.""",
-    """What deserves the centre of your {sport} wall?
+    """Every collection needs a centrepiece.
+Only {limit} collectors can own this one.
 
-Something that actually means something.
+[PRODUCT / SUBJECT / MOMENT].
+[SHORT PRODUCT-SPECIFIC LINE EVOKING ITS VERIFIED ERA, SPORTING MEANING OR SUPPORTER CONNECTION].
 
-[PRODUCT / SUBJECT / MOMENT]
-or another forgettable {comparison} print?
-
-You already know the answer.
-
-Only {limit} exist.
+[SHORT EMOTIONAL LINE SHOWING WHY THIS EDITION BELONGS IN THIS COLLECTOR'S COLLECTION].
 
 Claim this edition for your collection…
 or leave it for another collector.""",
@@ -165,9 +162,12 @@ Use exactly one framework per creative in this permanent order: legacy_standard,
 
 {DESCRIPTION_WORDING_INSTRUCTIONS}
 
+THIRD DESCRIPTION — COLLECTOR CENTREPIECE OVERRIDE
+For New Ads slot 3 only, the choose_a_side compatibility key now uses the collector-centrepiece framework printed above. This replaces the old question/response, forgettable-print comparison and answer-line requirements for this slot. Open verbatim with "Every collection needs a centrepiece. Only 100 collectors can own this one." on the two short lines shown. Never use the old wall-centre question, "Something that actually means something.", "or another forgettable ... print?" or "You already know the answer." in this slot. Keep the two-line ownership close. Make the flexible lines nostalgic and emotional through this exact subject, verified era or sporting moment and its meaning to supporters; when no historical moment is supplied, use grounded fan connection without inventing memories. Connect that feeling to owning this limited edition as a meaningful premium collector piece, not generic luxury or home-decor language. Slots 1 and 2 retain all existing rules.
+
 PRODUCT ADAPTATION
 Resolve bracketed writing cues using the supplied title, athlete/team, product identity, moment, sport, event, rivalry, era and market where available. Never print brackets or unresolved placeholders. Omit an unavailable factual line or replace it with a short product-identity line; never invent achievements, events, years, relationships or viewer memories. Empty ATHLETE_NAMES does not erase a name explicitly supplied in the title. Write naturally, not as mechanical placeholder substitution. For team edition use club/fan identity where natural. For awkward categories use sporting identity or fan identity.
-The defining hooks and short-line/blank-line structure are locked. legacy_standard preserves "This isn't wall art."; framed_greatness always opens "Greatness doesn't fade.\nIt gets framed." including motorsport; choose_a_side always uses the collector challenge, product-versus-forgettable-print choice, "You already know the answer.", and two-line ownership close. Choose-a-Side is valid for every product; athlete-versus-athlete rivalry requires verified rivalry/opposition and must never be invented. Do not substitute three random advertising concepts.
+The defining hooks and short-line/blank-line structure are locked. legacy_standard preserves "This isn't wall art."; framed_greatness always opens "Greatness doesn't fade.\nIt gets framed." including motorsport; choose_a_side uses the collector-centrepiece opening, product-specific emotional supporting lines and two-line ownership close defined above. Choose-a-Side is valid for every product; athlete-versus-athlete rivalry requires verified rivalry/opposition and must never be invented. Do not substitute three random advertising concepts.
 
 DESCRIPTION SCARCITY ONLY
 All Sports Cave editions are owner-confirmed as limited to 100 worldwide. Use this approved claim without verification flags, blocking or confirmation questions. Do not invent remaining stock, near-sellout claims, countdowns, discounts, percentages, numbered status, no reprint or retirement. Description wording must not alter the selected image footer.

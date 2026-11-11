@@ -7558,6 +7558,8 @@ def compose_final_ads_prompt(
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
             workflow_mode=workflow_mode,
         )
+    if campaign_type == "Carousel":
+        prompt += "\n\n" + RACING_WRITTEN_COPY_INSTRUCTIONS
     if campaign_type == "Instant Experience":
         prompt += "\n\n" + WRITTEN_META_HEADLINE_INSTRUCTIONS
     if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
@@ -8430,6 +8432,11 @@ def build_carousel_winner_examples(example_text):
     return "; ".join(example for example in examples if example)
 
 
+RACING_WRITTEN_COPY_INSTRUCTIONS = """RACING WRITTEN COPY — NO COMPETITOR NUMBERS
+For every racing sport, including horse racing, Formula 1/F1, NASCAR, V8 Supercars, rally, IndyCar, endurance, motorcycle racing and all other motorsport/racing disciplines: never mention a car, bike, vehicle or horse racing number in any newly generated or explicitly regenerated primary text, description, written headline or carousel card copy. This applies even when a number appears in the product title, supplied details, reference copy or artwork. Omit race-entry, starting, saddlecloth and competitor identifiers in digits, words, hashtags or indirect number-based hooks (for example, "No. 5", "#5", "number five", "the 5" or "Make Room for the 5"). Identify the subject through its supplied driver, rider, horse or team name and verified story instead; do not echo a numbered product title verbatim into written ad copy. This rule overrides conflicting written-copy examples and title-reuse instructions. It does not ban verified years, race names, achievements or the approved 100-edition scarcity claim. Preserve all other factual and style safeguards, saved ads, catalogue product.name, artwork/image details, image prompts and on-image footer rules. Before returning fresh written copy, check every description and headline for competitor-number references and rewrite any found.
+"""
+
+
 WRITTEN_META_HEADLINE_INSTRUCTIONS = """WRITTEN META HEADLINE — PRODUCT MEANING
 Scope: only newly generated written Meta headline fields in ad output and CSV. These rules take precedence over all other written-headline directions, examples and option counts, including refresh instructions. They do not apply to on-image scarcity headlines, image prompts, primary text, descriptions, CTAs, catalogue product.name or any other field. Preserve explicitly assigned or proven headlines unless headline regeneration is requested; never rewrite saved ads.
 For each three-ad package, return exactly THREE final headlines total: ONE selected headline in each ad's existing headline field, reused verbatim in its CSV cell. Never return three headlines per ad, alternatives, angle labels or extra fields.
@@ -8442,7 +8449,7 @@ The image already communicates edition scarcity; the written headline must add e
 Adapt to the actual fan base and product, not national stereotypes. USA: consider relevant athlete mentality, team/city allegiance, defining records and era memories. Australia: consider relevant sporting heritage, local allegiance, shared memories and homegrown connection. Do not force Australian pride into USA copy because an athlete is Australian. A shared emotional connection can use the same headline in both markets; do not force market-only wording changes.
 Within the existing generation process, consider at least nine headline candidates internally, then select the strongest three. Assess exact-product fit, supporter emotion, brevity/natural wording, confident collector tone, distinctness and factual accuracy. Ask: Would a knowledgeable fan recognise why this belongs with this edition? Does it add something beyond scarcity? Does it sound like a fan's belief rather than a shop's sales pitch? Rewrite weak candidates before returning only one selected headline per ad.
 Generate from product meaning each time, never a rotating headline bank. Avoid repetition across unrelated products when recent headline history is already supplied; never claim to check unavailable history or add history infrastructure. Do not sacrifice a strong phrase solely for novelty. These are creative candidates to test, not proven winners.
-"""
+""" + "\n\n" + RACING_WRITTEN_COPY_INSTRUCTIONS
 
 
 def build_category_winner_angle_block(category, campaign_type, country, *, include_ie_setting=True):
