@@ -530,6 +530,7 @@ def test_combined_release_retains_reset_and_quality_routes():
 
 def test_updated_mapped_source_prepares_once_preserving_generation(design,tmp_path):
     d,sql,reset,old=design
+    sql.execute("UPDATE edition_products SET product_title='New marketing title'")
     before=protected(sql);active=snapshot(selected(sql))
     fresh=asset(rev='b2',content_hash='b'*64)
     sql.execute("UPDATE auto_edition_discovery SET next_check_at=now()+interval '15 minutes'")
@@ -541,6 +542,10 @@ def test_updated_mapped_source_prepares_once_preserving_generation(design,tmp_pa
     tick((d,sql),[fresh],metadata=fresh)
     assert selected(sql)['replacement']==pending
     job=d.queue.claim('host')
+    with patch.object(api,'queue',return_value=d.queue),patch.object(api.runtime,'storage',return_value=SimpleNamespace(
+            integration=SimpleNamespace(psd_open_metadata=lambda *a,**kw:fresh),token='synthetic')):
+        context=api.product_context(PID,str(job['lease_token']))
+    assert context['source']==ae.source_identity(PID,fresh)
     complete(design,job['lease_token'],tmp_path)
     assert selected(sql)['replacement']['stage']=='Complete'
     assert selected(sql)['source']==ae.source_identity(PID,fresh)
