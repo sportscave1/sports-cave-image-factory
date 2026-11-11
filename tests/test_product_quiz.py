@@ -70,17 +70,17 @@ class QuizContracts(unittest.TestCase):
             self.assertEqual(store.get_state('present_product_ids'),[])
         with patch.object(store,'q',return_value=None):
             self.assertIsNone(store.get_state('present_product_ids'))
-    def test_navigation_has_one_admin_child_under_developer(self):
+    def test_navigation_has_one_admin_child_under_website(self):
         import os_accounts
         from pathlib import Path
         page=os_accounts.PAGE_BY_ROUTE['Product Quiz']
-        self.assertEqual(page['parent_key'],'developer');self.assertTrue(page['navigation_child'])
+        self.assertEqual(page['parent_key'],os_accounts.PAGE_BY_ROUTE['SEO Analytics']['key']);self.assertTrue(page['navigation_child'])
         self.assertEqual(sum(p['route']=='Product Quiz' for p in os_accounts.PAGE_REGISTRY),1)
         self.assertFalse(os_accounts.can_access_page({'role':'worker','is_active':True,'page_permissions':['product_quiz']},'Product Quiz'))
         self.assertTrue(os_accounts.can_access_page({'role':'admin','is_active':True},'Product Quiz'))
         source=(Path(__file__).parents[1]/'app.py').read_text(encoding='utf-8')
-        self.assertIn('child_button(children, "Product Quiz", "Product Quiz")',source)
-        self.assertIn('key="sidebar-developer-children"',source)
+        self.assertIn('child_button(children, route, analytics_nav.WEBSITE_NAV_LABELS[route])',source)
+        self.assertIn('key="sidebar-website-children"',source)
         self.assertIn('elif current_page == "Product Quiz":',source)
 
     def test_defaults_and_configuration_constraints(self):
@@ -288,37 +288,27 @@ class QuizContracts(unittest.TestCase):
         for code in embeds.values():
             self.assertNotIn('iframe',code);self.assertIn('loader.js',code);self.assertLess(len(code),300)
 
-    def test_isolated_editor_renders_and_saves_the_visible_draft(self):
+    def test_quiz_page_renders_read_only_analytics_and_install_html(self):
         from streamlit.testing.v1 import AppTest
-        app=AppTest.from_string('''
-import streamlit as st
-from copy import deepcopy
-from tests.test_product_quiz import MemoryStore
-from product_quiz import DEFAULT
-from product_quiz_publish import compile_catalogue
+        app = AppTest.from_string('''
 from product_quiz_page import render_page
-class FixtureStore(MemoryStore):
-    def draft(self): return self.states.get('draft',{'revision':0,'config':deepcopy(DEFAULT)})
-    def save(self,config,revision):
-        self.states['draft']={'revision':revision+1,'config':deepcopy(config)}
-        return self.states['draft']
-if 'fixture_store' not in st.session_state:
-    store=FixtureStore()
-    _,review=compile_catalogue(store.rows,{},{})
-    store.states['catalogue_status']={'products':review}
-    st.session_state['fixture_store']=store
-render_page({'role':'admin','is_active':True},store=st.session_state['fixture_store'])
-''',default_timeout=10).run()
-        self.assertEqual(list(app.exception),[])
-        self.assertEqual([t.label for t in app.tabs],['Questions & answers','Matching rules','Catalogue','Appearance','Preview & publish','Analytics','Install'])
-        next(t for t in app.text_input if t.label=='Question when story choices are available').set_value('What era do you collect?')
-        next(b for b in app.button if b.label=='Save draft').click().run()
-        self.assertEqual(list(app.exception),[])
-        saved=app.session_state['fixture_store'].draft()['config']
-        self.assertEqual(saved['appearance']['title'],'Find your next edition')
-        self.assertEqual(saved['appearance']['intro'],'')
-        self.assertEqual(saved['questions'][2]['label'],'What era do you collect?')
-        self.assertEqual(saved['rules']['max_results'],1)
+
+class FixtureStore:
+    def report(self):
+        return [
+            dict(event="started", question="", source="page", version="fixture", count=8, sessions=7),
+            dict(event="started", question="", source="collection", version="fixture", count=3, sessions=3),
+            dict(event="completed", question="", source="page", version="fixture", count=4, sessions=4),
+        ]
+
+render_page({"role": "admin", "is_active": True}, store=FixtureStore())
+''', default_timeout=10).run()
+        self.assertFalse(app.exception)
+        self.assertEqual([(metric.label, metric.value) for metric in app.metric],
+                         [("Starts", "11"), ("Completions", "4"), ("Product clicks", "0")])
+        self.assertEqual(len(app.dataframe), 1)
+        self.assertFalse(app.tabs)
+        self.assertIn("data-sc-edition-finder", app.code[0].value)
 
 
 if __name__=='__main__': unittest.main()

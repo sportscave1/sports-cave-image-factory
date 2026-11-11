@@ -84,12 +84,13 @@ def analytics(user, state, store, reports, initial=None):
             st.warning('Connection diagnostics are unavailable. Saved Plan and Review work remains available.')
             return
     identity=tuple(str(connection.get(k) or '') for k in ('id','gsc_site_url','ga4_property_id','connected_at','updated_at'))
-    cols = st.columns(5)
+    cols = st.columns([1, 1, 1, 1, 1.2, .8], gap="small", vertical_alignment="bottom")
     days_label = cols[0].selectbox('Date range', ('28 days', '7 days', '90 days', 'Custom'))
     comparison = cols[1].selectbox('Compare', ('Previous period', 'Off'))
     market = cols[2].selectbox('Market', ('All markets', 'Australia', 'United States', 'United Kingdom'))
     device = cols[3].selectbox('Device', ('All devices', 'Desktop', 'Mobile', 'Tablet'))
     scope = cols[4].selectbox('Traffic scope (GA4)', ('Google organic', 'All organic', 'All channels'), index=2 if initial in ('Channels','Engagement','Ecommerce','Events','Audience','Realtime') else 0)
+    refresh = cols[5].button('Refresh data', key='seo-phase1-refresh', disabled=reports is None)
     through=None
     if reports is not None and seo_access:
         today=model.datetime.now(model.ZoneInfo('America/Los_Angeles')).date()
@@ -114,7 +115,7 @@ def analytics(user, state, store, reports, initial=None):
             import seo_page
             seo_page._render_keywords(store,state,user)
         return
-    if st.button('Refresh data', key='seo-phase1-refresh'):
+    if refresh:
         reports.cache.clear()
         model.event(state, 'Data refresh', source='Google reporting cache', status='Invalidated', detail=context)
         save(store, state, user)
@@ -149,7 +150,7 @@ def analytics(user, state, store, reports, initial=None):
         chart = report_rows(ga(model.ga4_contract(scope, ('date',))))
         field = {'GA4 sessions':'sessions', 'GA4 purchases':'ecommercePurchases', 'GA4 attributed purchase revenue':'purchaseRevenue'}[metric]
     if chart:
-        st.line_chart([{'date':r['date'], field:float(r[field]) if r.get(field) is not None else None} for r in chart], x='date', y=field)
+        st.line_chart([{'date':r['date'], field:float(r[field]) if r.get(field) is not None else None} for r in chart], x='date', y=field, height=235)
     view = st.selectbox('View', VIEWS, index=VIEWS.index(initial) if initial in VIEWS else 0, key='seo-phase1-view-' + str(initial))
     if view in ('Queries', 'Mappings') and not seo_access:
         st.info('SEO access is required for this view.')
@@ -459,15 +460,25 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
     import streamlit.components.v1 as components
     import seo_page
     seo_page._inject_styles()
-    st.markdown('<style>[data-testid="stMetricLabel"] {min-height:3rem;height:auto} [data-testid="stMetricLabel"] p {white-space:normal!important;overflow:visible!important}</style>',unsafe_allow_html=True)
+    if destination != nav.SEO_ANALYTICS_ROUTE:
+        st.markdown('<style>[data-testid="stMetricLabel"] {min-height:3rem;height:auto} [data-testid="stMetricLabel"] p {white-space:normal!important;overflow:visible!important}</style>',unsafe_allow_html=True)
     status='ready'
     try:
-        st.subheader(nav.SEO_NAV_LABELS.get(destination,'SEO'))
-        if destination==nav.SEO_ANALYTICS_ROUTE: analytics(user,state,store,reports,initial)
-        elif destination==nav.SEO_PLAN_ROUTE: plan(user,state,store,navigate,initial)
-        elif destination==nav.SEO_REVIEW_ROUTE: review(user,state,store,initial)
-        elif destination==nav.SEO_HISTORY_ROUTE: history(user,state)
-        else: worker(user,state,store,reports,navigate)
+        if destination == nav.SEO_ANALYTICS_ROUTE:
+            from website_analytics import compact_styles, tool_summaries
+
+            compact_styles()
+            with st.container(key="website-compact"):
+                st.subheader("Analytics")
+                if route == anav.WEBSITE_OVERVIEW_ROUTE:
+                    tool_summaries(user)
+                analytics(user, state, store, reports, initial)
+        else:
+            st.subheader(nav.SEO_NAV_LABELS.get(destination, 'SEO'))
+            if destination == nav.SEO_PLAN_ROUTE: plan(user, state, store, navigate, initial)
+            elif destination == nav.SEO_REVIEW_ROUTE: review(user, state, store, initial)
+            elif destination == nav.SEO_HISTORY_ROUTE: history(user, state)
+            else: worker(user, state, store, reports, navigate)
     except Exception:
         status='error'
         raise

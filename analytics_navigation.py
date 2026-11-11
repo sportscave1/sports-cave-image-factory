@@ -1,3 +1,6 @@
+from seo_navigation import SEO_ANALYTICS_ROUTE
+from social_media import WALL_PREVIEW_ROUTE
+
 ANALYTICS_PAGE_KEY = "analytics"
 
 ANALYTICS_OVERVIEW_ROUTE = "Analytics Overview"
@@ -34,3 +37,12 @@ LEGACY_ANALYTICS_PAGE_KEYS = (
     "seo_store_analytics",
     "store_analytics",
 )
+
+WEBSITE_OVERVIEW_ROUTE = SEO_ANALYTICS_ROUTE
+PRODUCT_QUIZ_ROUTE = "Product Quiz"
+WEBSITE_NAV_LABELS = {
+    WEBSITE_OVERVIEW_ROUTE: "Overview",
+    WALL_PREVIEW_ROUTE: "Wall Preview Inbox",
+    PRODUCT_QUIZ_ROUTE: "Product Quiz",
+}
+WEBSITE_ROUTES = tuple(WEBSITE_NAV_LABELS)

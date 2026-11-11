@@ -64,7 +64,7 @@ PAGE_REGISTRY = (
     },
     {"key": social_media.WALL_PREVIEW_PAGE_KEY, "route": social_media.WALL_PREVIEW_ROUTE,
      "label": "Wall Preview Inbox", "worker_assignable": False,
-     "parent_key": social_media.SOCIAL_MEDIA_PAGE_KEY, "navigation_child": True},
+     "parent_key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE], "navigation_child": True},
     {
         "key": social_media.AI_REELS_PAGE_KEY,
         "route": social_media.AI_REELS_ROUTE,
@@ -148,7 +148,15 @@ PAGE_REGISTRY = (
             "navigation_child": True,
         }
         for route in seo_workspace.SEO_ROUTES[1:]
+        if route != analytics_navigation.WEBSITE_OVERVIEW_ROUTE
     ),
+    {
+        "key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE],
+        "route": analytics_navigation.WEBSITE_OVERVIEW_ROUTE,
+        "label": "Website",
+        "worker_assignable": False,
+        "top_level": True,
+    },
     {"key": "email", "route": "Email", "label": "Email", "worker_assignable": True},
     {"key": "reviews", "route": "Reviews", "label": "Reviews", "worker_assignable": True},
     *({"key": key, "route": route, "label": label, "worker_assignable": key != 'crm_settings_view', "navigation_child": True}
@@ -185,8 +193,8 @@ PAGE_REGISTRY = (
         "worker_assignable": False,
     },
     {"key": "developer", "route": "Developer", "label": "Developer", "worker_assignable": False, "top_level": True},
-    {"key": "product_quiz", "route": "Product Quiz", "label": "Product Quiz", "worker_assignable": False,
-     "parent_key": "developer", "navigation_child": True},
+    {"key": "product_quiz", "route": analytics_navigation.PRODUCT_QUIZ_ROUTE, "label": "Product Quiz", "worker_assignable": False,
+     "parent_key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE], "navigation_child": True},
     {"key": "products", "route": "Products", "label": "Products", "worker_assignable": False},
     {
         "key": "product_assets",

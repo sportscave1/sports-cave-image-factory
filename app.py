@@ -7231,21 +7231,22 @@ def _sidebar_route_button(
 
 def _active_sidebar_group(route):
     import crm_navigation
-    if route in {"Developer", "Worker Health", "Task Recorder", "Product Quiz", "Image Protection"}:
+    if route in (*analytics_nav.WEBSITE_ROUTES, *analytics_nav.ANALYTICS_ROUTES):
+        return "website"
+    if route in {"Developer", "Worker Health", "Task Recorder", "Image Protection"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
     return navigation_runtime.active_disclosure_group(
         route,
-        social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE},
-        seo_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
+        social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
+        seo_routes=seo_nav.SEO_ROUTES,
         reporting_routes={
             "Reporting",
             os_accounts.DAILY_PLANNER_ROUTE,
             os_accounts.WEEKLY_REVIEW_ROUTE,
         },
         ads_routes=ads_nav.ADS_ROUTES,
-        analytics_routes=analytics_nav.ANALYTICS_ROUTES,
     )
 
 
@@ -7259,19 +7260,7 @@ def _toggle_sidebar_group(group):
 @st.fragment
 def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
     if SIDEBAR_OPEN_GROUP_KEY not in st.session_state:
-        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = navigation_runtime.initial_disclosure_group(
-            current_page,
-            stored=None,
-            social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE},
-            seo_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
-            reporting_routes={
-                "Reporting",
-                os_accounts.DAILY_PLANNER_ROUTE,
-                os_accounts.WEEKLY_REVIEW_ROUTE,
-            },
-            ads_routes=ads_nav.ADS_ROUTES,
-            analytics_routes=analytics_nav.ANALYTICS_ROUTES,
-        )
+        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = _active_sidebar_group(current_page)
     active_group = _active_sidebar_group(current_page)
     if active_group and st.session_state.get("sidebar-email-last-route") != current_page:
         # The selected route owns disclosure state.  A stale fragment value
@@ -7358,7 +7347,6 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             children = st.container(key="sidebar-social-children")
             children.markdown('<span id="sidebar-social-children"></span>', unsafe_allow_html=True)
             child_button(children, social_media.SOCIAL_MEDIA_ROUTE, "Overview")
-            child_button(children, social_media.WALL_PREVIEW_ROUTE, "Wall Preview Inbox")
             child_button(
                 children,
                 social_media.AI_REELS_ROUTE,
@@ -7390,13 +7378,26 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                     icon=SIDEBAR_ICON_BY_ROUTE.get(route),
                 )
 
+    website_routes = tuple(route for route in analytics_nav.WEBSITE_ROUTES if route in history_routes)
+    if website_routes and disclosure(
+        "website",
+        "Website",
+        ":material/language:",
+        website_routes[0],
+        force_open_routes=(*website_routes, *analytics_nav.ANALYTICS_ROUTES),
+    ):
+        children = st.container(key="sidebar-website-children")
+        children.markdown('<span id="sidebar-website-children"></span>', unsafe_allow_html=True)
+        for route in website_routes:
+            child_button(children, route, analytics_nav.WEBSITE_NAV_LABELS[route])
+
     if any(route in allowed_routes for route in seo_nav.SEO_MENU_ROUTES):
         if disclosure(
             "seo",
             "SEO",
             SIDEBAR_ICON_BY_ROUTE[seo_nav.SEO_OVERVIEW_ROUTE],
-            seo_nav.SEO_OVERVIEW_ROUTE if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes else seo_nav.SEO_ANALYTICS_ROUTE,
-            force_open_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
+            seo_nav.SEO_OVERVIEW_ROUTE,
+            force_open_routes=tuple(route for route in seo_nav.SEO_ROUTES if route != analytics_nav.WEBSITE_OVERVIEW_ROUTE),
         ):
             children = st.container(key="sidebar-seo-children")
             children.markdown('<span id="sidebar-seo-children"></span>', unsafe_allow_html=True)
@@ -7426,8 +7427,6 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Image Protection' in history_routes:
             child_button(children, 'Image Protection', 'Image Protection', icon=SIDEBAR_ICON_BY_ROUTE['Image Protection'])
-        if 'Product Quiz' in history_routes:
-            child_button(children, "Product Quiz", "Product Quiz")
         if 'Developer Studio' in allowed_routes:
             children.container(key='sidebar-row-developer_studio').link_button('Dev Mode',
                 '?page=Developer%20Studio&dev_mode=1',use_container_width=True,icon=SIDEBAR_ICON_BY_ROUTE['Developer Studio'],

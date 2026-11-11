@@ -1,6 +1,7 @@
 """Local PostgreSQL and rendered UI regressions for the dedicated inbox."""
 import inspect
 import os
+from pathlib import Path
 import unittest
 import uuid
 from unittest.mock import Mock,patch
@@ -132,11 +133,15 @@ class InboxUiTests(unittest.TestCase):
         with patch.object(inbox.st,'session_state',{'wp-analytics-device':'mobile','wall-preview-cursors':['x'],'other':'keep'}) as state:
             inbox._reset();self.assertEqual(state['other'],'keep');self.assertEqual(state['wp-analytics-device'],'All');self.assertEqual(state['wall-preview-cursors'],[None])
 
-    def test_actual_sidebar_contains_three_social_children(self):
-        app=AppTest.from_file('tests/sidebar_preview_app.py').run()
+    def test_actual_sidebar_places_wall_preview_under_website(self):
+        app=AppTest.from_file(Path(__file__).with_name('sidebar_preview_app.py').resolve()).run()
         app.session_state['route']='Wall Preview Inbox'
-        app.session_state['sidebar-open-group']='social_media'
         app.run()
         self.assertFalse(app.exception)
-        labels=[b.label for b in app.button]
-        self.assertIn('Overview',labels);self.assertIn('Wall Preview Inbox',labels);self.assertIn('AI Reels',labels)
+        self.assertEqual(app.session_state['sidebar-open-group'], 'website')
+        self.assertIsNotNone(app.sidebar.button(key='sidebar-child::Wall Preview Inbox'))
+        app.session_state['route']='Social Media'
+        app.run()
+        keys={button.key for button in app.sidebar.button}
+        self.assertIn('sidebar-child::AI Reels', keys)
+        self.assertNotIn('sidebar-child::Wall Preview Inbox', keys)
