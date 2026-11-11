@@ -604,7 +604,7 @@ class OrderStatusUiContractTests(unittest.TestCase):
         self.assertIn("right: 12px", source)
         self.assertIn("refreshOrderStatus", source)
         self.assertIn("const EMAIL_HEARTBEAT_MS = 30000", source)
-        self.assertIn("state.config.emailEnabled || state.config.wallInboxEnabled", source)
+        self.assertNotIn("wallInboxEnabled", source)
         self.assertIn("TEMPORARY_TOAST_MS = 3000", source)
         self.assertIn("SportsCaveTemporaryToastRuntime", source)
         self.assertIn("current.identity === cleanIdentity", source)

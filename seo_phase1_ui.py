@@ -1,4 +1,6 @@
 """Compact Streamlit workspace using existing reporting clients and SEO editors."""
+from concurrent.futures import ThreadPoolExecutor
+
 import csv
 import io
 import json
@@ -11,6 +13,8 @@ import analytics_contracts as contracts
 import seo_workspace as workspace
 import os_accounts
 
+_OVERVIEW_READS = ThreadPoolExecutor(max_workers=6, thread_name_prefix='website-report')
+
 VIEWS = ('Pages', 'Queries', 'Channels', 'Engagement', 'Ecommerce', 'Events', 'Audience', 'Realtime', 'Overview details', 'Store operations', 'Mappings')
 
 def save(store, state, user):
@@ -18,18 +22,31 @@ def save(store, state, user):
     except workspace.SEOStoreError as error:
         st.error(str(error)); st.stop()
 
+def _csv_text(rows):
+    buffer = io.StringIO()
+    columns = list(dict.fromkeys(key for row in rows for key in row))
+    writer = csv.DictWriter(buffer, fieldnames=columns)
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
 def table(rows, *, key):
-    if rows:
-        import seo_page
-        displayed=seo_page._paginated_rows(rows,key=key+'-pagination',default_page_size=25) if len(rows)>25 else rows
-        st.dataframe(displayed, hide_index=True, use_container_width=True)
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=list(dict.fromkeys(k for row in rows for k in row)))
-        writer.writeheader()
-        writer.writerows(rows)
-        st.download_button('Export filtered rows', buffer.getvalue(), file_name='seo-report.csv', mime='text/csv', key=key)
-    else:
+    if not rows:
         st.info('No records match this view.')
+        return []
+    import seo_page
+    displayed = seo_page._paginated_rows(rows, key=key+'-pagination', default_page_size=25) if len(rows)>25 else rows
+    st.dataframe(displayed, hide_index=True, width='stretch')
+    st.download_button('Export filtered rows', lambda: _csv_text(rows), file_name='seo-report.csv',
+                       mime='text/csv', key=key, on_click='ignore')
+    return displayed
+
+
+def filter_rows(rows, search):
+    needle = search.casefold()
+    return [row for row in rows if needle in json.dumps(row, default=str).casefold()] if needle else rows
+
 
 def fetch(key, callback):
     """Keep same-filter prior results visible on partial-source failure."""
@@ -49,10 +66,16 @@ def fetch(key, callback):
 def report_rows(report):
     return [{**r.get('dimensions', {}), **r.get('metrics', {})} for r in (report or {}).get('rows', [])]
 
-def task_action(row, context, state, store, user):
+def task_action(row, context, store, user):
     target = row.get('page') or row.get('landingPagePlusQueryString') or row.get('canonical_url') or ''
     query = row.get('query') or ''
-    with st.expander('Details and Plan task', expanded=False):
+    panel = st.expander('Details and Plan task', key='seo-report-task-details', on_change='rerun')
+    if not panel.open:
+        return
+    with panel:
+        state = load_analytics_state(store)
+        if state is None:
+            return
         st.json(row)
         mappings = [m for m in state.get('keyword_mappings', []) if (query and m.get('primary_keyword', '').casefold() == query.casefold()) or (target and m.get('target_page') == target)]
         if mappings:
@@ -74,16 +97,17 @@ def task_action(row, context, state, store, user):
             st.success('Task saved to Plan.' if added else 'This open task already exists in Plan.')
             st.caption(task['id'])
 
-def analytics(user, state, store, reports, initial=None):
+def load_analytics_state(store):
+    try:
+        return store.load()
+    except workspace.SEOStoreError as error:
+        st.warning(str(error))
+        return None
+
+
+def analytics(user, store, reports, initial=None):
     # Analytics-only users retain GA4 access, without gaining GSC or editing SEO records.
     seo_access = os_accounts.can_access_page(user, nav.SEO_OVERVIEW_ROUTE)
-    connection={}
-    if reports is not None:
-        try: connection=reports.connection()
-        except Exception:
-            st.warning('Connection diagnostics are unavailable. Saved Plan and Review work remains available.')
-            return
-    identity=tuple(str(connection.get(k) or '') for k in ('id','gsc_site_url','ga4_property_id','connected_at','updated_at'))
     cols = st.columns([1, 1, 1, 1, 1.2, .8], gap="small", vertical_alignment="bottom")
     days_label = cols[0].selectbox('Date range', ('28 days', '7 days', '90 days', 'Custom'))
     comparison = cols[1].selectbox('Compare', ('Previous period', 'Off'))
@@ -91,6 +115,27 @@ def analytics(user, state, store, reports, initial=None):
     device = cols[3].selectbox('Device', ('All devices', 'Desktop', 'Mobile', 'Tablet'))
     scope = cols[4].selectbox('Traffic scope (GA4)', ('Google organic', 'All organic', 'All channels'), index=2 if initial in ('Channels','Engagement','Ecommerce','Events','Audience','Realtime') else 0)
     refresh = cols[5].button('Refresh data', key='seo-phase1-refresh', disabled=reports is None)
+    connection = {}
+    parallel = False
+    if reports is not None:
+        try:
+            connection = reports.connection()
+            from google_direct_reporting import GoogleReports
+            if isinstance(reports, GoogleReports):
+                reports = reports.for_request(connection)
+                parallel = True
+        except Exception:
+            st.warning('Connection diagnostics are unavailable. Saved Plan and Review work remains available.')
+            return
+    identity=tuple(str(connection.get(k) or '') for k in ('id','gsc_site_url','ga4_property_id','connected_at','updated_at'))
+    if refresh:
+        reports.cache.clear()
+    contract = model.ga4_contract(scope)
+    property_id = connection.get('ga4_property_id')
+    if parallel and seo_access and property_id and days_label != 'Custom':
+        # Compatibility has no date dependency. Its exact request is shared with
+        # both totals queries while Search Console determines the final date.
+        _OVERVIEW_READS.submit(reports.ga4_compatibility, property_id, contract)
     through=None
     if reports is not None and seo_access:
         today=model.datetime.now(model.ZoneInfo('America/Los_Angeles')).date()
@@ -113,67 +158,123 @@ def analytics(user, state, store, reports, initial=None):
         view = st.selectbox('View', VIEWS, index=VIEWS.index(initial) if initial in VIEWS else 0, key='seo-phase1-view-' + str(initial))
         if view == 'Mappings' and seo_access:
             import seo_page
-            seo_page._render_keywords(store,state,user)
+            state = load_analytics_state(store)
+            if state is not None:
+                seo_page._render_keywords(store, state, user)
         return
     if refresh:
-        reports.cache.clear()
-        model.event(state, 'Data refresh', source='Google reporting cache', status='Invalidated', detail=context)
-        save(store, state, user)
+        state = load_analytics_state(store) if seo_access else workspace.default_state()
+        if state is not None:
+            model.event(state, 'Data refresh', source='Google reporting cache', status='Invalidated', detail=context)
+            save(store, state, user)
     gfilters = {'market': market, 'device': device, 'search_type': 'web'}
     ga_filters = model.filters_for_ga4(market, device)
     signature = json.dumps([user.get('id'),identity,context], sort_keys=True)
+    span = end - start + timedelta(days=1)
+
+    def period(old):
+        return (start - span, start - timedelta(days=1)) if old else (start, end)
+
+    def gsc_request(dimensions, old=False):
+        a, b = period(old)
+        return ('GSC', signature, dimensions, old), lambda: reports.gsc(a, b, dimensions, gfilters)
+
+    def ga_request(contract, old=False):
+        a, b = period(old)
+        key = ('GA4', signature, str(contract), old)
+        return key, lambda: reports.ga4(property_id, contract, a, b, filters=ga_filters)
+
     def gsc(dimensions, old=False):
-        span = (end-start).days+1
-        a,b = (start-timedelta(days=span), start-timedelta(days=1)) if old else (start,end)
-        return fetch(('GSC', signature, dimensions, old), lambda: reports.gsc(a,b,dimensions,gfilters))
+        return fetch(*gsc_request(dimensions, old))
+
     def ga(contract, old=False):
-        span = (end-start).days+1
-        a,b = (start-timedelta(days=span), start-timedelta(days=1)) if old else (start,end)
-        return fetch(('GA4', signature, str(contract), old), lambda: reports.ga4(connection.get('ga4_property_id'),contract,a,b,filters=ga_filters))
-    totals = model.gsc_totals(gsc(()) or []) if seo_access else {}
-    previous = model.gsc_totals(gsc((), True) or []) if seo_access and comparison != 'Off' else {}
-    ga_report = ga(model.ga4_contract(scope))
+        return fetch(*ga_request(contract, old))
+
+    metric_cards = st.container()
+    metric = st.selectbox('Chart metric', ('GSC clicks','GSC impressions','GA4 sessions','GA4 purchases','GA4 attributed purchase revenue') if seo_access else ('GA4 sessions','GA4 purchases','GA4 attributed purchase revenue'))
+    chart_panel = st.container()
+    view = st.selectbox('View', VIEWS, index=VIEWS.index(initial) if initial in VIEWS else 0, key='seo-phase1-view-' + str(initial))
+    comparing = comparison != 'Off'
+    requests = {'ga_total': ga_request(contract)}
+    if comparing:
+        requests['ga_previous'] = ga_request(contract, old=True)
+    if seo_access:
+        requests['gsc_total'] = gsc_request(())
+        if comparing:
+            requests['gsc_previous'] = gsc_request((), old=True)
+    gsc_chart = metric.startswith('GSC')
+    requests['chart'] = gsc_request(('date',)) if gsc_chart else ga_request(model.ga4_contract(scope, ('date',)))
+    if seo_access and view in ('Pages', 'Queries'):
+        requests['table'] = gsc_request(('page',) if view == 'Pages' else ('query', 'page'))
+
+    # The reporting client is safe to call from workers. Keep Streamlit state and
+    # same-filter failure handling on the script thread.
+    detail_reads = ('chart', 'table')
+    pending = {
+        name: _OVERVIEW_READS.submit(callback)
+        for name, (_, callback) in requests.items() if name not in detail_reads
+    } if parallel else {}
+
+    def load(name):
+        if name not in requests:
+            return None
+        key, callback = requests[name]
+        return fetch(key, pending[name].result if name in pending else callback)
+
+    totals = model.gsc_totals(load('gsc_total') or []) if seo_access else {}
+    previous = model.gsc_totals(load('gsc_previous') or []) if seo_access and comparing else {}
+    ga_report = load('ga_total')
     ga_totals = report_rows(ga_report)
     ga_total = ga_totals[0] if ga_totals else {}
-    old_rows = report_rows(ga(model.ga4_contract(scope), True)) if comparison != 'Off' else []
+    old_rows = report_rows(load('ga_previous')) if comparing else []
     old_ga = old_rows[0] if old_rows else {}
     metrics = [('Google organic clicks', totals.get('clicks'), previous.get('clicks')), ('Google organic impressions', totals.get('impressions'), previous.get('impressions'))] if seo_access else []
     metrics += [(scope+' sessions', ga_total.get('sessions'), old_ga.get('sessions')), (scope+' purchases', ga_total.get('ecommercePurchases'), old_ga.get('ecommercePurchases')), ('GA4 attributed purchase revenue (' + str((ga_report or {}).get('currency') or connection.get('ga4_property_currency') or 'currency unavailable') + ')', ga_total.get('purchaseRevenue'), old_ga.get('purchaseRevenue'))]
-    for col, (label, value, old) in zip(st.columns(len(metrics)), metrics):
-        value, old = model.number(value), model.number(old)
-        col.metric(label, 'Unavailable' if value is None else f'{value:,.2f}', delta=f'{(value-old)/old:.1%}' if value is not None and old else None,help=label+' · '+scope if label.startswith('GA4') else label)
-    metric = st.selectbox('Chart metric', ('GSC clicks','GSC impressions','GA4 sessions','GA4 purchases','GA4 attributed purchase revenue') if seo_access else ('GA4 sessions','GA4 purchases','GA4 attributed purchase revenue'))
-    if metric.startswith('GSC'):
-        chart = gsc(('date',)) or []
+    with metric_cards:
+        for col, (label, value, old) in zip(st.columns(len(metrics)), metrics):
+            value, old = model.number(value), model.number(old)
+            col.metric(label, 'Unavailable' if value is None else f'{value:,.2f}', delta=f'{(value-old)/old:.1%}' if value is not None and old else None,help=label+' · '+scope if label.startswith('GA4') else label)
+    if parallel:
+        for name in detail_reads:
+            if name in requests:
+                pending[name] = _OVERVIEW_READS.submit(requests[name][1])
+    chart_report = load('chart')
+    if gsc_chart:
+        chart = chart_report or []
         field = 'clicks' if metric == 'GSC clicks' else 'impressions'
     else:
-        chart = report_rows(ga(model.ga4_contract(scope, ('date',))))
+        chart = report_rows(chart_report)
         field = {'GA4 sessions':'sessions', 'GA4 purchases':'ecommercePurchases', 'GA4 attributed purchase revenue':'purchaseRevenue'}[metric]
     if chart:
-        st.line_chart([{'date':r['date'], field:float(r[field]) if r.get(field) is not None else None} for r in chart], x='date', y=field, height=235)
-    view = st.selectbox('View', VIEWS, index=VIEWS.index(initial) if initial in VIEWS else 0, key='seo-phase1-view-' + str(initial))
+        chart_panel.line_chart([{'date':r['date'], field:float(r[field]) if r.get(field) is not None else None} for r in chart], x='date', y=field, height=235)
     if view in ('Queries', 'Mappings') and not seo_access:
         st.info('SEO access is required for this view.')
         return
     if view == 'Mappings':
         import seo_page
-        seo_page._render_keywords(store, state, user)
+        state = load_analytics_state(store)
+        if state is not None:
+            seo_page._render_keywords(store, state, user)
         return
     st.caption('GSC final-data watermark: '+str(through or 'Unavailable')+' · GA4 fetched: '+str((ga_report or {}).get('fetched_at') or 'Unavailable')+' · GA4 quality: '+str(((ga_report or {}).get('quality') or {}).get('status') or 'Unavailable'))
-    with st.expander('Source freshness and definitions'):
-        st.write('GSC uses Pacific dates and final data. Query rows can omit private queries and need not reconcile to property totals. CTR is summed clicks / summed impressions. Positions are supplied by GSC at the requested grain.')
-        st.write('GA4 uses its property timezone, currency and attribution. All organic includes other search engines. Attributed purchase revenue is separate from Shopify sales. No cross-source conversion join is performed.')
-        st.json({k:(ga_report or {}).get(k) for k in ('metadata','quality','property_timezone','currency','fetched_at','complete')})
-        st.write('Default window ends at least three Pacific days ago. A source can still be delayed; empty reports remain unavailable. Refresh invalidates the shared cache; it does not execute SEO changes.')
+    freshness = st.expander('Source freshness and definitions', key='seo-report-source-details', on_change='rerun')
+    if freshness.open:
+        with freshness:
+            st.write('GSC uses Pacific dates and final data. Query rows can omit private queries and need not reconcile to property totals. CTR is summed clicks / summed impressions. Positions are supplied by GSC at the requested grain.')
+            st.write('GA4 uses its property timezone, currency and attribution. All organic includes other search engines. Attributed purchase revenue is separate from Shopify sales. No cross-source conversion join is performed.')
+            st.json({k:(ga_report or {}).get(k) for k in ('metadata','quality','property_timezone','currency','fetched_at','complete')})
+            st.write('Default window ends at least three Pacific days ago. A source can still be delayed; empty reports remain unavailable. Refresh invalidates the shared cache; it does not execute SEO changes.')
     if view == 'Queries':
-        rows = gsc(('query','page')) or []
+        rows = load('table') or []
         st.caption('One row per query and page. Query totals and positions come from GSC; conversions are not expanded into query rows.')
         st.session_state['seo-phase1-scan-evidence'] = {'rows':rows, 'context':context}
     elif view == 'Pages':
-        rows = gsc(('page',)) or [] if seo_access else []
-        with st.expander('Landing-page conversion context (GA4)'):
-            table(report_rows(ga(model.ga4_contract(scope, ('landingPagePlusQueryString',)))), key='seo-page-conversion-export')
-            st.caption('Separate source table preserves URL query parameters and source grain; no inferred query revenue.')
+        rows = load('table') or []
+        landing_pages = st.expander('Landing-page conversion context (GA4)', key='seo-landing-conversions', on_change='rerun')
+        if landing_pages.open:
+            with landing_pages:
+                table(report_rows(ga(model.ga4_contract(scope, ('landingPagePlusQueryString',)))), key='seo-page-conversion-export')
+                st.caption('Separate source table preserves URL query parameters and source grain; no inferred query revenue.')
     elif view == 'Store operations':
         if model.local_mode(): st.info('Shared Shopify operational reporting is unavailable in local mode.')
         else:
@@ -191,10 +292,12 @@ def analytics(user, state, store, reports, initial=None):
             contract = replace(contract, filters=model.ga4_contract(scope).filters)
             rows = report_rows(ga(contract))
         if view == 'Audience':
-            with st.expander('Devices'):
-                table(report_rows(ga(replace(contracts.report_contract('devices'), filters=model.ga4_contract(scope).filters))), key='seo-devices-export')
+            devices = st.expander('Devices', key='seo-audience-devices', on_change='rerun')
+            if devices.open:
+                with devices:
+                    table(report_rows(ga(replace(contracts.report_contract('devices'), filters=model.ga4_contract(scope).filters))), key='seo-devices-export')
     search = st.text_input('Filter rows', key='seo-phase1-report-search')
-    rows = [r for r in rows if search.casefold() in json.dumps(r, default=str).casefold()]
+    rows = filter_rows(rows, search)
     if view in ('Pages','Queries'):
         opportunity_filter = st.selectbox('Opportunity signal', ('All', 'High impressions / low CTR', 'Approaching page one', 'Declining traffic', 'Landing pages with sessions / no purchases'))
         if opportunity_filter == 'High impressions / low CTR':
@@ -216,13 +319,14 @@ def analytics(user, state, store, reports, initial=None):
                 rows=[]
             else:
                 rows=[r for r in report_rows(ga(model.ga4_contract(scope,('landingPagePlusQueryString',)))) if r.get('sessions') is not None and model.number(r['sessions'])>0 and r.get('ecommercePurchases') is not None and model.number(r['ecommercePurchases'])==0]
-                rows=[r for r in rows if search.casefold() in json.dumps(r,default=str).casefold()]
+                rows=filter_rows(rows, search)
                 st.caption('GA4 landing pages: sessions >0 and recorded purchase events =0, in the selected traffic scope. Missing purchase values are excluded.')
         st.caption('Signals: at least 100 impressions and CTR <2%; approaching page one: average position 11–20. Signals require review and do not prove a title problem.')
-    table(rows, key='seo-active-export')
-    if rows and seo_access and view in ('Pages','Queries'):
-        selected = st.selectbox('Inspect row', range(len(rows)), format_func=lambda i: str(rows[i].get('query') or rows[i].get('page') or rows[i].get('landingPagePlusQueryString') or i))
-        row=rows[selected]
+    displayed = table(rows, key='seo-active-export')
+    if displayed and seo_access and view in ('Pages','Queries'):
+        selected = st.selectbox('Inspect row', range(len(displayed)), format_func=lambda i: str(displayed[i].get('query') or displayed[i].get('page') or displayed[i].get('landingPagePlusQueryString') or i),
+                                help='Choose a row on this page. Use the table controls or search to find other rows.')
+        row = displayed[selected]
         with st.expander('Ranking history / related queries'):
             if st.checkbox('Load source details',key='seo-load-source-details',disabled=not bool(row.get('page') or row.get('query'))):
                 extra=[]
@@ -231,7 +335,7 @@ def analytics(user, state, store, reports, initial=None):
                 dims=('date',) if row.get('query') else ('query',)
                 details=fetch(('GSC details',signature,json.dumps(extra)),lambda:reports.gsc(start,end,dims,{**gfilters,'extra_filters':extra}))
                 table(details or [],key='seo-details-export')
-        task_action(row, {**context,'search':search,'opportunity_filter':opportunity_filter}, state, store, user)
+        task_action(row, {**context,'search':search,'opportunity_filter':opportunity_filter}, store, user)
 
 
 def plan(user, state, store, navigate, initial=None):
@@ -454,9 +558,6 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
     if reports is None and not model.local_mode():
         from google_direct_reporting import GoogleReports
         reports=GoogleReports(connection_store=google_store)
-    try: state=store.load() if os_accounts.can_access_page(user,nav.SEO_OVERVIEW_ROUTE) else workspace.default_state()
-    except workspace.SEOStoreError as error:
-        st.error(str(error)); return
     import streamlit.components.v1 as components
     import seo_page
     seo_page._inject_styles()
@@ -470,10 +571,13 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
             compact_styles()
             with st.container(key="website-compact"):
                 st.subheader("Analytics")
+                analytics(user, store, reports, initial)
                 if route == anav.WEBSITE_OVERVIEW_ROUTE:
                     tool_summaries(user)
-                analytics(user, state, store, reports, initial)
         else:
+            state = load_analytics_state(store) if os_accounts.can_access_page(user, nav.SEO_OVERVIEW_ROUTE) else workspace.default_state()
+            if state is None:
+                return
             st.subheader(nav.SEO_NAV_LABELS.get(destination, 'SEO'))
             if destination == nav.SEO_PLAN_ROUTE: plan(user, state, store, navigate, initial)
             elif destination == nav.SEO_REVIEW_ROUTE: review(user, state, store, initial)

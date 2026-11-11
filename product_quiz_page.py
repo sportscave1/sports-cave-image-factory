@@ -15,7 +15,12 @@ INSTALL_HTML = (
 )
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=60, max_entries=1, show_spinner=False)
+def quiz_totals():
+    return QuizStore().report_totals()
+
+
+@st.cache_data(ttl=60, max_entries=1, show_spinner=False)
 def quiz_report():
     return QuizStore().report()
 
@@ -52,25 +57,34 @@ def render_page(user, store=None):
             st.caption("Quiz analytics are unavailable in this local workspace.")
             return
         try:
-            rows = store.report() if store is not None else quiz_report()
+            totals = store.report_totals() if store is not None else quiz_totals()
         except Exception:
             st.warning("Quiz analytics are temporarily unavailable.")
             return
 
-        metric_row(quiz_metrics(rows), key="quiz-kpis")
-        if not rows:
-            st.caption("No quiz activity recorded in the last 30 days.")
+        metric_row(quiz_metrics(totals), key="quiz-kpis")
+        breakdown = st.expander("Event breakdown", key="quiz-event-breakdown", on_change="rerun")
+        if not breakdown.open:
             return
-        st.dataframe(
-            rows,
-            hide_index=True,
-            height=280,
-            column_config={
-                "event": "Event",
-                "question": "Question",
-                "source": "Source",
-                "version": "Version",
-                "count": "Events",
-                "sessions": "Distinct sessions",
-            },
-        )
+        with breakdown:
+            try:
+                rows = store.report() if store is not None else quiz_report()
+            except Exception:
+                st.warning("Quiz event details are temporarily unavailable.")
+                return
+            if not rows:
+                st.caption("No quiz activity recorded in the last 30 days.")
+                return
+            st.dataframe(
+                rows,
+                hide_index=True,
+                height=280,
+                column_config={
+                    "event": "Event",
+                    "question": "Question",
+                    "source": "Source",
+                    "version": "Version",
+                    "count": "Events",
+                    "sessions": "Distinct sessions",
+                },
+            )

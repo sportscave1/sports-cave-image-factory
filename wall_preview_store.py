@@ -167,7 +167,7 @@ def record_preview(payload):
             raise
 
 
-def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search='', intent='all', start_date=None, end_date=None, product_id='', device_type='', capture_source='', cursor=None):
+def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, customer_search='', intent='all', start_date=None, end_date=None, product_id='', device_type='', capture_source='', cursor=None, cards_only=False):
     clean_status = str(status or "new").strip().lower()
     if clean_status not in (*VALID_STATUSES, "all"):
         clean_status = "new"
@@ -203,15 +203,22 @@ def list_previews(*, status="new", limit=DEFAULT_LIMIT, include_private=False, c
         params.extend((pattern, pattern, pattern))
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     params.append(safe_limit)
+    columns = """
+        id, product_title, product_id, customer_email, customer_name, received_at, status,
+        marketing_permission, dropbox_file_id, dropbox_path, version, last_saved_at,
+        jsonb_build_object('inbox_deletion', attribution->'inbox_deletion') AS attribution
+    """ if cards_only else """
+        *, (SELECT state FROM public.wall_preview_email_jobs j
+            WHERE j.preview_id=wall_previews.id AND j.kind='requested') AS email_job_state,
+        EXISTS (SELECT 1 FROM public.wall_preview_events e
+            WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart') AS added_to_cart
+    """
     with _backend().connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='4000ms'")
             cur.execute(
                 f"""
-                SELECT *, (SELECT state FROM public.wall_preview_email_jobs j
-                    WHERE j.preview_id=wall_previews.id AND j.kind='requested') AS email_job_state,
-                EXISTS (SELECT 1 FROM public.wall_preview_events e
-                    WHERE e.preview_id=wall_previews.id AND e.event_name='WallPreviewAddedToCart') AS added_to_cart
+                SELECT {columns}
                 FROM public.wall_previews
                 {where}
                 ORDER BY received_at DESC, id DESC

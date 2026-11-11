@@ -31,6 +31,8 @@ class Phase1UITests(unittest.TestCase):
         app=self.app(); self.assertEqual(list(app.exception),[])
         self.select(app,'Workspace',nav.SEO_ANALYTICS_ROUTE)
         self.select(app,'View','Queries')
+        app.session_state['seo-report-task-details'] = True
+        app.run()
         self.click(app,'Create Plan task')
         self.select(app,'Workspace',nav.SEO_PLAN_ROUTE)
         self.assertTrue(any('title' in d.value and any('Review search performance' in title for title in d.value['title']) for d in app.dataframe))
@@ -52,6 +54,12 @@ class Phase1UITests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertTrue(any('GA4 is unavailable' in x.value for x in app.warning))
         self.assertTrue(any('Google organic clicks'==m.label and m.value=='4.00' for m in app.metric))
+    def test_closed_conversion_panel_skips_landing_page_report(self):
+        app = self.app()
+        self.select(app, 'Workspace', nav.SEO_ANALYTICS_ROUTE)
+        self.assertTrue(any(x.label == 'Landing-page conversion context (GA4)' for x in app.expander))
+        self.assertNotIn(('landingPagePlusQueryString',), app.session_state['fixture-ga4-dimensions'])
+
     def test_existing_blog_project_editor_offline(self):
         app=self.app(); self.select(app,'Workspace',nav.SEO_REVIEW_ROUTE)
         self.select(app,'Content workflow','Blog projects')

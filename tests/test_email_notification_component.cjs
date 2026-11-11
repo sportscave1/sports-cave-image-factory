@@ -60,7 +60,7 @@ assert.equal(rows.orders.button.badge.textContent,'7');
 assert.match(source,/updateSidebarBadge\("email", payload.unread_count, ""\)/);
 assert.match(source,/button span.sc-orders-action-badge \{[^}]*pointer-events: none;/);
 assert.match(source,/\[class\*="st-key-sidebar-disclosure-email-"\] button span.sc-orders-action-badge[^{}]*\{\s*right: 34px;/);
-assert.match(source,/state.config.emailEnabled \|\| state.config.wallInboxEnabled/);
+assert.doesNotMatch(source,/wallInboxEnabled/);
 assert.doesNotMatch(source,/setInterval\(refreshEmailStatus|later\(refreshEmailStatus/);
 console.log('Shared notification badge checks passed (collapsed/expanded, zero/unread, clear, no duplicate, Orders unchanged).');
 

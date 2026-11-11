@@ -59,6 +59,16 @@ class NotificationTests(unittest.TestCase):
                         (notifications._prefix(self.user['id'])+str(row['id']),))
             self.assertEqual(cur.fetchone()['n'],1)
 
+    def test_inbox_card_query_uses_the_same_visibility_and_order(self):
+        rows = [self.create() for _ in range(3)]
+        full = ledger.list_previews(status='all', include_private=True)
+        cards = ledger.list_previews(status='all', include_private=True, cards_only=True)
+        self.assertEqual([card['id'] for card in cards], [row['id'] for row in full])
+        self.assertEqual({str(card['id']) for card in cards}, {str(row['id']) for row in rows})
+        self.assertNotIn('email_job_state', cards[0])
+        self.assertNotIn('share_token', cards[0])
+        self.assertEqual(ledger.list_previews(status='all', cards_only=True), [])
+
     def test_historical_capture_retries_do_not_create_arrival(self):
         with patch.object(notifications,'record'):
             row=crm.confirm(self.data,self.upload)[0]
@@ -94,6 +104,19 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(result['notifications'][0]['route_key'],'social_media_wall_previews')
         self.assertEqual(result['notifications'][0]['wall_preview_id'],str(rows[-1]['id']))
 
+    def test_bulk_read_is_idempotent_and_preserves_other_accounts_and_new_arrivals(self):
+        rows = [self.create() for _ in range(3)]
+        self.assertEqual(notifications.mark_read(self.user, []), 0)
+        self.assertEqual(notifications.mark_read(self.user, [rows[0]['id']]), 1)
+        self.assertEqual(notifications.mark_read(self.user, [rows[0]['id']]), 0)
+        self.assertEqual(self.status()['unread_count'], 2)
+        self.assertEqual(notifications.mark_read(self.user), 2)
+        self.assertEqual(self.status()['unread_count'], 0)
+        other = {**self.claims, 'sub': str(uuid.uuid4())}
+        self.assertEqual(notifications.status(other)['unread_count'], 3)
+        self.create()
+        self.assertEqual(self.status()['unread_count'], 1)
+
     def test_legacy_ingest_emits_once(self):
         data={'image_sha256':'a'*64,'dropbox_path':'/fixture/new.jpg','image_width':640,
               'image_height':480,'image_bytes':100,'marketing_permission':True}
@@ -114,26 +137,22 @@ class NotificationTests(unittest.TestCase):
 
 
 class NotificationApiTests(unittest.IsolatedAsyncioTestCase):
-    async def test_shared_endpoint_combines_existing_items_and_wall_count(self):
+    async def test_global_endpoint_omits_wall_events_and_does_not_query_wall_status(self):
         import httpx
         import top_bar_api
         from starlette.applications import Starlette
         from starlette.routing import Route
-        app=Starlette(routes=[Route(top_bar_api.NOTIFICATIONS_PATH,top_bar_api.top_bar_notifications)])
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='https://fixture') as client:
-            response=await client.get(top_bar_api.NOTIFICATIONS_PATH)
-            self.assertEqual(response.status_code,403)
-            with patch.object(top_bar_api,'_claims',return_value={'sub':'fixture'}), \
-                 patch.object(top_bar_api,'load_notification_sources',return_value=([],[])), \
-                 patch.object(top_bar_api,'build_notifications',return_value=[{'title':'Existing order'}]), \
-                 patch.object(notifications,'status',return_value={'unread_count':3,'notifications':[{'title':'New image'}]}):
-                response=await client.get(top_bar_api.NOTIFICATIONS_PATH)
-                self.assertEqual(response.json()['wall_unread_count'],3)
-                self.assertEqual([item['title'] for item in response.json()['notifications']],['New image','Existing order'])
-            with patch.object(top_bar_api,'_claims',return_value={'sub':'fixture'}), \
-                 patch.object(top_bar_api,'load_notification_sources',return_value=([],[])), \
-                 patch.object(top_bar_api,'build_notifications',return_value=[{'title':'Existing email'}]), \
-                 patch.object(notifications,'status',side_effect=RuntimeError('database unavailable')):
-                response=await client.get(top_bar_api.NOTIFICATIONS_PATH)
-                self.assertIsNone(response.json()['wall_unread_count'])
-                self.assertEqual(response.json()['notifications'],[{'title':'Existing email'}])
+
+        app = Starlette(routes=[Route(top_bar_api.NOTIFICATIONS_PATH, top_bar_api.top_bar_notifications)])
+        claims = {'sub': 'fixture', 'can_view_activity': True, 'can_view_all_activity': True}
+        rows = [{'event_type': notifications.EVENT, 'entity_type': 'wall_preview_notification'}]
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://fixture') as client:
+            response = await client.get(top_bar_api.NOTIFICATIONS_PATH)
+            self.assertEqual(response.status_code, 403)
+            with patch.object(top_bar_api, '_claims', return_value=claims), \
+                 patch.object(top_bar_api, 'load_notification_sources', return_value=(rows, [])), \
+                 patch.object(top_bar_api, '_notification_row_allowed', return_value=True), \
+                 patch.object(notifications, 'status') as wall:
+                response = await client.get(top_bar_api.NOTIFICATIONS_PATH)
+            wall.assert_not_called()
+            self.assertEqual(response.json(), {'ok': True, 'notifications': []})

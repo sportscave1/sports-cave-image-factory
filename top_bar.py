@@ -135,7 +135,6 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "filesEnabled": "Files" in allowed_routes,
         "ordersEnabled": "Orders" in allowed_routes,
         "emailEnabled": "Email" in allowed_routes,
-        "wallInboxEnabled": "Wall Preview Inbox" in allowed_routes,
         "authToken": token,
         "revision": revision,
     }

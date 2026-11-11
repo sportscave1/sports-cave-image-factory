@@ -288,12 +288,43 @@ class QuizContracts(unittest.TestCase):
         for code in embeds.values():
             self.assertNotIn('iframe',code);self.assertIn('loader.js',code);self.assertLess(len(code),300)
 
+    @unittest.skipUnless(__import__('os').environ.get('CRM_TEST_POSTGRES') == '1', 'Local PostgreSQL required')
+    def test_quiz_totals_match_event_breakdown(self):
+        from product_quiz_page import quiz_metrics
+        from product_quiz_store import QuizStore
+        from tests.crm_db_fixture import connect
+
+        with connect() as db:
+            db.execute("DELETE FROM crm_runtime_state WHERE starts_with(key,'product_quiz/event/')")
+            for key, kind, source, recent in (
+                ('product_quiz/event/a', 'started', 'page', True),
+                ('product_quiz/event/b', 'started', 'collection', True),
+                ('product_quiz/event/c', 'completed', 'page', True),
+                ('product_quiz/event/d', 'product_click', 'page', False),
+                ('product_quiz/event/e', 'answer_selected', 'page', True),
+                ('productXquiz/event/f', 'started', 'page', True),
+            ):
+                db.execute("""INSERT INTO crm_runtime_state(key,value,updated_at)
+                    VALUES (%s,jsonb_build_object('type',%s::text,'source',%s::text),
+                    now() - CASE WHEN %s::boolean THEN interval '1 day' ELSE interval '31 days' END)""",
+                    (key, kind, source, recent))
+            quiz = QuizStore()
+            quiz.q = lambda sql, args: db.execute(sql, args).fetchall()
+            self.assertEqual(quiz_metrics(quiz.report_totals()), quiz_metrics(quiz.report()))
+            self.assertEqual(quiz_metrics(quiz.report_totals()), [
+                ('Starts', 2), ('Completions', 1), ('Product clicks', 0),
+            ])
+            db.execute("DELETE FROM crm_runtime_state WHERE starts_with(key,'product_quiz/event/') OR key='productXquiz/event/f'")
+
     def test_quiz_page_renders_read_only_analytics_and_install_html(self):
         from streamlit.testing.v1 import AppTest
         app = AppTest.from_string('''
 from product_quiz_page import render_page
 
 class FixtureStore:
+    def report_totals(self):
+        return [dict(event="started", count=11), dict(event="completed", count=4)]
+
     def report(self):
         return [
             dict(event="started", question="", source="page", version="fixture", count=8, sessions=7),
@@ -306,6 +337,9 @@ render_page({"role": "admin", "is_active": True}, store=FixtureStore())
         self.assertFalse(app.exception)
         self.assertEqual([(metric.label, metric.value) for metric in app.metric],
                          [("Starts", "11"), ("Completions", "4"), ("Product clicks", "0")])
+        self.assertEqual(len(app.dataframe), 0)
+        app.session_state["quiz-event-breakdown"] = True
+        app.run()
         self.assertEqual(len(app.dataframe), 1)
         self.assertFalse(app.tabs)
         self.assertIn("data-sc-edition-finder", app.code[0].value)

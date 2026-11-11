@@ -81,10 +81,10 @@ def tool_summaries(user):
         return
     summaries = []
     if os_accounts.can_access_page(user, WALL_PREVIEW_ROUTE):
-        from wall_preview_analytics_ui import bounds, snapshot
+        from wall_preview_analytics_ui import bounds, engagement as wall_engagement
 
         try:
-            engagement = snapshot(*bounds(30))["engagement"]
+            engagement = wall_engagement(*bounds(30))
             values = [
                 ("Preview opens", engagement["opens"]),
                 ("Placements", engagement["confirmed"]),
@@ -95,10 +95,10 @@ def tool_summaries(user):
         summaries.append(("Wall Preview", values))
 
     if os_accounts.can_access_page(user, PRODUCT_QUIZ_ROUTE):
-        from product_quiz_page import quiz_metrics, quiz_report
+        from product_quiz_page import quiz_metrics, quiz_totals
 
         try:
-            values = quiz_metrics(quiz_report())
+            values = quiz_metrics(quiz_totals())
         except Exception:
             values = None
         summaries.append(("Product Quiz", values))

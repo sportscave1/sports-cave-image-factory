@@ -39,6 +39,9 @@ class Database(unittest.TestCase):
             self.assertEqual(data[key],1,key)
         self.assertEqual(float(data['avg_active_seconds']),35)
         self.assertEqual(float(data['median_active_seconds']),35)
+        overview = analytics.overview_engagement({'capture_source':'camera','device_type':'mobile','product_id':'123'})
+        self.assertEqual({key: overview[key] for key in ('opens', 'confirmed', 'atc')},
+                         {key: data[key] for key in ('opens', 'confirmed', 'atc')})
         self.assertEqual(data['click_open_percent'],100)
         self.assertEqual(data['placement_percent'],100)
         self.assertEqual(analytics.report({'device_type':'desktop'})['engagement']['opens'],0)

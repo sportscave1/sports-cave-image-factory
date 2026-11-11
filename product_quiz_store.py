@@ -89,9 +89,15 @@ class QuizStore(Store):
         return bool(self.q('''INSERT INTO crm_runtime_state(key,value) VALUES(%s,%s::jsonb)
           ON CONFLICT(key) DO NOTHING RETURNING key''',(PREFIX+'event/'+event['event_id'],json.dumps(event)),True))
 
+    def report_totals(self):
+        return self.q("""SELECT value->>'type' AS event,count(*) AS count
+          FROM crm_runtime_state WHERE starts_with(key,%s)
+          AND updated_at>now()-interval '30 days'
+          AND value->>'type' IN ('started','completed','product_click') GROUP BY 1""", (PREFIX+'event/',))
+
     def report(self):
         return self.q('''SELECT value->>'type' AS event,value->>'step' AS question,
           value->>'source' AS source,value->>'version' AS version,count(*) AS count,
           count(DISTINCT value->>'session_id') AS sessions
-          FROM crm_runtime_state WHERE left(key,19)='product_quiz/event/'
-          AND updated_at>now()-interval '30 days' GROUP BY 1,2,3,4 ORDER BY 1,2''')
+          FROM crm_runtime_state WHERE starts_with(key,%s)
+          AND updated_at>now()-interval '30 days' GROUP BY 1,2,3,4 ORDER BY 1,2''', (PREFIX+'event/',))

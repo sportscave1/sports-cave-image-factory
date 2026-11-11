@@ -86,8 +86,8 @@ class AnalyticsNavigationTests(unittest.TestCase):
         fixture = ROOT / "tests/fixtures/seo_phase1_preview.py"
         with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"SEO_PHASE1_FIXTURE_DIR": tmp}), \
              patch("seo_phase1.local_mode", return_value=False), \
-             patch("product_quiz_page.quiz_report", return_value=[{"event": "started", "count": 9}]), \
-             patch("wall_preview_analytics_ui.snapshot", return_value={"engagement": {"opens": 5, "confirmed": 3, "atc": 2}}):
+             patch("product_quiz_page.quiz_totals", return_value=[{"event": "started", "count": 9}]), \
+             patch("wall_preview_analytics_ui.engagement", return_value={"opens": 5, "confirmed": 3, "atc": 2}):
             app = AppTest.from_file(fixture)
             app.session_state["fixture-route"] = analytics_navigation.WEBSITE_OVERVIEW_ROUTE
             app.run()

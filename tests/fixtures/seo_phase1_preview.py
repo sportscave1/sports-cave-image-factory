@@ -22,6 +22,7 @@ class FixtureReports:
         if 'page' in dimensions:row['page']='https://fixture.invalid/products/art?variant=1'
         return [row]
     def ga4(self,property_id,contract,start,end,filters=()):
+        st.session_state.setdefault('fixture-ga4-dimensions', []).append(contract.dimensions)
         if st.session_state.get('fixture-fail-ga4'):raise RuntimeError('synthetic unavailable')
         dims={d: ('20261017' if d=='date' else '/products/art?variant=1' if d=='landingPagePlusQueryString' else 'fixture') for d in contract.dimensions}
         return {'rows':[{'dimensions':dims,'metrics':{metric:12 for metric in contract.metrics}}], 'metadata':{'timezone':'Australia/Sydney','currency':'AUD','fixture':True}}

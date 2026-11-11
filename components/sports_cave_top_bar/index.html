@@ -1367,10 +1367,6 @@
       }
       const email = readStatusCache("email").payload;
       if (Number.isInteger(email?.unread_count)) updateSidebarBadge("email", email.unread_count, "");
-      const wall = readStatusCache("wall").payload;
-      if (Number.isInteger(wall?.wall_unread_count)) {
-        updateSidebarBadge("social_media_wall_previews", wall.wall_unread_count, "");
-      }
     };
     const watchSidebarPresentation = () => {
       if (sidebarPresentationObserver || !parentWindow.MutationObserver) return;
@@ -1683,7 +1679,7 @@
       }, delay);
     };
     const updateSidebarBadge = (route, count, label, attempt = 0) => {
-      const group = route === "email" ? "email" : route === "social_media_wall_previews" ? "social" : null;
+      const group = route === "email" ? "email" : null;
       const routeLabel = route === "orders" ? "Orders" : group === "social" ? "Social Media" : "Email";
       const row = doc.querySelector(group
         ? `section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-${group}-"]`
@@ -2000,16 +1996,15 @@
     const refreshOrderStatus = async () => {
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
-      void refreshWallNotifications();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
-        if (state.config.emailEnabled || state.config.wallInboxEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
+        if (state.config.emailEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
         return;
       }
       // One timer, with Orders retaining its existing 60-second request cadence.
       const remaining = statusRefreshDelay("orders", ORDER_STATUS_REFRESH_MS);
       if (remaining > 0) {
-        later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
+        later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
         return;
       }
       const previousOrders = readStatusCache("orders");
@@ -2035,7 +2030,7 @@
         // A temporary failure cannot keep an unverified count visible indefinitely.
         expireOrdersBadge();
       } finally {
-        later(refreshOrderStatus, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
+        later(refreshOrderStatus, (state.config.emailEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
       }
     };
     const compactTimerLabel = (seconds) => {
@@ -2730,43 +2725,12 @@
           const payload = await requestJson(state.config.notificationsUrl);
           if (version === notificationReadVersion) {
             state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
-            if (Number.isInteger(payload.wall_unread_count)) {
-              writeStatusCache('wall',{wall_unread_count:payload.wall_unread_count});
-              updateSidebarBadge("social_media_wall_previews", payload.wall_unread_count, "");
-            }
           }
         } catch (_error) {
           if (!state.destroyed && _error.name !== "AbortError" && version === notificationReadVersion) state.notifications = [];
         }
       }
       return state.notifications || [];
-    };
-    let wallNotificationsPending = false;
-    let wallNotificationsDirty = false;
-    const refreshWallNotifications = async () => {
-      if (!state.config.wallInboxEnabled) return;
-      if (wallNotificationsPending) { wallNotificationsDirty = true; return; }
-      wallNotificationsPending = true;
-      try {
-        if (state.activePanel === "notifications") {
-          state.notifications = null;
-          renderNotifications(await loadNotifications());
-        } else {
-          const url = new URL(state.config.notificationsUrl, parentWindow.location.href);
-          url.searchParams.set('counts_only','1');
-          const payload = await requestJson(url.href);
-          if (Number.isInteger(payload.wall_unread_count)) {
-            writeStatusCache('wall',payload);
-            updateSidebarBadge('social_media_wall_previews',payload.wall_unread_count,'');
-          }
-          state.notifications = null;
-        }
-      } catch (_error) {
-        // Failure is not a confirmed zero. Keep the last authoritative badge.
-      } finally {
-        wallNotificationsPending = false;
-        if (wallNotificationsDirty) { wallNotificationsDirty = false; void refreshWallNotifications(); }
-      }
     };
     const currentTheme = () => {
       const key = `stActiveTheme-${parentWindow.location.pathname}-v2`;
@@ -3063,12 +3027,6 @@
     parentWindow.addEventListener("pageshow", reconcileDocumentRoute, listenerOptions);
     parentWindow.addEventListener("message", (event) => {
       if (event.origin !== parentWindow.location.origin) return;
-      if (event.data?.type === "sc:wall-inbox-seen") {
-        const trusted = [...doc.querySelectorAll('iframe[title="wall_preview_inbox.wall_preview_gallery"]')]
-          .some(frame => frame.contentWindow === event.source);
-        if (trusted) void refreshWallNotifications();
-        return;
-      }
       if (event.data?.type === "sports-cave-planner-timer-state") {
         receivePlannerTimerState(event.data);
         return;
@@ -3185,8 +3143,6 @@
         }, 250);
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
-          const cachedWall = readStatusCache('wall').payload;
-          if (Number.isInteger(cachedWall?.wall_unread_count)) updateSidebarBadge('social_media_wall_previews',cachedWall.wall_unread_count,'');
           const cachedOrders = readStatusCache("orders");
           if (cachedOrders.payload && Date.now() - Number(cachedOrders.payload.confirmed_at || cachedOrders.checked_at || 0) <= 2 * ORDER_STATUS_REFRESH_MS) {
             updateOrdersBadge(
