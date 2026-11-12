@@ -5,7 +5,6 @@ from datetime import date
 from unittest.mock import Mock
 
 import pytest
-from streamlit.testing.v1 import AppTest
 
 import home_sports_morning_brief as brief
 import os_accounts
@@ -51,7 +50,7 @@ def test_payload_validates_date_and_links():
         brief.parse_edition(edition().replace("https://", "https://name@"), TODAY)
 
 
-def test_publisher_updates_only_its_setting_and_rejects_older_editions(database, monkeypatch):
+def test_publisher_archives_older_editions_without_replacing_latest(database, monkeypatch):
     jobs, sql = database
     sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
     monkeypatch.setattr(db, "connect", jobs.connect)
@@ -65,32 +64,89 @@ def test_publisher_updates_only_its_setting_and_rejects_older_editions(database,
     assert db.get_app_setting(brief.SETTING_KEY, ensure_schema_first=False) == prior
     current = brief.publish(edition(), OWNER)
     assert brief.publish(edition(), OWNER) == current
-    with pytest.raises(ValueError, match="newer"):
-        brief.publish(edition("2026-11-12"), OWNER)
+    older = brief.publish(edition("2026-11-11"), OWNER)
+    entries, cursor = brief.archive_page(TODAY, size=2)
+    assert entries == [current, prior]
+    assert cursor == "2026-11-12"
+    assert brief.archive_page(TODAY, before=cursor) == ([older], None)
     assert db.get_app_setting(brief.SETTING_KEY, ensure_schema_first=False) == current
     assert db.get_app_setting("other", ensure_schema_first=False) == {"active": True}
 
 
-def test_home_form_publishes_and_updates_the_dated_display(monkeypatch):
-    previous = brief.parse_edition(edition("2026-11-12"), TODAY)
-    current = brief.parse_edition(edition(recommendation="![example](https://example.test/image.png)"), TODAY)
-    # Two stories can cite the same source without duplicating widget keys.
-    current["recommendations"] *= 2
-    monkeypatch.setattr(brief, "get_app_setting", Mock(side_effect=[previous, current]))
-    publish = Mock(return_value=current)
-    monkeypatch.setattr(brief, "publish", publish)
-    app = AppTest.from_string("""
-from datetime import date
-import streamlit as st
-import home_sports_morning_brief as brief
-brief.render(st, {"email": "owner@example.test", "role": "admin"}, date(2026, 11, 13))
-""").run()
-    assert not app.exception
-    assert any("Today's brief is pending" in caption.value for caption in app.caption)
-    app.text_area[0].set_value(edition())
-    app.button[0].click().run()
-    assert not app.exception
+def test_home_has_compact_links_and_no_publish_form(monkeypatch):
+    previous = brief.parse_edition(edition("2026-11-12", "<script>example</script>"), TODAY)
+    monkeypatch.setattr(brief, "get_app_setting", Mock(return_value=previous))
+    monkeypatch.setattr(brief, "archive_page", Mock(return_value=([], None)))
+    st = Mock()
+    brief.render(st, OWNER, TODAY)
+    assert "Today's brief is pending" in st.caption.call_args.args[0]
+    markup = st.html.call_args.args[0]
+    assert "Create Design" in markup and "Create Ad" in markup
+    assert "Sports Cave event: Fixture release" in markup
+    assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
+    assert "&lt;script&gt;example&lt;/script&gt;" in markup
+    assert "Morning Brief JSON" not in markup
+    assert "Sports calendar" in markup and "News / updates" in markup
+    assert all(f'data-market-tab="{market}"' in markup for market in ("AUS", "USA", "UK"))
+    st.form.assert_not_called()
+
+
+def test_publisher_route_rejects_cross_origin_and_nonowners(monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import home_morning_brief_publish as route
+
+    get_user = Mock(return_value={**OWNER, "role": "worker"})
+    publish = Mock(return_value={"date": "2026-11-13"})
+    monkeypatch.setattr(route, "_request_user", get_user)
+    monkeypatch.setattr(route, "publish", publish)
+    client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
+                                          for path, endpoint, methods in route.ROUTES]))
+    payload = {"brief": edition()}
+    assert client.get(route.PATH).status_code == 403
+    assert client.get("/ops/morning-brief/history?sport=Rugby+League&market=AUS").status_code == 403
+    assert client.post(route.PATH, data=payload, headers={"Origin": "https://other.test"}).status_code == 403
+    publish.assert_not_called()
+    get_user.return_value = OWNER
+    assert "Morning Brief JSON" in client.get(route.PATH).text
+    data = json.loads(edition())
+    data["recommendations"][0].update(sport="Rugby League", markets=["AUS"])
+    entry = brief.parse_edition(json.dumps(data), TODAY)
+    monkeypatch.setattr(route, "sydney_date", lambda: TODAY)
+    monkeypatch.setattr(route, "archive_page", Mock(return_value=([entry], "2026-11-12")))
+    monkeypatch.setattr(route, "get_app_setting", Mock(return_value=None))
+    history = client.get("/ops/morning-brief/history?sport=Rugby+League&market=AUS").json()
+    assert "Fixture release" in history["html"] and history["before"] == "2026-11-12"
+    assert client.get("/ops/morning-brief/history?sport=Rugby+League&market=UK").json()["html"] == ""
+    response = client.post(route.PATH, data=payload, headers={"Origin": "http://testserver"})
+    assert response.status_code == 200
+    assert "Published the 2026-11-13 Morning Brief." in response.text
     publish.assert_called_once_with(edition(), OWNER)
-    assert app.success[0].value == "Published the 2026-11-13 Morning Brief."
-    assert any("13 November 2026" in caption.value for caption in app.caption)
-    assert any(r"\!\[example\]" in item.value for item in app.markdown)
+
+
+
+def test_calendar_dates_history_and_product_identity(monkeypatch):
+    from home_brief_calendar import calendar_rows
+    from home_morning_brief_actions import article_html
+    import ads_page
+
+    value = json.loads(edition())
+    article = value["recommendations"][0]
+    article.update(sport="Rugby League", markets=["AUS"], start_date="2026-11-15", end_date="2026-11-17")
+    article["links"].append({"label": "Product", "url": "https://www.sportscaveshop.com/products/fixture-final"})
+    parsed = brief.parse_edition(json.dumps(value), TODAY)
+    events, news = calendar_rows([parsed], "AUS", TODAY)
+    assert events["Rugby League"][:2] == (True, date(2026, 11, 15))
+    assert news == {"Rugby League"}
+    assert calendar_rows([parsed], "USA", TODAY) == ({}, set())
+    assert 'href="/?page=ads&amp;brief_product=fixture-final"' in article_html(parsed["recommendations"][0], allow_ads=True)
+
+    browser = Mock()
+    browser.query_params = {"brief_product": "fixture-final"}
+    browser.session_state = {}
+    monkeypatch.setattr(ads_page, "st", browser)
+    row = {"product_handle": "fixture-final", "shopify_product_id": "gid://shopify/Product/123", "title": "Fixture final"}
+    ads_page._apply_morning_brief_product([row])
+    assert browser.query_params == {}
+    assert browser.session_state[ads_page.ADS_PRODUCT_SELECTOR_KEY] == ads_page._edition_ops_product_selector_identity(row)

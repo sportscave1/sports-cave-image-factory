@@ -10616,44 +10616,6 @@ def render_active_alerts(events, today):
     )
 
 
-@st.fragment(parallel=True)
-def render_active_upcoming_events(events, today):
-    started = time.perf_counter()
-    render_html_section_title("Active & Upcoming Events")
-    rows = sports_cave_dashboard.build_home_event_rows(events, today, limit=8)
-    if not rows:
-        st.markdown(
-            '<div class="sc-empty-note">No confirmed live or upcoming events.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-    records = []
-    for row in rows:
-        remaining = int(row.get("days_remaining") or 0)
-        if row.get("status") == "Live":
-            timing = "Ends today" if remaining == 0 else f"{remaining} day{'s' if remaining != 1 else ''} left"
-        else:
-            timing = "Starts today" if remaining == 0 else f"In {remaining} day{'s' if remaining != 1 else ''}"
-        records.append(
-            {
-                "Event": row.get("name") or "",
-                "Type": row.get("category") or row.get("type") or "Event",
-                "Status": row.get("status") or "Coming soon",
-                "Dates": row.get("date_label") or "",
-                "Timing": timing,
-            }
-        )
-    st.dataframe(
-        records,
-        hide_index=True,
-        width="stretch",
-        height=min(318, 42 + len(records) * 34),
-        row_height=TABLE_ROW_HEIGHT,
-        key="home-active-upcoming-events",
-    )
-    safe_startup_print(f"PERF Dashboard events={(time.perf_counter() - started):.3f}s")
-
-
 def _home_duration_label(seconds):
     total = max(int(seconds or 0), 0)
     hours, remainder = divmod(total, 3600)
@@ -12526,16 +12488,13 @@ def render_lightweight_dashboard_page():
     user = current_os_user()
     local_now = account_local_now(user)
     today = sports_sales_calendar.sydney_date(local_now)
-    events = sports_cave_dashboard.load_calendar_events()
     with st.container(key="home-ops-dashboard"):
         import home_sports_morning_brief
 
         home_sports_morning_brief.render(st, user, today)
         home_daily_planner.render_status(st, user, local_now)
-        render_active_upcoming_events(events, today)
         render_home_weekly_work(user, local_now)
-    # The two fragments complete independently; this measures shell/dispatch,
-    # not their completion time or the browser's time to interactive content.
+    # The weekly-work fragment completes independently of shell dispatch.
     safe_startup_print(f"PERF Dashboard shell_dispatch={(time.perf_counter() - started):.3f}s")
 
 

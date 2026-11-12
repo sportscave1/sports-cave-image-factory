@@ -10,6 +10,7 @@ from collector_vault_api import COLLECTOR_VAULT_ROUTES
 from chatgpt_crm_api import ROUTES as CHATGPT_CRM_ROUTES
 from chatgpt_crm_mcp import ROUTES as CHATGPT_CRM_MCP_ROUTES
 from daily_planner import DAILY_PLANNER_ROUTE_HANDLERS
+from home_morning_brief_publish import ROUTES as MORNING_BRIEF_ROUTES
 from files_upload_api import FILES_UPLOAD_ROUTES
 import google_seo
 from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
@@ -56,6 +57,7 @@ routes = [
         *COLLECTOR_VAULT_ROUTES,
         *CHATGPT_CRM_ROUTES,
         *CHATGPT_CRM_MCP_ROUTES,
+        *MORNING_BRIEF_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
         *GOOGLE_SEO_ROUTE_HANDLERS,

@@ -3362,7 +3362,7 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
-    def test_admin_home_renders_events_and_weekly_work_without_design_queries(self):
+    def test_admin_home_renders_weekly_work_without_legacy_events_or_design_queries(self):
         backend = FakeDashboardBackend()
         today = datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
         backend.daily_sheets = [
@@ -3414,9 +3414,9 @@ class DashboardRenderContractTests(unittest.TestCase):
             any("Design title" in dataframe.value.columns for dataframe in app_test.dataframe)
         )
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
-        self.assertIn("Active &amp; Upcoming Events", rendered)
+        self.assertNotIn("Active &amp; Upcoming Events", rendered)
         self.assertIn("This Week&#x27;s Work", rendered)
-        self.assertIn('id="sc-home-greeting"', rendered)
+        self.assertNotIn('id="sc-home-greeting"', rendered)
         self.assertNotIn(":)", rendered)
         self.assertNotIn("Sports Cave</div>", rendered)
         self.assertNotIn("Daily Execution", rendered)
@@ -3478,9 +3478,9 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertEqual(backend.daily_calls, [])
         rendered = "\n".join(str(item.value) for item in app_test.markdown)
-        self.assertIn("Active &amp; Upcoming Events", rendered)
+        self.assertNotIn("Active &amp; Upcoming Events", rendered)
         self.assertIn("This Week&#x27;s Work", rendered)
-        self.assertIn('id="sc-home-greeting"', rendered)
+        self.assertNotIn('id="sc-home-greeting"', rendered)
         self.assertNotIn(":)", rendered)
         self.assertNotIn("Daily Execution", rendered)
         self.assertNotIn("Daily Execution Archive", rendered)
@@ -3959,7 +3959,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("DELETE FROM dashboard_tasks", delete_source)
         self.assertNotIn("shopify", delete_source.casefold())
 
-    def test_dashboard_uses_events_and_weekly_work_without_restoring_planner_or_design_workflow(self):
+    def test_dashboard_uses_chatgpt_brief_and_weekly_work_without_restoring_legacy_events(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         dashboard_source = source[
             source.index("def get_browser_timezone") : source.index("\n\ndef page_uses_local_database")
@@ -3973,14 +3973,10 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("\n\ndef page_uses_local_database")
         ]
         self.assertIn("home_daily_planner.render_status(st, user, local_now)", render_body)
-        self.assertIn("render_active_upcoming_events(events, today)", render_body)
-        self.assertIn("render_home_weekly_work(user, local_now)", render_body)
+        self.assertNotIn("render_active_upcoming_events", render_body)
+        self.assertNotIn("load_calendar_events", render_body)
         self.assertLess(
-            render_body.index("home_daily_planner.render_status(st, user, local_now)"),
-            render_body.index("render_active_upcoming_events(events, today)"),
-        )
-        self.assertLess(
-            render_body.index("render_active_upcoming_events(events, today)"),
+            render_body.index("home_sports_morning_brief.render(st, user, today)"),
             render_body.index("render_home_weekly_work(user, local_now)"),
         )
         self.assertIn('st.container(key="home-ops-dashboard")', render_body)
@@ -4009,10 +4005,6 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index('div[data-testid="stAppViewContainer"]:has(.st-key-home-ops-dashboard)') :
             source.index(".st-key-planner-data-refresh-bridge")
         ]
-        events_source = source[
-            source.index("def render_active_upcoming_events") :
-            source.index("\n\ndef _home_duration_label")
-        ]
         weekly_source = source[
             source.index("def render_home_weekly_work") :
             source.index("\n\ndef render_home_recent_activity")
@@ -4025,8 +4017,6 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn("gap: 0.55rem !important", style_source)
         self.assertIn("min-height: 64px !important", style_source)
         self.assertIn("overflow-x: hidden", style_source)
-        self.assertIn("height=min(318, 42 + len(records) * 34)", events_source)
-        self.assertIn("row_height=34", events_source)
         self.assertIn("cards = st.columns(6)", weekly_source)
         self.assertIn("height=min(286, 42 + len(team_rows) * 34)", weekly_source)
         self.assertIn("height=min(360, max(190, 42 + len(work_rows) * 34))", weekly_source)

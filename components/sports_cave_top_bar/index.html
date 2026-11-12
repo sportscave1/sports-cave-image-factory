@@ -169,7 +169,6 @@
     #${ROOT_ID} .sc-os-navigation button:active:not(:disabled) { background: #333; }
     #${ROOT_ID} .sc-os-navigation button:disabled { opacity: .35; cursor: not-allowed; background: transparent; }
     #sc-os-files { width: auto; padding: 0 12px; gap: 7px; white-space: nowrap; font-size: 13px; }
-    .sc-home-greeting { color: #888; font-size: 14px; margin-bottom: 8px; }
     .sc-home-active-planner { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 14px; margin-bottom: 10px; border: 1px solid #b99448; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
     .sc-home-active-planner[hidden] { display: none !important; }
     .sc-home-active-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; }
@@ -1009,7 +1008,6 @@
       plannerTimer: {},
       plannerStatusPending: false,
       plannerStatusTimer: null,
-      greetingTimer: null,
       plannerExpiryRequested: false,
       plannerHalfwayRequested: false,
       plannerDataRefreshPending: false,
@@ -1648,43 +1646,6 @@
       if (method === "GET") pendingReads.set(key, entry);
       return entry.promise;
     };
-    const topBarGreetingForDate = (date = new Date()) => {
-      const hour = Number(date.getHours());
-      if (hour >= 5 && hour < 12) return "Good morning";
-      if (hour >= 12 && hour < 17) return "Good afternoon";
-      return "Good night";
-    };
-    const updateTopBarGreeting = () => {
-      const topbarGreeting = doc.getElementById("sc-home-greeting");
-      if (!topbarGreeting) return;
-      const displayName = String(state.config.userDisplayName || "").trim();
-      if (!displayName) {
-        topbarGreeting.textContent = "";
-        topbarGreeting.hidden = true;
-        return;
-      }
-      topbarGreeting.textContent = `${topBarGreetingForDate(new Date())}, ${displayName}`;
-      topbarGreeting.hidden = false;
-    };
-    const scheduleTopBarGreeting = () => {
-      if (state.greetingTimer) {
-        parentWindow.clearTimeout(state.greetingTimer);
-        timers.delete(state.greetingTimer);
-        state.greetingTimer = null;
-      }
-      updateTopBarGreeting();
-      const now = new Date();
-      const nextHour = new Date(now);
-      nextHour.setMinutes(60, 0, 100);
-      const delay = Math.max(
-        30000,
-        Math.min(nextHour.getTime() - now.getTime(), 3660000),
-      );
-      state.greetingTimer = later(() => {
-        state.greetingTimer = null;
-        scheduleTopBarGreeting();
-      }, delay);
-    };
     const updateSidebarBadge = (route, count, label, attempt = 0) => {
       const group = route === "email" ? "email" : null;
       const routeLabel = route === "orders" ? "Orders" : group === "social" ? "Social Media" : "Email";
@@ -2115,7 +2076,6 @@
       }
     };
     const updateHomeStatus = () => {
-      updateTopBarGreeting();
       const strip = doc.getElementById("sc-home-active-planner");
       if (!strip) return;
       const timer = state.plannerTimer || {};
@@ -3096,7 +3056,6 @@
         root.querySelector(".sc-os-topbar-logo").src = state.config.logoSrc || "";
         root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";
         root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
-        scheduleTopBarGreeting();
         filesButton.hidden = !state.config.filesEnabled;
         if (revisionChanged) {
           cancelPendingReads();

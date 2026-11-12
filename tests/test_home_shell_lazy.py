@@ -11,18 +11,18 @@ import daily_planner
 ROOT = Path(__file__).resolve().parents[1]
 
 class HomeShellLazyTests(unittest.TestCase):
-    def test_summary_is_markup_only_and_greeting_is_escaped(self):
+    def test_status_keeps_the_planner_strip_without_a_greeting(self):
         st = Mock()
         with patch.object(home_daily_planner, 'compact_planner_config', side_effect=AssertionError('bootstrap')), patch.object(home_daily_planner, '_component_source', side_effect=AssertionError('UI loaded')):
-            for hour, expected in [(4,'Good night'),(5,'Good morning'),(11,'Good morning'),(12,'Good afternoon'),(16,'Good afternoon'),(17,'Good night')]:
-                home_daily_planner.render_status(st, {'role':'admin','display_name':'<Nathan>'}, datetime(2026,9,30,hour))
-                markup=st.markdown.call_args.args[0]
-                self.assertIn(expected + ', &lt;Nathan&gt;', markup)
-                self.assertIn('type="button" hidden', markup)
-                self.assertNotIn("Today's Plan",markup)
-                self.assertNotIn('iframe',markup)
-        home_daily_planner.render_status(st, {'role':'worker','display_name':'Worker'}, datetime.now())
-        self.assertNotIn('id="sc-home-active-planner"',st.markdown.call_args.args[0])
+            home_daily_planner.render_status(st, {'role':'admin','display_name':'Nathan'}, datetime.now())
+        markup = st.markdown.call_args.args[0]
+        self.assertNotIn("Nathan", markup)
+        self.assertNotIn("sc-home-greeting", markup)
+        self.assertIn('type="button" hidden', markup)
+        self.assertNotIn('iframe', markup)
+        st.reset_mock()
+        home_daily_planner.render_status(st, {'role':'worker'}, datetime.now())
+        st.markdown.assert_not_called()
 
     def test_real_home_render_never_mounts_planner_or_files(self):
         source=(ROOT/'app.py').read_text(encoding='utf-8')

@@ -9088,6 +9088,23 @@ def render_meta_url_parameters_section(section_number):
     return None
 
 
+def _apply_morning_brief_product(rows):
+    from home_brief_calendar import PRODUCT_QUERY
+
+    handle = st.query_params.get(PRODUCT_QUERY)
+    if not handle:
+        return
+    del st.query_params[PRODUCT_QUERY]
+    if not isinstance(handle, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,149}", handle):
+        st.warning("The Morning Brief product link is invalid.")
+        return
+    matches = [row for row in rows if _edition_ops_product_handle_from_row(row).casefold() == handle]
+    if len(matches) != 1:
+        st.warning("The Morning Brief product is unavailable in the New Ads product list.")
+        return
+    st.session_state[ADS_PRODUCT_SELECTOR_KEY] = _edition_ops_product_selector_identity(matches[0])
+
+
 def render_product_name_input(*, rows=None, result=None):
     rows = list(rows or ())
     if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
@@ -14686,6 +14703,8 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.session_state[ADS_PRODUCT_NAME_KEY] = result.get("product_name")
 
     product_rows = load_edition_ops_product_rows()
+    if workflow_mode == ADS_WORKFLOW_MODE_NEW:
+        _apply_morning_brief_product(product_rows)
     if is_google:
         ads_google_ui.apply_pending(product_rows)
         result = st.session_state.get(result_state_key)
