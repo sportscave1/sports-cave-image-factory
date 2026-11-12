@@ -395,7 +395,7 @@ ads_page._render_carousel_setup_notes(st.session_state["result"], st.session_sta
         renderer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "render_supported_result")
         calls = [n.value.func.id for n in renderer.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)]
         self.assertLess(calls.index("_render_ads_image_slots"), calls.index("_render_ads_setup_notes"))
-        self.assertLess(calls.index("_render_ads_setup_notes"), calls.index("_render_ads_image_save"))
+        self.assertLess(calls.index("_render_ads_setup_notes"), calls.index("_render_ads_final_actions"))
 
     def test_post_now_navigation_hydration_edit_rerun_and_zero_meta_writes_all_four_flows(self):
         for source in (ads.ADS_WORKFLOW_MODE_NEW, ads.ADS_WORKFLOW_MODE_CREATIVE_REFRESH):

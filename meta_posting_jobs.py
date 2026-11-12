@@ -5,6 +5,7 @@ idempotency. A lost process with a nonterminal ledger requires review, not repla
 """
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime, timezone
 from threading import RLock
 from time import monotonic
 from meta_posting_service import (
@@ -14,6 +15,18 @@ from meta_posting_service import (
 from meta_ads_client import sanitize_meta_error
 
 TERMINAL = {'COMPLETE', 'FAILED', 'AMBIGUOUS', 'ABANDONED_EXTERNALLY'}
+
+def has_active_lease(row):
+    """A different web process may own the durable job; absence here is not failure."""
+    expires = row.get('lease_expires_at')
+    if not row.get('lease_token') or not expires or row.get('status') in TERMINAL:
+        return False
+    try:
+        expires = datetime.fromisoformat(str(expires).replace('Z', '+00:00'))
+        return expires.tzinfo is not None and expires > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
 
 class PostingJobs:
     def __init__(self, store_factory=SupabasePostingStore, service_factory=MetaPostingService):
@@ -96,7 +109,7 @@ class PostingJobs:
             job = self.jobs.get(str(identity))
             running = bool(job and not job['future'].done())
             return {
-                **row, 'running_here': running,
+                **row, 'running_here': running, 'lease_active': has_active_lease(row),
                 'operation': job['message'] if running else '',
                 'last_operation': job['message'] if job else '',
                 'elapsed_seconds': int(monotonic() - job['started_at']) if running else None,

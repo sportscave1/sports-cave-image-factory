@@ -561,11 +561,11 @@ class PostingNavigationTests(unittest.TestCase):
 
     def test_lifecycle_ui_defaults_all_audiences_and_keeps_acquisition_fail_closed(self):
         source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
-        self.assertIn('"Customer Lifecycle Strategy"', source)
+        self.assertNotIn('"Customer Lifecycle Strategy"', source)
         self.assertIn("CUSTOMER_LIFECYCLE_ALL_AUDIENCES", source)
         self.assertIn("CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS", source)
-        self.assertIn("Acquire new customers is not available yet", source)
-        self.assertIn("Customer lifecycle settings will not be changed.", source)
+        self.assertIn("customer_lifecycle_strategy = CUSTOMER_LIFECYCLE_ALL_AUDIENCES", source)
+        self.assertIn('customer_lifecycle_strategy = ""', source)
 
     def test_existing_adset_options_are_filtered_by_campaign(self):
         targets = {

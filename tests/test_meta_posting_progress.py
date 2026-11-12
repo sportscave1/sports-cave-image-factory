@@ -83,14 +83,11 @@ class ProgressViewTests(unittest.TestCase):
         with patch.object(progress.JOBS, 'snapshot', return_value=row):
             app.run()
         self.assertFalse(app.exception)
-        self.assertEqual(app.session_state[posting.SUBMISSION_ID_KEY], identity)
+        self.assertNotEqual(app.session_state[posting.SUBMISSION_ID_KEY], identity)
         self.assertFalse(app.session_state[posting.PROCESSING_KEY])
-        self.assertEqual(app.text_area(key=posting.PRIMARY_TEXT_KEYS[0]).value, 'Unfinished copy')
+        self.assertNotEqual(app.text_area(key=posting.PRIMARY_TEXT_KEYS[0]).value, 'Unfinished copy')
         self.assertNotIn(progress.QUERY_KEY, app.query_params)
-        for button in app.button:
-            if button.label == 'New Campaign':
-                button.click().run()
-                break
+        app.button(key='posting_success_close').click().run()
         self.assertFalse(app.exception)
         self.assertNotIn('Close', [b.label for b in app.button])
         self.assertNotEqual(app.session_state[posting.SUBMISSION_ID_KEY], identity)
@@ -131,9 +128,9 @@ class ProgressViewTests(unittest.TestCase):
             self.assertNotIn(progress.JOB_KEY, app.session_state)
             self.assertNotIn(progress.RECEIPT_KEY, app.session_state)
             self.assertNotIn(progress.QUERY_KEY, app.query_params)
-            self.assertEqual(app.session_state[posting.RESULT_KEY], row)
-            self.assertEqual(app.session_state[posting.SUBMISSION_ID_KEY], row['submission_id'])
-            self.assertNotIn('Close', [b.label for b in app.button])
+            self.assertEqual(app.session_state[progress.LAST_RESULT_KEY], row)
+            self.assertNotEqual(app.session_state[posting.SUBMISSION_ID_KEY], row['submission_id'])
+            self.assertNotIn('Dismiss', [b.label for b in app.button])
             self.assertEqual(read.call_count, 1)
             submit.assert_not_called()
             retry.assert_not_called()
@@ -151,6 +148,48 @@ class ProgressViewTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state[posting.SUBMISSION_ID_KEY], 'new-draft')
         self.assertNotIn('posting_status_failures', app.session_state)
+
+    def test_navigation_preserves_draft_and_background_monitor(self):
+        source = """
+import streamlit as st
+import ads_posting_page as posting
+import ads_posting_progress as progress
+progress.cleanup_completed()
+page = st.radio('Page', ['Posting', 'Other'], key='fixture_route')
+if page == 'Posting':
+    st.text_area('Copy', key=posting.PRIMARY_TEXT_KEYS[0])
+else:
+    progress.preserve_draft_on_navigation()
+    st.write('Other page remains usable')
+progress.render_current()
+"""
+        app = AppTest.from_string(source).run()
+        row = {**completed_row(), 'status': 'AD_CREATED', 'running_here': False, 'lease_active': True}
+        app.session_state[posting.SUBMISSION_ID_KEY] = row['submission_id']
+        app.session_state[progress.JOB_KEY] = row['submission_id']
+        with patch.object(progress.JOBS, 'snapshot', return_value=row), patch.object(progress.JOBS, 'submit') as submit:
+            app.text_area[0].set_value('Keep my original ad').run()
+            app.radio[0].set_value('Other').run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state[posting.PRIMARY_TEXT_KEYS[0]], 'Keep my original ad')
+            self.assertFalse(app.warning)
+            self.assertTrue(app.expander)
+            app.radio[0].set_value('Posting').run()
+            self.assertEqual(app.text_area[0].value, 'Keep my original ad')
+            submit.assert_not_called()
+
+    def test_uncertain_job_preserves_draft_without_replay(self):
+        app = AppTest.from_string('import ads_posting_progress as p; p.render_current()')
+        row = {**completed_row(), 'status': 'AD_CREATED', 'running_here': False, 'lease_active': False}
+        app.session_state[progress.JOB_KEY] = row['submission_id']
+        app.session_state[posting.IMAGE_STATE_KEYS[0]] = {'data': b'original'}
+        with patch.object(progress.JOBS, 'snapshot', return_value=row), patch.object(progress.JOBS, 'submit') as submit:
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertTrue(app.warning)
+            self.assertEqual(app.session_state[posting.IMAGE_STATE_KEYS[0]], {'data': b'original'})
+            self.assertNotIn(progress.NEW_CAMPAIGN_KEY, app.session_state)
+            submit.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()

@@ -49,6 +49,7 @@ def package(ads, result, workflow, folder):
         'source_signature':ads._ads_saved_source_signature(result,workflow),
         'saved_at':datetime.now(timezone.utc).isoformat(),'folder':folder,
         'source_provenance':deepcopy(result.get('creative_refresh_context') or {}),
+        'posting_settings':deepcopy(result.get('posting_settings') or {}),
         'refresh_executions':deepcopy((workflow.get('ad_notes') or {}).get('refresh_executions') or []),
         'batch':batch,'source_copy':copy,'copy_csv':csv,'assets':assets,'files':[]}
     value['package_hash']=handoff.content_hash(value)

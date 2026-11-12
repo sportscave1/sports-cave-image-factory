@@ -44,9 +44,11 @@ LAST_RESULT_KEY = 'posting_last_completed_result'
 
 
 def cleanup_completed():
-    """Apply an explicit New Campaign action before form widgets are created."""
-    import ads_posting_page as posting
+    """Clear only the verified completed draft before form widgets are created."""
     identity = st.session_state.pop(NEW_CAMPAIGN_KEY, None)
+    if not identity:
+        return
+    import ads_posting_page as posting
     receipt = st.session_state.get(LAST_RESULT_KEY) or {}
     if (identity and receipt.get('submission_id') == identity and verified_success(receipt)
             and st.session_state.get(posting.SUBMISSION_ID_KEY) == identity):
@@ -82,11 +84,26 @@ def _render_success(receipt):
     st.progress(1.0, text=f'{done} of {total} ads verified')
     st.write(receipt.get('campaign_name') or 'Meta campaign')
     st.caption('PAUSED — Ready for Review')
-    left, right = st.columns(2)
-    if left.button('New Campaign', key='posting_success_new', type='primary', use_container_width=True):
-        _close_success(receipt['submission_id'], new_campaign=True)
-    if right.button('Close', key='posting_success_close', use_container_width=True):
+    if st.button('Dismiss', key='posting_success_close', use_container_width=True):
         _close_success(receipt['submission_id'])
+
+
+def preserve_draft_on_navigation():
+    """Detach saved form values from widget cleanup while another page is mounted.
+
+    Upload widgets themselves are ephemeral; their captured bytes already live in
+    IMAGE_STATE_KEYS / CSV_IMPORT_STATE_KEY. Never restore button/upload values.
+    """
+    if not any(key.startswith('ads_posting_v2_') for key in st.session_state):
+        return
+    import ads_posting_page as posting
+    uploads = {*posting.IMAGE_KEYS, *posting.CAROUSEL_IMAGE_KEYS, posting.CSV_IMPORT_KEY}
+    for name, value in vars(posting).items():
+        keys = (value,) if name.endswith('_KEY') else value if name.endswith('_KEYS') and isinstance(value, tuple) else ()
+        for key in keys:
+            if isinstance(key, str) and key.startswith(posting.STATE_PREFIX) and key not in uploads and key in st.session_state:
+                st.session_state[key] = st.session_state[key]
+
 
 
 def render_current(*, compact=False):
@@ -105,33 +122,21 @@ def render_current(*, compact=False):
     identity = identity or receipt.get("submission_id")
     polling_paused = st.session_state.get('posting_status_failures', 0) >= 5
 
-    @st.dialog('Meta Ads', width='small', dismissible=False)
-    def modal():
-        st.markdown("""<style>
-        [role="dialog"]:has(.posting-popup) {width:min(500px,calc(100vw - 24px));border:1px solid #d6dce5;
-          border-radius:12px;box-shadow:0 16px 48px #14223826;
-          margin:0;max-height:calc(100dvh - 24px);overflow:auto;}
-        [role="dialog"]:has(.posting-popup) [data-testid="stVerticalBlock"] {gap:.65rem;}
-        [role="dialog"]:has(.posting-popup) [data-testid="stHorizontalBlock"] {flex-wrap:nowrap;gap:.75rem;}
-        [role="dialog"]:has(.posting-popup) [data-testid="stColumn"] {min-width:0;flex:1;}
-        [role="dialog"]:has(.posting-popup) [role="progressbar"] > div {background:var(--sc-border,#E5E1D8);}
-        [role="dialog"]:has(.posting-popup) [role="progressbar"] > div > div,
-        [role="dialog"]:has(.posting-popup) [role="progressbar"] > div[style*="width"] {
-          background:var(--sc-gold,#D4A54C);transition:width .25s ease,transform .25s ease;}
-        [role="dialog"]:has(.posting-popup) button[kind="primary"] {
-          background:var(--sc-gold,#D4A54C);border-color:var(--sc-gold,#D4A54C);color:var(--sc-text,#0B0B0D);}
-        [role="dialog"]:has(.posting-popup) [data-stale="true"] {opacity:1;}
-        @media(prefers-reduced-motion:reduce) {
-          [role="dialog"]:has(.posting-popup) [role="progressbar"] * {transition:none;}}
-        .posting-success {color:#168342;font-weight:600;}
-        </style><span class="posting-popup"></span>""", unsafe_allow_html=True)
+    st.markdown("""<style>
+    .st-key-posting_notification {position:fixed;top:5.2rem;right:1.25rem;
+      width:min(340px,calc(100vw - 32px));z-index:990;background:var(--background-color,#fff);
+      border:1px solid #d6dce5;border-radius:10px;box-shadow:0 4px 16px #14223818;}
+    .st-key-posting_notification [data-testid="stExpanderDetails"] {max-height:50vh;overflow:auto;}
+    .st-key-posting_notification h3 {font-size:1rem;}
+    .st-key-posting_notification .posting-success {color:#168342;font-weight:600;}
+    .st-key-posting_notification [role="progressbar"] > div > div {background:var(--sc-gold,#D4A54C);}
+    </style>""", unsafe_allow_html=True)
 
+    def notification():
         polling_enabled = not (receipt or polling_paused or st.session_state.get('posting_finished_job') == identity)
-        @st.fragment(run_every=2 if polling_enabled else None)
-        def panel():
+        def panel_contents():
             import ads_posting_page as posting
-            # This timer belongs only to the mounted dialog. After success it reads
-            # the receipt without polling; dismissal's full rerun disposes the fragment.
+            # The app mounts this monitor on every route; navigation never cancels the job.
             # Read live state, not a receipt captured when the dialog opened.
             current_receipt = st.session_state.get(RECEIPT_KEY)
             if current_receipt and current_receipt.get('submission_id') == identity:
@@ -178,7 +183,10 @@ def render_current(*, compact=False):
                     st.session_state[posting.SUBMISSION_ID_KEY] = identity
                     st.session_state[posting.RUN_STATE_KEY] = 'COMPLETE'
                     st.session_state[posting.PROCESSING_KEY] = False
-                _render_success(row)
+                st.session_state[LAST_RESULT_KEY] = dict(row)
+                st.session_state[NEW_CAMPAIGN_KEY] = identity
+                clear()
+                st.rerun()
                 return
             status = row.get('status')
             done, total = confirmed_ads(row)
@@ -214,9 +222,26 @@ def render_current(*, compact=False):
             else:
                 st.subheader('Creating Meta Ads…')
                 st.progress(progress_value(row), text=f'{done} of {total} ads verified PAUSED · final verification pending')
-                st.caption(row.get('operation') or 'Validating campaign settings…')
-                if not row.get('running_here'):
-                    st.warning('Outcome unknown. Reconcile the saved job before retrying; it will not be replayed automatically.')
+                st.caption(row.get('operation') or ('Posting worker lease is active. Checking saved progress…'
+                           if row.get('lease_active') else 'Checking saved posting progress…'))
+                if not row.get('running_here') and not row.get('lease_active'):
+                    st.warning('The posting worker is no longer confirmed active. Your draft and saved progress are retained. Reconcile the saved job before retrying; no ads will be replayed automatically.')
+        @st.fragment(run_every=2 if polling_enabled else None)
+        def panel():
+            import ads_posting_page as posting
+            latest = st.session_state.get(RECEIPT_KEY) or st.session_state.get(posting.RESULT_KEY) or {}
+            done, total = confirmed_ads(latest)
+            if st.session_state.get('posting_status_failures'):
+                label = 'Meta Ads · Status unavailable'
+            elif verified_success(latest):
+                label = '✓ Ads created · PAUSED for review'
+            elif latest.get('status') in TERMINAL or (latest and not latest.get('running_here') and not latest.get('lease_active')):
+                label = 'Meta Ads · Needs review'
+            else:
+                label = f'Meta Ads · Posting {done}/{total}' if total else 'Meta Ads · Posting…'
+            with st.container(key='posting_notification'):
+                with st.expander(label, expanded=False):
+                    panel_contents()
         panel()
-    modal()
+    notification()
     return True

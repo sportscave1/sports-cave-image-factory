@@ -100,7 +100,14 @@ def main():
             st.session_state.setdefault('fixture_saved_files',{})[path]=bytes(item['data'])
             results.append({'relative_path':item['relative_path'], 'metadata':{'id':'fixture:'+path,'rev':'fixture','path_display':path}})
         return {'successes':results,'failures':[]}
+    import ads_direct_post as direct
+    def direct_submit(package, settings, workflow):
+        st.session_state['fixture_direct_submitted'] = package
+        workflow['direct_post_submission_id'] = 'fixture-job'
+        return 'fixture-job'
     with ExitStack() as stack:
+        stack.enter_context(patch.object(direct, 'render_settings', return_value=({}, [])))
+        stack.enter_context(patch.object(direct, 'submit_saved', side_effect=direct_submit))
         for owner, name, kwargs in (
             (ads,'load_edition_ops_product_rows',dict(return_value=[ROW])),
             (ads,'current_ads_user',dict(return_value={})),

@@ -42,6 +42,17 @@ class Ledger(FakePostingStore):
 
 
 class PostingJobTests(unittest.TestCase):
+    def test_worker_lease_status_does_not_replay_missing_local_job(self):
+        from datetime import datetime, timedelta, timezone
+        from meta_posting_jobs import has_active_lease
+        row = {'status': 'AD_CREATED', 'lease_token': 'worker',
+               'lease_expires_at': (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()}
+        self.assertTrue(has_active_lease(row))
+        self.assertFalse(has_active_lease({**row, 'status': 'COMPLETE'}))
+        self.assertFalse(has_active_lease({**row, 'lease_token': None}))
+        self.assertFalse(has_active_lease({**row, 'lease_expires_at': 'invalid'}))
+        self.assertFalse(has_active_lease({**row, 'lease_expires_at': '2000-01-01T00:00:00Z'}))
+
     def make_jobs(self, store=None, client=None, factory=None):
         store = store or Ledger()
         client = client or FakePostingClient()

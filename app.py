@@ -14014,11 +14014,11 @@ def main():
 
     log_startup_stage("ROUTER START")
     current_page = get_current_page()
-    if st.session_state.get("posting_success_receipt"):
-        from ads_posting_progress import cleanup_completed, RECEIPT_KEY
-        cleanup_completed()
-        if current_page != "Posting":
-            st.session_state.pop(RECEIPT_KEY, None)
+    from ads_posting_progress import cleanup_completed, render_current as render_posting_notification
+    cleanup_completed()
+    if current_page != "Posting":
+        from ads_posting_progress import preserve_draft_on_navigation
+        preserve_draft_on_navigation()
     apply_global_search_context(current_page)
     log_startup_stage(f"PAGE SELECTED: {current_page}")
     log_app_memory(f"Page load start: {current_page}")
@@ -14068,6 +14068,8 @@ def main():
                 navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
                 status=page_status,
             )
+    if current_page != "Posting":
+        render_posting_notification(compact=True)
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
     safe_startup_print(
