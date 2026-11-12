@@ -346,8 +346,10 @@ async def mcp(request):
                                 "properties": {"date": {"type": "string", "format": "date"}} if daily else {},
                                 "required": ["date"] if daily else [], "additionalProperties": False},
                 "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+                "securitySchemes": [{"type": "oauth2", "scopes": [scope]}],
+                "_meta": {"securitySchemes": [{"type": "oauth2", "scopes": [scope]}]},
             }
-            for name, (_, _, title, description, daily) in TOOLS.items()
+            for name, (scope, _, title, description, daily) in TOOLS.items()
         ]}
     elif method == "tools/call":
         name = params.get("name")
@@ -356,7 +358,12 @@ async def mcp(request):
             return _rpc_error(identifier, -32602, "Unknown tool or invalid arguments")
         scope, page, _, _, daily = TOOLS[name]
         if scope not in granted:
-            return _challenge(SCOPE_LIST, 403)
+            message = "Reconnect Sports Cave OS to authorize the requested reporting tool."
+            auth = (f'Bearer resource_metadata="{ISSUER + RESOURCE_METADATA}", scope="{SCOPE_LIST}", '
+                    f'error="insufficient_scope", error_description="{message}"')
+            result = {"isError": True, "content": [{"type": "text", "text": message}],
+                      "_meta": {"mcp/www_authenticate": [auth]}}
+            return _response({"jsonrpc": "2.0", "id": identifier, "result": result})
         if set(arguments) != ({"date"} if daily else set()):
             return _rpc_error(identifier, -32602, "Invalid arguments")
         try:
