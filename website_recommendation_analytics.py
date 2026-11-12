@@ -186,7 +186,7 @@ def _ranking_snapshot():
     if time.monotonic() < expiry:
         return cached
     if not _RANK_LOCK.acquire(blocking=False):
-        return cached or {}
+        return cached
     try:
         expiry, cached = _rank_cache
         if time.monotonic() >= expiry:
@@ -221,12 +221,21 @@ async def ranking(request):
     market = request.query_params.get("market", "")
     if not re.fullmatch(r"[A-Z]{2}", market):
         return Response(status_code=400, headers=headers)
-    try:
-        scores = (await run_in_threadpool(_ranking_snapshot)).get(market, {})
-    except Exception:
+    # The immutable snapshot is replaced atomically by the refresh worker.
+    # Serve cache hits on the event loop so storefront traffic uses no DB workers.
+    expiry, snapshot = _rank_cache
+    if time.monotonic() >= expiry:
+        try:
+            snapshot = await run_in_threadpool(_ranking_snapshot)
+        except Exception:
+            snapshot = None
+        expiry, _ = _rank_cache
+    if snapshot is None:
+        headers["Retry-After"] = "2"
         return Response(status_code=503, headers=headers)
-    headers["Cache-Control"] = "public, max-age=300"
-    return JSONResponse({"scores": scores}, headers=headers)
+    age = max(0, int(expiry - time.monotonic()))
+    headers["Cache-Control"] = f"public, max-age={age}"
+    return JSONResponse({"scores": snapshot.get(market, {})}, headers=headers)
 
 
 async def ingest(request):

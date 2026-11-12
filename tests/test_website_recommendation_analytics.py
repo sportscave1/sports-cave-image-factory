@@ -2,6 +2,7 @@ import base64
 import hmac
 import json
 import os
+import time
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -86,6 +87,23 @@ class RecommendationEvents(unittest.TestCase):
             self.assertEqual(response.headers["access-control-allow-origin"], ORIGIN)
             self.assertEqual(self.client.get(analytics.RANK_PATH + "?market=aus").status_code, 400)
             self.assertEqual(self.client.get(analytics.RANK_PATH + "?market=AU", headers={"Origin": "https://another.example"}).status_code, 403)
+
+    def test_warm_ranking_skips_worker_and_limits_http_cache_to_snapshot_lifetime(self):
+        with (
+            patch.object(analytics, "_rank_cache", (time.monotonic() + 30, {"AU": {"200": 2}})),
+            patch.object(analytics, "run_in_threadpool") as worker,
+        ):
+            response = self.client.get(analytics.RANK_PATH + "?market=AU")
+            self.assertEqual(response.json(), {"scores": {"200": 2}})
+            self.assertIn(int(response.headers["cache-control"].split("=")[1]), range(1, 31))
+            worker.assert_not_called()
+
+    def test_cold_ranking_refresh_in_progress_is_not_cached_as_empty(self):
+        with patch.object(analytics, "_rank_cache", (0, None)), analytics._RANK_LOCK:
+            response = self.client.get(analytics.RANK_PATH + "?market=AU")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.headers["retry-after"], "2")
 
     @unittest.skipUnless(os.getenv("CRM_TEST_POSTGRES") == "1", "Disposable PostgreSQL fixture required")
     def test_only_matching_paid_addons_count_and_feed_market_scores(self):
