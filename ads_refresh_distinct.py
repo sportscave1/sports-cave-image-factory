@@ -25,10 +25,7 @@ def build_plan(context, campaign, product, category, seed, references, identity)
                   output_count=3)
     result.pop('carousel_contract', None)
     assigned = (context or {}).get('on_image_headlines') or []
-    bank = visuals.eligible_headlines(context or {})
-    result['on_image_headlines'] = (list(assigned) if len(assigned) == 3 and len(set(assigned)) == 3
-                                  and all(h in bank for h in assigned)
-                                  else random.Random(str(seed)).sample(bank, 3))
+    result['on_image_headlines'] = visuals.select_distinct_headlines(context or {}, seed, assigned)
     return result
 
 

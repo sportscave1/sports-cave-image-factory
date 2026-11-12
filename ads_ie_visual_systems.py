@@ -61,6 +61,21 @@ def eligible_headlines(context):
 
 
 
+def select_distinct_headlines(context, seed, assigned=()):
+    """Keep first valid occurrences in place; fill only gaps without replacement."""
+    bank = eligible_headlines(context)
+    assigned = list(assigned or ())[:3]
+    result, used = [], set()
+    for headline in assigned + [None] * (3 - len(assigned)):
+        keep = headline in bank and headline not in used
+        result.append(headline if keep else None)
+        if keep:
+            used.add(headline)
+    unused = [headline for headline in bank if headline not in used]
+    replacements = iter(random.Random(str(seed)).sample(unused, result.count(None)))
+    return [headline if headline is not None else next(replacements) for headline in result]
+
+
 def eligible_support_lines(context):
     # Original quantity/meaning pairings; other approved lines duplicate scarcity.
     lines = [APPROVED_SUPPORT_LINES[i] for i in (1, 2, 4, 7, 8)]
@@ -107,7 +122,7 @@ def coherent_pair(headline, support, *, require_scarcity=True):
 def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
     """Draw once without replacement, then reuse the three persisted assignments.
 
-    Old or duplicate selections are upgraded as a complete set. Supporting lines use historical rotation and never affect headline selection.
+    Keep valid assignments; replace only invalid or duplicate headlines, retaining the first occurrence. Supporting lines use historical rotation and never affect headline selection.
     """
     if context.get("usa_product_first"):
         return usa_policy.resolve_footer(visuals, context, headline_is_valid, pair_is_valid, selections)
@@ -117,10 +132,10 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
     if len(visuals) != 3:
         raise ValueError("An Instant Experience set requires exactly three images.")
     frozen = (len(selections) == 3
-              and all(isinstance(v, dict) and v.get("headline_text") in eligible for v in selections)
-              and len({v["headline_text"] for v in selections}) == 3)
-    headlines = ([v["headline_text"] for v in selections] if frozen else
-                 random.Random(str(visuals[0]["resolved_seed"]) + "|approved-five-headlines").sample(eligible, 3))
+              and all(isinstance(v, dict) and v.get("headline_text") in eligible for v in selections))
+    headlines = select_distinct_headlines(context,
+        str(visuals[0]["resolved_seed"]) + "|approved-five-headlines",
+        [v.get("headline_text") if isinstance(v, dict) else None for v in selections])
     supports = eligible_support_lines(context)
     # Restore historical support rotation without changing the current headline draw.
     from itertools import product

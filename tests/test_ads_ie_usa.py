@@ -6,6 +6,7 @@ from pathlib import Path
 import unittest
 import ads_page as ads
 import ads_ie_usa as usa
+import ads_ie_visual_systems as words
 import ads_ie_copy as writing
 import ads_ie_legacy_description as legacy
 import ads_black_friday
@@ -40,7 +41,8 @@ class USAInstantExperienceTests(unittest.TestCase):
                 r = self.record(country=market, metadata=metadata)
                 fp = r['instant_experience_fingerprints']
                 self.assertEqual(len(fp),3)
-                self.assertEqual([v['headline_text'] for v in fp], [usa.HEADLINE]*3)
+                self.assertEqual(len({v['headline_text'] for v in fp}), 3)
+                self.assertTrue(all(v['headline_text'] in words.HEADLINES for v in fp))
                 self.assertEqual(len({v['supporting_line'] for v in fp}), 3)
                 self.assertTrue(all(v['supporting_line'] in usa.SUPPORT_LINES for v in fp))
                 self.assertEqual([v['cta_text'] for v in fp], ['CLAIM YOUR EDITION']*3)
@@ -56,11 +58,11 @@ class USAInstantExperienceTests(unittest.TestCase):
             prompts=[r['master_prompt']]+[ads.build_standard_instant_experience_image_prompt(i,v,product_name=name,category=sport,country='USA') for i,v in enumerate(visuals,1)]
             self.assertTrue(ads.validate_instant_experience_set_differentiation(visuals))
             for prompt in prompts:
-                for obsolete in ('Select three different approved headlines','Never repeat a headline or subline','AND visible depth arrangement','imperceptible surface reflections','thumbnail-visible glazing','reflections clearly visible at thumbnail','visible at a 256 × 256 preview','all signature and fixed template lines verbatim'):
+                for obsolete in ('fixed USA footer headline','identical exact USA footer headline','AND visible depth arrangement','imperceptible surface reflections','thumbnail-visible glazing','reflections clearly visible at thumbnail','visible at a 256 × 256 preview','all signature and fixed template lines verbatim'):
                     self.assertNotIn(obsolete,prompt)
                 self.assertIn('Product recognition takes priority over excessive glare',prompt)
                 self.assertIn('never over visible glazing',prompt)
-                self.assertIn('Limited to 100 Worldwide',prompt)
+                self.assertTrue(any(h in prompt for h in words.HEADLINES))
                 self.assertNotIn('A limited run of 100 editions.',prompt)
                 self.assertTrue(any(s in prompt for s in usa.SUPPORT_LINES))
                 self.assertIn('18–20%',prompt)

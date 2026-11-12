@@ -152,7 +152,10 @@ def build_new_ad_style_rules(product, sport, context):
         body = body.replace(f"Limited to {limit} worldwide.", scarcity)
         if not limit:
             body = body.replace(f"Only {limit} exist.", "")
-        blocks.append(f"AD {index} — {key}\nDescription framework:\n{body}\n\nHeadline: ONE short product-specific emotional headline fitted to this description style.\nCTA: {cta}")
+        headline_rule = "ONE short product-specific emotional headline fitted to this description style."
+        if index == 3:
+            headline_rule += " For this collector-centrepiece description, make the written Meta headline collector-focused: express why this exact subject, verified sporting memory or legacy deserves a lasting place in a meaningful collection. Add a complementary emotional idea rather than repeating or paraphrasing the opening, centrepiece wording or 100-collector scarcity claim. Keep it premium, natural and product-specific, with nostalgia only where supported; no generic collector slogan or purchase CTA. This is the third written headline only, in every market; preserve the description and all on-image headline assignments."
+        blocks.append(f"AD {index} — {key}\nDescription framework:\n{body}\n\nHeadline: {headline_rule}\nCTA: {cta}")
     return f"""LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS — NEW ADS ONLY
 Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Product being personalised: {product}

@@ -20,6 +20,18 @@ class RacingCollectorCopyTests(unittest.TestCase):
                                           'winning_headline': 'Reference headline'})
             self.assertIn(ads.RACING_WRITTEN_COPY_INSTRUCTIONS, prompt)
 
+    def test_only_third_written_headline_has_collector_direction_in_all_markets(self):
+        rules = legacy.build_new_ad_style_rules('Kyle Larson Talladega', 'NASCAR', {})
+        first_two, third = rules.split('AD 3 — choose_a_side', 1)
+        cue = 'make the written Meta headline collector-focused'
+        self.assertNotIn(cue, first_two)
+        self.assertIn(cue, third)
+        self.assertIn('rather than repeating or paraphrasing the opening', third)
+        self.assertIn('preserve the description and all on-image headline assignments', third)
+        for market in ('USA', 'Australia'):
+            prompt = ads.build_ads_prompt('Kyle Larson Talladega', 'NASCAR', market, 'Instant Experience')
+            self.assertEqual(prompt.count(cue), 1)
+
     def test_third_slot_is_product_grounded_collector_copy(self):
         rules = legacy.build_new_ad_style_rules('Kyle Larson Talladega', 'NASCAR', {})
         third = rules.split('AD 3 — choose_a_side')[1].split('Headline:')[0]

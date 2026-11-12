@@ -66,21 +66,24 @@ def enabled(normalized_country, metadata):
 
 
 def resolve_footer(visuals, context, headline_is_valid, pair_is_valid, selections=()):
+    from ads_ie_visual_systems import eligible_headlines, select_distinct_headlines
     if len(visuals) != 3:
         raise ValueError('USA IE requires exactly three visuals.')
     if selections:
         pairs = [(s.get('headline_text'), s.get('supporting_line')) for s in selections]
-        if len(pairs) != 3 or any(h != HEADLINE or s not in (*SUPPORT_LINES, FALLBACK) for h, s in pairs):
+        if len(pairs) != 3 or any(h not in eligible_headlines(context) or s not in (*SUPPORT_LINES, FALLBACK) for h, s in pairs):
             raise ValueError('Preserve the supplied USA footer; inconsistent saved selections require explicit regeneration.')
         supports = [s for h, s in pairs]  # Preserve old identical assignments as well as new distinct draws.
     else:
         supports = random.Random(str(visuals[0]['resolved_seed']) + '|usa-six-supports').sample(SUPPORT_LINES, 3)
-    if not headline_is_valid(HEADLINE) or (pair_is_valid and any(not pair_is_valid(HEADLINE, s) for s in supports)):
-        raise ValueError('USA fixed footer must pass existing copy-fit limits.')
-    for v, support in zip(visuals, supports):
-        v.update(headline_text=HEADLINE, supporting_line=support, fomo_line=support, cta_text='CLAIM YOUR EDITION',
-                 footer_emphasis='scarcity', footer_pair_signature=hashlib.sha256(f'{HEADLINE}|{support}'.encode()).hexdigest()[:20],
-                 eligible_headline_alternatives=[], headline_fit_fallback=HEADLINE)
+    headlines = select_distinct_headlines(context, str(visuals[0]['resolved_seed']) + '|approved-five-headlines',
+        [s.get('headline_text') for s in selections])
+    if any(not headline_is_valid(h) for h in headlines) or (pair_is_valid and any(not pair_is_valid(h, s) for h, s in zip(headlines, supports))):
+        raise ValueError('USA footer must pass existing copy-fit limits.')
+    for v, headline, support in zip(visuals, headlines, supports):
+        v.update(headline_text=headline, supporting_line=support, fomo_line=support, cta_text='CLAIM YOUR EDITION',
+                 footer_emphasis='scarcity', footer_pair_signature=hashlib.sha256(f'{headline}|{support}'.encode()).hexdigest()[:20],
+                 eligible_headline_alternatives=[], headline_fit_fallback=headline)
 
 
 def distinct(a, b):
@@ -141,12 +144,12 @@ def adapt_prompt(prompt):
         'Premium collector hallway: close edition-led photography': 'Premium collector hallway: edition-led photography',
         'retain close edition prominence.': 'retain recognisable edition prominence.',
         'GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.': 'GLAZING CHECK: Product recognition takes priority over reflection visibility at thumbnail size.',
-        'Confirm three different approved footer headlines and distinct supporting lines in every set; preserve the assigned selections verbatim.': 'Confirm the identical fixed USA footer headline and each image’s exact resolved supporting line; preserve all assignments verbatim. Fresh packs draw three distinct approved sentences once without replacement; never reroll saved assignments.',
+        'Confirm three different approved footer headlines and distinct supporting lines in every set; preserve the assigned selections verbatim.': 'Confirm three different approved footer headlines and each image’s exact resolved supporting line; preserve all assignments verbatim. Fresh packs draw three distinct approved sentences once without replacement; never reroll saved assignments.',
         'three visibly different homes/walls/light': 'three recognisably different residential compositions',
         'flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count)': 'check premium glazing without obscuring faces, action or defining edition text; thumbnail recognition takes priority',
-        'approved selected headline and supporting-line wording, with maximum eligible variety': 'the identical exact USA footer headline and each image’s assigned approved supporting sentence',
-        'Select three different approved headlines for a fresh pack; no within-pack repeats.': 'Repeat the fixed USA footer headline; use each image’s exact resolved supporting sentence. Fresh packs use three distinct sentences from the approved six-line bank, selected once before generation; never invent, paraphrase, combine or reroll sentences.',
-        'Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared.': 'Repeat the exact fixed USA footer headline and CTA; preserve each image’s resolved supporting sentence through individual calls, retries and exports. Repetition across future packages is allowed.',
+        'approved selected headline and supporting-line wording, with maximum eligible variety': 'the three distinct exact approved footer headlines and each image’s assigned approved supporting sentence',
+        'Select three different approved headlines for a fresh pack; no within-pack repeats.': 'Select three different approved headlines without replacement; use each image’s exact resolved supporting sentence. Fresh packs use three distinct sentences from the approved six-line bank, selected once before generation; never invent, paraphrase, combine or reroll sentences.',
+        'Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared.': 'Never repeat an approved headline within this three-image set; repeat the fixed CTA; preserve each image’s resolved supporting sentence through individual calls, retries and exports. Repetition across future packages is allowed.',
         'Keep all signature and fixed template lines verbatim, including': 'Keep signature hooks, scarcity and ownership closes verbatim; generic supporting lines are editable in place. Preserve',
         'Keep the three hook families, mandatory lines and ownership closes even when recent history contains them.': 'Keep the three signature hook families, approved scarcity and ownership closes even when history contains them; personalise generic supporting lines in their existing positions.',
         '- Wall colour and cues differ from the other routes.': '- Composition cues distinguish the routes; neutral wall colours and finishes may repeat.',
