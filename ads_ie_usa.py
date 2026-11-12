@@ -20,8 +20,8 @@ GLAZING = ('For every framed edition: Show believable premium glass reflections 
            'Preserve premium glass, never an acrylic appearance or pasted-on product. Keep realistic frame-edge highlights and mounting shadows; '
            'no bright window grids across important details. Preserve unframed products without adding a frame or pane.')
 COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the collector hallway, straight-on architectural product wall and residential man cave, '
-               'with their assigned RIGHT / FRONT / LEFT cameras. Use three recognisably different residential compositions; neutral colour families '
-               'and understated wall finishes may repeat. Priority: product fidelity and real scale; subject and defining-detail recognition; desirable '
+               'with their assigned RIGHT / FRONT / LEFT cameras. Use three recognisably different residential compositions, different room styles, '
+               'clearly different wall-colour families, different wall finishes and different lighting setups. Priority: product fidelity and real scale; subject and defining-detail recognition; desirable '
                'residential presentation; meaningful composition variety; then environmental novelty. Moderate perspective, no extreme foreshortening. '
                'Move the camera closer when needed, never enlarge the product. Keep the full frame, breathing room and footer clearance. '
                'A wider residential view is valid when the edition remains recognisable and the setting contributes. At approximately 256 × 256, '
@@ -29,9 +29,9 @@ COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the collector hallway, s
                'Keep furniture, bright windows and patterns subordinate. Coherent natural or warm directional light must not darken faces or key details. '
                'Use the supplied edition colours, contrast and mood; never recolour the product or add compulsory team colours, flags, neon or invented memorabilia. '
                'Recent history prevents accidental near-duplicates, not reuse of effective neutral settings across products. Inspect actual images before claiming visual quality.')
-WALL_RULES = ('USA automatic walls prioritise warm greige, stone beige, sand, medium earthy taupe and soft warm off-white when the source supports it; '
-              'charcoal or smoky grey require clear frame separation. Deep navy, heritage green and muted olive are secondary options only when supplied '
-              'edition colours support them. Prefer calm matte paint, fine plaster and restrained stone/concrete. Keep pronounced masonry, timber joins '
+WALL_RULES = ('USA automatic walls randomly select from eligible colours without prioritising warm neutrals. Warm greige, stone beige, sand and taupe count as one colour family; never repeat that family within a fresh pack. Soft warm off-white is a separate family; '
+              'charcoal or smoky grey require clear frame separation. Deep navy, heritage green and muted olive are eligible when supplied '
+              'edition colours support them. Vary eligible calm matte paint, fine plaster and restrained stone/concrete across the pack. Resolve room, colour, finish and lighting choices once before export; preserve assigned choices on reopen and export. Keep pronounced masonry, timber joins '
               'and strong material details peripheral. No fixed colour per slot or stereotyped American sports-bar styling.')
 COPY_RULES = ('USA SUPPORTING WORDING: Keep legacy_standard, framed_greatness and choose_a_side in their existing order, line/blank-line positions, '
               'approximate length and distinct approaches. Preserve signature hooks, approved scarcity, ownership closes and CTA. '
@@ -91,11 +91,28 @@ def distinct(a, b):
         a['spatial_family'] != b['spatial_family'] or a['depth_position'] != b['depth_position'])
 
 
+def colour_family(scene):
+    colour = scene['wall_colour'].casefold()
+    if any(word in colour for word in ('beige', 'sand', 'taupe', 'greige')):
+        return 'warm neutral'
+    if scene['wall_visual_group'] == 'grey':
+        return 'grey'
+    return scene['wall_colour_family']
+
+
+def fresh_distinct(a, b):
+    # Saved packs retain their existing composition contract; fresh draws add
+    # visible colour, finish and lighting separation before being persisted.
+    return (distinct(a, b) and a['room_type'] != b['room_type']
+            and colour_family(a) != colour_family(b)
+            and a['wall_finish'] != b['wall_finish']
+            and a['light_family'] != b['light_family'])
+
+
 def select_scenes(seed, context, recent=(), selections=()):
     from ads_ie_scenes import SCENES, signature, _rank, HISTORY_LIMIT
     metadata = context.get('product_metadata') or {}
     palette = ' '.join(str(metadata.get(k, '')) for k in ('artwork_colours', 'artwork_colors', 'dominant_colours', 'dominant_colors', 'colour_palette')).lower()
-    frame = str(context.get('frame_finish', '')).lower()
     history = [r for r in list(recent)[:HISTORY_LIMIT] if isinstance(r, dict)]
     pools = []
     for slot in SCENES:
@@ -113,20 +130,18 @@ def select_scenes(seed, context, recent=(), selections=()):
                 s['scene_signature'] = signature(s)
                 s['scene_near_signature'] = signature(s, near=True)
                 pool.append(s)
-        def rank(s):
-            matching_accent = s['wall_colour_family'] in palette and s['wall_visual_group'] in ('blue', 'green', 'olive')
-            dark_frame = 'black' in frame and s['wall_lightness'] == 'dark'
-            return (dark_frame, s['wall_visual_group'] != 'neutral' and not matching_accent, _rank(seed, s['scene_signature']))
-        # Multiple old candidates can share the new wall: keep one resolved composition each.
-        pools.append(sorted({s['scene_signature']:s for s in pool}.values(), key=rank))
+        # Seeded random ordering across all eligible rooms, walls and light rigs.
+        # Deduplicate equivalent compositions without a warm-neutral preference.
+        pools.append(sorted({s['scene_signature']:s for s in pool}.values(),
+                            key=lambda s: _rank(seed, s['scene_signature'])))
     for keep in range(len(history), -1, -1):
         filtered = [[s for s in pool if not any(
             old.get('scene_signature') == s['scene_signature'] or old.get('scene_near_signature') == s['scene_near_signature']
             for old in history[:keep])] for pool in pools]
         for a in filtered[0]:
             for b in filtered[1]:
-                if not distinct(a,b): continue
-                c = next((c for c in filtered[2] if distinct(a,c) and distinct(b,c)),None)
+                if not fresh_distinct(a,b): continue
+                c = next((c for c in filtered[2] if fresh_distinct(a,c) and fresh_distinct(b,c)),None)
                 if c:
                     return [dict(s, history_exclusions_relaxed=len(history)-keep) for s in (a,b,c)]
     raise ValueError('USA IE needs three distinct residential compositions.')
@@ -152,8 +167,8 @@ def adapt_prompt(prompt):
         'Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared.': 'Never repeat an approved headline within this three-image set; repeat the fixed CTA; preserve each image’s resolved supporting sentence through individual calls, retries and exports. Repetition across future packages is allowed.',
         'Keep all signature and fixed template lines verbatim, including': 'Keep signature hooks, scarcity and ownership closes verbatim; generic supporting lines are editable in place. Preserve',
         'Keep the three hook families, mandatory lines and ownership closes even when recent history contains them.': 'Keep the three signature hook families, approved scarcity and ownership closes even when history contains them; personalise generic supporting lines in their existing positions.',
-        '- Wall colour and cues differ from the other routes.': '- Composition cues distinguish the routes; neutral wall colours and finishes may repeat.',
-        '- Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.': '- Use recognisably distinct residential compositions; not every environmental attribute needs to differ.',
+        '- Wall colour and cues differ from the other routes.': '- Room styles, wall-colour families, finishes and lighting must visibly differ across the three resolved scenes.',
+        '- Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.': '- Use recognisably distinct residential compositions with different room styles, wall-colour families, finishes and lighting; preserve the resolved assignments.',
     }
     for old,new in replacements.items(): prompt = prompt.replace(old,new)
     return prompt
