@@ -8,6 +8,7 @@ import app_branding
 import collector_vault
 from collector_vault_api import COLLECTOR_VAULT_ROUTES
 from chatgpt_crm_api import ROUTES as CHATGPT_CRM_ROUTES
+from chatgpt_crm_mcp import ROUTES as CHATGPT_CRM_MCP_ROUTES
 from daily_planner import DAILY_PLANNER_ROUTE_HANDLERS
 from files_upload_api import FILES_UPLOAD_ROUTES
 import google_seo
@@ -54,6 +55,7 @@ routes = [
 
         *COLLECTOR_VAULT_ROUTES,
         *CHATGPT_CRM_ROUTES,
+        *CHATGPT_CRM_MCP_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
         *GOOGLE_SEO_ROUTE_HANDLERS,
@@ -109,7 +111,8 @@ class ConstantTimeHealthMiddleware:
 
 class _GoogleOAuthAccessLogFilter(logging.Filter):
     def filter(self, record):
-        return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in record.getMessage()
+        message = record.getMessage()
+        return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in message and "/api/chatgpt/crm/oauth/" not in message
 
 logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
 

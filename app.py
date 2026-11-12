@@ -12530,8 +12530,9 @@ def render_lightweight_dashboard_page():
     with st.container(key="home-ops-dashboard"):
         if os_accounts.is_reporting_owner(user) and os_accounts.can_access_page(user, "crm_campaigns_manage"):
             from chatgpt_crm_api import home_url
+            from chatgpt_crm_mcp import mcp_home_url
 
-            if url := home_url():
+            if url := mcp_home_url() or home_url():
                 st.link_button("Open CRM in ChatGPT", url, key="home-chatgpt-crm")
         home_daily_planner.render_status(st, user, local_now)
         render_active_upcoming_events(events, today)
