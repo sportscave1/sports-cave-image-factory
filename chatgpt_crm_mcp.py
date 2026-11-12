@@ -184,7 +184,7 @@ def _page(markup, status=200):
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         "<title>Sports Cave CRM</title><main>" + markup + "</main></html>",
         status_code=status,
-        headers={**HEADERS, "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+        headers={**HEADERS, "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
                  "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'"},
     )
 
