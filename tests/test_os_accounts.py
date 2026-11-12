@@ -530,6 +530,35 @@ class AccountAccessTests(unittest.TestCase):
             ["prodigi", "chatgpt"],
         )
 
+    def test_only_configured_owner_can_copy_mygov_credentials(self):
+        owner = {"id": "owner", "email": "owner@sportscave.test", "role": "admin"}
+        other_admin = {**owner, "id": "other", "email": "other@sportscave.test"}
+        worker = {**owner, "role": "worker", "page_permissions": ["credential_mygov"]}
+        legacy = {**owner, "legacy": True}
+        store = FakeAccountStore()
+        store.users.extend([owner, other_admin])
+        settings = {
+            "SPORTS_CAVE_REPORTING_OWNER_EMAIL": owner["email"],
+            "MYGOV_USERNAME": "test-mygov-user",
+            "MYGOV_PASSWORD": "test-mygov-password",
+        }
+
+        with patch.dict("os.environ", settings, clear=True), patch("activity_log.record_activity_log"):
+            self.assertIn("mygov", [spec.key for spec in shared_credentials.accessible_credential_specs(owner)])
+            for user in (other_admin, worker, legacy, {**owner, "is_active": False}):
+                self.assertFalse(shared_credentials.can_access_credential(user, "mygov"))
+            self.assertEqual(shared_credentials.credential_permission_keys(["credential_mygov"]), ())
+            for field, action, expected in (
+                ("username", shared_credentials.ACTION_USERNAME_COPIED, settings["MYGOV_USERNAME"]),
+                ("password", shared_credentials.ACTION_PASSWORD_COPIED, settings["MYGOV_PASSWORD"]),
+            ):
+                self.assertEqual(
+                    shared_credentials.read_credential_for_action(owner, "mygov", field, action, store=store),
+                    expected,
+                )
+                with self.assertRaises(shared_credentials.CredentialAccessDenied):
+                    shared_credentials.read_credential_for_action(other_admin, "mygov", field, action, store=store)
+
     def test_unpermitted_worker_cannot_reveal_or_copy_credentials(self):
         worker = {
             "id": "worker-1",
