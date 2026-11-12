@@ -122,15 +122,8 @@ def render_current(*, compact=False):
     identity = identity or receipt.get("submission_id")
     polling_paused = st.session_state.get('posting_status_failures', 0) >= 5
 
-    st.markdown("""<style>
-    .st-key-posting_notification {position:fixed;top:5.2rem;right:1.25rem;
-      width:min(340px,calc(100vw - 32px));z-index:990;background:var(--background-color,#fff);
-      border:1px solid #d6dce5;border-radius:10px;box-shadow:0 4px 16px #14223818;}
-    .st-key-posting_notification [data-testid="stExpanderDetails"] {max-height:50vh;overflow:auto;}
-    .st-key-posting_notification h3 {font-size:1rem;}
-    .st-key-posting_notification .posting-success {color:#168342;font-weight:600;}
-    .st-key-posting_notification [role="progressbar"] > div > div {background:var(--sc-gold,#D4A54C);}
-    </style>""", unsafe_allow_html=True)
+    from ads_posting_status_style import install
+    install(st)
 
     def notification():
         polling_enabled = not (receipt or polling_paused or st.session_state.get('posting_finished_job') == identity)
@@ -241,6 +234,8 @@ def render_current(*, compact=False):
                 label = f'Meta Ads · Posting {done}/{total}' if total else 'Meta Ads · Posting…'
             with st.container(key='posting_notification'):
                 with st.expander(label, expanded=False):
+                    state_class = 'posting-state-success' if verified_success(latest) else 'posting-state-working'
+                    st.markdown(f'<span class="{state_class}" data-posting-job="{identity}" hidden></span>', unsafe_allow_html=True)
                     panel_contents()
         panel()
     notification()

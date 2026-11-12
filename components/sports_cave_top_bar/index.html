@@ -90,7 +90,7 @@
       color: #fff;
       display: grid;
       font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-      grid-template-columns: var(--sc-sidebar-width) auto auto minmax(0, 1fr) auto;
+      grid-template-columns: var(--sc-sidebar-width) auto auto minmax(0, 1fr) auto auto;
       height: var(--sc-topbar-height);
       left: 0;
       position: fixed;
@@ -196,6 +196,11 @@
       position: relative;
       width: 100%;
     }
+    #sc-os-posting-slot {width:250px;height:40px;margin-right:8px;}
+    #sc-os-posting-slot[hidden] {display:none;}
+    #${ROOT_ID}.sc-has-posting .sc-os-topbar-search-wrap {justify-self:start;max-width:620px;}
+    @media(max-width:1100px) {#sc-os-posting-slot {width:180px;}}
+    @media(max-width:820px) {#sc-os-posting-slot {width:100px;margin-right:2px;}}
     .sc-os-topbar-search-shell {
       align-items: center;
       background: #252525;
@@ -741,7 +746,7 @@
     }
     .sc-os-topbar-action svg { height: 17px !important; width: 17px !important; }
     @media (max-width: 960px) {
-      #${ROOT_ID} { grid-template-columns: var(--sc-sidebar-width) auto auto minmax(0, 1fr) auto; }
+      #${ROOT_ID} { grid-template-columns: var(--sc-sidebar-width) auto auto minmax(0, 1fr) auto auto; }
 
       .sc-os-topbar-search-wrap { padding-left: 12px; padding-right: 12px; }
       #sc-os-search-results { left: 12px; right: 12px; }
@@ -765,7 +770,7 @@
     @media (max-width: 820px), (max-width: 940px) and (max-height: 520px) {
       :root { --sc-topbar-height: 56px; }
       #${ROOT_ID} {
-        grid-template-columns: minmax(0, 1fr) auto auto auto;
+        grid-template-columns: minmax(0, 1fr) auto auto auto auto;
         height: var(--sc-topbar-height);
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
@@ -862,6 +867,7 @@
         min-width: 44px; min-height: 44px;
       }
       #sc-os-files { grid-column: 2; grid-row: 2; justify-self: end; }
+      #sc-os-posting-slot {grid-column:2;grid-row:2;justify-self:start;width:120px;}
     }
     @media (max-width: 430px) {
       #sc-os-profile { display: none; }
@@ -904,6 +910,7 @@
       </div>
       <div id="sc-os-search-results" class="sc-os-topbar-panel" role="listbox" aria-label="Global search results" hidden></div>
     </div>
+    <div id="sc-os-posting-slot" aria-hidden="true" hidden></div>
     <div class="sc-os-topbar-actions">
       <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}</button>
       <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>

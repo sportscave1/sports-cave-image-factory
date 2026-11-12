@@ -76,6 +76,8 @@ def save_and_queue(ads, result, workflow, user, progress_callback=None, *, navig
 
 def render(ads, result, workflow, *, source_matches=True, quality_issues=None):
     st = ads.st
+    from ads_posting_status_style import install
+    install(st)
     issues = list(quality_issues or [])
     refresh = result.get('workflow_mode') == ads.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
     if not source_matches:
@@ -94,7 +96,15 @@ def render(ads, result, workflow, *, source_matches=True, quality_issues=None):
     if ads.google_ads.platform_for(result) != 'meta':
         issues.append(ads.google_ads.POSTING_HELP)
     import ads_direct_post as direct
-    settings, targeting_issues = direct.render_settings(result, workflow)
+    # Mount the action before potentially slow Meta reference reads. Keep it in
+    # the same position, below the selectors, when those reads finish.
+    settings_area = st.container()
+    action_area = st.empty()
+    action_area.button('Post now', type='primary', use_container_width=True,
+                       disabled=True, key=f"ads-post-loading::{result['context_key']}",
+                       help='Loading posting settings…')
+    with settings_area:
+        settings, targeting_issues = direct.render_settings(result, workflow)
     issues += targeting_issues
     if not ads.os_accounts.can_access_page(ads.current_ads_user(), 'Posting'):
         issues.append('Posting access is required to submit ads.')
@@ -104,14 +114,15 @@ def render(ads, result, workflow, *, source_matches=True, quality_issues=None):
         issues.append('Finish or review the current posting job before submitting another package.')
     if issues:
         st.caption(' · '.join(dict.fromkeys(issues)))
-    clicked = st.button('Post now', type='primary', use_container_width=True,
+    clicked = action_area.button('Post now', type='primary', use_container_width=True,
                         disabled=bool(issues) or bool(workflow.get('saving')),
                         key=f"ads-post-now::{result['context_key']}")
     if not clicked:
         return
     workflow['saving'] = True
     st.session_state[ads._ads_image_state_key()] = workflow
-    progress = st.progress(0, text='Saving ad package…')
+    with st.container(key='ads_save_progress'):
+        progress = st.progress(0, text='Saving ad package…')
     def update(index, total, label, uploaded, size):
         fraction = min(1, uploaded / size) if size else 1
         progress.progress(min(1.0, ((index - 1) + fraction) / max(total, 1)), text=f'Saving {label}')

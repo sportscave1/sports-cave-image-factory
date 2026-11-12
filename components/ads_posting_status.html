@@ -1,0 +1,73 @@
+<script>
+(() => {
+  const w = window.parent, d = w.document;
+  if (w.SportsCavePostingStatus) { w.SportsCavePostingStatus.refresh(); return; }
+  const style = d.createElement('style');
+  style.id = 'sc-posting-status-style';
+  style.textContent = `
+    .st-key-ads_save_progress [role="progressbar"] {--sc-progress-colour:#D4A54C;}
+    .st-key-ads_save_progress [role="progressbar"] > div > div,
+    .st-key-ads_save_progress [role="progressbar"] > div[style*="width"],
+    .st-key-posting_notification [role="progressbar"] > div > div,
+    .st-key-posting_notification [role="progressbar"] > div[style*="width"] {background:#D4A54C !important;}
+    .st-key-posting_notification {position:fixed;top:80px;right:16px;width:min(340px,calc(100vw - 32px));
+      z-index:1000000;background:#fff;border:1px solid #b58b38;border-radius:8px;box-shadow:0 4px 16px #14223818;}
+    .sc-posting-docked .st-key-posting_notification {left:var(--sc-posting-left);top:var(--sc-posting-top);
+      right:auto;width:var(--sc-posting-width);box-shadow:none;border:0;background:transparent;}
+    .st-key-posting_notification [data-testid="stExpander"] details {border:0;}
+    .st-key-posting_notification summary {background:#D4A54C !important;color:#17130b !important;border-radius:7px;min-height:40px;}
+    .st-key-posting_notification summary * {color:inherit !important;}
+    .st-key-posting_notification summary p {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;}
+    .st-key-posting_notification:has(.posting-state-success) summary {background:#168342 !important;color:#fff !important;}
+    .st-key-posting_notification:has(.posting-state-success) [role="progressbar"] > div > div,
+    .st-key-posting_notification:has(.posting-state-success) [role="progressbar"] > div[style*="width"] {background:#168342 !important;}
+    .st-key-posting_notification [data-testid="stExpanderDetails"] {background:#fff;color:#171717;max-height:50vh;overflow:auto;
+      border:1px solid #d6dce5;border-radius:8px;box-shadow:0 4px 16px #14223818;}
+    .sc-posting-docked .st-key-posting_notification [data-testid="stExpanderDetails"] {position:fixed;top:calc(var(--sc-posting-top) + 45px);
+      right:max(12px,calc(100vw - var(--sc-posting-left) - var(--sc-posting-width)));width:min(340px,calc(100vw - 24px));}
+    .st-key-posting_notification h3 {font-size:1rem;}
+    .st-key-posting_notification .posting-success {color:#168342;font-weight:600;}
+    .sc-posting-flight {position:fixed;background:#D4A54C;border-radius:8px;z-index:1000003;pointer-events:none;}
+    @media(prefers-reduced-motion:reduce) {.sc-posting-flight {display:none;}}
+  `;
+  d.head.appendChild(style);
+  let frame = 0, observedSlot = null, origin = null;
+  const animated = new Set();
+  const resize = new w.ResizeObserver(() => schedule());
+  function setVar(name, value) { if (d.documentElement.style.getPropertyValue(name) !== value) d.documentElement.style.setProperty(name, value); }
+  function update() {
+    frame = 0;
+    const saving = d.querySelector('.st-key-ads_save_progress [role="progressbar"]');
+    if (saving) { const r=saving.getBoundingClientRect(); if(r.width && r.height) origin={x:r.x,y:r.y,width:r.width,height:r.height,at:Date.now()}; }
+    const status = d.querySelector('.st-key-posting_notification');
+    const root = d.getElementById('sports-cave-os-top-bar'), slot = d.getElementById('sc-os-posting-slot');
+    if (!slot || !root) return;
+    const active = !!status;
+    if (slot.hidden === active) slot.hidden = !active;
+    root.classList.toggle('sc-has-posting', active);
+    d.documentElement.classList.toggle('sc-posting-docked', active);
+    if (!active) return;
+    if (observedSlot !== slot) { resize.disconnect(); resize.observe(slot); resize.observe(root); observedSlot=slot; }
+    const r=slot.getBoundingClientRect();
+    setVar('--sc-posting-left',r.x+'px'); setVar('--sc-posting-top',r.y+'px'); setVar('--sc-posting-width',r.width+'px');
+    const identity=status.querySelector('[data-posting-job]')?.dataset.postingJob;
+    if (!identity || animated.has(identity)) return;
+    animated.add(identity);
+    if (!origin || Date.now()-origin.at>120000 || w.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const ghost=d.createElement('div');ghost.className='sc-posting-flight';ghost.setAttribute('aria-hidden','true');
+    Object.assign(ghost.style,{left:r.x+'px',top:r.y+'px',width:r.width+'px',height:r.height+'px'});
+    d.body.appendChild(ghost);
+    const animation=ghost.animate([
+      {transform:`translate(${origin.x-r.x}px,${origin.y-r.y}px) scale(${origin.width/r.width},${Math.max(origin.height,6)/r.height})`,opacity:.65},
+      {transform:'translate(0,0) scale(1,1)',opacity:0}
+    ],{duration:440,easing:'cubic-bezier(.22,.8,.3,1)'});
+    ghost.style.transformOrigin='top left';animation.onfinish=()=>ghost.remove();
+    origin=null;
+  }
+  function schedule() { if(!frame) frame=w.requestAnimationFrame(update); }
+  new w.MutationObserver(schedule).observe(d.body,{childList:true,subtree:true});
+  w.addEventListener('resize',schedule);
+  w.SportsCavePostingStatus={refresh:schedule};
+  schedule();
+})();
+</script>

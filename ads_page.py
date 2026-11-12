@@ -12411,14 +12411,6 @@ def _render_instant_experience_concepts(result, workflow):
                                 widget_args.pop("value", None)
                                 widget_args["disabled"] = True
                             variation[field_key] = st.text_area(("Description" if _is_ie_copy_v2(result) and field_key == "primary_text" else "Primary Text / Description" if field_key == "primary_text" and _refresh_copy_count(result) == 1 else field_label), **widget_args)
-                            if field_key == "primary_text":
-                                render_prompt_copy_button(
-                                    _preserve_multiline_text(variation[field_key]),
-                                    key=f"{widget_key}::copy",
-                                    label="Copy Description",
-                                    success_label="Description copied",
-                                    compact=compact_refresh,
-                                )
                     variations[index - 1] = variation
                 concept_notes[concept_id] = variations
                 complete_count = sum(
@@ -14200,12 +14192,19 @@ def _submit_ads_review(result, workflow):
 
 
 def _render_final_ad_review(result, workflow=None):
-    render_prompt_copy_button(
-        build_final_ad_review_copy_prompt(result, workflow),
-        f"ads-final-review-prompt::{result['context_key']}",
-        label="Copy Final Review Prompt",
-        success_label="Final review prompt copied",
-    )
+    """Optional copy assistance must never gate the save/post controls below it."""
+    st.caption("Optional: review or improve the copy before posting. You can post without copying this prompt.")
+    try:
+        prompt = build_final_ad_review_copy_prompt(result, workflow)
+        render_prompt_copy_button(
+            prompt,
+            f"ads-final-review-prompt::{result['context_key']}",
+            label="Copy Final Review Prompt",
+            success_label="Final review prompt copied",
+        )
+    except Exception:
+        logging.exception("Optional Ads copy review prompt could not be displayed")
+        st.caption("The optional review prompt is unavailable. You can still use Post now below.")
 
 
 def render_product_artwork_reference(selection, product_url, *, creative_refresh=False):

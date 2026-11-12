@@ -109,10 +109,11 @@ class AutomaticPostTests(TestCase):
 
     def test_render_has_one_full_width_action_and_keeps_validation(self):
         r,w=completed_ad('Instant Experience')
-        fake=SimpleNamespace(session_state={},query_params={},button=mock.Mock(return_value=False),caption=mock.Mock())
+        fake=SimpleNamespace(session_state={},query_params={},button=mock.Mock(return_value=False),caption=mock.Mock(),container=mock.MagicMock())
+        fake.empty=mock.Mock(return_value=fake)
         with mock.patch.object(ads,'st',fake), mock.patch('ads_direct_post.render_settings',return_value=({},[])), mock.patch.object(ads.os_accounts,'can_access_page',return_value=True), mock.patch.object(ads,'instant_experience_package_ready',return_value=True), mock.patch.object(auto,'save_and_queue') as save:
             auto.render(ads,r,w)
-            fake.button.assert_called_once()
+            self.assertEqual(fake.button.call_count,2)
             self.assertEqual(fake.button.call_args.args,('Post now',))
             self.assertTrue(fake.button.call_args.kwargs['use_container_width'])
             self.assertFalse(fake.button.call_args.kwargs['disabled'])

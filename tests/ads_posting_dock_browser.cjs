@@ -1,0 +1,55 @@
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({channel:'chrome',headless:true});
+ try {
+  const reduced=process.env.POSTING_REDUCED_MOTION==='1';
+  const page=await browser.newPage({viewport:{width:1600,height:950},reducedMotion:reduced?'reduce':'no-preference'});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.route('**/*',route=>{
+   const url=new URL(route.request().url());
+   if(url.hostname!=='127.0.0.1')return route.abort();
+   if(url.pathname.startsWith('/api/'))return route.fulfill({contentType:'application/json',body:'{}'});
+   return route.continue();
+  });
+  await page.goto(process.env.POSTING_DOCK_URL||'http://127.0.0.1:8896');
+  await page.getByRole('button',{name:'Simulate saving',exact:true}).waitFor();
+  await page.evaluate(()=>{window.flightCount=0;const original=Element.prototype.animate;Element.prototype.animate=function(...args){if(this.classList.contains('sc-posting-flight'))window.flightCount++;return original.apply(this,args);};});
+  await page.getByRole('button',{name:'Simulate saving',exact:true}).click();
+  const bar=page.locator('.st-key-ads_save_progress [role="progressbar"]');
+  await bar.waitFor();
+  const colours=await bar.evaluate(el=>[el,...el.querySelectorAll('*')].map(x=>getComputedStyle(x).backgroundColor));
+  assert.ok(colours.includes('rgb(212, 165, 76)'),JSON.stringify(colours));
+  const before=await page.locator('.sc-os-topbar-search-shell').boundingBox();
+  await page.waitForTimeout(150);
+  await page.getByRole('button',{name:'Hand off to posting',exact:true}).click();
+  const status=page.locator('.st-key-posting_notification'),summary=status.locator('summary');
+  await summary.waitFor();await page.waitForTimeout(600);
+  const header=await page.locator('#sports-cave-os-top-bar').boundingBox();
+  const chip=await summary.boundingBox();
+  assert.ok(chip.y>=header.y && chip.y+chip.height<=header.y+header.height+2,JSON.stringify({chip,header}));
+  assert.equal(await summary.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(212, 165, 76)');
+  const after=await page.locator('.sc-os-topbar-search-shell').boundingBox();
+  assert.ok(after.x<=before.x && after.x+after.width<=chip.x,JSON.stringify({before,after,chip}));
+  assert.equal(await page.evaluate(()=>window.flightCount),reduced?0:1);
+  await page.getByRole('textbox',{name:'Continue browsing'}).fill('Still usable');
+  await page.screenshot({path:process.env.TEMP+'/posting-dock-working.png'});
+  await page.getByRole('button',{name:'Verify success',exact:true}).click();
+  await summary.filter({hasText:'Ads created'}).waitFor();
+  await page.waitForTimeout(200);
+  assert.equal(await summary.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(22, 131, 66)');
+  await page.screenshot({path:process.env.TEMP+'/posting-dock-success.png'});
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(300);
+  const mobile=await summary.boundingBox(),mobileHeader=await page.locator('#sports-cave-os-top-bar').boundingBox();
+  assert.ok(mobile.y+mobile.height<=mobileHeader.height+2,JSON.stringify({mobile,mobileHeader}));
+  assert.ok(mobile.x>=0 && mobile.x+mobile.width<=390,JSON.stringify(mobile));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:process.env.TEMP+'/posting-dock-mobile.png'});
+  await summary.click();await status.getByRole('button',{name:'Dismiss',exact:true}).click();
+  await status.waitFor({state:'hidden'});
+  assert.equal(await page.locator('#sc-os-posting-slot').isVisible(),false);
+  assert.equal(await page.evaluate(()=>window.flightCount),reduced?0:1);
+  assert.deepEqual(errors,[]);
+  console.log('Gold saving/working, green success, header docking, one-shot animation, browsing and mobile passed.');
+ } finally {await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1});
