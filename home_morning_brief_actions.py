@@ -48,7 +48,17 @@ def _prompt(title, story):
         "exact pixel dimensions, orientation, safe margins, and limited-edition badge. Preserve the "
         "original limited-edition badge and edition-number layer.\n\n"
         "Step 3. Generate this design now as a 10/10 Sports Cave–styled, realistic collector edition "
-        "that is highly appealing and could become our next top seller."
+        "that is highly appealing and could become our next top seller.\n\n"
+        "Step 4. Find a verified example of the featured person’s signature online. Add it as a "
+        "separate layer where it fits naturally with the artwork and typography. Make it neat, "
+        "premium, and balanced. Skip this step if you can’t verify the signature.\n\n"
+        "Step 5. Inspect the updated artwork against the original photo. Check that the person "
+        "looks realistic and that their face, body, and uniform are free of unintended cropping, "
+        "blending, or AI distortion. If you find a problem, regenerate or correct the design "
+        "and repeat the check.\n\n"
+        "Step 6. Place the final artwork on a copy of designs-canvas.psd. Name the PSD using "
+        "the intended online product title and upload it to Dropbox at /Sportscave Team Folder/"
+        "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/."
     )
 
 
