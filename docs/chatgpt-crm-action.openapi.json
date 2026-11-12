@@ -1,0 +1,77 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sports Cave OS CRM",
+    "version": "1.0.0",
+    "description": "Read aggregate Sports Cave OS CRM campaign status."
+  },
+  "servers": [
+    {
+      "url": "https://sports-cave-image-factory.onrender.com"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "SportsCaveReadKey": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "paths": {
+    "/api/chatgpt/crm/campaign-summary": {
+      "get": {
+        "operationId": "getCrmCampaignSummary",
+        "summary": "Get current CRM campaign counts and whether delivery activity was detected",
+        "security": [
+          {
+            "SportsCaveReadKey": []
+          }
+        ],
+        "x-openai-isConsequential": false,
+        "responses": {
+          "200": {
+            "description": "Aggregate campaign state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "working_campaigns",
+                    "sent_campaigns",
+                    "delivery_activity_detected",
+                    "as_of_utc"
+                  ],
+                  "properties": {
+                    "working_campaigns": {
+                      "type": "integer"
+                    },
+                    "sent_campaigns": {
+                      "type": "integer"
+                    },
+                    "delivery_activity_detected": {
+                      "type": "boolean"
+                    },
+                    "as_of_utc": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credential missing or invalid"
+          },
+          "404": {
+            "description": "Connector disabled"
+          },
+          "503": {
+            "description": "CRM summary temporarily unavailable"
+          }
+        }
+      }
+    }
+  }
+}

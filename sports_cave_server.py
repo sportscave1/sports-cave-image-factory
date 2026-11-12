@@ -7,6 +7,7 @@ from streamlit.web.server.starlette import App
 import app_branding
 import collector_vault
 from collector_vault_api import COLLECTOR_VAULT_ROUTES
+from chatgpt_crm_api import ROUTES as CHATGPT_CRM_ROUTES
 from daily_planner import DAILY_PLANNER_ROUTE_HANDLERS
 from files_upload_api import FILES_UPLOAD_ROUTES
 import google_seo
@@ -52,6 +53,7 @@ routes = [
         *TASK_RECORDER_ROUTES,
 
         *COLLECTOR_VAULT_ROUTES,
+        *CHATGPT_CRM_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
         *GOOGLE_SEO_ROUTE_HANDLERS,
