@@ -7183,6 +7183,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Reviews": ":material/reviews:",
     "Image Protection": ":material/shield:",
     "Reporting": ":material/bar_chart:",
+    "Accounting": ":material/calculate:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
@@ -7558,6 +7559,8 @@ def render_sidebar():
                 reporting_daily_allowed=reporting_daily_allowed,
                 reporting_weekly_allowed=reporting_weekly_allowed,
             )
+
+    _sidebar_route_button("Accounting", current_page, allowed_routes)
 
     if (
         current_page not in MENU_OPTIONS
@@ -13819,7 +13822,7 @@ def render_selected_page(current_page):
     # headings/top spacing. Keep newer module-specific workspaces independent.
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
-        "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
+        "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access", "Accounting",
         "Developer Studio", "Developer", "Worker Health", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
@@ -13860,6 +13863,9 @@ def render_selected_page(current_page):
         render_accounts_access_page()
     elif current_page == "Reporting":
         get_reporting_page().render_page(current_os_user())
+    elif current_page == "Accounting":
+        from accounting_page import render_page
+        render_page()
     elif current_page == os_accounts.DAILY_PLANNER_ROUTE:
         set_current_page("Dashboard", source="daily-planner-popup")
         st.rerun()

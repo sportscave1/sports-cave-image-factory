@@ -187,6 +187,12 @@ PAGE_REGISTRY = (
         "navigation_child": True,
     },
     {
+        "key": "accounting",
+        "route": "Accounting",
+        "label": "Accounting",
+        "worker_assignable": True,
+    },
+    {
         "key": "accounts_access",
         "route": "Accounts & Access",
         "label": "Settings",
