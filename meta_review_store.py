@@ -4,6 +4,7 @@ from datetime import date
 import hashlib
 import json
 import time
+from meta_reporting_contract import validate_account
 
 import supabase_backend as backend
 from meta_review_analysis import normalize_metrics
@@ -57,7 +58,7 @@ def log_start(account_id, range_label):
 
 def log_failure(log_id, error):
     with cursor(True) as cur:
-        cur.execute("UPDATE ads_sync_logs SET status='error',finished_at=now(),error_message=%s WHERE id=%s",
+        cur.execute("UPDATE ads_sync_logs SET status='error',finished_at=now(),error_message=%s WHERE id=%s AND status IS DISTINCT FROM 'success'",
                     (error, log_id))
 
 
@@ -91,6 +92,9 @@ def _upsert(cur, table, values, keys):
     placeholders = ['%s::jsonb' if isinstance(values[k], (dict, list)) else '%s' for k in fields]
     args = [json.dumps(values[k], default=str) if isinstance(values[k], (dict, list)) else values[k] for k in fields]
     updates = ','.join(f'{key}=EXCLUDED.{key}' for key in fields if key not in keys)
+    if table == 'meta_ad_accounts':
+        updates = updates.replace('raw=EXCLUDED.raw',
+            "raw=COALESCE(meta_ad_accounts.raw, '{}'::jsonb) || jsonb_strip_nulls(EXCLUDED.raw)")
     if table != 'meta_review_asset_daily':
         updates += ',updated_at=now(),synced_at=now()'
     else:
@@ -105,6 +109,21 @@ def _upsert(cur, table, values, keys):
 def save_sync(payload, log_id):
     """One transaction for base reporting, asset rows and successful sync marker."""
     aid = payload['account_id']
+    reporting = payload.get('reporting')
+    if reporting:
+        validate_account(payload['account'], aid)
+        from datetime import date
+        first, last = date.fromisoformat(reporting['since']), date.fromisoformat(reporting['until'])
+        if not reporting.get('complete') or last < first or (last-first).days >= 31:
+            raise ValueError('Only complete bounded daily reporting may replace stored rows.')
+        seen = set()
+        for row in payload['daily']:
+            key = (str(row.get('date_start')), str(row.get('ad_id')))
+            if (not row.get('ad_id') or str(row.get('account_id')) != str(aid)
+                    or row.get('date_start') != row.get('date_stop')
+                    or not reporting['since'] <= key[0] <= reporting['until'] or key in seen):
+                raise ValueError('Invalid or duplicate daily reporting row; history was retained.')
+            seen.add(key)
     with cursor(True) as cur:
         cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', ('meta-review:' + aid,))
         cur.execute("SELECT EXISTS(SELECT 1 FROM ads_sync_logs newer JOIN ads_sync_logs current ON current.id=%s WHERE newer.source='meta_review' AND newer.status='success' AND newer.context->>'account_id'=%s AND newer.started_at>current.started_at) AS superseded", (log_id,aid))
@@ -112,8 +131,26 @@ def save_sync(payload, log_id):
             raise ValueError('A newer Meta sync already completed. Refresh history instead of overwriting it with this older run.')
         batch=WriteBatch(cur)
         account = payload['account']
-        _upsert(batch, 'meta_ad_accounts', {'account_id': aid, 'name': account.get('name'), 'currency': account.get('currency'),
-            'timezone_name': account.get('timezone_name'), 'raw': account}, ('account_id',))
+        if str(account.get('account_id') or account.get('id') or '').removeprefix('act_') != str(aid):
+            raise ValueError('Missing or mismatched Meta account; existing metadata retained.')
+        account_raw = {key: value for key, value in account.items()
+                       if key not in ('currency', 'timezone_name') or (isinstance(value, str) and value.strip())}
+        account_values = {'account_id': aid, 'raw': account_raw}
+        account_values.update({key: account[key] for key in ('name', 'currency', 'timezone_name')
+                               if account.get(key) is not None and str(account[key]).strip()})
+        _upsert(batch, 'meta_ad_accounts', account_values, ('account_id',))
+        if reporting:
+            cur.execute("""SELECT 1 FROM meta_ad_insights_daily WHERE account_id<>%s
+                AND date BETWEEN %s AND %s AND ad_id=ANY(%s)
+                AND COALESCE(country,'')='' AND COALESCE(placement,'')='' LIMIT 1""",
+                (aid, reporting['since'], reporting['until'], [str(row['ad_id']) for row in payload['daily']]))
+            if cur.fetchone():
+                raise ValueError('A returned ad identity belongs to another stored account; history was retained.')
+            # Replace only this fully fetched base-grain window. Failures roll back
+            # deletion, inserts and the success marker together; breakdowns survive.
+            cur.execute("""DELETE FROM meta_ad_insights_daily WHERE account_id=%s
+                AND date BETWEEN %s AND %s AND COALESCE(country,'')=''
+                AND COALESCE(placement,'')=''""", (aid, reporting['since'], reporting['until']))
         for plural, singular in (('campaigns', 'campaign'), ('adsets', 'adset'), ('ads', 'ad')):
             for row in payload[plural]:
                 values = {singular+'_id': str(row['id']), 'account_id': aid, singular+'_name': row.get('name'),
@@ -144,6 +181,8 @@ def save_sync(payload, log_id):
             values.update(date=raw['date_start'], account_id=aid, country='', placement='',
                           raw={**raw, '_review_creative': (admap.get(str(raw['ad_id'])) or {}).get('creative'),
                                '_review_note': 'Creative observed at sync; Meta does not provide historical serving combinations.'})
+            if reporting:
+                values['raw'] = {**raw, '_reporting': reporting}
             for field in ('spend','impressions','clicks','inline_link_clicks','reach','frequency','cpc','cpm','purchases','purchase_value','roas','add_to_cart'):
                 values[field] = m.get(field)
             values.update(ctr=m['click_ctr'], cost_per_purchase=m['cpa'], initiate_checkout=m['checkout'])
@@ -156,7 +195,8 @@ def save_sync(payload, log_id):
         counts['accounts']=1
         cur.execute("UPDATE ads_sync_logs SET finished_at=now(),status='success',rows_fetched=%s,rows_upserted=%s,context=%s::jsonb WHERE id=%s",
                     (sum(counts.values()), sum(counts.values()), json.dumps({'account_id': aid, 'counts': counts,
-                     'warnings': payload['warnings'], 'api_version': payload['api_version']}), log_id))
+                     'warnings': payload['warnings'], 'api_version': payload['api_version'],
+                     'reporting': reporting}), log_id))
     return counts
 
 

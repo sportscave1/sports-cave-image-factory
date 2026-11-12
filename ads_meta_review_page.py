@@ -459,7 +459,41 @@ def render_creative_selection(ads,history,context):
                 st.rerun()
 
 
-def render_page():
+def refresh_saved_performance(authorize, days):
+    """Explicit local reporting write; recheck current OS access before any I/O."""
+    import os_accounts
+    if not callable(authorize) or not os_accounts.can_access_page(authorize(), 'ads_meta_review'):
+        raise PermissionError('Current Meta Review access is required.')
+    if type(days) is not int or not 1 <= days <= 31:
+        raise ValueError('Choose 1–31 completed account-calendar days.')
+    return sync_service.sync_reporting(days=days)
+
+
+def render_saved_performance(config, authorize):
+    if authorize is None:
+        return
+    with st.expander('Saved daily performance', expanded=False):
+        st.caption('Explicitly refresh OS reporting data from Meta. Uses completed days in the ad account timezone; today is excluded. The live campaign report has its own refresh.')
+        days = st.number_input('Completed account days', min_value=1, max_value=31, value=1, step=1)
+        if st.button('Sync saved performance', disabled=not config.get('configured')):
+            try:
+                with st.spinner('Saving completed daily performance…'):
+                    result = refresh_saved_performance(authorize, days)
+                st.session_state['meta-review-saved-result'] = (live.scope(config), result)
+            except PermissionError:
+                st.error('Current Meta Review access is required. Sign in again or contact an administrator.')
+            except Exception as error:
+                st.error(sync_service.safe_error(error))
+        saved = st.session_state.get('meta-review-saved-result')
+        if saved and saved[0] == live.scope(config):
+            report = saved[1]['reporting']
+            st.success(f"Last successful save: {report['since']} — {report['until']} · {report['timezone']} · {report['currency']}")
+            st.caption(f"Captured {report['captured_at']} · Meta-attributed revenue, impression reporting time. {report['attribution_windows']}")
+            for warning in saved[1].get('warnings', []):
+                st.warning(warning)
+
+
+def render_page(authorize=None):
     st.markdown('<span class="meta-review-page-marker"></span>',unsafe_allow_html=True)
     st.title('Meta Review')
     st.markdown("""<style>
@@ -495,6 +529,7 @@ def render_page():
     div[role="dialog"]:has(.meta-review-modal-marker) [data-testid="stCaptionContainer"] p { margin-bottom:.15rem; }
     </style>""",unsafe_allow_html=True)
     config=meta.get_meta_config()
+    render_saved_performance(config, authorize)
     account_scope=live.scope(config)
     cache=st.session_state.setdefault('meta-review-live-cache',{})
     if st.session_state.get('meta-review-live-scope')!=account_scope:

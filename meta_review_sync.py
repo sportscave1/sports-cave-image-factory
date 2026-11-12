@@ -7,6 +7,9 @@ from urllib.parse import urlparse
 import meta_ads_client as meta
 import meta_review_retry as retry
 import meta_review_store as store
+from datetime import datetime, timezone
+from meta_reporting_contract import (REPORTABLE_CAMPAIGN_STATUSES, REPORTABLE_ADSET_STATUSES,
+                                     REPORTABLE_AD_STATUSES, reporting_window, validate_account)
 
 LOGGER=logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ def safe_error(error):
         return meta.sanitize_meta_error(str(error))[:500]
     if isinstance(error, (TimeoutError, ValueError)):
         return str(error)[:250]
-    return 'Reporting storage is unavailable or its migration is missing. Check server/database configuration; prior history has been retained.'
+    return 'Reporting storage is unavailable or save completion could not be confirmed. Check sync history and server/database configuration before retrying.'
 
 
 class Reader:
@@ -43,6 +46,8 @@ class Reader:
             payload = self.get(path, params)
             if not isinstance(payload, dict) or not isinstance(payload.get('data'), list):
                 raise ValueError('Meta returned malformed reporting data. History was retained.')
+            if any(not isinstance(row, dict) for row in payload['data']):
+                raise ValueError('Meta returned malformed reporting rows. History was retained.')
             rows.extend(payload['data'])
             paging = payload.get('paging') or {}
             if not paging.get('next'):
@@ -59,6 +64,61 @@ def optional_error(error):
     return isinstance(error, meta.MetaAdsApiError) and str(error.error_code) in ('100', '3')
 
 
+def collect_reporting(since=None, until=None, *, days=None, config=None, reader=None, at=None):
+    """GET-only preparation; no log, schema, cache or database writes."""
+    config = config or meta.get_meta_config()
+    if not config.get('configured'):
+        raise ValueError('Configure the existing Meta account connection before refreshing.')
+    reader = reader or Reader(config)
+    aid = str(config['ad_account_id']).removeprefix('act_')
+    account = validate_account(reader.get(config['ad_account_id'],
+        {'fields': 'account_id,name,currency,timezone_name'}), aid)
+    since, until = reporting_window(account, since, until, days=days, at=at)
+    params = {'fields': CORE, 'level': 'ad', 'time_increment': 1,
+              'time_range': json.dumps({'since': since, 'until': until}),
+              'use_unified_attribution_setting': 'true', 'action_report_time': 'impression'}
+    daily = reader.pages(config['ad_account_id']+'/insights', params)
+    unique = {}
+    for row in daily:
+        if (str(row.get('account_id')) != aid or not row.get('ad_id')
+                or row.get('date_start') != row.get('date_stop')
+                or not since <= str(row.get('date_start', '')) <= until):
+            raise ValueError('Meta returned a different account, grain or date; history was retained.')
+        key = (row['date_start'], str(row['ad_id']))
+        if key in unique and unique[key] != row:
+            raise ValueError('Meta returned conflicting duplicate daily rows; history was retained.')
+        unique[key] = row
+    captured = datetime.now(timezone.utc).isoformat()
+    return {'account_id': aid, 'account': account, 'campaigns': [], 'adsets': [], 'ads': [],
+            'daily': list(unique.values()), 'assets': [], 'warnings': [],
+            'api_version': config['api_version'],
+            'reporting': {'since': since, 'until': until, 'timezone': account['timezone_name'],
+                          'currency': account['currency'], 'level': 'ad', 'time_increment': 1,
+                          'complete': True, 'captured_at': captured, 'api_version': config['api_version'],
+                          'use_unified_attribution_setting': True, 'action_report_time': 'impression',
+                          'attribution_windows': 'Per-adset settings; exact windows not returned by this query.'}}
+
+
+def sync_reporting(since=None, until=None, *, days=None, config=None, reader=None):
+    """Explicit manual refresh into the existing Daily Brief source tables."""
+    config = config or meta.get_meta_config()
+    if not config.get('configured'):
+        raise ValueError('Configure the existing Meta account connection before refreshing.')
+    aid = str(config['ad_account_id']).removeprefix('act_')
+    log_id = store.log_start(aid, f'Completed daily performance: {since or days or 1} / {until or ""}')
+    try:
+        payload = collect_reporting(since, until, days=days, config=config, reader=reader)
+        counts = store.save_sync(payload, log_id)
+        return {'counts': counts, 'warnings': payload['warnings'], 'reporting': payload['reporting']}
+    except Exception as error:
+        message = safe_error(error)
+        try:
+            store.log_failure(log_id, message)
+        except Exception:
+            LOGGER.error('Meta reporting failure log unavailable sync_id=%s', log_id)
+        raise RuntimeError(message) from None
+
+
 def sync(since=None, until=None, *, lifetime=False, assets=True, progress=lambda message: None, reader=None):
     config = meta.get_meta_config()
     if not config['configured']:
@@ -71,7 +131,7 @@ def sync(since=None, until=None, *, lifetime=False, assets=True, progress=lambda
         progress('Reading account and campaign history…')
         warnings = []
         account = reader.get(config['ad_account_id'], {'fields': 'account_id,name,currency,timezone_name'})
-        statuses = json.dumps(['ACTIVE','PAUSED','ARCHIVED','DELETED'])
+        statuses = json.dumps(REPORTABLE_CAMPAIGN_STATUSES)
         campaigns = reader.pages(config['ad_account_id']+'/campaigns', {'fields': 'id,name,status,effective_status,objective,created_time,updated_time', 'effective_status':statuses})
         try:
             completed = reader.pages(config['ad_account_id']+'/campaigns', {'fields':'id,name,status,effective_status,objective,created_time,updated_time','is_completed':'true'})
@@ -82,15 +142,15 @@ def sync(since=None, until=None, *, lifetime=False, assets=True, progress=lambda
         except meta.MetaAdsApiError as error:
             if not optional_error(error): raise
             warnings.append('Completed-campaign filter unavailable; accessible archived/paused history retained.')
-        adsets = reader.pages(config['ad_account_id']+'/adsets', {'fields': 'id,name,campaign_id,status,effective_status,targeting,created_time,updated_time', 'effective_status':json.dumps(['ACTIVE','PAUSED','ARCHIVED','DELETED','CAMPAIGN_PAUSED','IN_PROCESS','WITH_ISSUES'])})
+        adsets = reader.pages(config['ad_account_id']+'/adsets', {'fields': 'id,name,campaign_id,status,effective_status,targeting,created_time,updated_time', 'effective_status':json.dumps(REPORTABLE_ADSET_STATUSES)})
         progress('Reading actual ads and creative assets…')
         base_ads = 'id,name,campaign_id,adset_id,status,effective_status,created_time,updated_time'
         try:
-            ads = reader.pages(config['ad_account_id']+'/ads', {'fields': base_ads+',creative{'+CREATIVE+'}', 'effective_status':json.dumps(['ACTIVE','PAUSED','ARCHIVED','DELETED','CAMPAIGN_PAUSED','ADSET_PAUSED','DISAPPROVED','PENDING_REVIEW','IN_PROCESS','WITH_ISSUES'])})
+            ads = reader.pages(config['ad_account_id']+'/ads', {'fields': base_ads+',creative{'+CREATIVE+'}', 'effective_status':json.dumps(REPORTABLE_AD_STATUSES)})
         except meta.MetaAdsApiError as error:
             if not optional_error(error):
                 raise
-            ads = reader.pages(config['ad_account_id']+'/ads', {'fields': base_ads+',creative{id,name,thumbnail_url,object_story_spec,asset_feed_spec}', 'effective_status':json.dumps(['ACTIVE','PAUSED','ARCHIVED','DELETED','CAMPAIGN_PAUSED','ADSET_PAUSED'])})
+            ads = reader.pages(config['ad_account_id']+'/ads', {'fields': base_ads+',creative{id,name,thumbnail_url,object_story_spec,asset_feed_spec}', 'effective_status':json.dumps(REPORTABLE_AD_STATUSES)})
             warnings.append('Some optional creative fields were unsupported. Available original assets are retained.')
         # Resolve dynamic image hashes using the same account endpoint when URLs are absent.
         hashes = set()

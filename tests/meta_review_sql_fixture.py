@@ -12,7 +12,7 @@ def statements():
     conn=connection.__enter__.return_value
     cur=conn.cursor.return_value.__enter__.return_value
     cur.execute.side_effect=lambda sql,params=():executed.append({'sql':sql,'params':params})
-    payload={'account_id':'123','account':{'name':'Fixture','currency':'AUD'},
+    payload={'account_id':'123','account':{'account_id':'123','name':'Fixture','currency':'AUD'},
         'campaigns':[{'id':'cam','name':'Campaign','status':'PAUSED'}],
         'adsets':[{'id':'set','campaign_id':'cam','name':'Ad set'}],
         'ads':[{'id':'1','campaign_id':'cam','adset_id':'set','name':'Ad','creative':CREATIVE},

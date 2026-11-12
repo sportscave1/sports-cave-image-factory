@@ -13946,7 +13946,8 @@ def render_selected_page(current_page):
     elif current_page == ads_nav.POSTING_ROUTE:
         get_ads_posting_page().render_page()
     elif current_page == ads_nav.META_REVIEW_ROUTE:
-        get_ads_meta_review_page().render_page()
+        get_ads_meta_review_page().render_page(
+            authorize=lambda: _refresh_session_account_if_due(current_os_user()))
     elif current_page == "Product Quiz":
         from product_quiz_page import render_page
         render_page(current_os_user())
