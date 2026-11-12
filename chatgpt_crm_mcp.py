@@ -185,7 +185,10 @@ def _page(markup, status=200):
         "<title>Sports Cave CRM</title><main>" + markup + "</main></html>",
         status_code=status,
         headers={**HEADERS, "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
-                 "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'"},
+                 "Content-Security-Policy": (
+                     "default-src 'none'; frame-ancestors 'none'; form-action 'self' "
+                     "https://chatgpt.com/connector_platform_oauth_redirect https://chatgpt.com/connector/oauth/"
+                 )},
     )
 
 
