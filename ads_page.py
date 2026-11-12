@@ -40,7 +40,7 @@ from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
 from activity_log import record_activity_log
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from ads_meta_contract import META_AD_URL_PARAMETERS, META_DEFAULT_CTA
-from ads_product_catalog import load_live_edition_product_rows
+from ads_product_catalog import load_live_edition_product_rows, recommend_new_ads_category
 import dropbox_integration
 import os_accounts
 import sports_cave_physical_realism as physical_realism
@@ -1644,11 +1644,21 @@ def _on_ads_product_selector_changed(rows):
     )
     st.session_state[ADS_PRODUCT_NAME_KEY] = selection.get("selected_label") or ""
     _synchronise_ads_product_url_state(selection)
+    if _active_ads_workflow_mode() == ADS_WORKFLOW_MODE_NEW:
+        _apply_new_ads_product_defaults(selection)
     if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
         import ads_refresh_product
         if not ads_refresh_product.correct(st.session_state,selection.get('row'),previous_url):
             st.session_state[ADS_PRODUCT_URL_KEY]=previous_url
             st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]=True
+
+
+def _apply_new_ads_product_defaults(selection):
+    st.session_state["ads_category"] = recommend_new_ads_category(
+        selection.get("row"), selection.get("selected_label"),
+    ) or "Select category"
+    if st.session_state.get("ads_platform") != "Google":
+        st.session_state["ads_campaign_type"] = "Instant Experience"
 
 
 def prepare_ads_product_selector_state(rows, *, result=None):
@@ -9103,6 +9113,7 @@ def _apply_morning_brief_product(rows):
         st.warning("The Morning Brief product is unavailable in the New Ads product list.")
         return
     st.session_state[ADS_PRODUCT_SELECTOR_KEY] = _edition_ops_product_selector_identity(matches[0])
+    _apply_new_ads_product_defaults({"row": matches[0]})
 
 
 def render_product_name_input(*, rows=None, result=None):
@@ -14715,11 +14726,18 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     )
     category_col, country_col, campaign_col = st.columns(3)
     with category_col:
+        if not is_creative_refresh and product_name and "ads_category" not in st.session_state:
+            st.session_state["ads_category"] = recommend_new_ads_category(
+                product_selection.get("row"), product_name,
+            ) or "Select category"
         normalize_sport_state(st.session_state, "ads_category", "Select category")
         category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
     with country_col:
         country = st.selectbox("Country", COUNTRY_OPTIONS, key="ads_country")
     with campaign_col:
+        if (not is_creative_refresh and not is_google
+                and st.session_state.get("ads_campaign_type") in (None, "Select campaign type")):
+            st.session_state["ads_campaign_type"] = "Instant Experience"
         campaign_type = st.selectbox(
             "Campaign type",
             ["Demand Gen"] if is_google else CAMPAIGN_TYPE_OPTIONS,
