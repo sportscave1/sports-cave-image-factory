@@ -5491,7 +5491,7 @@ PRODUCT AND VERIFIED METADATA
 - Country/market: {country}
 - Destination URL for ad setup only: {product_url or "[exact product-page URL from the Ads form]"}
 - Route key: {visual["route_key"]}
-- Route name: {visual["route"]}
+- Route name (compatibility identity only; not a camera instruction): {visual["route"]}
 - Camera role: {visual["camera_role"]}
 - Product sport used for room selection: {visual.get("product_sport")}
 - Product era/mood classification: {visual.get("product_era")} / {visual.get("artwork_mood")}
@@ -7285,10 +7285,14 @@ def _refresh_copy_count(value):
 
 
 def _ie_concepts_for_result(result):
-    if not _is_ie_copy_v2(result):
-        return INSTANT_EXPERIENCE_CONCEPTS
-    return tuple({**c, "display_name": ie_copy.ROUTES[c["id"]][0],
-                  "supporting_label": ie_copy.ROUTES[c["id"]][1]} for c in INSTANT_EXPERIENCE_CONCEPTS)
+    # Keep CSV identities stable while presenting scene names in the OS.
+    concepts = INSTANT_EXPERIENCE_CONCEPTS
+    if _is_ie_copy_v2(result):
+        concepts = tuple({**c, "display_name": ie_copy.ROUTES[c["id"]][0],
+                          "supporting_label": ie_copy.ROUTES[c["id"]][1]} for c in concepts)
+    return tuple({**c, "csv_route_label": _instant_experience_copy_csv_route_label(c),
+                  "display_name": c["scene_name"], "supporting_label": c["scene_label"]}
+                 for c in concepts)
 
 
 def _ie_default_cta(result, concept_id):
@@ -8580,7 +8584,7 @@ def build_instant_experience_execution_image_brief(index, visual):
 
 IMAGE GENERATION PROMPT
 Image {index}; Route key: {visual['route_key']}; camera role: {visual['camera_role']}.
-Output label: Ad {index} — {'Collector Hallway' if index == 1 else visual['room_type']}
+Output label: Ad {index} — {INSTANT_EXPERIENCE_CONCEPTS[index - 1]['scene_name']}
 Camera: {visual['camera_side']}.
 SCENE: {scene}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}.
@@ -10850,6 +10854,8 @@ def _instant_experience_copy_csv_output_mode(result):
 
 
 def _instant_experience_copy_csv_route_label(concept):
+    if concept.get("csv_route_label"):
+        return concept["csv_route_label"]
     return (
         f"{str(concept.get('display_name') or '').upper()} \u2014 "
         f"{concept.get('supporting_label') or ''}"

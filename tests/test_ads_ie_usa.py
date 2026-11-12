@@ -87,7 +87,8 @@ class USAInstantExperienceTests(unittest.TestCase):
         previous=[]
         for n in range(8):
             v=ads.resolve_standard_instant_experience_visuals(product_name='Don Mattingly',category='Baseball',country='USA',variation_token=str(n),recent_fingerprints=previous)
-            self.assertEqual([row['camera_role'] for row in v],['RIGHT','FRONT','LEFT'])
+            self.assertEqual(v[1]['camera_role'], 'FRONT')
+            self.assertEqual({v[0]['camera_role'], v[2]['camera_role']}, {'RIGHT', 'LEFT'})
             self.assertEqual([row['room_profile_key'] for row in v],['hallway_gallery','minimal_art_wall','collector_interior'])
             for field in ('home_setting', 'room_type', 'wall_finish', 'light_family'):
                 self.assertEqual(len({row[field] for row in v}), 3, field)

@@ -20,7 +20,7 @@ GLAZING = ('For every framed edition: Show believable premium glass reflections 
            'Preserve premium glass, never an acrylic appearance or pasted-on product. Keep realistic frame-edge highlights and mounting shadows; '
            'no bright window grids across important details. Preserve unframed products without adding a frame or pane.')
 COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the collector hallway, straight-on architectural product wall and residential man cave, '
-               'with their assigned RIGHT / FRONT / LEFT cameras. Use three recognisably different residential compositions, different room styles, '
+               'with their resolved cameras: a subtle randomly selected left/right viewpoint for the hallway and man cave, and a mostly straight-on architectural wall. Resolve once and preserve saved camera assignments; legacy route IDs and copy labels never determine the camera. Use three recognisably different residential compositions, different room styles, '
                'clearly different wall-colour families, different wall finishes and different lighting setups. Priority: product fidelity and real scale; subject and defining-detail recognition; desirable '
                'residential presentation; meaningful composition variety; then environmental novelty. Moderate perspective, no extreme foreshortening. '
                'Move the camera closer when needed, never enlarge the product. Keep the full frame, breathing room and footer clearance. '
@@ -91,6 +91,18 @@ def distinct(a, b):
         a['spatial_family'] != b['spatial_family'] or a['depth_position'] != b['depth_position'])
 
 
+def resolve_camera(visual, index, seed, saved):
+    from ads_ie_visual_systems import CAMERAS
+    # Separate draw leaves the established scene and footer seeds untouched.
+    sides = random.Random(str(seed) + '|scene-camera-sides').sample((0, 2), 2)
+    camera = saved.get('assigned_camera_angle') or CAMERAS[1 if index == 1 else sides[index // 2]]
+    visual.update(camera_side=camera, assigned_camera_angle=camera,
+                  camera_role=camera.split(':', 1)[0],
+                  camera_instruction=camera + '. Keep the existing subtle perspective, straight verticals and rigid complete frame. Never mirror artwork.')
+    names = ('COLLECTOR HALLWAY', 'ARCHITECTURAL WALL', 'MAN CAVE')
+    visual['group_heading'] = f'GROUP {index + 1} — {names[index]}'
+
+
 def colour_family(scene):
     colour = scene['wall_colour'].casefold()
     if any(word in colour for word in ('beige', 'sand', 'taupe', 'greige')):
@@ -156,6 +168,11 @@ def adapt_prompt(prompt):
     prompt = re.sub(r'PACK COMPOSITION:.*?(?=\n\n)', COMPOSITION+' '+WALL_RULES, prompt, flags=re.S)
     prompt = re.sub(r'MANDATORY CREATIVE VARIETY AND TYPOGRAPHY:.*?(?=\n)', COMPOSITION+' Preserve the existing restrained typography; resolve choices before exactly one image per ad.', prompt)
     replacements = {
+        'Generate Image 1 (RIGHT angle)': 'Generate Image 1 (collector hallway; use its resolved camera)',
+        'generate Image 3 (LEFT angle)': 'generate Image 3 (man cave; use its resolved camera)',
+        'each uses its assigned right / centre / left camera': 'each uses its resolved camera; old route names do not assign angles',
+        'RIGHT-angle Room 1 hallway / gallery': 'Room 1 collector hallway with its resolved camera',
+        'LEFT-angle Room 3 distinctive restrained collector interior': 'Room 3 minimal premium residential man cave with its resolved camera',
         'Premium collector hallway: close edition-led photography': 'Premium collector hallway: edition-led photography',
         'retain close edition prominence.': 'retain recognisable edition prominence.',
         'GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.': 'GLAZING CHECK: Product recognition takes priority over reflection visibility at thumbnail size.',

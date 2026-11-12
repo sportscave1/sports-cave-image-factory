@@ -110,9 +110,9 @@ class AdsImageProcessingTests(unittest.TestCase):
         self.assertEqual(
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Instant Experience")],
             [
-                "Premium Scarcity — Right Angle Cover",
-                "Premium Scarcity — Straight On Cover",
-                "Premium Scarcity — Left Angle Cover",
+                "Collector Hallway Cover",
+                "Architectural Wall Cover",
+                "Man Cave Cover",
             ],
         )
         self.assertEqual(
@@ -1006,8 +1006,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
             [
-                (1, 14, "Premium Scarcity — Right Angle Cover"),
-                (1, 14, "Premium Scarcity — Right Angle Cover"),
+                (1, 14, "Collector Hallway Cover"),
+                (1, 14, "Collector Hallway Cover"),
             ],
         )
 
