@@ -9,7 +9,10 @@ from crm_prompt_copy import copy_prompt
 
 # These IDs are persisted by the prompt store. Keep them stable when titles change.
 WEEKLY_PROMPT_ID = "accounting_update_quickbooks"
-BAS_PROMPT_ID = "accounting_bas_review"
+REPORT_PROMPT_ID = "accounting_bas_review"
+PAY_BAS_PROMPT_ID = "accounting_pay_bas"
+MYGOV_URL = "https://my.gov.au/"
+ATO_URL = "https://www.ato.gov.au/"
 PROMPTS = (
     (
         WEEKLY_PROMPT_ID,
@@ -60,11 +63,36 @@ PROMPTS = (
         "unexplained adjustments.",
     ),
     (
-        BAS_PROMPT_ID,
-        "Accounting Report / BAS Review",
-        "Summarise completed work, GST totals and items still open for review.",
+        REPORT_PROMPT_ID,
+        "Accounting Report",
+        "Report account balances, GST figures, supporting records and unresolved discrepancies.",
         "Use the available QuickBooks reports and supporting records to prepare the accounting report. "
-        "Identify the records behind the GST figures and flag any totals that still need verification.",
+        "Identify the records behind the account balances and GST figures and flag any totals that still need verification.",
+    ),
+    (
+        PAY_BAS_PROMPT_ID,
+        "PAY BAS",
+        "Reconcile a BAS quarter, prepare and lodge after approval, then report what to pay.",
+        "1. Ask me which BAS quarter to prepare. Reconcile the entire quarter in QuickBooks against "
+        "Commonwealth Bank statements and the relevant Shopify, Afterpay, PayPal, eBay and Etsy records. "
+        "Request any missing statements or tax invoices.\n\n"
+        "2. Check sales, refunds, fees, expenses, GST, duplicates, opening and closing balances, "
+        "and payment-provider balances. Claim only supported GST. Resolve differences without forcing "
+        "balances or changing previously lodged periods without my approval.\n\n"
+        "3. Prepare and review the BAS in QuickBooks using the business’s existing GST reporting basis. "
+        "Check every applicable BAS label. Produce a concise report showing the period, amounts by BAS label, "
+        "supporting reconciliations and unresolved items. Mark it ready only after resolving material issues.\n\n"
+        "4. With my assistance, open the appropriate official ATO portal through myGov or Online services for "
+        "business. Let me handle passwords and MFA. Verify the business and ABN, BAS period and whether it has "
+        "already been lodged.\n\n"
+        "5. Enter the verified QuickBooks BAS figures into the matching ATO fields. Show me the completed "
+        "summary and ask for my explicit approval before lodging. Lodge once through a single channel. "
+        "If the BAS is already lodged, confirm its status and stop before submission.\n\n"
+        "6. After successful lodgement, save the receipt or reference. Report the amount payable or refundable, "
+        "the due date and the official payment instructions shown by the ATO. Copy the exact BPAY biller code "
+        "and payment reference or other official payment details when available. Never invent bank details.\n\n"
+        "7. Tell me what I need to pay. Record the BAS as lodged only after confirmation and as paid only "
+        "after payment evidence is available.",
     ),
 )
 
@@ -84,17 +112,27 @@ COMPLETION = (
 
 
 def _build_prompt(prompt_id, title, instructions):
-    sections = [f"QuickBooks task: {title}", PERIOD]
+    heading = f"QuickBooks task: {title}"
+    if prompt_id == PAY_BAS_PROMPT_ID:
+        return "\n\n".join((
+            heading,
+            instructions.strip(),
+            RULES,
+            "Do not initiate a bank payment.",
+            f"Official links\nmyGov: {MYGOV_URL}\nATO: {ATO_URL}",
+        ))
+
+    sections = [heading, PERIOD]
     if prompt_id == WEEKLY_PROMPT_ID:
         sections.append(
             "Update QuickBooks for the period. Check sales and fees, categorise expenses, match payouts "
             "and reconcile accounts against available statements."
         )
     sections.extend((instructions.strip(), RULES, COMPLETION))
-    if prompt_id == BAS_PROMPT_ID:
+    if prompt_id == REPORT_PROMPT_ID:
         sections.append(
-            "Include GST collected, eligible GST credits, outstanding differences and missing documents "
-            "in the report. Do not lodge the BAS."
+            "Report the account balances, GST collected, eligible GST credits, supporting records, "
+            "unresolved discrepancies and missing documents. Do not lodge the BAS."
         )
     return "\n\n".join(sections)
 
@@ -104,6 +142,8 @@ def _render_card(prompt_id, title, description, saved):
         details, actions = st.columns([3, 1], vertical_alignment="center")
         details.subheader(title)
         details.caption(description)
+        if prompt_id == PAY_BAS_PROMPT_ID:
+            details.markdown(f"[myGov]({MYGOV_URL}) · [ATO]({ATO_URL})")
 
         with st.expander("View or edit prompt"):
             with st.form(f"{prompt_id}_form", border=False):
