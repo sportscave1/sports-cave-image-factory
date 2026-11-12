@@ -146,16 +146,18 @@ def render(st, user, today):
     if not os_accounts.is_reporting_owner(user):
         return
     st.subheader("Sports Updates — Morning Brief")
+    brief_unavailable = False
     try:
         saved = get_app_setting(SETTING_KEY, ensure_schema_first=False)
         edition = parse_edition(_edition_json(saved), today) if saved else None
     except Exception as error:
         LOG.warning("home_morning_brief_unavailable type=%s", type(error).__name__)
         st.warning("The Morning Brief is temporarily unavailable.")
-        return
+        brief_unavailable = True
+        edition = None
     editions = []
     try:
-        editions, _ = archive_page(today, size=90)
+        editions, _ = archive_page(today, size=20)
     except Exception as error:
         LOG.warning("home_brief_archive_unavailable type=%s", type(error).__name__)
     if edition:
@@ -163,7 +165,7 @@ def render(st, user, today):
         day = date.fromisoformat(edition["date"])
         label = day.strftime("%d %B %Y").lstrip("0")
         st.caption(f"{label} · Sydney" if day == today else f"Latest brief · {label} Sydney. Today's brief is pending.")
-    else:
+    elif not brief_unavailable:
         st.caption("No Morning Brief has been published yet.")
     from home_morning_brief_actions import brief_html
 

@@ -12,7 +12,12 @@
 .sc-brief-row :focus-visible {outline:2px solid #956810;outline-offset:2px}
 .sc-brief-body {padding:.55rem .9rem .8rem;font-size:.875rem;line-height:1.5;overflow-wrap:anywhere;border-top:1px solid #d6cdbb}
 .sc-brief-body h4 {font-size:1rem;margin:.1rem 0 .45rem}
-.sc-brief-body p {max-width:78ch}
+.sc-brief-copy {column-width:32rem;column-gap:1.8rem}
+.sc-brief-copy p {break-inside:avoid}
+.sc-cal-wrap td a {color:inherit;text-decoration-color:#a58847;text-underline-offset:.13rem}
+.sc-cal-state[data-state="live"] {color:#23664d}
+.sc-cal-state[data-state="upcoming"] {color:#8c601a}
+.sc-cal-state[data-state="ended"],.sc-cal-state[data-state="tbc"] {opacity:.75}
 .sc-brief-links a {font-size:.76rem;text-underline-offset:.15rem}
 .sc-brief-body p {white-space:pre-wrap;margin:0 0 .4rem}
 .sc-brief-links {display:flex;flex-wrap:wrap;gap:.35rem .85rem}

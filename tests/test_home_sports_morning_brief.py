@@ -83,6 +83,14 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     markup = st.html.call_args.args[0]
     assert "Create Design" in markup and "Create Ad" in markup
     assert "Sports Cave event: Fixture release" in markup
+    assert "actual photo previews in a native image carousel" in markup
+    assert "inline gallery or individually" in markup
+    assert "Do not create a certificate" in markup
+    assert markup.index("Show the photos in this chat first") < markup.index("Create the print from the photos you showed")
+    assert "designs-canvas.psd" in markup
+    assert "Keep editorial" not in markup
+    assert "If none of the shortlisted photos" not in markup
+    assert markup.index("Step 1. List all shortlisted images") < markup.index("Step 2. Start generating a 10/10")
     assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
     assert "Morning Brief JSON" not in markup
@@ -136,10 +144,11 @@ def test_calendar_dates_history_and_product_identity(monkeypatch):
     article.update(sport="Rugby League", markets=["AUS"], start_date="2026-11-15", end_date="2026-11-17")
     article["links"].append({"label": "Product", "url": "https://www.sportscaveshop.com/products/fixture-final"})
     parsed = brief.parse_edition(json.dumps(value), TODAY)
-    events, news = calendar_rows([parsed], "AUS", TODAY)
-    assert events["Rugby League"][:2] == (True, date(2026, 11, 15))
-    assert news == {"Rugby League"}
-    assert calendar_rows([parsed], "USA", TODAY) == ({}, set())
+    aus = {sport: (event, news) for sport, event, news in calendar_rows([parsed], "AUS", TODAY)}
+    usa = {sport: (event, news) for sport, event, news in calendar_rows([parsed], "USA", TODAY)}
+    assert aus["Rugby League"][0].title == "Rugby League World Cup finals"
+    assert aus["Rugby League"][0].end == date(2026, 11, 15)
+    assert aus["Rugby League"][1] and not usa["Rugby League"][1]
     assert 'href="/?page=ads&amp;brief_product=fixture-final"' in article_html(parsed["recommendations"][0], allow_ads=True)
 
     browser = Mock()
@@ -150,3 +159,37 @@ def test_calendar_dates_history_and_product_identity(monkeypatch):
     ads_page._apply_morning_brief_product([row])
     assert browser.query_params == {}
     assert browser.session_state[ads_page.ADS_PRODUCT_SELECTOR_KEY] == ads_page._edition_ops_product_selector_identity(row)
+
+
+
+def test_static_schedule_covers_every_sport_without_news_and_ranks_by_market():
+    from home_brief_calendar import MARKETS, calendar_rows
+    from sports_categories import CANONICAL_SPORT_CATEGORIES
+
+    for market in MARKETS:
+        rows = calendar_rows([], market, TODAY)
+        assert len(rows) == len(CANONICAL_SPORT_CATEGORIES)
+        assert all(event and event.source.startswith("https://") and not news for _, event, news in rows)
+        top = {sport for sport, _, _ in rows[:4]}
+        assert {"AUS": "Cricket", "USA": "NFL", "UK": "Football"}[market] in top
+
+    upcoming = calendar_rows([], "AUS", date(2027, 2, 25))
+    assert next(event for sport, event, _ in upcoming if sport == "V8 Supercars").status(date(2027, 2, 25)) == "Upcoming"
+
+
+def test_recent_ranked_news_breaks_schedule_ties():
+    from home_brief_calendar import calendar_rows
+
+    edition = {"date": TODAY.isoformat(), "recommendations": [
+        {"sport": "NFL", "markets": ["USA"]}, {"sport": "NBA", "markets": ["USA"]}
+    ]}
+    order = [sport for sport, _, _ in calendar_rows([edition], "USA", TODAY)]
+    assert order.index("NFL") < order.index("NBA")
+
+
+def test_calendar_still_renders_when_brief_storage_is_unavailable(monkeypatch):
+    monkeypatch.setattr(brief, "get_app_setting", Mock(side_effect=RuntimeError))
+    monkeypatch.setattr(brief, "archive_page", Mock(side_effect=RuntimeError))
+    st = Mock()
+    brief.render(st, OWNER, TODAY)
+    assert "Big Bash League" in st.html.call_args.args[0]

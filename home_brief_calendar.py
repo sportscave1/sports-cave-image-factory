@@ -1,10 +1,14 @@
 """Sport, market and date fields used by the ChatGPT calendar and news archive."""
 
+from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
+import json
+from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-from sports_categories import normalize_sport_category, detect_sport_in_text
+from sports_categories import CANONICAL_SPORT_CATEGORIES, normalize_sport_category, detect_sport_in_text
 
 MARKETS = ("AUS", "USA", "UK")
 MARKET_CODES = {"AUS": "AUS", "AU": "AUS", "AUSTRALIA": "AUS", "USA": "USA",
@@ -65,26 +69,90 @@ def matches_market(article, market):
     return market in article["markets"] or "ALL" in article["markets"]
 
 
-def calendar_rows(editions, market, today):
-    items = {}
-    news = set()
-    seen = set()
+SCHEDULE_PATH = Path(__file__).parent / "data" / "home_sports_schedule.json"
+MARKET_FOCUS = {
+    "AUS": {"AFL", "Cricket", "Rugby League", "Rugby Union", "V8 Supercars", "Motorsport",
+            "Formula One", "Horse Racing", "Tennis", "Surfing", "Swimming"},
+    "USA": {"Baseball", "NBA", "NFL", "Ice Hockey", "NASCAR", "IndyCar", "Combat", "WWE",
+            "Motocross", "Golf"},
+    "UK": {"Football", "Darts", "Rugby Union", "Rugby League", "Cricket", "Formula One",
+           "Horse Racing", "Road Racing", "Golf", "Tennis"},
+}
+
+
+@dataclass(frozen=True)
+class ScheduleEvent:
+    sport: str
+    markets: tuple[str, ...]
+    title: str
+    start: date
+    end: date
+    source: str
+
+    def status(self, today):
+        if self.start > today:
+            return "Upcoming"
+        return "Live" if self.end >= today else "Ended"
+
+
+@lru_cache(maxsize=1)
+def load_schedule():
+    data = json.loads(SCHEDULE_PATH.read_text(encoding="utf-8"))
+    events = []
+    for item in data["events"]:
+        start, end = iso_day(item["start"]), iso_day(item["end"])
+        source = urlsplit(item["source"])
+        if (item["sport"] not in CANONICAL_SPORT_CATEGORIES or not item["markets"]
+                or not set(item["markets"]).issubset((*MARKETS, "ALL"))
+                or start > end or source.scheme != "https" or not source.hostname
+                or source.username is not None or source.password is not None):
+            raise ValueError(f"Invalid Sports Cave schedule entry: {item['title']}")
+        events.append(ScheduleEvent(item["sport"], tuple(item["markets"]), item["title"],
+                                    start, end, item["source"]))
+    return tuple(events)
+
+
+def _select_event(events, today):
+    live = [event for event in events if event.status(today) == "Live"]
+    if live:
+        return min(live, key=lambda event: (event.end, event.start, event.title))
+    upcoming = [event for event in events if event.start > today]
+    if upcoming:
+        return min(upcoming, key=lambda event: (event.start, event.end, event.title))
+    return max(events, key=lambda event: (event.end, event.start, event.title), default=None)
+
+
+def _news_scores(editions, market, today):
+    scores = {}
     for edition in editions:
-        for item in edition["recommendations"]:
+        age = (today - iso_day(edition["date"])).days
+        for rank, item in enumerate(edition["recommendations"], 1):
             sport = item["sport"]
             if not sport or not matches_market(item, market):
                 continue
-            news.add(sport)
-            if "start_date" not in item:
-                continue
-            # The latest dates for an event take precedence over older reports.
-            identity = sport, item["title"].casefold()
-            if identity in seen:
-                continue
-            seen.add(identity)
-            start = iso_day(item["start_date"])
-            end = iso_day(item["end_date"])
-            if end >= today:
-                items.setdefault(sport, []).append((start > today, start if start > today else end,
-                                                    start, end, item["title"]))
-    return {sport: min(events) for sport, events in items.items()}, news
+            # The source brief ranks its recommendations by commercial relevance.
+            score = max(0, 44 - 3 * age - 3 * rank) if age >= 0 else 0
+            scores[sport] = max(score, scores.get(sport, 0))
+    return scores
+
+
+def calendar_rows(editions, market, today, *, schedule=None):
+    schedule = load_schedule() if schedule is None else schedule
+    news = _news_scores(editions, market, today)
+    rows = []
+    for sport in CANONICAL_SPORT_CATEGORIES:
+        available = [event for event in schedule if event.sport == sport]
+        market_events = [event for event in available if market in event.markets or "ALL" in event.markets]
+        event = _select_event(market_events or available, today)
+        relevant = bool(market_events) or sport in news
+        score = (24 if sport in MARKET_FOCUS[market] else 0) + news.get(sport, 0)
+        if market_events and event:
+            if event.status(today) == "Live":
+                score += 48
+            elif event.start > today:
+                score += max(0, 30 - (event.start - today).days)
+            if market in event.markets:
+                score += 12
+        rows.append((relevant, score, sport, event, sport in news))
+    rows.sort(key=lambda row: (not row[0], -row[1], row[2].casefold()))
+    return [(sport, event, has_news) for _, _, sport, event, has_news in rows]
