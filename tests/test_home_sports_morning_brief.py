@@ -83,14 +83,11 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     markup = st.html.call_args.args[0]
     assert "Create Design" in markup and "Create Ad" in markup
     assert "Sports Cave event: Fixture release" in markup
-    assert "actual photo previews in a native image carousel" in markup
-    assert "inline gallery or individually" in markup
-    assert "Do not create a certificate" in markup
-    assert markup.index("Show the photos in this chat first") < markup.index("Create the print from the photos you showed")
+    assert "Show the photos in this chat first" in markup
+    assert "generate the design based on the photos you showed" in markup
     assert "designs-canvas.psd" in markup
-    assert "Keep editorial" not in markup
-    assert "If none of the shortlisted photos" not in markup
-    assert markup.index("Step 1. List all shortlisted images") < markup.index("Step 2. Start generating a 10/10")
+    assert "Step 3. Generate this design now" in markup
+    assert "<h4>Fixture release</h4>" not in markup
     assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
     assert "Morning Brief JSON" not in markup
@@ -193,3 +190,32 @@ def test_calendar_still_renders_when_brief_storage_is_unavailable(monkeypatch):
     st = Mock()
     brief.render(st, OWNER, TODAY)
     assert "Big Bash League" in st.html.call_args.args[0]
+
+
+
+def test_full_edition_and_selected_story_design_prompt(monkeypatch):
+    from home_morning_brief_actions import _prompt
+
+    story = ("Shopify verified: Active — Reece Walsh.\n"
+             "**Recommended Meta ad**\n\nHeadline: Hide this copy.\n"
+             "Primary text: Hide this too.\n\n"
+             "Timing: Before Sunday's final.\n"
+             "Design decision: Feature Reece Walsh.")
+    result = _prompt("World Cup finals", story)
+    assert "Shopify verified: Active — Reece Walsh." in result
+    assert "Design decision: Feature Reece Walsh." in result
+    assert "Timing: Before Sunday's final." in result
+    assert "Hide this" not in result and "Recommended Meta ad" not in result
+    assert result.index("Use web image search") < result.index("Step 1.") < result.index("Step 2.") < result.index("Step 3.")
+    assert "photographer or agency credit" not in result
+    assert "wall-art reproduction and compositing" not in result
+
+    data = json.loads(edition())
+    data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)
+    parsed = brief.parse_edition(json.dumps(data), TODAY)
+    monkeypatch.setattr(brief, "get_app_setting", Mock(return_value=parsed))
+    monkeypatch.setattr(brief, "archive_page", Mock(return_value=([], None)))
+    st = Mock()
+    brief.render(st, OWNER, TODAY)
+    markup = st.html.call_args.args[0]
+    assert "Read the full Morning Brief" in markup and "Other sports and updates" in markup

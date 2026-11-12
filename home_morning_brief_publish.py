@@ -30,7 +30,7 @@ def _page(message="", status=200, *, form=False):
             f'<form method="post" action="{PATH}">'
             '<label for="brief">Morning Brief JSON</label><br>'
             '<p>Use the Sydney edition date and recommendations with title, recommendation, links, sport, '
-            'markets, and confirmed start_date and end_date when available.</p>'
+            'markets, and confirmed start_date and end_date when available. Include the complete edition as full_brief.</p>'
             f'<textarea id="brief" name="brief" maxlength="{MAX_PAYLOAD}" '
             'rows="14" cols="72" required></textarea><br>'
             '<button>Publish brief</button></form>'

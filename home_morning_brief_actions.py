@@ -3,6 +3,7 @@
 from functools import lru_cache
 from html import escape
 from pathlib import Path
+import re
 from urllib.parse import urlencode
 
 from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, product_handle
@@ -11,35 +12,43 @@ PROJECT_URL = "https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/projec
 TEMPLATE = Path(__file__).parent / "components" / "morning_brief_actions.html"
 
 
-def _prompt(event):
+META_AD_HEADING = re.compile(r"^(?:recommended|suggested)\b.*\bmeta\b.*\bad\b", re.I)
+META_AD_COPY = re.compile(r"^(?:headline|primary text|description|cta|call to action)\s*:", re.I)
+
+
+def _story_without_meta_ad(text):
+    lines = []
+    ad = False
+    for line in text.splitlines():
+        label = line.strip().lstrip("#*- ").replace("*", "").replace("\\:", ":")
+        if META_AD_HEADING.match(label):
+            ad = True
+            continue
+        if ad and (not label or META_AD_COPY.match(label) or label.startswith(("“", '"', "‘"))):
+            continue
+        ad = False
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _prompt(title, story):
+    context = _story_without_meta_ad(story)
     return (
-        f"Sports Cave event: {event}\n\n"
-        "Deliver one finished, photo-led Sports Cave Collector Series wall-art print. Follow the "
-        "Sports Cave Designs project instructions. The limited-edition badge is a small brand element "
-        "on the artwork. Do not create a certificate, authenticity card, mockup, or empty photo frame.\n\n"
-        "Show the photos in this chat first. Use web image search to find 4–8 authentic photos "
-        "from Getty Images, official event or league galleries, and other credible sources. Display "
-        "the actual photo previews in a native image carousel. If this chat cannot render a carousel, "
-        "show the actual previews in an inline gallery or individually. A table of links alone does "
-        "not complete this step. Under the previews, add the source link, photographer or agency "
-        "credit, what each image shows, and whether its commercial use is verified. Label archival "
-        "photos by their actual match and date. If the event is upcoming, use authentic lead-up or "
-        "rivalry photos and frame the design as a preview.\n\n"
-        "Create the print from the photos you showed. Choose the strongest usable photo as the "
-        "hero, and use a supporting photo from the same shortlist only if it improves the composition. "
-        "Place the actual selected image in the artwork so the athletes and sporting moment dominate "
-        "the composition. Preserve recognisable faces, uniforms, and event details. Follow the "
-        "project's Collector Series references for typography, colour, depth, and visual hierarchy. "
-        "Use photos cleared for the intended wall-art reproduction and compositing.\n\n"
-        "Match the production canvas. Inspect designs-canvas.psd in Dropbox for the exact pixel "
-        "dimensions, orientation, safe margins and badge position. Preserve the original limited-edition "
-        "badge and edition-number layer. Build the print at the PSD's exact size so it fits without "
-        "cropping, stretching, or distortion. Display the finished artwork in chat and attach a "
-        "full-resolution export. Identify the photo or photos used. If the PSD is inaccessible, "
-        "show the image shortlist and ask for the file before claiming a production fit.\n\n"
-        "Step 1. List all shortlisted images and display their actual previews in chat.\n"
-        "Step 2. Start generating a 10/10 Sports Cave–styled limited-edition design using the "
-        "selected photos. Make it realistic, premium and worthy of a collector."
+        f"Sports Cave event: {title}\n\n{context}\n\n"
+        "List the best possible images. Show the photos in this chat first. Use web image search to "
+        "find 4–8 of the best images for this design.\n\n"
+        "Step 1. Do this fully first. Once there is a carousel of images, generate the design based "
+        "on the photos you showed. Choose the strongest usable photo as the hero, and use a supporting "
+        "photo from the same shortlist only if it improves the composition. Place the actual selected "
+        "image in the artwork so the athletes and sporting moment dominate the composition. Preserve "
+        "recognisable faces, uniforms, and event details. Follow the project’s Collector Series "
+        "references for typography, colour, depth, and visual hierarchy. Refer to the project "
+        "instructions in Sports Cave Designs for how Sports Cave designs are structured.\n\n"
+        "Step 2. Once the images are in the carousel, inspect designs-canvas.psd in Dropbox for the "
+        "exact pixel dimensions, orientation, safe margins, and limited-edition badge. Preserve the "
+        "original limited-edition badge and edition-number layer.\n\n"
+        "Step 3. Generate this design now as a 10/10 Sports Cave–styled, realistic collector edition "
+        "that is highly appealing and could become our next top seller."
     )
 
 
@@ -50,7 +59,7 @@ def _template():
 
 def article_html(item, *, heading=None, allow_ads=False):
     title = " ".join(item["title"].split())
-    prompt = escape(_prompt(title), quote=True).replace("\n", "&#10;")
+    prompt = escape(_prompt(title, item["recommendation"]), quote=True).replace("\n", "&#10;")
     actions = (
         f'<a href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
         f'data-prompt="{prompt}" title="Open Sports Cave Designs and copy the prompt">Create Design</a>'
@@ -77,7 +86,7 @@ def article_html(item, *, heading=None, allow_ads=False):
     return (
         '<article class="sc-brief-row"><details>'
         f'<summary title="{escape(title, quote=True)}"><span>{escape(heading or title)}</span></summary>'
-        f'<div class="sc-brief-body"><h4>{escape(title)}</h4>'
+        '<div class="sc-brief-body">'
         f'<div class="sc-brief-copy">{"".join(paragraphs)}</div>'
         f'<div class="sc-brief-links">{links}</div></div></details>'
         f'<div class="sc-brief-actions">{actions}</div></article>'
@@ -130,5 +139,9 @@ def brief_html(edition, *, editions, today, allow_ads=False):
         article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads)
         for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
     )
+    full_brief = (edition or {}).get("full_brief")
+    if full_brief:
+        rows += ('<details class="sc-full-brief"><summary>Read the full Morning Brief</summary>'
+                 f'<div class="sc-brief-body sc-full-brief-text">{escape(full_brief)}</div></details>')
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     return _template().replace("<!-- CALENDARS -->", tables).replace("<!-- RECOMMENDATIONS -->", rows)

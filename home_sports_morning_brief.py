@@ -12,7 +12,7 @@ from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
 SETTING_KEY = "home_sports_morning_brief"
-MAX_PAYLOAD = 24000
+MAX_PAYLOAD = 96000
 LOG = logging.getLogger(__name__)
 
 
@@ -50,7 +50,7 @@ def parse_edition(raw, today):
         data = json.loads(raw)
     except (ValueError, RecursionError):
         raise ValueError("Enter valid Morning Brief JSON.") from None
-    if not isinstance(data, dict) or set(data) != {"date", "recommendations"}:
+    if not isinstance(data, dict) or not {"date", "recommendations"} <= set(data) <= {"date", "recommendations", "full_brief"}:
         raise ValueError("Include the Sydney date and a list of recommendations.")
     raw_day = data["date"]
     if not isinstance(raw_day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_day):
@@ -73,7 +73,7 @@ def parse_edition(raw, today):
             raise ValueError("Include up to five links per recommendation.")
         article = {
             "title": _text(item.get("title"), 160, "Title"),
-            "recommendation": _text(item.get("recommendation"), 2600, "Recommendation"),
+            "recommendation": _text(item.get("recommendation"), 10000, "Recommendation"),
             "links": [_link(link) for link in links],
         }
         if item.get("product_url"):
@@ -88,6 +88,8 @@ def parse_edition(raw, today):
         article.update(article_fields({**item, **article}))
         recommendations.append(article)
     edition = {"date": day.isoformat(), "recommendations": recommendations}
+    if "full_brief" in data:
+        edition["full_brief"] = _text(data["full_brief"], 50000, "Full brief")
     if len(_edition_json(edition)) > MAX_PAYLOAD:
         raise ValueError("The brief is too long.")
     return edition
