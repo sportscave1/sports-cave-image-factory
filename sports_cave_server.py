@@ -28,6 +28,7 @@ from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
 from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
 from auto_editions_status import ROUTES as AUTO_EDITIONS_STATUS_ROUTES
 from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
+from website_recommendation_analytics import ROUTES as WEBSITE_RECOMMENDATION_ROUTES
 from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
 from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
 from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
@@ -44,6 +45,7 @@ routes = [
         *AUTO_EDITIONS_ONBOARDING_ROUTES,
         *AUTO_EDITIONS_STATUS_ROUTES,
         *PRODUCT_QUIZ_ROUTES,
+        *WEBSITE_RECOMMENDATION_ROUTES,
         *AUTO_EDITIONS_BULK_ROUTES,
         *WORKER_HEALTH_ROUTES,
         *PRODUCT_UPLOAD_ROUTES,

@@ -566,7 +566,7 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
     status='ready'
     try:
         if destination == nav.SEO_ANALYTICS_ROUTE:
-            from website_analytics import compact_styles, tool_summaries
+            from website_analytics import compact_styles, recommendation_panel, tool_summaries
 
             compact_styles()
             with st.container(key="website-compact"):
@@ -574,6 +574,7 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
                 analytics(user, store, reports, initial)
                 if route == anav.WEBSITE_OVERVIEW_ROUTE:
                     tool_summaries(user)
+                    recommendation_panel()
         else:
             state = load_analytics_state(store) if os_accounts.can_access_page(user, nav.SEO_OVERVIEW_ROUTE) else workspace.default_state()
             if state is None:

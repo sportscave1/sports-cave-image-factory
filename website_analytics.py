@@ -113,3 +113,44 @@ def tool_summaries(user):
         ) if values is not None else "Analytics temporarily unavailable."
         panels.append(f'<section class="sc-website-tool"><h4>{escape(title)} · Last 30 days</h4><p>{metrics}</p></section>')
     st.markdown('<div class="sc-website-tools">' + "".join(panels) + "</div>", unsafe_allow_html=True)
+
+@st.cache_data(ttl=60, show_spinner=False, max_entries=1)
+def _recommendation_report():
+    from website_recommendation_analytics import report
+
+    return report()
+
+
+def recommendation_panel():
+    from seo_phase1 import local_mode
+
+    panel = st.expander("Recommendation performance", key="website-recommendations", on_change="rerun")
+    if not panel.open:
+        return
+    with panel:
+        st.caption("Last 30 days · Consented product impressions, clicks and confirmed bundle add-ons and Shopify-verified paid add-ons.")
+        if local_mode():
+            st.caption("Recommendation reporting is unavailable in this local workspace.")
+            return
+        try:
+            rows = _recommendation_report()
+        except Exception:
+            st.warning("Recommendation reporting is temporarily unavailable.")
+            return
+        if not rows:
+            st.caption("No recommendation activity recorded yet.")
+            return
+        labels = {
+            "desktop_menu": "Desktop Shop menu", "mobile_featured": "Mobile Featured Drops",
+            "mobile_lifestyle": "Mobile lifestyle card", "mobile_collector": "Mobile Collector Drops image",
+            "product_bundle": "Product-page bundle",
+        }
+        st.dataframe(
+            [{
+                "Market": row["market"], "Placement": labels.get(row["placement"], row["placement"]),
+                "Impressions": row["views"], "Product clicks": row["clicks"] if row["placement"] != "mobile_collector" else None,
+                "Confirmed add-ons": row["cart_adds"] if row["placement"] == "product_bundle" else None,
+                "Paid add-ons": row["purchases"] if row["placement"] == "product_bundle" else None,
+            } for row in rows],
+            hide_index=True, width="stretch",
+        )
