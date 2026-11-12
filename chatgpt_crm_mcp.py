@@ -20,6 +20,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 import os_accounts
 from chatgpt_crm_api import HEADERS, _campaign_summary
 from files_upload_api import FilesUploadError, _request_user
+from chatgpt_reporting import meta_daily, orders_daily, reporting_day
 
 ISSUER = "https://sports-cave-image-factory.onrender.com"
 MCP_PATH = "/api/chatgpt/crm/mcp"
@@ -31,6 +32,18 @@ TOKEN_PATH = "/api/chatgpt/crm/oauth/token"
 REGISTRATION_PATH = "/api/chatgpt/crm/oauth/register"
 SCOPE = "crm:summary"
 TOOL = "get_crm_campaign_summary"
+ORDERS_SCOPE = "orders:summary"
+META_SCOPE = "meta:summary"
+SCOPES = (SCOPE, ORDERS_SCOPE, META_SCOPE)
+SCOPE_LIST = " ".join(SCOPES)
+TOOLS = {
+    TOOL: (SCOPE, "crm_campaigns_manage", "Get CRM campaign summary",
+           "Read current CRM campaign counts and delivery activity.", False),
+    "get_orders_daily_summary": (ORDERS_SCOPE, "orders", "Get daily Orders summary",
+                                 "Read aggregate Shopify order counts and known totals by currency for a Sydney date.", True),
+    "get_meta_daily_summary": (META_SCOPE, "ads_meta_review", "Get daily Meta reporting summary",
+                               "Read saved ad-level Meta spend, attributed purchases and coverage for a Sydney date.", True),
+}
 REDIRECT = re.compile(
     r"https://chatgpt\.com/(?:connector_platform_oauth_redirect|connector/oauth/[A-Za-z0-9_-]{1,128})"
 )
@@ -85,9 +98,10 @@ def _owner_session(request):
     return user if _owner(user) else None
 
 
-def _active_owner(claims):
+def _active_owner(claims, page):
     user = os_accounts.DEFAULT_STORE.get_user(claims["sub"])
-    return _owner(user) and str(user.get("session_version") or 1) == claims["version"]
+    return (_owner(user) and os_accounts.can_access_page(user, page)
+            and str(user.get("session_version") or 1) == claims["version"])
 
 
 async def _read_body(request):
@@ -120,7 +134,7 @@ async def protected_resource(_request):
     return _response({
         "resource": RESOURCE,
         "authorization_servers": [ISSUER],
-        "scopes_supported": [SCOPE],
+        "scopes_supported": list(SCOPES),
         "bearer_methods_supported": ["header"],
     })
 
@@ -136,7 +150,7 @@ async def authorization_server(_request):
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
         "token_endpoint_auth_methods_supported": ["none"],
-        "scopes_supported": [SCOPE],
+        "scopes_supported": list(SCOPES),
         "code_challenge_methods_supported": ["S256"],
         "authorization_response_iss_parameter_supported": True,
     })
@@ -160,22 +174,24 @@ async def register(request):
         "token_endpoint_auth_method": "none",
         "grant_types": ["authorization_code"],
         "response_types": ["code"],
-        "scope": SCOPE,
+        "scope": SCOPE_LIST,
     }, 201)
 
 
 def _authorization_values(key, values):
     redirect = values.get("redirect_uri", "")
+    requested = set(values.get("scope", SCOPE_LIST).split())
     if (not REDIRECT.fullmatch(redirect)
             or not hmac.compare_digest(values.get("client_id", "").encode(), _tag(key, "client", redirect).encode())
             or values.get("response_type") != "code"
             or values.get("resource", RESOURCE) != RESOURCE
-            or values.get("scope", SCOPE) != SCOPE
+            or not requested or not requested.issubset(SCOPES)
             or values.get("code_challenge_method") != "S256"
             or not PKCE.fullmatch(values.get("code_challenge", ""))
             or not 1 <= len(values.get("state", "")) <= 1024):
         raise ValueError("invalid authorization request")
-    return {field: values[field] for field in ("redirect_uri", "client_id", "code_challenge", "state")}
+    return {**{field: values[field] for field in ("redirect_uri", "client_id", "code_challenge", "state")},
+            "scope": " ".join(scope for scope in SCOPES if scope in requested)}
 
 
 def _page(markup, status=200):
@@ -210,10 +226,16 @@ async def authorize(request):
     try:
         if request.method == "GET":
             values = _authorization_values(key, _parameters(request.query_params.multi_items()))
+            allowed = {scope for scope, page, *_ in TOOLS.values() if os_accounts.can_access_page(owner, page)}
+            if not set(values["scope"].split()).issubset(allowed):
+                return _page("<h1>Sports Cave OS reporting permission required</h1>", 403)
             consent = html.escape(_seal(key, "consent", {**values, **identity}), quote=True)
+            labels = {SCOPE: "CRM campaign counts and delivery status", ORDERS_SCOPE: "daily Orders totals",
+                      META_SCOPE: "saved daily Meta reporting"}
+            summary = ", ".join(labels[scope] for scope in values["scope"].split())
             return _page(
                 "<h1>Connect Sports Cave CRM to ChatGPT</h1>"
-                "<p>Share aggregate campaign counts and delivery status with the private ChatGPT connector.</p>"
+                f"<p>Share {html.escape(summary)} with the private ChatGPT connector.</p>"
                 f"<form method=post action='{AUTH_PATH}'>"
                 f"<input type=hidden name=consent value='{consent}'>"
                 "<button type=submit>Allow read-only access</button></form>"
@@ -263,16 +285,16 @@ async def token(request):
             return _response({"error": "invalid_grant"}, 400)
         claims = _codes.pop(code)[1]
     access = _seal(key, "access", {
-        "sub": claims["sub"], "version": claims["version"], "scope": SCOPE,
+        "sub": claims["sub"], "version": claims["version"], "scope": claims["scope"],
         "iss": ISSUER, "aud": RESOURCE,
     })
-    return _response({"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_SECONDS, "scope": SCOPE})
+    return _response({"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_SECONDS, "scope": claims["scope"]})
 
 
-def _challenge():
+def _challenge(scope=SCOPE_LIST, status=401):
     return _response(
-        {"error": "unauthorized"}, 401,
-        {"WWW-Authenticate": f'Bearer resource_metadata="{ISSUER + RESOURCE_METADATA}", scope="{SCOPE}"'},
+        {"error": "insufficient_scope" if status == 403 else "unauthorized"}, status,
+        {"WWW-Authenticate": f'Bearer resource_metadata="{ISSUER + RESOURCE_METADATA}", scope="{scope}"'},
     )
 
 
@@ -291,7 +313,8 @@ async def mcp(request):
         return _challenge()
     try:
         claims = _unseal(key, "access", bearer, ACCESS_SECONDS)
-        if (claims["scope"], claims["iss"], claims["aud"]) != (SCOPE, ISSUER, RESOURCE):
+        granted = set(claims["scope"].split())
+        if (claims["iss"], claims["aud"]) != (ISSUER, RESOURCE) or not granted or not granted.issubset(SCOPES):
             return _challenge()
     except (ValueError, InvalidToken, KeyError):
         return _challenge()
@@ -316,22 +339,42 @@ async def mcp(request):
     elif method == "ping":
         result = {}
     elif method == "tools/list":
-        result = {"tools": [{
-            "name": TOOL, "title": "Get CRM campaign summary",
-            "description": "Read current Sports Cave OS CRM campaign counts and delivery activity. No customer records.",
-            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
-            "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
-        }]}
+        result = {"tools": [
+            {
+                "name": name, "title": title, "description": description,
+                "inputSchema": {"type": "object",
+                                "properties": {"date": {"type": "string", "format": "date"}} if daily else {},
+                                "required": ["date"] if daily else [], "additionalProperties": False},
+                "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+            }
+            for name, (_, _, title, description, daily) in TOOLS.items()
+        ]}
     elif method == "tools/call":
-        if params.get("name") != TOOL or params.get("arguments", {}) != {}:
+        name = params.get("name")
+        arguments = params.get("arguments", {})
+        if not isinstance(name, str) or name not in TOOLS or not isinstance(arguments, dict):
             return _rpc_error(identifier, -32602, "Unknown tool or invalid arguments")
+        scope, page, _, _, daily = TOOLS[name]
+        if scope not in granted:
+            return _challenge(SCOPE_LIST, 403)
+        if set(arguments) != ({"date"} if daily else set()):
+            return _rpc_error(identifier, -32602, "Invalid arguments")
         try:
-            if not await run_in_threadpool(_active_owner, claims):
+            day = reporting_day(arguments["date"]) if daily else None
+        except ValueError as error:
+            return _rpc_error(identifier, -32602, str(error))
+        try:
+            if not await run_in_threadpool(_active_owner, claims, page):
                 return _challenge()
-            summary = await run_in_threadpool(_campaign_summary)
+            if scope == ORDERS_SCOPE:
+                summary = await run_in_threadpool(orders_daily, day)
+            elif scope == META_SCOPE:
+                summary = await run_in_threadpool(meta_daily, day)
+            else:
+                summary = await run_in_threadpool(_campaign_summary)
         except Exception as error:
             LOG.warning("chatgpt_crm_mcp_unavailable type=%s", type(error).__name__)
-            result = {"isError": True, "content": [{"type": "text", "text": "CRM summary unavailable."}]}
+            result = {"isError": True, "content": [{"type": "text", "text": "Reporting summary unavailable."}]}
         else:
             result = {"content": [{"type": "text", "text": json.dumps(summary)}], "structuredContent": summary}
     else:
