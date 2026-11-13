@@ -338,10 +338,16 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     review = result.index("Check the finished image once against the hero photo")
     upload = result.index("Step 3. Only now open a copy of designs-canvas.psd")
     assert signature < generation < review < upload
+    assert "SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt" in result[:generation]
+    assert "Remove the original background completely." in result[:generation]
+    assert "The first artwork you show must already include the subject and the signature when verified." in result[generation:review]
+    assert "composite the original cutout and signature" in result[generation:review]
     assert "designs-canvas.psd" not in result[:upload]
     assert "2835 × 2004 pixels" in result[generation:upload]
     assert "editable SC_EDITION_NUMBER" in result[upload:]
     assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[upload:]
+    assert "Confirm the saved PSD is in that folder" in result[upload:]
+    assert "provide the finished full-resolution artwork for handoff" in result[upload:]
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)
