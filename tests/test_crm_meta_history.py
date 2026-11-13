@@ -2,6 +2,7 @@
 from datetime import date
 from unittest.mock import Mock, patch
 
+import pytest
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
@@ -58,14 +59,55 @@ def test_live_reads_paginate_reuse_cache_and_force_refresh(monkeypatch):
 def test_provider_field_fallback_and_wrong_account_rejection():
     reader = Mock()
     reader.get.return_value = ACCOUNT
-    reader.pages.side_effect = [history.meta.MetaAdsApiError("unsupported", error_code=100), [raw(1)]]
-    assert history._fetch(CONFIG, DAY, DAY, reader)[3] is True
-    assert reader.pages.call_args.args[1]["fields"] == history.CORE_FIELDS
+    bad_field = "instagram_profile_follow"
+    video = "video_play_actions"
+    assert "unique_inline_link_click_ctr" in history.EXTRA_FIELDS
+    assert "unique_inline_link_ctr" not in history.EXTRA_FIELDS
+    error = history.meta.MetaAdsApiError(f"Tried accessing nonexisting field ({bad_field})", error_code=100)
+    reader.pages.side_effect = [error, [raw(1)], [{**raw(1), video: [{"value": "25"}]}]]
+    _, rows, _, coverage = history._fetch(CONFIG, DAY, DAY, reader)
+    assert coverage["rejected"] == [bad_field]
+    assert coverage["returned"] == [video]
+    assert coverage["unverified"] == []
+    assert history._report_row(rows[0][1])["metrics"][video] == 25
+    assert reader.pages.call_args_list[1].args[1]["fields"] == history.CORE_FIELDS
+    assert bad_field not in reader.pages.call_args.args[1]["fields"].split(",")
     reader.pages.side_effect = None
     reader.pages.return_value = [{**raw(1), "account_id": "999"}]
-    import pytest
     with pytest.raises(ValueError, match="outside the requested account"):
         history._fetch(CONFIG, DAY, DAY, reader)
+
+
+def test_generic_extra_error_keeps_video_and_bounds_probes(monkeypatch):
+    reader = Mock()
+    reader.get.return_value = ACCOUNT
+    bad = history.meta.MetaAdsApiError("Invalid parameter", error_code=100)
+    monkeypatch.setattr(history, "OPTIONAL_REQUEST_LIMIT", 2)
+    reader.pages.side_effect = [bad, [raw(1)], [{**raw(1), "video_play_actions": [{"value": "9"}]}], bad]
+    _, _, _, coverage = history._fetch(CONFIG, DAY, DAY, reader)
+    assert coverage["returned"] == ["video_play_actions"]
+    assert coverage["rejected"] == []
+    assert "unique_clicks" in coverage["unverified"]
+    assert reader.pages.call_count == 4
+
+
+def test_paid_post_likes_use_reaction_breakdown_without_overwriting_page_likes():
+    reader = Mock()
+    reader.get.return_value = ACCOUNT
+    row = raw(1)
+    row["actions"] = [{"action_type": "post_reaction", "value": "5"},
+                      {"action_type": "like", "value": "1"}]
+    reader.pages.side_effect = [[row], [{**row, "actions": [
+        {"action_type": "post_reaction", "action_reaction": "LIKE", "value": "3"},
+        {"action_type": "post_reaction", "action_reaction": "LOVE", "value": "2"},
+    ]}]]
+    _, rows, _, coverage = history._fetch(CONFIG, DAY, DAY, reader)
+    metrics = history._report_row(rows[0][1])["metrics"]
+    assert coverage["paid_post_likes_breakdown"] == "accepted"
+    assert metrics["reactions"] == 5
+    assert metrics["page_likes"] == 1
+    assert metrics["paid_post_likes"] == 3
+    assert reader.pages.call_args.args[1]["action_breakdowns"] == "action_type,action_reaction"
 
 
 def test_mcp_history_requires_its_own_scope_and_current_owner(monkeypatch):
