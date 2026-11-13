@@ -333,7 +333,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert result.index("Use web image search") < result.index("Step 1.") < result.index("Step 2.") < result.index("Step 3.")
     assert "source link, available credit, and verified match or date" in result
     assert "wall-art reproduction and compositing" not in result
-    signature = result.index("Find a verified signature if available.")
+    signature = result.index("for an authentic signature for each featured person.")
     generation = result.index("use the image generation tool once")
     review = result.index("Check the finished image once against the hero photo")
     upload = result.index("Step 3. Only now open a copy of designs-canvas.psd")
@@ -342,13 +342,16 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Remove the original background completely." in result[:generation]
     assert "resize proportionally, reposition" in result[:generation]
     assert "apparent head size, eye lines, and body scale" in result[:generation]
-    assert "The first artwork you show must already include the subject and the signature when verified." in result[generation:review]
-    assert "composite the original cutout and signature" in result[generation:review]
+    assert "limited-edition-plaque.png" in result[:generation]
+    assert "“Sports Cave” or “Collector Series” as artwork text" in result[:generation]
+    assert "composite the original cutouts and signatures" in result[generation:review]
+    assert "official plaque PNG as a separate overlay" in result[generation:review]
     assert "Vary the composition across designs." in result[generation:review]
     assert "visible AI artifacts" in result[review:upload]
     assert "designs-canvas.psd" not in result[:upload]
     assert "2835 × 2004 pixels" in result[generation:upload]
     assert "editable SC_EDITION_NUMBER" in result[upload:]
+    assert "exactly one plaque visible" in result[upload:]
     assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[upload:]
     assert "Confirm the saved PSD is in that folder" in result[upload:]
     assert "provide the finished full-resolution artwork for handoff" in result[upload:]
