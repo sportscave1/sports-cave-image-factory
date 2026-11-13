@@ -70,7 +70,19 @@ def _prompt(title, story):
         "and repeat the check.\n\n"
         "Step 7. Place the final generated artwork on a copy of designs-canvas.psd. Name the PSD using "
         "the intended online product title and upload it to Dropbox at /Sportscave Team Folder/"
-        "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/."
+        "02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/.\n\n"
+        "Step 8 — Final review and polish\n\n"
+        "Critically review the finished PSD for realism, rough edges, leftover backgrounds, "
+        "lighting, blending, typography, borders and collector appeal. Use those findings to "
+        "make one final image-generation polish, preserving the design, faces, anatomy, "
+        "uniforms, text and verified signatures. Check the result against the original and "
+        "correct any new distortions.\n\n"
+        "Exclude the official badge and edition number from generation. Add the polished image "
+        "as FINAL POLISHED ARTWORK above the existing artwork, keeping all previous artwork "
+        "layers intact in a hidden ORIGINAL EDITABLE ARTWORK group. Keep the original badge "
+        "above the polished artwork and the editable edition number as the top layer.\n\n"
+        "Preserve the canvas dimensions and colour profile. Save over the same Dropbox PSD, "
+        "verify the saved file and display the finished artwork in chat."
     )
 
 
