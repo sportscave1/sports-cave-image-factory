@@ -172,6 +172,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     monkeypatch.setattr(meta, "sydney_date", lambda: TODAY)
     live_roas = Mock(return_value=2.75)
     monkeypatch.setattr(meta, "account_roas", live_roas)
+    devices = {"desktop": 2, "mobile": 0, "timezone": "Australia/Sydney"}
+    monkeypatch.setattr(meta, "device_orders", Mock(return_value=devices))
     get_user = Mock(return_value=OWNER)
     monkeypatch.setattr(route, "_request_user", get_user)
     client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
@@ -194,7 +196,9 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "Published the 2026-11-13 Meta Morning Brief." in client.post(meta.PATH, data=payload, headers=headers).text
     previous = {**data, "date": "2026-11-12"}
     assert client.post(meta.PATH, data={"brief": json.dumps(previous)}, headers=headers).status_code == 400
-    assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == {**data, "roas": 2.75}
+    assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == {
+        **data, "roas": 2.75, "ga4_orders": devices,
+    }
     live_roas.assert_called_once_with(date(2026, 11, 11))
 
     st = Mock()
@@ -203,7 +207,9 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     meta.render(st, get_user.return_value, date(2026, 11, 14))
     assert "Today's brief pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
-    assert "<dt>Shopify orders</dt><dd>0</dd>" in markup
+    assert "<dt>Desktop orders</dt><dd>2</dd><small>GA4</small>" in markup
+    assert "<dt>Mobile orders</dt><dd>0</dd><small>GA4</small>" in markup
+    assert "<dt>Shopify orders</dt>" not in markup
     assert "<dt>Meta ROAS</dt><dd>2.75×</dd>" in markup
     assert "Review creatives for a refresh" not in markup
 
@@ -217,10 +223,21 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
             "Review Warne creative for a refresh.",
             "Check Reece Walsh product availability.",
             "Test a baseball creative tied to the awards.",
+            "Compare historical prospecting creative.",
+            "Review delivery of the latest catalogue ad.",
         ],
+        "insights": {"shopify": ["Compare the product page on desktop and mobile."],
+                     "seo": ["Review the collector print landing page."]},
     }
     for unsafe_text in ("Spend rose by $20.", "Payouts rose", "Revenue rose", "Revenue: ＄１２"):
         rejected = {**review, "recommendations": [unsafe_text]}
+        assert client.post(meta.PATH, data={"brief": json.dumps(rejected)}, headers=headers).status_code == 400
+        rejected = {**review, "insights": {"seo": [unsafe_text]}}
+        assert client.post(meta.PATH, data={"brief": json.dumps(rejected)}, headers=headers).status_code == 400
+    for rejected in (
+        {**review, "recommendations": ["Check checkout tracking.", "Second: Check checkout tracking!"]},
+        {**review, "ga4_orders": devices},
+    ):
         assert client.post(meta.PATH, data={"brief": json.dumps(rejected)}, headers=headers).status_code == 400
     assert client.post(meta.PATH, data={"brief": json.dumps(review)}, headers=headers).status_code == 200
     meta.render(st, get_user.return_value, TODAY)
@@ -229,7 +246,12 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "Test &lt;creative&gt;" in markup
     assert 'aria-haspopup="dialog">More recommendations</button>' in markup
     assert '<dialog class="sc-meta-full"' in markup
-    assert "Test a baseball creative tied to the awards." in markup
+    popup = markup.split('<dialog class="sc-meta-full"', 1)[1].split("</dialog>", 1)[0]
+    assert '<ol start="4">' in popup and popup.count("<li>") == 5
+    assert "Test a baseball creative tied to the awards." in popup
+    assert "Check checkout tracking." not in popup
+    assert "Shopify · catalogue and storefront" in markup
+    assert "Search Console · SEO opportunities" in markup
 
     monkeypatch.setattr(meta, "get_app_setting", Mock(return_value=legacy))
     meta.render(st, get_user.return_value, TODAY)
