@@ -108,7 +108,7 @@ def _cleanup_probe(store,owner,host,context,descriptor):
     store.chunk(state['id'],owner,host,0,payload,d['chunks'][0]);store.finalize(state['id'],owner,host)
     with connect() as connection,connection.cursor() as cursor:
         cursor.execute("UPDATE companion_package_uploads SET expires_at=now()-interval '1 second' WHERE id=%s",(state['id'],))
-    count=store.cleanup()
+    count=store.cleanup(acceptance_run=context['acceptance_run'])
     if count!=1 or store.provider.metadata_if_present(store.provider.destination(state['id'])) is not None:raise ValueError('Isolated cleanup failed.')
     return dict(expired_sessions=count,active_main_preserved=True)
 
