@@ -2,14 +2,17 @@
 
 from datetime import date
 from decimal import Decimal
+from html import escape
 import json
 import math
+import re
+import unicodedata
 from zoneinfo import ZoneInfoNotFoundError
 
 import meta_ads_client
 import meta_review_live
 import os_accounts
-from home_sports_morning_brief import LOG
+from home_sports_morning_brief import LOG, _text
 from meta_reporting_contract import reporting_window, validate_account
 from meta_review_analysis import action
 from sports_sales_calendar import sydney_date
@@ -28,6 +31,23 @@ ACTIONS = {
     "review_sports": "Review sports stories for an ad test",
 }
 FIELDS = {"date", "report_date", "roas", "orders", "actions"}
+REVIEW_FIELDS = {"summary", "recommendations"}
+FINANCIAL_TEXT = re.compile(
+    r"\b(?:aud|usd|nzd|cad|gbp|eur|jpy|inr|chf|dollars?|cents?|euros?|pounds?|"
+    r"spend(?:ing)?|spent|payouts?|revenue|sales value|purchase value|"
+    r"budgets?|costs?|prices?|cpc|cpm|cpa)\b", re.IGNORECASE
+)
+
+
+def _home_text(value, limit, field):
+    value = _text(value, limit, field)
+    normalized = unicodedata.normalize("NFKC", value)
+    if FINANCIAL_TEXT.search(normalized) or any(
+        unicodedata.category(char) in {"Sc", "Cf"} or char.isnumeric()
+        for char in normalized
+    ):
+        raise ValueError(f"Keep {field.lower()} qualitative and free of financial figures.")
+    return value
 
 
 def _day(value):
@@ -51,8 +71,8 @@ def parse_edition(raw, today):
         edition = json.loads(raw)
     except (ValueError, RecursionError):
         raise ValueError("Enter valid Meta Morning Brief JSON.") from None
-    if not isinstance(edition, dict) or set(edition) != FIELDS:
-        raise ValueError("Include date, report_date, roas, orders and actions only.")
+    if not isinstance(edition, dict) or set(edition) not in (FIELDS, FIELDS | REVIEW_FIELDS):
+        raise ValueError("Include date, report_date, roas, orders and actions. Add summary and recommendations together.")
     day = _day(edition["date"])
     report_day = _day(edition["report_date"])
     if day > today or report_day >= day:
@@ -70,6 +90,12 @@ def parse_edition(raw, today):
         not isinstance(action, str) or action not in ACTIONS for action in actions
     ) or len(set(actions)) != len(actions):
         raise ValueError("Choose up to three distinct supported action codes.")
+    if "summary" in edition:
+        edition["summary"] = _home_text(edition["summary"], 240, "Summary")
+        items = edition["recommendations"]
+        if not isinstance(items, list) or not 1 <= len(items) <= 3:
+            raise ValueError("Include one to three recommendations.")
+        edition["recommendations"] = [_home_text(item, 190, "Recommendation") for item in items]
     return edition
 
 
@@ -144,7 +170,7 @@ def render(st, user, today):
             return
         day = _day(saved["date"])
         # Older editions include unrestricted text and financial metrics. Keep them out of the page entirely.
-        edition = parse_edition(json.dumps(saved), today) if set(saved) == FIELDS else None
+        edition = parse_edition(json.dumps(saved), today) if FIELDS <= set(saved) else None
     except Exception as error:
         LOG.warning("home_meta_morning_brief_unavailable type=%s", type(error).__name__)
         st.warning("The Meta brief is temporarily unavailable.")
@@ -155,6 +181,14 @@ def render(st, user, today):
     orders_value = f"{orders:,}" if orders is not None else "Unavailable"
     roas_value = f"{Decimal(str(roas)):.2f}×" if roas is not None else "Unavailable"
     report_day = f'<p class="sc-meta-period">{_label(_day(edition["report_date"]))} reporting</p>' if edition else ""
+    review = ""
+    if edition and edition.get("summary"):
+        items = "".join(f"<li>{escape(item)}</li>" for item in edition["recommendations"])
+        review = (
+            '<section class="sc-meta-review" aria-label="Daily ad review">'
+            f'<p>{escape(edition["summary"])}</p>'
+            f'<h4>What to do next</h4><ul>{items}</ul></section>'
+        )
     st.html(
         """<style>
         .sc-meta-brief {--line:rgba(128,114,82,.24);font-size:.82rem;line-height:1.4}
@@ -165,9 +199,16 @@ def render(st, user, today):
         .sc-meta-brief dl div {padding:.65rem .75rem;border-top:2px solid #b49048;overflow-wrap:anywhere}
         .sc-meta-brief dt {font-size:.76rem;opacity:.82}
         .sc-meta-brief dd {margin:.12rem 0 0;font-size:1rem;font-weight:650;font-variant-numeric:tabular-nums}
+        .sc-meta-review {margin-top:.55rem;padding:.7rem .8rem;border:1px solid var(--line);
+            border-radius:12px;background:var(--background-color,#fff);overflow-wrap:anywhere}
+        .sc-meta-review p,.sc-meta-review li {font-size:.82rem;line-height:1.45}
+        .sc-meta-review p {margin:0 0 .55rem}
+        .sc-meta-review h4 {font-size:.8rem;margin:0 0 .25rem;padding:0}
+        .sc-meta-review ul {margin:0;padding-left:1.1rem}
+        .sc-meta-review li+li {margin-top:.25rem}
         </style>"""
         f'<section class="sc-meta-brief" aria-label="Meta and Shopify snapshot">{report_day}'
         f'<dl><div><dt>Meta ROAS</dt><dd>{roas_value}</dd></div>'
         f'<div><dt>Shopify orders</dt><dd>{orders_value}</dd></div></dl>'
-        + '</section>'
+        + review + '</section>'
     )

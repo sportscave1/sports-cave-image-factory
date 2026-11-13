@@ -207,6 +207,17 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "<dt>Meta ROAS</dt><dd>2.75×</dd>" in markup
     assert "Review creatives for a refresh" not in markup
 
+    review = {**data, "summary": "The Final Lap leads recent performance.",
+              "recommendations": ["Test <creative> from the older campaign."]}
+    for unsafe_text in ("Spend rose by $20.", "Payouts rose", "Revenue rose", "Revenue: ＄１２"):
+        rejected = {**review, "recommendations": [unsafe_text]}
+        assert client.post(meta.PATH, data={"brief": json.dumps(rejected)}, headers=headers).status_code == 400
+    assert client.post(meta.PATH, data={"brief": json.dumps(review)}, headers=headers).status_code == 200
+    meta.render(st, get_user.return_value, TODAY)
+    markup = st.html.call_args.args[0]
+    assert "The Final Lap leads recent performance." in markup
+    assert "Test &lt;creative&gt;" in markup
+
     monkeypatch.setattr(meta, "get_app_setting", Mock(return_value=legacy))
     meta.render(st, get_user.return_value, TODAY)
     markup = st.html.call_args.args[0]
