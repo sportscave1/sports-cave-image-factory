@@ -154,9 +154,10 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     assert "Create Design" in markup and "Create Ad" in markup
     assert "Sports Cave event: Fixture release" in markup
     assert "Show the photos in this chat first" in markup
-    assert "generate the design based on the photos you showed" in markup
+    assert "Choose the strongest usable photo as the hero" in markup
     assert "designs-canvas.psd" in markup
-    assert "Step 3. Generate this design now" in markup
+    assert "Step 3. Define the composition" in markup
+    assert "MANDATORY CONTINUATION AND RECOVERY" in markup
     assert "<h4>Fixture release</h4>" not in markup
     assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
@@ -403,12 +404,27 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert result.index("Use web image search") < result.index("Step 1.") < result.index("Step 2.") < result.index("Step 3.")
     assert "photographer or agency credit" not in result
     assert "wall-art reproduction and compositing" not in result
+    assert "If a required operation is unavailable or fails" not in result
+    assert "10/10" not in result
+    assert "three distinct credible sources" in result
+    assert "record the reason in REVIEW NOTES, and continue" in result
     signature = result.index("Keep the original letterforms and strokes.")
-    generation = result.index("Step 5. Use the image generation tool")
-    review = result.index("Step 6. Inspect the generated artwork against the original photo.")
-    upload = result.index("Step 7. Place the final generated artwork on a copy of designs-canvas.psd.")
-    assert signature < generation < review < upload
-    assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[upload:]
+    first_generation = result.index("Step 5. Use the image generation tool")
+    first_review = result.index("Step 6. Inspect the generated artwork")
+    first_save = result.index("Step 7. Place the first complete artwork")
+    second_pass = result.index("**STEP 8")
+    confirmed_first_save = result.index("**Entry requirement:**", second_pass)
+    second_generation = result.index("Make a **new image-generation call**")
+    overwrite = result.index("**Overwrite the exact Dropbox PSD saved in Step 7.**")
+    assert signature < first_generation < first_review < first_save < second_pass
+    assert confirmed_first_save < second_generation < overwrite
+    assert "as a review draft" in result[first_save:second_pass]
+    assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[first_save:second_pass]
+    assert "hidden REVIEW NOTES layer" in result[first_save:second_pass]
+    assert "Confirm the save and continue immediately to Step 8" in result[first_save:second_pass]
+    assert "ORIGINAL EDITABLE ARTWORK" in result[second_generation:overwrite]
+    assert "connected Dropbox browser" in result[overwrite:]
+    assert "confirm it is the updated revision" in result[overwrite:]
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)
