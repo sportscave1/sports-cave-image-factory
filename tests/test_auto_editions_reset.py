@@ -552,6 +552,33 @@ def test_updated_mapped_source_prepares_once_preserving_generation(design,tmp_pa
     assert protected(sql)==before
 
 
+def test_activation_recovery_requeues_replacement_and_preserves_ready_generation(design, monkeypatch):
+    import auto_editions_recovery as recovery
+    from tests.test_auto_editions_backlog_recovery import CONFIG, resize_runtime
+
+    d, sql, _, _ = design
+    sql.execute((ROOT/'supabase/migrations/20261017001547_auto_editions_technical_completion.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    monkeypatch.delenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED',raising=False)
+    before = protected(sql)
+    active = snapshot(selected(sql))
+    fresh = asset(rev='b2',content_hash='b'*64)
+    tick((d,sql),[fresh],metadata=fresh)
+    claimed = d.queue.claim('host')
+    reason = 'Photoshop inspection failed: OSError'
+    d.queue.checkpoint(PID,str(claimed['lease_token']),'host','Blocked',reason)
+    assert selected(sql)['replacement']['stage'] == 'Failed'
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG), patch.object(
+            recovery,'native_runtime',return_value=resize_runtime()):
+        assert recovery.scan(d.connect,lambda _:fresh) == []
+        sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()-interval '1 minute' WHERE product_gid=%s",(PID,))
+        assert recovery.scan(d.connect,lambda _:fresh) == [PID]
+        assert recovery.scan(d.connect,lambda _:fresh) == []
+    assert selected(sql)['replacement']['stage'] == 'Queued'
+    assert snapshot(selected(sql)) == active
+    assert protected(sql) == before
+
+
 @pytest.mark.parametrize('kind',['deferred','busy','manual','changed_again'])
 def test_updated_source_respects_holds_and_freshness(design,kind):
     d,sql,reset,old=design

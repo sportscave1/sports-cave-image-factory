@@ -27,11 +27,11 @@ def native_dispatch(run, script, output):
     status=Path(output)/'native-status.json'
     prior_cleanup_uncertain = status.exists() and native_cleanup_uncertain(output)
     if status.exists():status.replace(Path(output)/'preflight-native-status.json')
-    from scripts.photoshop_dispatch import PhotoshopMethodUnavailable
+    from scripts.photoshop_dispatch import PhotoshopActivationUnavailable, PhotoshopMethodUnavailable
     try:
         return run(script)
-    except PhotoshopMethodUnavailable:
-        # Lookup failed before Invoke. A missing native receipt here does not
+    except (PhotoshopActivationUnavailable, PhotoshopMethodUnavailable):
+        # Activation or lookup failed before Invoke. A missing native receipt here does not
         # indicate an open Photoshop document from this dispatch.
         if not prior_cleanup_uncertain:
             (Path(output)/'photoshop-dispatch.json').unlink(missing_ok=True)

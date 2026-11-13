@@ -23,6 +23,23 @@ def test_own_position_and_style_preserved():
     assert preparation_scale([2004,2835])==4
 
 
+@pytest.mark.parametrize('caption', ['LIMITED EDITION', 'LIMITED EDTION'])
+def test_two_line_edition_number_preserves_caption_and_requires_plaque(caption):
+    data = inspection()
+    data['layers'][0]['text'] = '#047/100\r' + caption
+    assert detect(data, 100)['reference_number'] == 47
+    data['layers'].pop()
+    with pytest.raises(NeedsRepair, match='unique recognised collector plaque'):
+        detect(data, 100)
+
+
+def test_two_line_number_with_unrecognised_caption_requires_repair():
+    data = inspection()
+    data['layers'][0]['text'] = '#047/100\rPLAYER 23'
+    with pytest.raises(NeedsRepair, match='one visible, editable'):
+        detect(data, 100)
+
+
 @pytest.mark.parametrize('suffix', ['1', '2', '12'])
 @pytest.mark.parametrize('kind', ['smart_object', 'raster'])
 def test_download_copy_plaque_retains_exact_layer_identity(suffix,kind):

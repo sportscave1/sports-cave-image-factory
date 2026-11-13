@@ -35,17 +35,44 @@ def test_busy_method_lookup_retries_without_invoking_a_script(monkeypatch):
     attempts.assert_called_once()
 
 
+def test_photoshop_activation_retries_only_server_execution_failure(monkeypatch):
+    from scripts import photoshop_dispatch as dispatch
+
+    error = OSError('Server execution failed')
+    error.winerror = -2146959355
+    wait = Mock()
+    monkeypatch.setattr(dispatch.time, 'sleep', wait)
+
+    create = Mock(side_effect=[error, None])
+    dispatch.activate_photoshop(create)
+    assert create.call_count == 2
+
+    wait.reset_mock()
+    create = Mock(side_effect=error)
+    with pytest.raises(dispatch.PhotoshopActivationUnavailable, match='0x80080005'):
+        dispatch.activate_photoshop(create)
+    assert create.call_count == 3
+    assert [call.args for call in wait.call_args_list] == [(1,), (2,)]
+
+    create = Mock(side_effect=OSError('Unrelated failure'))
+    with pytest.raises(OSError, match='Unrelated failure'):
+        dispatch.activate_photoshop(create)
+    create.assert_called_once()
+
+
 @pytest.mark.parametrize("prior_close", [None, True, False])
-def test_pre_dispatch_lookup_preserves_prior_cleanup_evidence(tmp_path, prior_close):
-    from scripts.photoshop_dispatch import PhotoshopMethodUnavailable
+@pytest.mark.parametrize("activation_failure", [True, False])
+def test_pre_dispatch_failure_preserves_prior_cleanup_evidence(tmp_path, prior_close, activation_failure):
+    from scripts.photoshop_dispatch import PhotoshopActivationUnavailable, PhotoshopMethodUnavailable
     from scripts.prepare_auto_editions import native_cleanup_uncertain, native_dispatch
 
     (tmp_path/'photoshop-dispatch.json').write_text('{"started":true}')
     if prior_close is not None:
         (tmp_path/'native-status.json').write_text(json.dumps({"owned_document_closed": prior_close}))
-    failed_lookup = Mock(side_effect=PhotoshopMethodUnavailable(0x80010001))
-    with pytest.raises(PhotoshopMethodUnavailable):
-        native_dispatch(failed_lookup, 'script', tmp_path)
+    error = PhotoshopActivationUnavailable() if activation_failure else PhotoshopMethodUnavailable(0x80010001)
+    failed_dispatch = Mock(side_effect=error)
+    with pytest.raises(type(error)):
+        native_dispatch(failed_dispatch, 'script', tmp_path)
     assert native_cleanup_uncertain(tmp_path) is (prior_close is False)
 
 

@@ -21,6 +21,8 @@ def resize_runtime():
 @pytest.mark.parametrize('reason',[
     'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
     'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
+    'Photoshop inspection failed: OSError',
+    'Photoshop inspection failed: Photoshop automation server could not start (HRESULT 0x80080005)',
     'Photoshop inspection failed: Photoshop is busy before script dispatch (HRESULT 0x80010001)',
     'Photoshop inspection failed: Inspector failure: Error: Cannot open the file because the open options are incorrect'])
 def test_new_design_resize_failure_recovers_once_without_historical_scope(backlog,monkeypatch,reason):
@@ -41,6 +43,19 @@ def test_new_design_resize_failure_recovers_once_without_historical_scope(backlo
         # A restart and elapsed backoff do not reset the shared-fix budget.
         assert recovery.scan(d.connect,metadata)==[]
     assert {t:rows(sql,t) for t in protected}==protected
+
+
+def test_activation_failure_reports_specific_diagnostic(tmp_path, monkeypatch):
+    from scripts.photoshop_dispatch import PhotoshopActivationUnavailable
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1]/'scripts/studio'))
+    from auto_editions_local import failure_detail
+    row = dict(folder=tmp_path)
+
+    reason = failure_detail(row, 'Photoshop inspection', PhotoshopActivationUnavailable())
+
+    assert '0x80080005' in reason
+    assert row['diagnostic']['code'] == 'PHOTOSHOP_ACTIVATION'
+    assert row['diagnostic']['stage'] == 'Photoshop'
 
 
 @pytest.mark.parametrize('change',[{'state':'Live'},{'processor_lock':True},{'checkpoint_pending':True},
@@ -111,6 +126,18 @@ def test_preparation_http_diagnostics_preserve_status_and_retry_class(tmp_path,c
     assert 'HTTP '+str(code) in reason
     assert 'example.test' not in reason
     assert (explain(reason)['code']=='CONNECTION_INTERRUPTED')==(code in (408,429,500,502,503,504))
+
+
+def test_legacy_generic_inspection_requires_exact_approved_colour_evidence():
+    reason = 'Photoshop inspection failed: Photoshop preparation failed; inspect the retained local failure-detail.json.'
+    row = dict(status='Blocked', priority=2, reason=reason, dropbox_file_id='id:source',
+               source=dict(file_id='id:source'))
+    assert recovery.classify(row,CONFIG)['action'] is None
+    with patch('auto_editions_colour_policy.resolve',return_value=(b'icc', {'approval_hash':'verified'})):
+        decision = recovery.classify(row,CONFIG)
+        assert decision['action'] == 'retry'
+        assert decision['category'] == 'Colour/provenance'
+        assert decision['max_attempts'] == 1
 
 
 def test_corrected_input_resumes_without_manual_retry(backlog,monkeypatch):

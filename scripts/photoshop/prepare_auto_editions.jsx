@@ -42,6 +42,13 @@ var SCAutoEditionsPreparation = (function () {
         var target = new File(path).fsName.toLowerCase();
         return target.indexOf(base + "\\") === 0 || target.indexOf(base + "/") === 0;
     }
+    function canvasPixels(value) {
+        var pixels = value.as("px"), rounded = Math.round(pixels);
+        // UnitValue can return floating-point noise for integral PSD pixels.
+        if (!isFinite(pixels) || Math.abs(pixels-rounded)>0.00001)
+            throw Error("nonintegral_preparation_canvas");
+        return rounded;
+    }
     function run(r) {
         if (!r || !inside(r.stage_root, r.input) || !inside(r.output_root, r.report)
             || !r.icc_path || !inside(r.stage_root,r.icc_path)
@@ -121,7 +128,7 @@ var SCAutoEditionsPreparation = (function () {
             var inspection = timed("psd_inspection_ms",function(){return SCPSDInspector.inspect(doc, {smart_object_depth:0,smart_object_limit:0});});
             if (inspection.document.profile_state !== "tagged") throw Error("profile_inspector_failure");
             timed("icc_witness_ms",function(){profileWitness(doc,r.output_root,r.icc_path);});
-            var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
+            var sourceDimensions = [canvasPixels(doc.width), canvasPixels(doc.height)];
             var hidden = null, approvedHidden = r.approved_hidden_number;
             if (approvedHidden) {
                 var hiddenMatches=[];named(doc,approvedHidden.name,hiddenMatches);
@@ -183,16 +190,16 @@ var SCAutoEditionsPreparation = (function () {
             // Photoshop rerenders editable text/shapes; raster layers use bicubic smoother.
             if (scale !== 1) timed("layered_resize_ms",function(){doc.resizeImage(UnitValue(target[0],"px"),
                 r.preparation_plan && scale!==Math.floor(scale) ? null : UnitValue(target[1],"px"), null, ResampleMethod.BICUBICSMOOTHER);});
-            if(doc.width.as("px")!==target[0] || doc.height.as("px")!==target[1])throw Error("preparation_target_rounding_changed");
+            if(canvasPixels(doc.width)!==target[0] || canvasPixels(doc.height)!==target[1])throw Error("preparation_target_rounding_changed");
             // Keep the untouched composite as an independent outside-number proof.
             if(hidden){savePNG(doc,"uncorrected.png");hidden.visible=false;}
             timed("original_export_ms",function(){savePNG(doc, "original.png");});
             app.fonts.getByName(layer.textItem.font);
             var text = layer.textItem.contents;
-            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
+            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})((?:[ \t]*(?:\r\n|[\r\n])[ \t]*LIMITED[ \t]+(?:EDITION|EDTION))?\s*)$/i.exec(text);
             if (!m || parseInt(m[4], 10) !== r.edition_total || r.edition_total < 1 || r.edition_total > 1000)
                 throw Error("edition_total_mismatch");
-            var total = r.edition_total, w = doc.width.as("px"), h = doc.height.as("px");
+            var total = r.edition_total, w = canvasPixels(doc.width), h = canvasPixels(doc.height);
             if (w * h > 110000000) throw Error("canvas_exceeds_worker_limit");
             var originalBounds = box(layer), plaqueBounds = box(plaque), region = originalBounds.slice(0);
             var width = m[2].length, totalWidth = String(total).length;
@@ -253,7 +260,7 @@ var SCAutoEditionsPreparation = (function () {
                         if (restored.length !== 1 || restored[0].kind !== LayerKind.TEXT || restored[0].parent !== doc)
                             throw Error("preparation_history_restore_failed");
                         layer = restored[0];
-                        if (doc.width.as("px") !== w || doc.height.as("px") !== h)
+                        if (canvasPixels(doc.width) !== w || canvasPixels(doc.height) !== h)
                             throw Error("preparation_history_restore_failed");
                     }
                 }

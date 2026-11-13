@@ -7,7 +7,8 @@ import re
 import auto_editions as ae
 from auto_editions_colour_source import ColourReview
 
-NUMBER = re.compile(r'^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)$', re.I)
+# Keep the original caption, including its legacy spelling, when only digits change.
+NUMBER = re.compile(r'^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(?:([ \t]*(?:\r\n|[\r\n])[ \t]*LIMITED[ \t]+(?:EDITION|EDTION))?\s*)$', re.I)
 PLAQUES = {'SC_EDITION_PLAQUE', 'limited-edition-plaque'}
 # Placed assets can retain a numeric filename suffix. Match only that known
 # asset name, not arbitrary plaques.

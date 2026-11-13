@@ -26,3 +26,14 @@ for(const [file,opening] of [['scripts/photoshop/inspect_psd_editions.jsx','doc=
  assert.equal(opened,1);
 }
 console.log('Native PSD opens restore minimized Photoshop before opening staged copies');
+
+const canvasPixels = source.slice(source.indexOf('    function canvasPixels('), source.indexOf('    function run(r)'));
+const pixelCount = vm.runInNewContext(canvasPixels + 'canvasPixels');
+assert.equal(pixelCount({as: () => 7015.999999999999}), 7016);
+assert.equal(pixelCount({as: () => 4961.000000000001}), 4961);
+assert.throws(() => pixelCount({as: () => 7016.25}), /nonintegral_preparation_canvas/);
+const pattern = vm.runInNewContext(source.match(/var m = (\/\^.+\/i)\.exec\(text\);/)[1]);
+const editionText = pattern.exec('#047/100\rLIMITED EDTION');
+assert.equal(editionText[1] + '083' + editionText[3] + editionText[4] + editionText[5], '#083/100\rLIMITED EDTION');
+assert.equal(pattern.test('#047/100\rPLAYER 23'), false);
+console.log('Native canvas precision and two-line edition text checks passed');
