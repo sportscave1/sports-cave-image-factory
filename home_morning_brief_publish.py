@@ -10,6 +10,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 from files_upload_api import FilesUploadError, _request_user, _same_origin
 from home_brief_calendar import MARKETS, iso_day, matches_market
 import home_meta_morning_brief as meta
+import home_design_refresh as refresh
 from home_morning_brief_actions import article_html
 from home_sports_morning_brief import LOG, MAX_PAYLOAD, SETTING_KEY, archive_page, get_app_setting, parse_edition, publish
 from sports_categories import CANONICAL_SPORT_CATEGORIES
@@ -24,16 +25,18 @@ HEADERS = {
 }
 
 
-def _page(message="", status=200, *, form=False, meta_brief=False):
-    path = meta.PATH if meta_brief else PATH
-    title = "Meta Morning Brief" if meta_brief else "Morning Brief"
-    limit = meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
+def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief=False):
+    path = refresh.PATH if refresh_brief else meta.PATH if meta_brief else PATH
+    title = "Designs to Refresh" if refresh_brief else "Meta Morning Brief" if meta_brief else "Morning Brief"
+    limit = refresh.MAX_PAYLOAD if refresh_brief else meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
     instructions = (
         f"Include date, report_date, roas, orders and actions. Add a short qualitative summary and up to {meta.MAX_RECOMMENDATIONS} distinct recommendations for Home. Optional insights cover Shopify, GA4, SEO and sports."
         if meta_brief else
         "Use the Sydney edition date and recommendations with title, recommendation, links, sport, "
         "markets, and confirmed start_date and end_date when available. Include the complete edition as full_brief."
     )
+    if refresh_brief:
+        instructions = "Enter today's Sydney date and up to three verified candidates."
     body = f"<p>{escape(message)}</p>" if message else ""
     if form:
         body += (
@@ -55,13 +58,14 @@ def _page(message="", status=200, *, form=False, meta_brief=False):
 
 async def publication(request):
     meta_brief = request.url.path == meta.PATH
-    title = "Meta Morning Brief" if meta_brief else "Morning Brief"
-    limit = meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
-    permitted = meta.can_view if meta_brief else os_accounts.is_reporting_owner
-    publisher = meta.publish if meta_brief else publish
+    refresh_brief = request.url.path == refresh.PATH
+    title = "Designs to Refresh" if refresh_brief else "Meta Morning Brief" if meta_brief else "Morning Brief"
+    limit = refresh.MAX_PAYLOAD if refresh_brief else meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
+    permitted = meta.can_view if meta_brief or refresh_brief else os_accounts.is_reporting_owner
+    publisher = refresh.publish if refresh_brief else meta.publish if meta_brief else publish
 
     def page(message="", status=200, *, form=False):
-        return _page(message, status, form=form, meta_brief=meta_brief)
+        return _page(message, status, form=form, meta_brief=meta_brief, refresh_brief=refresh_brief)
 
     if request.method == "POST" and (not request.headers.get("origin") or not _same_origin(request)):
         return page("Invalid request origin.", 403)
@@ -134,6 +138,34 @@ async def history(request):
     return JSONResponse({"html": "".join(html), "before": next_page}, headers=HEADERS)
 
 
+async def results(request):
+    try:
+        user = await run_in_threadpool(_request_user, request, required_page="dashboard")
+    except FilesUploadError:
+        user = None
+    if not meta.can_view(user):
+        return JSONResponse({"error": "owner_required"}, status_code=403, headers=HEADERS)
+    period = request.query_params.get("period")
+    if period not in meta.PERIODS:
+        return JSONResponse({"error": "invalid_period"}, status_code=400, headers=HEADERS)
+    data = await run_in_threadpool(meta.period_results, period, sydney_date())
+    return JSONResponse(data, headers=HEADERS)
+
+
+async def refresh_history(request):
+    try:
+        user = await run_in_threadpool(_request_user, request, required_page="dashboard")
+    except FilesUploadError:
+        user = None
+    if not meta.can_view(user):
+        return JSONResponse({"error": "owner_required"}, status_code=403, headers=HEADERS)
+    ids = await run_in_threadpool(refresh.recent_ids, sydney_date())
+    return JSONResponse({"excluded_product_ids": ids}, headers=HEADERS)
+
+
 ROUTES = [(PATH, publication, ("GET", "POST")),
           (meta.PATH, publication, ("GET", "POST")),
+          (refresh.PATH, publication, ("GET", "POST")),
+          ("/ops/design-refresh/history", refresh_history, ("GET",)),
+          (meta.RESULTS_PATH, results, ("GET",)),
           ("/ops/morning-brief/history", history, ("GET",))]

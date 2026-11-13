@@ -96,8 +96,9 @@ def article_html(item, *, heading=None, allow_ads=False):
         if not line.strip():
             continue
         lead, colon, detail = line.partition(": ")
-        if colon and len(lead) < 32:
-            paragraphs.append(f"<p><strong>{escape(lead)}:</strong> {escape(detail)}</p>")
+        if (colon and len(lead) < 42) or (line.strip().endswith(":") and len(line.strip()) < 42):
+            label = lead if colon else line.strip()[:-1]
+            paragraphs.append(f'<p class="sc-brief-key"><strong>{escape(label)}:</strong> {escape(detail)}</p>')
         else:
             paragraphs.append(f"<p>{escape(line)}</p>")
     return (

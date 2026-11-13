@@ -1,6 +1,8 @@
 """Publish a compact, team-safe Meta brief using a fixed set of display fields."""
 
-from datetime import date
+from calendar import monthrange
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 from decimal import Decimal
 from html import escape
 import json
@@ -10,17 +12,24 @@ import unicodedata
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from crm_growth_reporting import device_orders
+from google_direct_reporting import MemoryReports
 import meta_ads_client
 import meta_review_live
 import os_accounts
+import home_design_refresh
 from home_sports_morning_brief import LOG, _text
-from meta_reporting_contract import reporting_window, validate_account
+from meta_reporting_contract import validate_account
 from meta_review_analysis import action
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
 
 PATH = "/ops/meta-morning-brief/publish"
+RESULTS_PATH = "/ops/meta-morning-brief/results"
+PERIODS = {"yesterday": "Yesterday", "week": "Last 7 days", "month": "Last 30 days",
+           "quarter": "Last 3 months", "today": "Today"}
+RESULTS_CACHE = MemoryReports(max_bytes=65536)
+RESULTS_POOL = ThreadPoolExecutor(max_workers=4)
 SETTING_KEY = "home_meta_morning_brief"
 MAX_PAYLOAD = 16000
 ACTIONS = {
@@ -120,8 +129,9 @@ def parse_edition(raw, today, *, stored=False):
         if not isinstance(insights, dict) or not set(insights) <= INSIGHT_LABELS.keys():
             raise ValueError("Use Shopify, GA4, SEO or sports insight sections.")
         for section, items in insights.items():
-            if not isinstance(items, list) or not 1 <= len(items) <= 3:
-                raise ValueError("Include one to three insights per section.")
+            maximum = 6 if section == "sports" else 3
+            if not isinstance(items, list) or not 1 <= len(items) <= maximum:
+                raise ValueError(f"Include one to {maximum} insights for {section}.")
             insights[section] = [_home_text(item, 220, "Insight") for item in items]
     devices = edition.get("ga4_orders")
     if devices is not None:
@@ -139,17 +149,19 @@ def parse_edition(raw, today, *, stored=False):
     return edition
 
 
-def account_roas(day):
-    """Read Meta's own account roll-up for one completed account day."""
+def account_roas(day, end=None):
+    """Read Meta's account roll-up for the exact requested calendar window."""
+    end = end or day
     config = meta_ads_client.get_meta_config()
     account_id = config["ad_account_id"]
     reader = meta_review_live.Reader(config, max_pages=1, seconds=12)
     account = validate_account(
         reader.get(account_id, {"fields": "account_id,currency,timezone_name"}), account_id
     )
-    reporting_window(account, day, day)
+    if account["timezone_name"] != "Australia/Sydney" or not day <= end <= sydney_date():
+        raise ValueError("Meta reporting dates do not match the Sydney window.")
     rows = reader.pages(account_id + "/insights", {
-        **meta_review_live.date_params(day, day),
+        **meta_review_live.date_params(day, end),
         "fields": "account_id,date_start,date_stop,purchase_roas",
         "level": "account",
         "use_unified_attribution_setting": "true",
@@ -160,11 +172,43 @@ def account_roas(day):
     if len(rows) != 1 or (
         str(rows[0].get("account_id")) != account_id.removeprefix("act_")
         or rows[0].get("date_start") != day.isoformat()
-        or rows[0].get("date_stop") != day.isoformat()
+        or rows[0].get("date_stop") != end.isoformat()
     ):
         raise ValueError("Meta returned an unexpected account or reporting period.")
     value = action(rows[0], "purchases", "purchase_roas")
     return value if value is not None and value <= 10_000 else None
+
+
+def period_window(period, today):
+    if period == "today":
+        return today, today
+    end = today - timedelta(days=1)
+    if period == "quarter":
+        year, month = divmod(today.year * 12 + today.month - 4, 12)
+        month += 1
+        return date(year, month, min(today.day, monthrange(year, month)[1])), end
+    return today - timedelta(days={"yesterday": 1, "week": 7, "month": 30}[period]), end
+
+
+def period_results(period, today):
+    start, end = period_window(period, today)
+
+    def read(source, call):
+        try:
+            return RESULTS_CACHE.read((source, period, start.isoformat(), end.isoformat()),
+                                      180 if period == "today" else 900, call)
+        except Exception as error:
+            LOG.warning("home_period_unavailable source=%s type=%s", source, type(error).__name__)
+            return None
+
+    meta = RESULTS_POOL.submit(read, "meta", lambda: account_roas(start, end))
+    google = RESULTS_POOL.submit(read, "ga4", lambda: device_orders(start, end, include_today=period == "today"))
+    ga4 = google.result() or {}
+    if ga4.get("timezone") != "Australia/Sydney":
+        ga4 = {}
+    roas = meta.result()
+    return {"roas": f"{Decimal(str(roas)):.2f}×" if roas is not None else None,
+            "desktop": ga4.get("desktop"), "mobile": ga4.get("mobile")}
 
 
 def publish(raw, user):
@@ -200,10 +244,6 @@ def publish(raw, user):
     return edition
 
 
-def _label(day):
-    return day.strftime("%d %B %Y").lstrip("0")
-
-
 def render(st, user, today):
     if not can_view(user):
         return
@@ -220,19 +260,23 @@ def render(st, user, today):
         LOG.warning("home_meta_morning_brief_unavailable type=%s", type(error).__name__)
         st.warning("The Meta brief is temporarily unavailable.")
         return
-    st.caption(f"{_label(day)} · Sydney" if day == today else f"{_label(day)} · Sydney · Today's brief pending")
-    roas = edition["roas"] if edition else None
-    ga4 = (edition or {}).get("ga4_orders") or {}
+    if day != today:
+        st.caption("Today's recommendations are pending.")
+    yesterday_saved = bool(edition and _day(edition["report_date"]) == today - timedelta(days=1))
+    roas = edition["roas"] if yesterday_saved else None
+    ga4 = (edition.get("ga4_orders") or {}) if yesterday_saved else {}
+    if ga4.get("timezone") != "Australia/Sydney":
+        ga4 = {}
     device_tiles = ""
     for device in ("desktop", "mobile"):
         count = ga4.get(device)
         value = f"{count:,}" if count is not None else "Unavailable"
         device_tiles += f'<div><dt>{device.title()} orders</dt><dd>{value}</dd><small>GA4</small></div>'
     roas_value = f"{Decimal(str(roas)):.2f}×" if roas is not None else "Unavailable"
-    report_day = f'<p class="sc-meta-period">{_label(_day(edition["report_date"]))} reporting</p>' if edition else ""
-    ga4_zone = (
-        f'<p class="sc-meta-source">GA4 property time · {escape(ga4["timezone"])}</p>'
-        if ga4 and ga4["timezone"] != "Australia/Sydney" else ""
+    periods = (
+        '<label class="sc-meta-period">Results <select aria-label="Reporting period">'
+        + "".join(f'<option value="{key}">{label}</option>' for key, label in PERIODS.items())
+        + '</select></label><small class="sc-meta-source" role="status"></small>'
     )
     review = ""
     if edition and edition.get("summary"):
@@ -260,10 +304,17 @@ def render(st, user, today):
         + "</ul></details>"
         for section, label in INSIGHT_LABELS.items() if section in insights
     )
+    try:
+        refresh = home_design_refresh.render_html(today)
+    except Exception as error:
+        LOG.warning("home_design_refresh_unavailable type=%s", type(error).__name__)
+        refresh = ""
     st.html(
         """<style>
         .sc-meta-brief {--line:rgba(128,114,82,.24);font-size:.82rem;line-height:1.4}
-        .sc-meta-brief .sc-meta-period {margin:0 0 .45rem;opacity:.75;font-size:.76rem}
+        .sc-meta-period {display:inline-flex;align-items:center;gap:.45rem;margin:0 .5rem .55rem 0;font-size:.76rem}
+        .sc-meta-period select {font:inherit;color:inherit;background:var(--background-color,#fff);
+            border:1px solid var(--line);border-radius:6px;padding:.22rem .35rem}
         .sc-meta-brief dl {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(7rem,100%),1fr));
             gap:.55rem;margin:0;padding:0}
         .sc-meta-brief dl div {background:var(--background-color,#fff);
@@ -290,20 +341,56 @@ def render(st, user, today):
         .sc-meta-full header {display:flex;justify-content:space-between;align-items:center;gap:.7rem}
         .sc-meta-insight {margin-top:.45rem;border:1px solid var(--line);border-radius:12px;
             background:var(--background-color,#fff);overflow-wrap:anywhere}
-        .sc-meta-insight summary {padding:.55rem .8rem;font-weight:650;cursor:pointer}
-        .sc-meta-insight ul {margin:0 .85rem .7rem;padding-left:1.15rem}
+        .sc-meta-insight summary {padding:.45rem .75rem;font-size:.8rem;font-weight:700;cursor:pointer}
+        .sc-meta-insight ul,.sc-meta-insight p {margin:0 .85rem .6rem;font-size:.77rem;line-height:1.4}
+        .sc-meta-insight ul {padding-left:1.1rem}
         .sc-meta-insight li+li {margin-top:.35rem}
         </style>"""
-        f'<section class="sc-meta-brief" aria-label="CRM snapshot">{report_day}'
+        f'<section class="sc-meta-brief" aria-label="CRM snapshot" data-saved="{int(yesterday_saved)}">{periods}'
         f'<dl><div><dt>Meta ROAS</dt><dd>{roas_value}</dd></div>'
-        f'{device_tiles}</dl>{ga4_zone}'
-        + review + insight_cards + '</section>'
+        f'{device_tiles}</dl>'
+        + review + insight_cards + refresh + '</section>'
         + """<script>{
           const panel = [...document.querySelectorAll(".sc-meta-brief")].at(-1);
           const button = panel?.querySelector(".sc-meta-more");
           if (button && !button.dataset.ready) {
             button.dataset.ready = "true";
             button.addEventListener("click", () => panel.querySelector(".sc-meta-full").showModal());
+          }
+          const select = panel?.querySelector("select");
+          if (select && !select.dataset.ready) {
+            select.dataset.ready = "true";
+            const values = [...panel.querySelectorAll("dl dd")];
+            const status = panel.querySelector(".sc-meta-source");
+            const saved = values.map(tile => tile.textContent);
+            let request;
+            const render = (items, note) => {
+              values.forEach((tile, index) => { tile.textContent = items[index] ?? "Unavailable"; });
+              status.textContent = note;
+            };
+            async function load() {
+              request?.abort();
+              const period = select.value;
+              if (period === "yesterday" && panel.dataset.saved === "1") {
+                render(saved, "");
+                return;
+              }
+              const controller = new AbortController();
+              request = controller;
+              render(["…", "…", "…"], "Loading results");
+              try {
+                const response = await fetch("/ops/meta-morning-brief/results?period=" + encodeURIComponent(period),
+                                             {signal: controller.signal});
+                if (!response.ok) throw new Error();
+                const data = await response.json();
+                if (!controller.signal.aborted) render([data.roas, data.desktop, data.mobile],
+                  period === "today" ? "Today is partial. Reporting may lag." : "");
+              } catch {
+                if (!controller.signal.aborted) render([], "Results temporarily unavailable");
+              }
+            }
+            select.addEventListener("change", load);
+            if (panel.dataset.saved !== "1") load();
           }
         }</script>""",
         unsafe_allow_javascript=True,

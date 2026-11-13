@@ -31,10 +31,11 @@ LANDING = GA4ReportContract(
 )
 
 
-def _ga4(report, connection, contract, start, end):
+def _ga4(report, connection, contract, start, end, *, include_today=False):
     data = report.ga4(connection["ga4_property_id"], contract, start, end)
     timezone = data["property_timezone"]
-    if not timezone or end >= datetime.now(ZoneInfo(timezone)).date():
+    property_today = datetime.now(ZoneInfo(timezone)).date() if timezone else None
+    if not property_today or end > property_today or (not include_today and end == property_today):
         return {"status": "reporting_day_incomplete"}
     rows = data["rows"]
     if contract == LANDING:
@@ -46,11 +47,11 @@ def _ga4(report, connection, contract, start, end):
     }
 
 
-def device_orders(day):
+def device_orders(day, end=None, *, include_today=False):
     """Return only explicit, verified GA4 device purchase counts for Home."""
     report = GoogleReports()
     connection = report.connection()
-    result = _ga4(report, connection, DEVICE, day, day)
+    result = _ga4(report, connection, DEVICE, day, end or day, include_today=include_today)
     if result.get("quality") != "GA4 verified" or not result["rows"]:
         return None
     counts = {"desktop": None, "mobile": None}
@@ -119,3 +120,30 @@ def published_sports_edition(day):
     if not edition or edition.get("date") != day.isoformat():
         return {"date": day.isoformat(), "status": "pending"}
     return edition
+
+
+def refresh_traffic(day):
+    """Return product landing traffic and previously suggested IDs for the worker."""
+    from home_design_refresh import recent_ids
+    from sports_sales_calendar import sydney_date
+
+    report = GoogleReports()
+    contract = GA4ReportContract(
+        "design_refresh_traffic", "Product landing traffic", "CRM", ("landingPage",),
+        ("sessions",), "session", (("sessions", True),), 5000, "not applicable",
+        filters=(("landingPage", "PARTIAL_REGEXP", r"(^|/)products/[a-z0-9-]+/?$"),),
+    )
+    report = report.for_request(report.connection())
+    result = _ga4(report, report.connection(), contract, day - timedelta(days=29), day)
+    if result.get("quality") != "GA4 verified":
+        return {"status": "unavailable"}
+    sessions = {}
+    for row in result["rows"]:
+        match = re.search(r"(?:^|/)products/([a-z0-9-]+)/?$", row["dimensions"].get("landingPage", ""))
+        if match:
+            handle = match.group(1)
+            sessions[handle] = sessions.get(handle, 0) + int(row["metrics"]["sessions"])
+    ranked = sorted(sessions.items(), key=lambda row: (-row[1], row[0]))[:150]
+    return {"start": result["start"], "end": result["end"], "timezone": result["timezone"],
+            "excluded_product_ids": recent_ids(sydney_date()),
+            "products": [{"handle": handle, "sessions": count} for handle, count in ranked if count > 0]}

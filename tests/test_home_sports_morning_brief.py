@@ -179,7 +179,7 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
                                           for path, endpoint, methods in route.ROUTES]))
     data = {
-        "date": TODAY.isoformat(), "report_date": "2026-11-11",
+        "date": TODAY.isoformat(), "report_date": "2026-11-12",
         "roas": None, "orders": 0, "actions": ["review_creative"],
     }
     payload = {"brief": json.dumps(data)}
@@ -199,13 +199,14 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == {
         **data, "roas": 2.75, "ga4_orders": devices,
     }
-    live_roas.assert_called_once_with(date(2026, 11, 11))
+    live_roas.assert_called_once_with(date(2026, 11, 12))
 
     st = Mock()
     meta.render(st, OWNER, TODAY)
     st.html.assert_not_called()
     meta.render(st, get_user.return_value, date(2026, 11, 14))
-    assert "Today's brief pending" in st.caption.call_args.args[0]
+    assert "Today's recommendations are pending." in st.caption.call_args.args[0]
+    meta.render(st, get_user.return_value, TODAY)
     markup = st.html.call_args.args[0]
     assert "<dt>Desktop orders</dt><dd>2</dd><small>GA4</small>" in markup
     assert "<dt>Mobile orders</dt><dd>0</dd><small>GA4</small>" in markup

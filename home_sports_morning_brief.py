@@ -165,8 +165,8 @@ def render(st, user, today):
     if edition:
         editions = [edition, *(entry for entry in editions if entry["date"] != edition["date"])]
         day = date.fromisoformat(edition["date"])
-        label = day.strftime("%d %B %Y").lstrip("0")
-        st.caption(f"{label} · Sydney" if day == today else f"Latest brief · {label} Sydney. Today's brief is pending.")
+        if day != today:
+            st.caption("Today's brief is pending.")
     elif not brief_unavailable:
         st.caption("No Morning Brief has been published yet.")
     from home_morning_brief_actions import brief_html
