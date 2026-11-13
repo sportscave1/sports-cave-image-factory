@@ -29,7 +29,7 @@ def _page(message="", status=200, *, form=False, meta_brief=False):
     title = "Meta Morning Brief" if meta_brief else "Morning Brief"
     limit = meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
     instructions = (
-        "Include date, coverage, summary, metrics and recommendations."
+        "Include date, report_date, roas, orders and actions only."
         if meta_brief else
         "Use the Sydney edition date and recommendations with title, recommendation, links, sport, "
         "markets, and confirmed start_date and end_date when available. Include the complete edition as full_brief."

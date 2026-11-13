@@ -175,9 +175,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
                                           for path, endpoint, methods in route.ROUTES]))
     data = {
-        "date": TODAY.isoformat(), "coverage": "Saved totals for 12 November",
-        "summary": "Verify <test> campaign delivery.", "metrics": {"clicks": "0", "ctr": None},
-        "recommendations": ["Review recent product demand."],
+        "date": TODAY.isoformat(), "report_date": "2026-11-11",
+        "roas": None, "orders": 0, "actions": ["review_creative"],
     }
     payload = {"brief": json.dumps(data)}
     assert client.get(meta.PATH).status_code == 403
@@ -185,6 +184,11 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "Meta Morning Brief JSON" in client.get(meta.PATH).text
     assert client.post(meta.PATH, data=payload, headers={"Origin": "https://other.test"}).status_code == 403
     headers = {"Origin": "http://testserver"}
+    legacy = {"date": TODAY.isoformat(), "summary": "AUD 122.10", "coverage": "Payouts",
+              "metrics": {"roas": "$5", "spend": "$122.10"}, "recommendations": ["Budget $50"]}
+    assert client.post(meta.PATH, data={"brief": json.dumps(legacy)}, headers=headers).status_code == 400
+    unsafe = {**data, "actions": ["Payout $50"]}
+    assert client.post(meta.PATH, data={"brief": json.dumps(unsafe)}, headers=headers).status_code == 400
     assert "Published the 2026-11-13 Meta Morning Brief." in client.post(meta.PATH, data=payload, headers=headers).text
     previous = {**data, "date": "2026-11-12"}
     assert client.post(meta.PATH, data={"brief": json.dumps(previous)}, headers=headers).status_code == 400
@@ -194,11 +198,16 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     meta.render(st, OWNER, TODAY)
     st.html.assert_not_called()
     meta.render(st, get_user.return_value, date(2026, 11, 14))
-    assert "Today's brief is pending" in st.caption.call_args.args[0]
+    assert "Today's brief pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
-    assert "&lt;test&gt;" in markup
-    assert "<dt>Clicks</dt><dd>0</dd>" in markup
-    assert "Unavailable metrics" in markup and "<dt>CTR</dt>" not in markup
+    assert "<dt>Shopify orders</dt><dd>0</dd>" in markup
+    assert "<dt>Meta ROAS</dt><dd>Unavailable</dd>" in markup
+    assert "Review creatives for a refresh" in markup
+
+    monkeypatch.setattr(meta, "get_app_setting", Mock(return_value=legacy))
+    meta.render(st, get_user.return_value, TODAY)
+    markup = st.html.call_args.args[0]
+    assert all(private not in markup for private in ("122.10", "Payouts", "$50", "$5"))
 
 
 
