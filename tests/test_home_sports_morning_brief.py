@@ -170,6 +170,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     monkeypatch.setattr(db, "connect", jobs.connect)
     monkeypatch.setattr(meta, "connect", jobs.connect)
     monkeypatch.setattr(meta, "sydney_date", lambda: TODAY)
+    live_roas = Mock(return_value=2.75)
+    monkeypatch.setattr(meta, "account_roas", live_roas)
     get_user = Mock(return_value=OWNER)
     monkeypatch.setattr(route, "_request_user", get_user)
     client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
@@ -192,7 +194,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "Published the 2026-11-13 Meta Morning Brief." in client.post(meta.PATH, data=payload, headers=headers).text
     previous = {**data, "date": "2026-11-12"}
     assert client.post(meta.PATH, data={"brief": json.dumps(previous)}, headers=headers).status_code == 400
-    assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == data
+    assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == {**data, "roas": 2.75}
+    live_roas.assert_called_once_with(date(2026, 11, 11))
 
     st = Mock()
     meta.render(st, OWNER, TODAY)
@@ -201,13 +204,35 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "Today's brief pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
     assert "<dt>Shopify orders</dt><dd>0</dd>" in markup
-    assert "<dt>Meta ROAS</dt><dd>Unavailable</dd>" in markup
-    assert "Review creatives for a refresh" in markup
+    assert "<dt>Meta ROAS</dt><dd>2.75×</dd>" in markup
+    assert "Review creatives for a refresh" not in markup
 
     monkeypatch.setattr(meta, "get_app_setting", Mock(return_value=legacy))
     meta.render(st, get_user.return_value, TODAY)
     markup = st.html.call_args.args[0]
     assert all(private not in markup for private in ("122.10", "Payouts", "$50", "$5"))
+
+
+def test_meta_roas_uses_meta_account_rollup(monkeypatch):
+    import home_meta_morning_brief as meta
+
+    config = {"ad_account_id": "act_123", "configured": True}
+    reader = Mock()
+    reader.get.return_value = {"account_id": "123", "currency": "AUD", "timezone_name": "Australia/Sydney"}
+    day = date(2026, 11, 12)
+    row = {"account_id": "123", "date_start": day.isoformat(), "date_stop": day.isoformat()}
+    reader.pages.return_value = [{**row, "purchase_roas": [{"action_type": "omni_purchase", "value": "4.12"}]}]
+    monkeypatch.setattr(meta.meta_ads_client, "get_meta_config", lambda: config)
+    monkeypatch.setattr(meta.meta_review_live, "Reader", Mock(return_value=reader))
+    assert meta.account_roas(day) == 4.12
+    path, params = reader.pages.call_args.args
+    assert path == "act_123/insights" and params["level"] == "account"
+    assert "spend" not in params["fields"]
+    reader.pages.return_value = [row]
+    assert meta.account_roas(day) is None
+    reader.pages.return_value = [{**row, "account_id": "124"}]
+    with pytest.raises(ValueError, match="unexpected account"):
+        meta.account_roas(day)
 
 
 

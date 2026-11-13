@@ -4,9 +4,14 @@ from datetime import date
 from decimal import Decimal
 import json
 import math
+from zoneinfo import ZoneInfoNotFoundError
 
+import meta_ads_client
+import meta_review_live
 import os_accounts
 from home_sports_morning_brief import LOG
+from meta_reporting_contract import reporting_window, validate_account
+from meta_review_analysis import action
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -68,6 +73,34 @@ def parse_edition(raw, today):
     return edition
 
 
+def account_roas(day):
+    """Read Meta's own account roll-up for one completed account day."""
+    config = meta_ads_client.get_meta_config()
+    account_id = config["ad_account_id"]
+    reader = meta_review_live.Reader(config, max_pages=1, seconds=12)
+    account = validate_account(
+        reader.get(account_id, {"fields": "account_id,currency,timezone_name"}), account_id
+    )
+    reporting_window(account, day, day)
+    rows = reader.pages(account_id + "/insights", {
+        **meta_review_live.date_params(day, day),
+        "fields": "account_id,date_start,date_stop,purchase_roas",
+        "level": "account",
+        "use_unified_attribution_setting": "true",
+        "action_report_time": "impression",
+    })
+    if not rows:
+        return None
+    if len(rows) != 1 or (
+        str(rows[0].get("account_id")) != account_id.removeprefix("act_")
+        or rows[0].get("date_start") != day.isoformat()
+        or rows[0].get("date_stop") != day.isoformat()
+    ):
+        raise ValueError("Meta returned an unexpected account or reporting period.")
+    value = action(rows[0], "purchases", "purchase_roas")
+    return value if value is not None and value <= 10_000 else None
+
+
 def publish(raw, user):
     if not can_view(user):
         raise PermissionError("Reporting access is required to publish the Meta brief.")
@@ -75,6 +108,11 @@ def publish(raw, user):
     edition = parse_edition(raw, today)
     if edition["date"] != today.isoformat():
         raise ValueError("Publish only today's Sydney Meta brief.")
+    try:
+        edition["roas"] = account_roas(_day(edition["report_date"]))
+    except (meta_ads_client.MetaAdsApiError, TimeoutError, OSError, ValueError, ZoneInfoNotFoundError) as error:
+        LOG.warning("home_meta_account_roas_unavailable type=%s", type(error).__name__)
+        edition["roas"] = None
     with connect() as conn, conn.cursor() as cursor:
         cursor.execute(
             """
@@ -116,28 +154,20 @@ def render(st, user, today):
     roas = edition["roas"] if edition else None
     orders_value = f"{orders:,}" if orders is not None else "Unavailable"
     roas_value = f"{Decimal(str(roas)):.2f}×" if roas is not None else "Unavailable"
-    actions = edition["actions"] if edition else ["check_reporting"]
-    items = "".join(f"<li>{ACTIONS[action]}</li>" for action in actions)
     report_day = f'<p class="sc-meta-period">{_label(_day(edition["report_date"]))} reporting</p>' if edition else ""
     st.html(
         """<style>
         .sc-meta-brief {--line:rgba(128,114,82,.24);font-size:.82rem;line-height:1.4}
         .sc-meta-brief .sc-meta-period {margin:0 0 .45rem;opacity:.75;font-size:.76rem}
         .sc-meta-brief dl {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;margin:0}
-        .sc-meta-brief dl div,.sc-meta-actions {background:var(--background-color,#fff);
+        .sc-meta-brief dl div {background:var(--background-color,#fff);
             border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 3px #15110b0c}
         .sc-meta-brief dl div {padding:.65rem .75rem;border-top:2px solid #b49048;overflow-wrap:anywhere}
         .sc-meta-brief dt {font-size:.76rem;opacity:.82}
         .sc-meta-brief dd {margin:.12rem 0 0;font-size:1rem;font-weight:650;font-variant-numeric:tabular-nums}
-        .sc-meta-actions {margin-top:.5rem;padding:.6rem .75rem}
-        .sc-meta-actions h4 {font-size:.8rem;margin:0 0 .3rem;padding:0}
-        .sc-meta-actions ul {margin:0;padding:0;list-style:none}
-        .sc-meta-actions li {font-size:.8rem;padding:.3rem 0}
-        .sc-meta-actions li+li {border-top:1px solid var(--line)}
         </style>"""
         f'<section class="sc-meta-brief" aria-label="Meta and Shopify snapshot">{report_day}'
         f'<dl><div><dt>Meta ROAS</dt><dd>{roas_value}</dd></div>'
         f'<div><dt>Shopify orders</dt><dd>{orders_value}</dd></div></dl>'
-        + (f'<div class="sc-meta-actions"><h4>Suggested next steps</h4><ul>{items}</ul></div>' if items else "")
         + '</section>'
     )
