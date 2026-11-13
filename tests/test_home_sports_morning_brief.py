@@ -331,7 +331,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Timing: Before Sunday's final." in result
     assert "Hide this" not in result and "Recommended Meta ad" not in result
     assert result.index("Use web image search") < result.index("Step 1.") < result.index("Step 2.") < result.index("Step 3.")
-    assert "photographer or agency credit" not in result
+    assert "source link, available credit, and verified match or date" in result
     assert "wall-art reproduction and compositing" not in result
     signature = result.index("Find a verified signature if available.")
     generation = result.index("use the image generation tool once")
@@ -340,8 +340,12 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert signature < generation < review < upload
     assert "SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt" in result[:generation]
     assert "Remove the original background completely." in result[:generation]
+    assert "resize proportionally, reposition" in result[:generation]
+    assert "apparent head size, eye lines, and body scale" in result[:generation]
     assert "The first artwork you show must already include the subject and the signature when verified." in result[generation:review]
     assert "composite the original cutout and signature" in result[generation:review]
+    assert "Vary the composition across designs." in result[generation:review]
+    assert "visible AI artifacts" in result[review:upload]
     assert "designs-canvas.psd" not in result[:upload]
     assert "2835 × 2004 pixels" in result[generation:upload]
     assert "editable SC_EDITION_NUMBER" in result[upload:]
