@@ -138,7 +138,8 @@ def _market_table(editions, market, today):
         )
     hidden = "" if market == MARKETS[0] else " hidden"
     return (
-        f'<div class="sc-cal-wrap" data-calendar="{market}"{hidden}><table>'
+        f'<div class="sc-cal-wrap" data-calendar="{market}" role="region" '
+        f'aria-label="{market} sports calendar" tabindex="0"{hidden}><table>'
         '<thead><tr><th>Sport</th><th>Status</th><th>Dates / season</th><th>Timing</th><th>News / updates</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
@@ -151,7 +152,12 @@ def brief_html(edition, *, editions, today, allow_ads=False):
     )
     full_brief = (edition or {}).get("full_brief")
     if full_brief:
-        rows += ('<details class="sc-full-brief"><summary>Read the full Morning Brief</summary>'
-                 f'<div class="sc-brief-body sc-full-brief-text">{escape(full_brief)}</div></details>')
+        rows += (
+            '<button type="button" class="sc-full-brief" aria-haspopup="dialog">Read the full Morning Brief</button>'
+            '<dialog class="sc-cal-dialog sc-sports-full" aria-label="Full Sports Morning Brief">'
+            '<header><h3>Full Morning Brief</h3><form method="dialog"><button>Close</button></form></header>'
+            f'<div class="sc-full-brief-text">{escape(full_brief)}</div></dialog>'
+        )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
-    return _template().replace("<!-- CALENDARS -->", tables).replace("<!-- RECOMMENDATIONS -->", rows)
+    stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
+    return _template().replace("<!-- CALENDARS -->", tables).replace("<!-- RECOMMENDATIONS -->", stories)

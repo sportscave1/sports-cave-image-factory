@@ -1369,6 +1369,28 @@ def inject_styles():
             gap: 0.5rem !important;
         }
 
+        .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) {
+            gap: clamp(1rem, 1.5vw, 1.6rem) !important;
+        }
+
+        .st-key-home-weekly-card {
+            margin-top: 1rem;
+            padding: clamp(.75rem, 1.4vw, 1.25rem);
+            border: 1px solid rgba(128, 114, 82, .23);
+            border-radius: 16px;
+            background: var(--background-color, #fff);
+            box-shadow: 0 2px 8px rgba(30, 24, 12, .05);
+        }
+
+        .st-key-home-weekly-card [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap;
+        }
+
+        .st-key-home-weekly-card [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            min-width: min(100%, 8.5rem);
+            flex: 1 1 8.5rem;
+        }
+
         @media (max-width: 1100px) {
             .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) {
                 flex-direction: column;
@@ -12511,7 +12533,8 @@ def render_lightweight_dashboard_page():
         else:
             home_sports_morning_brief.render(st, user, today)
         home_daily_planner.render_status(st, user, local_now)
-        render_home_weekly_work(user, local_now)
+        with st.container(key="home-weekly-card"):
+            render_home_weekly_work(user, local_now)
     # The weekly-work fragment completes independently of shell dispatch.
     safe_startup_print(f"PERF Dashboard shell_dispatch={(time.perf_counter() - started):.3f}s")
 
