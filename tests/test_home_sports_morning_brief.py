@@ -158,6 +158,49 @@ def test_calendar_dates_history_and_product_identity(monkeypatch):
     assert browser.session_state[ads_page.ADS_PRODUCT_SELECTOR_KEY] == ads_page._edition_ops_product_selector_identity(row)
 
 
+def test_meta_brief_publication_and_home_display(monkeypatch, database):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import home_meta_morning_brief as meta
+    import home_morning_brief_publish as route
+
+    jobs, sql = database
+    sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
+    monkeypatch.setattr(db, "connect", jobs.connect)
+    monkeypatch.setattr(meta, "connect", jobs.connect)
+    monkeypatch.setattr(meta, "sydney_date", lambda: TODAY)
+    get_user = Mock(return_value=OWNER)
+    monkeypatch.setattr(route, "_request_user", get_user)
+    client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
+                                          for path, endpoint, methods in route.ROUTES]))
+    data = {
+        "date": TODAY.isoformat(), "coverage": "Saved totals for 12 November",
+        "summary": "Verify <test> campaign delivery.", "metrics": {"clicks": "0", "ctr": None},
+        "recommendations": ["Review recent product demand."],
+    }
+    payload = {"brief": json.dumps(data)}
+    assert client.get(meta.PATH).status_code == 403
+    get_user.return_value = {**OWNER, "page_permissions": ["reporting"]}
+    assert "Meta Morning Brief JSON" in client.get(meta.PATH).text
+    assert client.post(meta.PATH, data=payload, headers={"Origin": "https://other.test"}).status_code == 403
+    headers = {"Origin": "http://testserver"}
+    assert "Published the 2026-11-13 Meta Morning Brief." in client.post(meta.PATH, data=payload, headers=headers).text
+    previous = {**data, "date": "2026-11-12"}
+    assert client.post(meta.PATH, data={"brief": json.dumps(previous)}, headers=headers).status_code == 400
+    assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == data
+
+    st = Mock()
+    meta.render(st, OWNER, TODAY)
+    st.html.assert_not_called()
+    meta.render(st, get_user.return_value, date(2026, 11, 14))
+    assert "Today's brief is pending" in st.caption.call_args.args[0]
+    markup = st.html.call_args.args[0]
+    assert "&lt;test&gt;" in markup
+    assert "<dt>Clicks</dt><dd>0</dd>" in markup
+    assert "Unavailable metrics" in markup and "<dt>CTR</dt>" not in markup
+
+
 
 def test_static_schedule_covers_every_sport_without_news_and_ranks_by_market():
     from home_brief_calendar import MARKETS, calendar_rows

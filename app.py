@@ -1369,6 +1369,16 @@ def inject_styles():
             gap: 0.5rem !important;
         }
 
+        @media (max-width: 1100px) {
+            .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) {
+                flex-direction: column;
+            }
+            .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) > [data-testid="stColumn"] {
+                width: 100%;
+                flex: 0 0 auto;
+            }
+        }
+
         .st-key-home-ops-dashboard [data-testid="stMetric"] {
             border-radius: 8px !important;
             border-top-width: 1px !important;
@@ -12489,9 +12499,17 @@ def render_lightweight_dashboard_page():
     local_now = account_local_now(user)
     today = sports_sales_calendar.sydney_date(local_now)
     with st.container(key="home-ops-dashboard"):
+        import home_meta_morning_brief
         import home_sports_morning_brief
 
-        home_sports_morning_brief.render(st, user, today)
+        if home_meta_morning_brief.can_view(user):
+            sports_column, meta_column = st.columns([3, 2], gap="medium")
+            with sports_column:
+                home_sports_morning_brief.render(st, user, today)
+            with meta_column, st.container(key="home-meta-brief"):
+                home_meta_morning_brief.render(st, user, today)
+        else:
+            home_sports_morning_brief.render(st, user, today)
         home_daily_planner.render_status(st, user, local_now)
         render_home_weekly_work(user, local_now)
     # The weekly-work fragment completes independently of shell dispatch.
