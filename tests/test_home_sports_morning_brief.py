@@ -332,6 +332,12 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert result.index("Use web image search") < result.index("Step 1.") < result.index("Step 2.") < result.index("Step 3.")
     assert "photographer or agency credit" not in result
     assert "wall-art reproduction and compositing" not in result
+    signature = result.index("Keep the original letterforms and strokes.")
+    generation = result.index("Step 5. Use the image generation tool")
+    review = result.index("Step 6. Inspect the generated artwork against the original photo.")
+    upload = result.index("Step 7. Place the final generated artwork on a copy of designs-canvas.psd.")
+    assert signature < generation < review < upload
+    assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[upload:]
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)
