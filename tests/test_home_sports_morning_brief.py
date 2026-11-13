@@ -33,6 +33,76 @@ def edition(day="2026-11-13", recommendation="Schedule the campaign after the of
     })
 
 
+def test_cloud_submission_publishes_once_without_browser_session(database, monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import chatgpt_crm_mcp as mcp
+    import daily_brief_worker as worker
+
+    jobs, sql = database
+    sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
+    monkeypatch.setenv("SPORTS_CAVE_HOSTED_BRIEFS", "1")
+    monkeypatch.setattr(worker, "sydney_date", lambda: TODAY)
+    for module in (db, brief, worker):
+        monkeypatch.setattr(module, "connect", jobs.connect)
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, "get_user",
+                        lambda _: {**OWNER, "session_version": 1})
+    monkeypatch.setattr(os_accounts, "can_access_page", lambda *_: True)
+    key = b"test-connector-secret"
+    monkeypatch.setattr(mcp, "_key", lambda: key)
+    client = TestClient(Starlette(routes=[Route(mcp.MCP_PATH, mcp.mcp, methods=["POST"])]))
+    payload = {**json.loads(edition(TODAY.isoformat())), "full_brief": "Complete synthetic edition."}
+
+    def submit(scope, value=payload):
+        access = mcp._seal(key, "access", {"sub": "owner", "version": "1", "scope": scope,
+                                          "iss": mcp.ISSUER, "aud": mcp.RESOURCE})
+        response = client.post(mcp.MCP_PATH, headers={"Authorization": f"Bearer {access}"}, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "submit_daily_home_brief", "arguments": {"kind": "sports", "edition": value}},
+        })
+        return response.json()["result"]
+
+    assert submit(mcp.SPORTS_SCOPE)["isError"]
+    assert submit(mcp.PUBLISH_SCOPE)["structuredContent"]["status"] == "scheduled"
+    assert submit(mcp.PUBLISH_SCOPE, {**payload, "full_brief": "Conflicting edition."})["isError"]
+    assert worker.process_one()
+    assert submit(mcp.PUBLISH_SCOPE)["structuredContent"]["status"] == "completed"
+    assert db.get_app_setting(brief.SETTING_KEY, ensure_schema_first=False)["full_brief"] == payload["full_brief"]
+    assert not worker.process_one()
+
+
+def test_hosted_brief_retry_is_delayed_and_publishes_after_recovery(database, monkeypatch):
+    import daily_brief_worker as worker
+
+    jobs, sql = database
+    sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
+    monkeypatch.setattr(worker, "sydney_date", lambda: TODAY)
+    for module in (db, brief, worker):
+        monkeypatch.setattr(module, "connect", jobs.connect)
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, "get_user",
+                        lambda _: {**OWNER, "session_version": 1})
+    monkeypatch.setattr(os_accounts, "can_access_page", lambda *_: True)
+    parse, publish, limit = worker.BRIEFS["sports"]
+
+    def publish_after_failure(raw, owner):
+        if publishing.call_count == 1:
+            raise TimeoutError
+        return publish(raw, owner)
+
+    publishing = Mock(side_effect=publish_after_failure)
+    monkeypatch.setitem(worker.BRIEFS, "sports", (parse, publishing, limit))
+    payload = {**json.loads(edition(TODAY.isoformat())), "full_brief": "Complete synthetic edition."}
+    worker.enqueue("sports", payload, {"sub": "owner", "version": "1"})
+    assert worker.process_one()
+    assert worker.status("sports")["status"] == "retrying"
+    assert not worker.process_one()
+    sql.execute("UPDATE app_settings SET updated_at = now() - interval '3 minutes'")
+    assert worker.process_one()
+    assert worker.status("sports")["status"] == "completed"
+    assert worker.status("sports")["attempts"] == 2
+
+
 def test_publishing_rejects_a_worker_before_opening_storage(monkeypatch):
     connection = Mock()
     monkeypatch.setattr(brief, "connect", connection)

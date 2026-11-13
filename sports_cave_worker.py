@@ -1,6 +1,7 @@
 """Supervise the operational CRM worker in the existing Render worker service."""
 
 import logging
+import os
 from pathlib import Path
 import signal
 import subprocess
@@ -31,7 +32,9 @@ class Supervisor:
         self.stop.set()
 
     def check_children(self):
-        for name, args in WORKERS.items():
+        workers = ({**WORKERS, "daily-briefs": ("daily_brief_worker.py",)}
+                   if os.getenv("SPORTS_CAVE_HOSTED_BRIEFS", "").strip() == "1" else WORKERS)
+        for name, args in workers.items():
             if self.stop.is_set():
                 break
             child = self.children.get(name)

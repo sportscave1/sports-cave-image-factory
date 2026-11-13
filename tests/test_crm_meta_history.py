@@ -1,5 +1,6 @@
 """Synthetic tests for direct, read-only Meta reporting."""
 from datetime import date
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -9,6 +10,35 @@ from starlette.testclient import TestClient
 
 import chatgpt_crm_mcp as mcp
 import crm_meta_history as history
+from tests.test_auto_editions_jobs import database  # noqa: F401
+
+
+def test_oauth_refresh_rotates_for_original_client_and_checks_owner(monkeypatch, database):
+    key = b"test-connector-secret"
+    monkeypatch.setattr(mcp, "_key", lambda: key)
+    owner = Mock(return_value=True)
+    monkeypatch.setattr(mcp, "_active_owner", owner)
+    jobs, sql = database
+    sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
+    monkeypatch.setattr(mcp, "connect", jobs.connect)
+    original = mcp._rotate_tokens(key, {
+        "sub": "owner", "version": "1", "scope": mcp.SPORTS_SCOPE, "client_id": "client",
+    })
+    first = json.loads(original.body)["refresh_token"]
+    client = TestClient(Starlette(routes=[Route(mcp.TOKEN_PATH, mcp.token, methods=["POST"])]))
+    request = {"grant_type": "refresh_token", "refresh_token": first, "client_id": "client"}
+    assert client.post(mcp.TOKEN_PATH, data={**request, "client_id": "other"}).status_code == 400
+    assert client.post(mcp.TOKEN_PATH, data={**request, "scope": mcp.META_SCOPE}).json() == {
+        "error": "invalid_scope",
+    }
+    renewed = client.post(mcp.TOKEN_PATH, data=request)
+    assert renewed.status_code == 200
+    result = renewed.json()
+    assert result["refresh_token"] != first
+    assert mcp._unseal(key, "access", result["access_token"], mcp.ACCESS_SECONDS)["scope"] == mcp.SPORTS_SCOPE
+    assert client.post(mcp.TOKEN_PATH, data=request).status_code == 400
+    owner.return_value = False
+    assert client.post(mcp.TOKEN_PATH, data={**request, "refresh_token": result["refresh_token"]}).status_code == 400
 
 DAY = date(2026, 11, 5)
 CONFIG = {"configured": True, "ad_account_id": "act_123", "api_version": "v26.0", "access_token": "fixture"}
