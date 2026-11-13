@@ -21,6 +21,7 @@ import os_accounts
 from chatgpt_crm_api import HEADERS, _campaign_summary
 from files_upload_api import FilesUploadError, _request_user
 from chatgpt_reporting import meta_daily, orders_daily, reporting_day
+from crm_meta_history import meta_ad_history, meta_history_args
 
 ISSUER = "https://sports-cave-image-factory.onrender.com"
 MCP_PATH = "/api/chatgpt/crm/mcp"
@@ -34,15 +35,31 @@ SCOPE = "crm:summary"
 TOOL = "get_crm_campaign_summary"
 ORDERS_SCOPE = "orders:summary"
 META_SCOPE = "meta:summary"
-SCOPES = (SCOPE, ORDERS_SCOPE, META_SCOPE)
+META_HISTORY_SCOPE = "meta:ad_history"
+META_HISTORY_TOOL = "get_meta_ad_history"
+SCOPES = (SCOPE, ORDERS_SCOPE, META_SCOPE, META_HISTORY_SCOPE)
 SCOPE_LIST = " ".join(SCOPES)
+DATE_PROPERTY = {"type": "string", "format": "date"}
+DAILY_INPUT = {"type": "object", "properties": {"date": DATE_PROPERTY},
+               "required": ["date"], "additionalProperties": False}
+EMPTY_INPUT = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+HISTORY_INPUT = {
+    "type": "object",
+    "properties": {"since": DATE_PROPERTY, "until": DATE_PROPERTY, "cursor": {"type": "string"},
+                   "refresh": {"type": "boolean"}},
+    "required": ["since", "until"], "additionalProperties": False,
+}
 TOOLS = {
     TOOL: (SCOPE, "crm_campaigns_manage", "Get CRM campaign summary",
-           "Read current CRM campaign counts and delivery activity.", False),
+           "Read current CRM campaign counts and delivery activity.", EMPTY_INPUT),
     "get_orders_daily_summary": (ORDERS_SCOPE, "orders", "Get daily Orders summary",
-                                 "Read aggregate Shopify order counts and known totals by currency for a Sydney date.", True),
+                                 "Read aggregate Shopify order counts and known totals by currency for a Sydney date.", DAILY_INPUT),
     "get_meta_daily_summary": (META_SCOPE, "ads_meta_review", "Get daily Meta reporting summary",
-                               "Read saved ad-level Meta spend, attributed purchases and coverage for a Sydney date.", True),
+                               "Read saved ad-level Meta spend, attributed purchases and coverage for a Sydney date.", DAILY_INPUT),
+    META_HISTORY_TOOL: (META_HISTORY_SCOPE, "ads_meta_review", "Get Meta ad performance history",
+                        "Read daily paid ad performance directly from Meta over 1–7 account dates. "
+                        "Set refresh on the first page for a fresh read. Follow next_cursor with the "
+                        "same dates until it is null.", HISTORY_INPUT),
 }
 REDIRECT = re.compile(
     r"https://chatgpt\.com/(?:connector_platform_oauth_redirect|connector/oauth/[A-Za-z0-9_-]{1,128})"
@@ -231,7 +248,8 @@ async def authorize(request):
                 return _page("<h1>Sports Cave OS reporting permission required</h1>", 403)
             consent = html.escape(_seal(key, "consent", {**values, **identity}), quote=True)
             labels = {SCOPE: "CRM campaign counts and delivery status", ORDERS_SCOPE: "daily Orders totals",
-                      META_SCOPE: "saved daily Meta reporting"}
+                      META_SCOPE: "saved daily Meta reporting",
+                      META_HISTORY_SCOPE: "live daily performance and identity of individual Meta ads"}
             summary = ", ".join(labels[scope] for scope in values["scope"].split())
             return _page(
                 "<h1>Connect Sports Cave CRM to ChatGPT</h1>"
@@ -342,21 +360,19 @@ async def mcp(request):
         result = {"tools": [
             {
                 "name": name, "title": title, "description": description,
-                "inputSchema": {"type": "object",
-                                "properties": {"date": {"type": "string", "format": "date"}} if daily else {},
-                                "required": ["date"] if daily else [], "additionalProperties": False},
+                "inputSchema": schema,
                 "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
                 "securitySchemes": [{"type": "oauth2", "scopes": [scope]}],
                 "_meta": {"securitySchemes": [{"type": "oauth2", "scopes": [scope]}]},
             }
-            for name, (scope, _, title, description, daily) in TOOLS.items()
+            for name, (scope, _, title, description, schema) in TOOLS.items()
         ]}
     elif method == "tools/call":
         name = params.get("name")
         arguments = params.get("arguments", {})
         if not isinstance(name, str) or name not in TOOLS or not isinstance(arguments, dict):
             return _rpc_error(identifier, -32602, "Unknown tool or invalid arguments")
-        scope, page, _, _, daily = TOOLS[name]
+        scope, page, _, _, schema = TOOLS[name]
         if scope not in granted:
             message = "Reconnect Sports Cave OS to authorize the requested reporting tool."
             auth = (f'Bearer resource_metadata="{ISSUER + RESOURCE_METADATA}", scope="{SCOPE_LIST}", '
@@ -364,19 +380,24 @@ async def mcp(request):
             result = {"isError": True, "content": [{"type": "text", "text": message}],
                       "_meta": {"mcp/www_authenticate": [auth]}}
             return _response({"jsonrpc": "2.0", "id": identifier, "result": result})
-        if set(arguments) != ({"date"} if daily else set()):
+        if not set(schema["required"]) <= set(arguments) <= set(schema["properties"]):
             return _rpc_error(identifier, -32602, "Invalid arguments")
         try:
-            day = reporting_day(arguments["date"]) if daily else None
+            if schema is HISTORY_INPUT:
+                report_args = meta_history_args(arguments)
+            else:
+                report_args = (reporting_day(arguments["date"]),) if schema is DAILY_INPUT else ()
         except ValueError as error:
             return _rpc_error(identifier, -32602, str(error))
         try:
             if not await run_in_threadpool(_active_owner, claims, page):
                 return _challenge()
             if scope == ORDERS_SCOPE:
-                summary = await run_in_threadpool(orders_daily, day)
+                summary = await run_in_threadpool(orders_daily, *report_args)
             elif scope == META_SCOPE:
-                summary = await run_in_threadpool(meta_daily, day)
+                summary = await run_in_threadpool(meta_daily, *report_args)
+            elif scope == META_HISTORY_SCOPE:
+                summary = await run_in_threadpool(meta_ad_history, *report_args)
             else:
                 summary = await run_in_threadpool(_campaign_summary)
         except Exception as error:
