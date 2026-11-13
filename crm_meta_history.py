@@ -12,16 +12,21 @@ from meta_review_analysis import normalize_metrics, number
 
 CORE_FIELDS = live.INSIGHT_FIELDS + ",account_id"
 EXTRA_FIELDS = (
-    "unique_clicks,unique_ctr,cost_per_unique_click,unique_inline_link_clicks,unique_inline_link_ctr,"
+    "unique_clicks,unique_ctr,cost_per_unique_click,unique_inline_link_clicks,unique_inline_link_click_ctr,"
+    "cost_per_unique_inline_link_click,"
     "unique_outbound_clicks,unique_outbound_clicks_ctr,unique_actions,conversions,conversion_values,"
     "cost_per_conversion,inline_post_engagement,instagram_profile_follow,instagram_profile_visits,"
     "video_play_actions,video_thruplay_watched_actions,video_avg_time_watched_actions,"
+    "video_continuous_2_sec_watched_actions,video_15_sec_watched_actions,video_time_watched_actions,"
     "video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,"
     "video_p95_watched_actions,video_p100_watched_actions,quality_ranking,engagement_rate_ranking,"
     "conversion_rate_ranking,instant_experience_clicks_to_open,instant_experience_clicks_to_start,"
     "instant_experience_outbound_clicks"
-)
-FIELDS = (CORE_FIELDS + "," + EXTRA_FIELDS).split(",")
+).split(",")
+FIELDS = CORE_FIELDS.split(",") + EXTRA_FIELDS
+IDENTITY_FIELDS = "account_id,date_start,date_stop,ad_id"
+VIDEO_FIELDS = tuple(field for field in EXTRA_FIELDS if field.startswith("video_"))
+OPTIONAL_REQUEST_LIMIT = 8
 PAGE_SIZE = 20
 CACHE_TTL = 120
 CACHE_LIMIT = 8
@@ -57,23 +62,7 @@ def meta_history_args(arguments):
     return since, until, (date.fromisoformat(match[1]), match[2]), refresh
 
 
-def _fetch(config, since, until, reader):
-    path = config["ad_account_id"]
-    account_id = path.removeprefix("act_")
-    account = validate_account(reader.get(path, {"fields": "account_id,currency,timezone_name"}), account_id)
-    account_tz = ZoneInfo(account["timezone_name"])
-    if until > datetime.now(account_tz).date():
-        raise ValueError("Choose dates through today in the Meta ad-account timezone.")
-    params = {**live.date_params(since, until), "level": "ad", "time_increment": 1,
-              "use_unified_attribution_setting": "true", "action_report_time": "impression"}
-    fields = ",".join(FIELDS)
-    try:
-        rows = reader.pages(path + "/insights", {**params, "fields": fields})
-    except meta.MetaAdsApiError as error:
-        if str(error.error_code) not in ("3", "100"):
-            raise
-        fields = CORE_FIELDS
-        rows = reader.pages(path + "/insights", {**params, "fields": fields})
+def _index_rows(rows, account_id, since, until):
     ordered = {}
     for row in rows:
         ad_id = row.get("ad_id")
@@ -85,7 +74,106 @@ def _fetch(config, since, until, reader):
         if key in ordered and row != ordered[key]:
             raise ValueError("Meta returned conflicting rows for the same ad and date.")
         ordered[key] = row
-    return account, sorted(ordered.items()), datetime.now(timezone.utc).isoformat(), fields == CORE_FIELDS
+    return ordered
+
+
+def _optional_error(error):
+    return str(error.error_code) in ("3", "100", "10", "200")
+
+
+def _read_extras(reader, path, params, base_rows, account_id, since, until, first_error):
+    pending = [tuple(EXTRA_FIELDS)]
+    rejected, accepted, unverified = set(), set(), set()
+    error = first_error
+    attempts = 0
+    while pending and attempts < OPTIONAL_REQUEST_LIMIT:
+        fields = pending.pop(0)
+        if error is None:
+            attempts += 1
+            try:
+                rows = reader.pages(path, {**params, "fields": ",".join((IDENTITY_FIELDS, *fields))})
+                for key, row in _index_rows(rows, account_id, since, until).items():
+                    if key in base_rows:
+                        base_rows[key].update({field: row[field] for field in fields if field in row})
+                accepted.update(fields)
+                continue
+            except meta.MetaAdsApiError as failure:
+                if not _optional_error(failure):
+                    raise
+                error = failure
+            except TimeoutError:
+                unverified.update(fields)
+                break
+        # Meta often identifies the invalid field. Treat a name as definitive
+        # only when the error explicitly describes an unsupported field.
+        match = re.search(r"(?:nonexisting field|unknown field|invalid field)\s*\(?['\"]?(\w+)",
+                          str(error), re.IGNORECASE)
+        named = match[1] if match else None
+        if named in fields:
+            rejected.add(named)
+            rest = tuple(field for field in fields if field != named)
+            if rest:
+                pending.insert(0, rest)
+        elif len(fields) == 1:
+            rejected.add(fields[0])
+        elif (videos := tuple(field for field in fields if field in VIDEO_FIELDS)) and len(videos) < len(fields):
+            pending.extend((videos, tuple(field for field in fields if field not in VIDEO_FIELDS)))
+        else:
+            midpoint = len(fields) // 2
+            pending.extend((fields[:midpoint], fields[midpoint:]))
+        error = None
+    unverified.update(field for group in pending for field in group)
+    return accepted, rejected, unverified
+
+
+def _read_likes(reader, path, params, base_rows, account_id, since, until):
+    if not any(item.get("action_type") == "post_reaction" and (number(item.get("value")) or 0) > 0
+               for row in base_rows.values() for item in (row.get("actions") or [])
+               if isinstance(item, dict)):
+        return "no_reported_reactions"
+    try:
+        rows = reader.pages(path, {**params, "fields": IDENTITY_FIELDS + ",actions",
+                                   "action_breakdowns": "action_type,action_reaction"})
+    except meta.MetaAdsApiError as error:
+        if not _optional_error(error):
+            raise
+        return "rejected"
+    except TimeoutError:
+        return "unverified"
+    for key, row in _index_rows(rows, account_id, since, until).items():
+        if key not in base_rows:
+            continue
+        likes = [number(item.get("value")) for item in (row.get("actions") or [])
+                 if isinstance(item, dict) and item.get("action_type") == "post_reaction"
+                 and str(item.get("action_reaction", "")).lower() == "like"]
+        if len(likes) == 1 and likes[0] is not None:
+            base_rows[key]["_paid_post_likes"] = likes[0]
+    return "accepted"
+
+
+def _fetch(config, since, until, reader):
+    path = config["ad_account_id"]
+    account_id = path.removeprefix("act_")
+    account = validate_account(reader.get(path, {"fields": "account_id,currency,timezone_name"}), account_id)
+    if until > datetime.now(ZoneInfo(account["timezone_name"])).date():
+        raise ValueError("Choose dates through today in the Meta ad-account timezone.")
+    params = {**live.date_params(since, until), "level": "ad", "time_increment": 1,
+              "use_unified_attribution_setting": "true", "action_report_time": "impression"}
+    path += "/insights"
+    try:
+        rows = reader.pages(path, {**params, "fields": ",".join(FIELDS)})
+        ordered = _index_rows(rows, account_id, since, until)
+        accepted, rejected, unverified = set(EXTRA_FIELDS), set(), set()
+    except meta.MetaAdsApiError as error:
+        if not _optional_error(error):
+            raise
+        ordered = _index_rows(reader.pages(path, {**params, "fields": CORE_FIELDS}), account_id, since, until)
+        accepted, rejected, unverified = _read_extras(reader, path, params, ordered, account_id, since, until, error)
+    likes = _read_likes(reader, path, params, ordered, account_id, since, until)
+    coverage = {"accepted": sorted(accepted), "rejected": sorted(rejected), "unverified": sorted(unverified),
+                "returned": sorted({field for row in ordered.values() for field in accepted if row.get(field) is not None}),
+                "paid_post_likes_breakdown": likes}
+    return account, sorted(ordered.items()), datetime.now(timezone.utc).isoformat(), coverage
 
 
 def _snapshot(config, since, until, refresh):
@@ -112,11 +200,21 @@ def _report_row(row):
     metrics = normalize_metrics(fields)
     metrics.pop("_reported_rates")
     actions = fields.get("actions")
-    metrics["likes"] = next(
+    metrics["page_likes"] = next(
         (number(item.get("value")) for item in actions
          if isinstance(item, dict) and item.get("action_type") == "like"),
         None,
     ) if isinstance(actions, list) else None
+    metrics["paid_post_likes"] = row.get("_paid_post_likes")
+    # Preserve the historical likes key, which reported the Meta 'like' action.
+    metrics["likes"] = metrics["page_likes"]
+    for field in VIDEO_FIELDS:
+        entries = fields.get(field)
+        metrics[field] = (
+            number(entries[0].get("value"))
+            if isinstance(entries, list) and len(entries) == 1 and isinstance(entries[0], dict)
+            else None
+        )
     return {"date": fields["date_start"], "ad_id": fields["ad_id"], "ad_name": fields.get("ad_name"),
             "adset_id": fields.get("adset_id"), "adset_name": fields.get("adset_name"),
             "campaign_id": fields.get("campaign_id"), "campaign_name": fields.get("campaign_name"),
@@ -125,7 +223,7 @@ def _report_row(row):
 
 def meta_ad_history(since, until, after, refresh):
     config = meta.get_meta_config()
-    account, all_rows, captured, core_only = _snapshot(config, since, until, refresh)
+    account, all_rows, captured, coverage = _snapshot(config, since, until, refresh)
     remaining = [(key, row) for key, row in all_rows if after is None or key > after]
     page = remaining[:PAGE_SIZE]
     next_cursor = None
@@ -137,7 +235,8 @@ def meta_ad_history(since, until, after, refresh):
         "timezone": account["timezone_name"], "captured_at": captured,
         "action_report_time": "impression", "attribution": "Per-ad-set settings.",
         "rows": [_report_row(row) for _, row in page], "next_cursor": next_cursor,
-        "total_rows": len(all_rows), "core_metrics_only": core_only,
+        "total_rows": len(all_rows), "core_metrics_only": not coverage["accepted"],
+        "extra_field_coverage": coverage,
         "basis": "Live paid Meta Insights by ad and account date. Missing fields are unknown. "
                  "Reach and frequency are per ad and date. Today's results may change.",
     }
