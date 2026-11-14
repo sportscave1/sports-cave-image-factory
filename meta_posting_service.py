@@ -3008,17 +3008,11 @@ class MetaPostingService:
             self._progress("Creating 1 paused carousel ad…")
             ad_id = str(ad_result.get("meta_ad_id") or "")
             if not ad_id:
-                existing_ad = self.client.find_ad_by_creative(adset_id, creative_id)
-                ad_id = str((existing_ad or {}).get("id") or "")
-            if not ad_id:
                 ad_id = self._create_or_reconcile(
                     lambda: self.client.create_paused_ad(
                         ad_name=ad_result["ad_name"],
                         adset_id=adset_id,
                         creative_id=creative_id,
-                    ),
-                    lambda: self._one_match(
-                        self.client.find_ad_by_creative(adset_id, creative_id)
                     ),
                     submission_id=submission_id,
                     entity="Carousel Ad",
@@ -3788,7 +3782,10 @@ class MetaPostingService:
                     "target_adset_id": adset_id,
                     "expected_ad_name": ad_label,
                     "creative_parameters": creative_payload,
-                    "persisted_ad_id": str(ad_result.get("meta_ad_id") or ""),
+                    "persisted_ad_id": (
+                        self.store.completed_route_copy_id()
+                        or str(ad_result.get("meta_ad_id") or "")
+                    ),
                 }
                 if source_snapshot is not None:
                     copy_arguments["source_snapshot"] = source_snapshot
