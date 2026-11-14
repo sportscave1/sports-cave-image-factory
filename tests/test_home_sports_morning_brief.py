@@ -407,7 +407,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "If a required operation is unavailable or fails" not in result
     assert "10/10" not in result
     assert "three distinct credible sources" in result
-    assert "record the reason in REVIEW NOTES, and continue" in result
+    assert "failed in REVIEW NOTES, and continue" in result
     signature = result.index("Keep the original letterforms and strokes.")
     first_generation = result.index("Step 5. Use the image generation tool")
     first_review = result.index("Step 6. Inspect the generated artwork")
@@ -428,6 +428,12 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "[Product Title] - v2 - TRIAL.psd" in result[first_save:second_pass]
     assert "[Product Title] - v2.psd" in result[first_save:second_pass]
     assert "ORIGINAL EDITABLE ARTWORK" in result[second_generation:final_save]
+    assert "download and inspect the strongest authentic candidates" in result[signature:first_generation]
+    assert "Never generate, redraw, or reconstruct" in result[signature:first_generation]
+    assert "at 100% magnification to this first generation" in result[first_review:first_save]
+    assert "restore the affected regions from the original photograph" in result[second_generation:final_save]
+    assert "REVIEW DRAFT, keep the trial" in result[second_generation:final_save]
+    assert "After the subject authenticity check passes, save the final PSD" in result[final_save:cleanup]
     assert "retain the trial and continue" in result[final_save:cleanup]
     assert "recoverable delete" in result[cleanup:display]
     assert "report it as pending" in result[cleanup:display]
