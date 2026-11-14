@@ -415,16 +415,23 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     second_pass = result.index("**STEP 8")
     confirmed_first_save = result.index("**Entry requirement:**", second_pass)
     second_generation = result.index("Make a **new image-generation call**")
-    overwrite = result.index("**Overwrite the exact Dropbox PSD saved in Step 7.**")
+    final_save = result.index("**8E. Save and verify the final PSD**")
+    cleanup = result.index("Only after successful final verification")
+    display = result.index("After Dropbox confirms trial deletion, display the final artwork")
     assert signature < first_generation < first_review < first_save < second_pass
-    assert confirmed_first_save < second_generation < overwrite
+    assert confirmed_first_save < second_generation < final_save < cleanup < display
     assert "as a review draft" in result[first_save:second_pass]
     assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[first_save:second_pass]
     assert "hidden REVIEW NOTES layer" in result[first_save:second_pass]
     assert "Confirm the save and continue immediately to Step 8" in result[first_save:second_pass]
-    assert "ORIGINAL EDITABLE ARTWORK" in result[second_generation:overwrite]
-    assert "connected Dropbox browser" in result[overwrite:]
-    assert "confirm it is the updated revision" in result[overwrite:]
+    assert "[Product Title] - TRIAL.psd" in result[first_save:second_pass]
+    assert "[Product Title] - v2 - TRIAL.psd" in result[first_save:second_pass]
+    assert "[Product Title] - v2.psd" in result[first_save:second_pass]
+    assert "ORIGINAL EDITABLE ARTWORK" in result[second_generation:final_save]
+    assert "retain the trial and continue" in result[final_save:cleanup]
+    assert "recoverable delete" in result[cleanup:display]
+    assert "report it as pending" in result[cleanup:display]
+    assert "overwrite" not in result.lower()
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)
