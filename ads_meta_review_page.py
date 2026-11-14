@@ -356,7 +356,7 @@ def simple_winner(ads,history,context,selected=None):
 
 def live_status(entry, label):
     if entry['error']:
-        st.warning('Meta connection warning · '+entry['error']+' · Use Refresh From Meta to retry.', icon='⚠️')
+        st.warning('Meta connection warning · '+entry['error'], icon='⚠️')
     if entry.get('refreshed_at'):
         stamp = datetime.fromisoformat(entry['refreshed_at']).astimezone(ZoneInfo('Australia/Sydney'))
         source = 'STALE CACHED META' if entry['stale'] else 'LIVE META · brief cache'

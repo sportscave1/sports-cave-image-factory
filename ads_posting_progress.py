@@ -1,6 +1,8 @@
 """Shared New Ads / Creative Refresh posting view over the existing ledger."""
 import uuid
 import streamlit as st
+from meta_ads_client import MetaPostingClient
+from meta_posting_service import ads_manager_url
 from meta_posting_jobs import JOBS, TERMINAL, confirmed_ads
 
 JOB_KEY = 'posting_tracked_job'
@@ -84,6 +86,14 @@ def _render_success(receipt):
     st.progress(1.0, text=f'{done} of {total} ads verified')
     st.write(receipt.get('campaign_name') or 'Meta campaign')
     st.caption('PAUSED — Ready for Review')
+    account_id = MetaPostingClient().ad_account_id
+    if account_id and all(receipt.get(key) for key in ('campaign_id', 'adset_id', 'meta_ad_id')):
+        st.link_button('Open in Ads Manager', ads_manager_url(
+            account_id=account_id,
+            campaign_id=receipt['campaign_id'],
+            adset_id=receipt['adset_id'],
+            ad_id=receipt['meta_ad_id'],
+        ), use_container_width=True)
     if st.button('Dismiss', key='posting_success_close', use_container_width=True):
         _close_success(receipt['submission_id'])
 
