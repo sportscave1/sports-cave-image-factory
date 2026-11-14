@@ -135,12 +135,16 @@ class PostingJobs:
 
 JOBS = PostingJobs()
 
-def confirmed_ads(row):
-    ads = (
+def receipt_ads(row):
+    return (
         [carousel_ad_result(row.get('ad_results'))]
         if row.get('ad_type') == CAROUSEL_AD_TYPE
         else posting_ad_results(row.get('ad_results'))
     )
+
+
+def confirmed_ads(row):
+    ads = receipt_ads(row)
     count = sum(
         bool(ad.get('meta_ad_id')) and ad.get('meta_ad_configured_status') == 'PAUSED'
         for ad in ads

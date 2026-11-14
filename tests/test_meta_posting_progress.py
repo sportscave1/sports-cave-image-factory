@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 from streamlit.testing.v1 import AppTest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 import ads_posting_page as posting
 import ads_posting_progress as progress
 
@@ -32,21 +32,30 @@ class ProgressViewTests(unittest.TestCase):
             self.assertEqual(posting.posting_handoff.LOADED_KEY not in state, cleared)
             self.assertIn('other_workflow', state)
 
-    def test_verified_success_links_to_the_created_ad(self):
-        row = {**completed_row(), 'campaign_id': '10', 'adset_id': '11', 'meta_ad_id': '1'}
-        with patch.object(progress, 'MetaPostingClient') as client, \
-             patch.object(progress.st, 'link_button') as button, \
-             patch.object(progress.st, 'columns') as columns:
-            client.return_value.ad_account_id = 'act_123'
-            columns.return_value = [Mock(), Mock()]
-            for column in columns.return_value:
-                column.button.return_value = False
-            progress._render_success(row)
-        self.assertEqual(button.call_args.args, (
-            'Open in Ads Manager',
-            'https://www.facebook.com/adsmanager/manage/ads?act=123'
-            '&selected_campaign_ids=10&selected_adset_ids=11&selected_ad_ids=1',
-        ))
+    def test_verified_success_names_and_links_all_ads(self):
+        row = {**completed_row(), 'campaign_id': '10', 'adset_id': '11',
+               'adset_name': 'Verified ad set'}
+        for ad in row['ad_results']:
+            ad['ad_name'] = f"Ad {ad['index']}"
+        for ad_type, ads, selected in (
+            (None, row['ad_results'], '1,2,3'),
+            (posting.CAROUSEL_AD_TYPE, row['ad_results'][:1], '1'),
+        ):
+            with self.subTest(ad_type=ad_type), \
+                 patch.object(progress, 'MetaPostingClient') as client, \
+                 patch.object(progress.st, 'link_button') as button, \
+                 patch.object(progress.st, 'write') as destination, \
+                 patch.object(progress.st, 'text') as name:
+                client.return_value.ad_account_id = 'act_123'
+                progress._render_success({**row, 'ad_type': ad_type, 'ad_results': ads})
+                self.assertEqual(button.call_args.args, (
+                    'View created ads in Ads Manager',
+                    'https://www.facebook.com/adsmanager/manage/ads?act=123'
+                    f'&selected_campaign_ids=10&selected_adset_ids=11&selected_ad_ids={selected}',
+                ))
+                self.assertIn(row['adset_name'], destination.call_args.args[0])
+                self.assertEqual([call.args[0] for call in name.call_args_list],
+                                 [ad['ad_name'] for ad in ads])
 
     def test_incomplete_complete_record_is_not_success(self):
         row = completed_row()

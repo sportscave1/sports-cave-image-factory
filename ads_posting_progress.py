@@ -3,7 +3,7 @@ import uuid
 import streamlit as st
 from meta_ads_client import MetaPostingClient
 from meta_posting_service import ads_manager_url
-from meta_posting_jobs import JOBS, TERMINAL, confirmed_ads
+from meta_posting_jobs import JOBS, TERMINAL, confirmed_ads, receipt_ads
 
 JOB_KEY = 'posting_tracked_job'
 QUERY_KEY = 'meta_posting_job'
@@ -84,16 +84,21 @@ def _render_success(receipt):
     done, total = confirmed_ads(receipt)
     st.markdown('<div class="posting-success">✓ Ads created successfully.</div>', unsafe_allow_html=True)
     st.progress(1.0, text=f'{done} of {total} ads verified')
-    st.write(receipt.get('campaign_name') or 'Meta campaign')
-    st.caption('PAUSED — Ready for Review')
+    campaign = receipt.get('campaign_name') or 'Meta campaign'
+    adset = receipt.get('adset_name')
+    st.write(f'{campaign} → {adset}' if adset else campaign)
+    st.caption('Paused in Ads Manager. Open the Ads tab to review.')
+    ads = receipt_ads(receipt)
+    for ad in ads:
+        st.text(ad['ad_name'] or ad['meta_ad_id'])
     account_id = MetaPostingClient().ad_account_id
-    if account_id and all(receipt.get(key) for key in ('campaign_id', 'adset_id', 'meta_ad_id')):
-        st.link_button('Open in Ads Manager', ads_manager_url(
+    if account_id and receipt.get('campaign_id') and receipt.get('adset_id'):
+        st.link_button('View created ads in Ads Manager', ads_manager_url(
             account_id=account_id,
             campaign_id=receipt['campaign_id'],
             adset_id=receipt['adset_id'],
-            ad_id=receipt['meta_ad_id'],
-        ), use_container_width=True)
+            ad_id=','.join(str(ad['meta_ad_id']) for ad in ads),
+        ), width='stretch')
     if st.button('Dismiss', key='posting_success_close', use_container_width=True):
         _close_success(receipt['submission_id'])
 
