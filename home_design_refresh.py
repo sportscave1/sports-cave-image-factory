@@ -12,6 +12,30 @@ from supabase_backend import connect, get_app_setting
 PATH = "/ops/design-refresh/publish"
 KEY = "home_design_refresh"
 MAX_PAYLOAD = 8000
+LEGACY_FIELDS = {"product_id", "handle", "title", "created", "image_updated",
+                 "lifetime_orders", "sessions", "suggestion"}
+REVIEW_FIELDS = {"product_id", "handle", "title", "reason", "evidence",
+                 "sessions", "orders", "suggestion"}
+REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
+
+
+def _valid_text(value, limit):
+    return isinstance(value, str) and 0 < len(value.strip()) <= limit
+
+
+def _valid_count(value):
+    return type(value) is int and value >= 0
+
+
+def _validate_review(row):
+    if (row["reason"] not in REASONS or not _valid_text(row["evidence"], 220)
+            or any(row[key] is not None and not _valid_count(row[key])
+                   for key in ("sessions", "orders"))):
+        raise ValueError
+    if row["reason"] == "low_conversion" and (
+            row["sessions"] is None or row["sessions"] < 30 or row["orders"] is None
+            or row["orders"] * 100 >= row["sessions"]):
+        raise ValueError
 
 
 def recent_ids(today):
@@ -24,7 +48,8 @@ def recent_ids(today):
 def parse(raw, today):
     try:
         edition = json.loads(raw)
-        if set(edition) != {"date", "candidates"} or edition["date"] != today.isoformat():
+        if (not isinstance(edition, dict) or set(edition) != {"date", "candidates"}
+                or edition["date"] != today.isoformat()):
             raise ValueError
         candidates = edition["candidates"]
         if not isinstance(candidates, list) or len(candidates) > 3:
@@ -34,17 +59,19 @@ def parse(raw, today):
         cutoff = date(year, month, min(today.day, monthrange(year, month)[1]))
         ids = set()
         for row in candidates:
-            if set(row) != {"product_id", "handle", "title", "created", "image_updated",
-                            "lifetime_orders", "sessions", "suggestion"}:
+            if not isinstance(row, dict) or set(row) not in (LEGACY_FIELDS, REVIEW_FIELDS):
                 raise ValueError
             if (not re.fullmatch(r"[0-9]{1,20}", row["product_id"]) or row["product_id"] in ids
                     or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,250}", row["handle"])
-                    or type(row["lifetime_orders"]) is not int or row["lifetime_orders"] != 0
-                    or type(row["sessions"]) is not int or row["sessions"] <= 0
-                    or not date.fromisoformat(row["created"]) < cutoff
-                    or date.fromisoformat(row["image_updated"]) > cutoff
-                    or not all(isinstance(row[key], str) and 0 < len(row[key].strip()) <= limit
+                    or not all(_valid_text(row[key], limit)
                                for key, limit in (("title", 160), ("suggestion", 220)))):
+                raise ValueError
+            if set(row) == REVIEW_FIELDS:
+                _validate_review(row)
+            elif (type(row["lifetime_orders"]) is not int or row["lifetime_orders"] != 0
+                  or not _valid_count(row["sessions"]) or row["sessions"] == 0
+                  or date.fromisoformat(row["created"]) >= cutoff
+                  or date.fromisoformat(row["image_updated"]) > cutoff):
                 raise ValueError
             ids.add(row["product_id"])
     except (ValueError, TypeError, KeyError, RecursionError):
@@ -83,9 +110,15 @@ def render_html(today):
     else:
         items = "".join(
             f'<li><a href="https://www.sportscaveshop.com/products/{escape(row["handle"], quote=True)}">'
-            f'<strong>{escape(row["title"])}</strong></a> · {row["sessions"]:,} GA4 landing sessions'
+            f'<strong>{escape(row["title"])}</strong></a> · {_render_evidence(row)}'
             f'<br>{escape(row["suggestion"])}</li>'
             for row in saved["candidates"]
         )
         body = f"<ul>{items}</ul>" if items else "<p>No eligible designs were verified today.</p>"
     return f'<details class="sc-meta-insight"><summary>Designs to Refresh</summary>{body}</details>'
+
+
+def _render_evidence(row):
+    if "reason" in row:
+        return f'{REASONS[row["reason"]]} · {escape(row["evidence"])}'
+    return f'{row["sessions"]:,} GA4 landing sessions'

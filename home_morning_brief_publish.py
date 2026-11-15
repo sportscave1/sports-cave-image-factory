@@ -36,7 +36,8 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
         "markets, and confirmed start_date and end_date when available. Include the complete edition as full_brief."
     )
     if refresh_brief:
-        instructions = "Enter today's Sydney date and up to three verified candidates."
+        instructions = ("Enter today's Sydney date and up to three verified candidates. "
+                        "Performance and artwork review candidates are supported.")
     body = f"<p>{escape(message)}</p>" if message else ""
     if form:
         body += (
