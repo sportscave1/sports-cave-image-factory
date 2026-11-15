@@ -6,6 +6,8 @@ from html import escape
 import json
 import re
 
+from home_morning_brief_actions import PROJECT_URL
+from psd_directory import ROOT as LIVE_FOLDER
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -17,6 +19,106 @@ LEGACY_FIELDS = {"product_id", "handle", "title", "created", "image_updated",
 REVIEW_FIELDS = {"product_id", "handle", "title", "reason", "evidence",
                  "sessions", "orders", "suggestion"}
 REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
+REVIEW_FOLDER = f"{LIVE_FOLDER}/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE"
+
+
+def _refresh_prompt(row, product_url):
+    return f"""Refresh an existing Sports Cave collector design for review.
+
+Product: {row["title"]}
+Shopify product ID: {row["product_id"]}
+Product page: {product_url}
+Refresh recommendation: {row["suggestion"]}
+Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sessions'}
+
+1. Find the current master PSD in Dropbox Live: {LIVE_FOLDER}/
+   Match it to this product using the product ID or handle, filename and live artwork.
+   Exclude the Review folder, drafts, mockups and previous refreshes. If you cannot verify the
+   match or visually inspect the PSD, ask for the exact PSD or a usable preview and stop.
+   Open the original for read-only reference. Record its path and revision if available,
+   inspect its artwork and preserve its canvas dimensions, orientation and print settings.
+
+2. Use ChatGPT image generation to create the full updated artwork based on the original
+   and the recommendation above. Apply the requested changes to the existing design while
+   keeping its subject, event and collector identity. Use this project's approved Sports Cave
+   Collector Series references for typography, colour, depth, and visual hierarchy. Keep
+   athletes recognisable and realistic, using authentic reference photography and preserving
+   face, anatomy, uniform, team details and era. Preserve verified signatures, logos, plaque
+   and edition details; do not invent them. Generate flat artwork, without a frame, wall or
+   room mockup. Check the result against the original and recommendation for accuracy,
+   readability, composition and realistic subjects. Correct visible issues before saving.
+
+3. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
+   Keep usable editable layers where available and place the generated artwork in a named
+   layer. Save only in Dropbox Review: {REVIEW_FOLDER}/
+   Use a new filename: [Original PSD stem] - REFRESH.psd. If it exists, choose an unused
+   version suffix and use create-only mode. Do not overwrite, move, rename or delete any
+   Dropbox file. Do not update the live Shopify listing or its PSD mapping.
+
+4. Verify that the new PSD opens and Dropbox confirms the new Review path. Display the
+   generated artwork in chat, report what changed, and provide the verified Dropbox path.
+   If Dropbox access, visual inspection, image generation, PSD export or upload is
+   unavailable, explain exactly what is blocked and report only what actually completed.
+   Never claim an unverified save or rename a PNG or JPEG to .psd.
+"""
+
+
+def _render_candidate(row):
+    product_url = f'https://www.sportscaveshop.com/products/{row["handle"]}'
+    prompt = escape(_refresh_prompt(row, product_url), quote=True)
+    title = escape(row["title"])
+    return (
+        f'<li><a href="{escape(product_url, quote=True)}"><strong>{title}</strong></a>'
+        f' · {_render_evidence(row)} '
+        f'<a class="sc-refresh-action" href="{PROJECT_URL}" target="_blank" '
+        f'rel="noopener noreferrer" aria-label="Create Refresh for {title}" '
+        f'data-refresh-prompt="{prompt}">Create Refresh</a>'
+        f'<br>{escape(row["suggestion"])}</li>'
+    )
+
+
+REFRESH_HANDOFF = """<style>
+.sc-refresh-action {display:inline-block;margin:.18rem 0;padding:.12rem .42rem;
+    border:1px solid #b8aa8a;border-radius:6px;color:inherit;text-decoration:none;
+    font-weight:600;white-space:nowrap}
+.sc-refresh-action:hover {background:#c29a43;color:#17130c}
+.sc-design-refresh p.sc-refresh-status {margin:.3rem .85rem .6rem}
+</style><script>{
+  const panel = [...document.querySelectorAll(".sc-design-refresh")].at(-1);
+  if (panel && !panel.dataset.refreshReady) {
+    panel.dataset.refreshReady = "true";
+    const status = panel.querySelector(".sc-refresh-status");
+    panel.addEventListener("click", event => {
+      const action = event.target.closest("a[data-refresh-prompt]");
+      if (!action) return;
+      const prompt = action.dataset.refreshPrompt;
+      const copied = () => {
+        status.textContent = "Prompt copied. Paste it into Sports Cave Designs and send it.";
+      };
+      const fallback = () => {
+        const field = document.createElement("textarea");
+        field.value = prompt;
+        field.style.cssText = "position:fixed;left:-9999px";
+        panel.append(field);
+        field.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch {}
+        field.remove();
+        action.focus({preventScroll:true});
+        if (ok) copied();
+        else {
+          status.textContent = "Copy the prompt manually and paste it into Sports Cave Designs.";
+          window.prompt("Copy this prompt, then paste it into Sports Cave Designs.", prompt);
+        }
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(prompt).then(copied, fallback);
+      } else {
+        fallback();
+      }
+    });
+  }
+}</script>"""
 
 
 def _valid_text(value, limit):
@@ -105,17 +207,19 @@ def publish(raw, user):
 
 def render_html(today):
     saved = get_app_setting(KEY, ensure_schema_first=False) or {}
+    handoff = ""
     if saved.get("date") != today.isoformat():
         body = "<p>Today's shortlist is pending.</p>"
     else:
-        items = "".join(
-            f'<li><a href="https://www.sportscaveshop.com/products/{escape(row["handle"], quote=True)}">'
-            f'<strong>{escape(row["title"])}</strong></a> · {_render_evidence(row)}'
-            f'<br>{escape(row["suggestion"])}</li>'
-            for row in saved["candidates"]
-        )
+        items = "".join(_render_candidate(row) for row in saved["candidates"])
         body = f"<ul>{items}</ul>" if items else "<p>No eligible designs were verified today.</p>"
-    return f'<details class="sc-meta-insight"><summary>Designs to Refresh</summary>{body}</details>'
+        if items:
+            body += '<p class="sc-refresh-status" role="status"></p>'
+            handoff = REFRESH_HANDOFF
+    return (
+        '<details class="sc-meta-insight sc-design-refresh">'
+        f'<summary>Designs to Refresh</summary>{body}</details>{handoff}'
+    )
 
 
 def _render_evidence(row):
