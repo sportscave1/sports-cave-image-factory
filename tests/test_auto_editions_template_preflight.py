@@ -123,6 +123,37 @@ def test_preflight_rejects_incompatible_template_before_number_exports(tmp_path,
     with pytest.raises(ValueError):check(tmp_path,report)
 
 
+
+def test_resize_corner_rounding_preserves_rgb_samples_and_icc(tmp_path):
+    from auto_editions_preflight import normalize_resize_corners
+    Image.new('RGB', (7, 5)).save(tmp_path / 'preflight-original.png')
+    path = tmp_path / 'master.png'
+    with Image.new('RGBA', (14, 10), (31, 72, 111, 255)) as src:
+        src.putpixel((0, 9), (10, 80, 140, 254))
+        src.putpixel((1, 9), (15, 85, 145, 254))
+        src.save(path, icc_profile=b'fixture profile')
+        expected = src.convert('RGB').tobytes()
+    assert normalize_resize_corners(tmp_path, [path.name], (14, 10)) == {path.name: 2}
+    with Image.open(path) as saved:
+        assert saved.mode == 'RGB'
+        assert saved.tobytes() == expected
+        assert saved.info['icc_profile'] == b'fixture profile'
+
+
+@pytest.mark.parametrize('pixel,alpha', [((0, 9), 253), ((4, 5), 254), ((4, 9), 254)])
+def test_resize_corner_rounding_rejects_other_transparency(tmp_path, pixel, alpha):
+    from auto_editions_preflight import normalize_resize_corners, NonOpaqueArtwork
+    Image.new('RGB', (7, 5)).save(tmp_path / 'preflight-original.png')
+    path = tmp_path / 'master.png'
+    with Image.new('RGBA', (14, 10), (31, 72, 111, 255)) as src:
+        src.putpixel(pixel, (10, 80, 140, alpha))
+        src.save(path)
+    before = path.read_bytes()
+    with pytest.raises(NonOpaqueArtwork):
+        normalize_resize_corners(tmp_path, [path.name], (14, 10))
+    assert path.read_bytes() == before
+
+
 def test_resize_proof_rejects_painting_and_the_demonstrated_222_alpha(tmp_path):
     native(tmp_path)
     for name in ('resize-original.png','original.png','master.png'):

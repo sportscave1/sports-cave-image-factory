@@ -140,7 +140,8 @@ def classify(row, config, *, runtime=None):
     transient=(code in TRANSIENT or 'transfer failed: timeouterror' in lower
         or reason=='Preparation failed: HTTPError. Existing PSD and mapping are preserved.')
     isolated_alpha = code=='ARTWORK_ALPHA' and 'preflight-artwork.png: non-opaque alpha' in lower
-    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED' or isolated_alpha
+    rounding_alpha = code=='ARTWORK_ALPHA' and 'non-opaque alpha (254-255)' in lower
+    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED' or isolated_alpha or rounding_alpha
                 else ACTIVATION if code=='PHOTOSHOP_ACTIVATION' or reason==LEGACY_INSPECTION_OSERROR
                 else 'Photoshop busy' if code=='PHOTOSHOP_BUSY'
                 else 'Native inspection' if 'cannot open the file because the open options are incorrect' in lower or reason=='Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.'

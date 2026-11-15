@@ -19,6 +19,7 @@ def resize_runtime():
 
 
 @pytest.mark.parametrize('reason',[
+    'Preparation failed: Saved artwork exports RGBA with non-opaque alpha (254-255). An approved opaque composition is required; no background was guessed or painted. Existing PSD and mapping are preserved.',
     'Preparation failed: preflight-artwork.png: non-opaque alpha (0-255). The visible artwork must cover the complete canvas; preserve the approved background in the PSD. Existing PSD and mapping are preserved.',
     'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
     'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
