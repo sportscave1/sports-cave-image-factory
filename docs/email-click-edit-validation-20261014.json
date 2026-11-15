@@ -1,0 +1,61 @@
+{
+  "results": [
+    {
+      "kind": "automation",
+      "desktop": true,
+      "mobile": true,
+      "stable_ids": true,
+      "duplicate": true,
+      "reordered": true,
+      "tabs": true,
+      "keyboard": true,
+      "content_unchanged": true,
+      "editor_retained": true,
+      "preview_dom_retained": true,
+      "unsaved_edits_preserved": true,
+      "deleted_and_hidden": true,
+      "fixed_brand_feedback": true,
+      "catalogue": true
+    },
+    {
+      "kind": "campaign",
+      "desktop": true,
+      "mobile": true,
+      "stable_ids": true,
+      "duplicate": true,
+      "reordered": true,
+      "tabs": true,
+      "keyboard": true,
+      "content_unchanged": true,
+      "editor_retained": true,
+      "preview_dom_retained": true,
+      "unsaved_edits_preserved": true,
+      "deleted_and_hidden": true,
+      "fixed_brand_feedback": true,
+      "catalogue": true
+    }
+  ],
+  "validation": [
+    "25 focused Python tests passed: modular builder and automation preview stability",
+    "2 JavaScript selection tests passed",
+    "Campaign and Automation click-to-edit browser tests passed in desktop/mobile previews",
+    "Existing modular builder browser regression passed for Campaign and Automation: insertion, independent editing, reorder, duplicate, visibility, deletion/undo, save/reopen, tabs and explicit template replacement",
+    "JavaScript syntax checks and git diff --check passed"
+  ],
+  "modified_files": [
+    "crm_campaign_page.py",
+    "components/crm_sections/composer.js",
+    "components/crm_sections/preview.js",
+    "components/crm_sections/style.css",
+    "tests/fixtures/crm_automation_preview.py",
+    "tests/test_crm_click_edit.cjs",
+    "tests/test_crm_click_edit_ui.cjs"
+  ],
+  "scope": "Shared editor UX only. Local synthetic fixtures; no production credentials, deployment, publication, automation activation or customer email sends. Delivery renderer unchanged.",
+  "limitations": [
+    "Fixed Header/Footer remain non-editable in the preview and display guidance to existing settings.",
+    "Loading placeholders are non-editable.",
+    "Settings/Templates use the existing tab fragment lifecycle; section editor and preview DOM remain mounted.",
+    "Browser validation covers representative Campaign and Automation fixtures using the shared implementation, not a live execution of every flow."
+  ]
+}

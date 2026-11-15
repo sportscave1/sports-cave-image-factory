@@ -1,0 +1,18 @@
+SPORTS CAVE DESIGN STUDIO V2 — FIND IMAGES
+
+Use the approved Research result immediately above as the authority.
+Do not redo the research or change the selected person, people, moment, event, year/era, team, vehicle, horse or concept. Preserve the Research lock and authenticity constraints.
+
+Use image search immediately to find the strongest REAL photographs matching that research.
+Prioritise clear identity, correct event/era/uniform/vehicle, strong emotion or action, good resolution and useful composition for the artwork.
+
+Use ChatGPT's image-search/carousel capability when available. DISPLAY approximately 4–6 of the strongest images directly in this ChatGPT conversation as an IMAGE CAROUSEL, before any commentary. Show fewer if fewer genuine matches are available.
+
+After the carousel, briefly identify:
+Best primary image: Image [number]
+Best supporting image: Image [number, if useful]
+
+Keep image numbers, source URLs/references and subject mapping with the images for Generation. Retain any asset_id, role and use_mode in image metadata, not a visible technical report; carry selected photographs forward as actual image inputs.
+
+Keep the response short; sources belong behind the images, not in a long URL list. If image display is unavailable, say so briefly rather than claiming a text list is a carousel.
+Do not generate the artwork yet.

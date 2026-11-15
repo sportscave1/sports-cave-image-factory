@@ -1,0 +1,782 @@
+[
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Cricket",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "scene-example"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Cricket",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "A rare piece for those who know its meaning.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Cricket",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "A rare piece for those who know its meaning.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Cricket",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "17"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "scene-example"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "A rare piece for those who know its meaning.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "copy": [
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "17"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Baseball",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "scene-example"
+    },
+    "copy": [
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "A rare piece for those who know its meaning.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Baseball",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "copy": [
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Baseball",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Baseball",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "17"
+    },
+    "copy": [
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "NBA",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "scene-example"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "NBA",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "NBA",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "A rare piece for those who know its meaning.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "NBA",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "17"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Other",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "scene-example"
+    },
+    "copy": [
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "A rare piece for those who know its meaning.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Other",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Other",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "copy": [
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role"
+      },
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Not everyone gets to own greatness, but you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Collector Print",
+      "category": "Other",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "17"
+    },
+    "copy": [
+      {
+        "headline_text": "ONLY 100 EDITIONS WILL EVER EXIST",
+        "supporting_line": "Made for serious collectors only.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "LIMITED TO 100 EDITIONS",
+        "eligible_headline_alternatives": [],
+        "camera_side": "RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "just below artwork centre with very subtle upward perspective"
+      },
+      {
+        "headline_text": "STRICTLY LIMITED TO 100 EDITIONS",
+        "supporting_line": "The moment lasts. The opportunity won’t.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "100 EDITIONS TOTAL",
+        "eligible_headline_alternatives": [],
+        "camera_side": "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      },
+      {
+        "headline_text": "JUST 100 EDITIONS. EVER.",
+        "supporting_line": "Some moments are worth claiming while you can.",
+        "cta_text": "CLAIM YOUR EDITION",
+        "headline_fit_fallback": "AN EDITION OF 100",
+        "eligible_headline_alternatives": [],
+        "camera_side": "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on",
+        "resolved_camera_variation": "a little above artwork centre with minimal downward perspective"
+      }
+    ]
+  }
+]

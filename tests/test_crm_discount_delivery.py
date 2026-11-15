@@ -1,0 +1,138 @@
+"""Disposable PostgreSQL, Shopify fixtures and mocked Resend; no live delivery."""
+from copy import deepcopy
+from datetime import timedelta
+import os
+import unittest
+import uuid
+from unittest.mock import patch,Mock
+from tests.test_crm_discounts import DiscountShop,doc
+from tests.test_crm import ADMIN
+from tests.test_crm_send_flow import LIVE
+from tests.test_crm_abandoned_checkout import checkout,native_document
+from crm_automation_definition import email_step
+from crm_automation_runtime import enter,advance
+from crm_logic import now
+
+
+@unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
+class DiscountDeliveryTests(unittest.TestCase):
+    def test_code_only_edit_move_save_reopen_publish_preserves_frozen_offer_and_checkout(self):
+        from crm_middle_sections import apply_event,middle_sections
+        from tests.test_crm_discount_editor_v2 import event
+        from crm_recovery_discount import prepare
+        from crm_recovery_links import inspect,verify
+        from crm_automation_runtime import render
+        f=self.f;old=deepcopy(self.j['steps']);flow=deepcopy(self.flow)
+        doc=flow['emails'][2]['document'];offer=deepcopy(doc['recovery_discount'])
+        s=next(s for s in middle_sections(doc) if s['type']=='discount')
+        html='<div style="background:#171717;color:#d4ac56;padding:12px">Collector invitation: {{discount_code}}</div>'
+        apply_event(doc,event(doc,'html',id=s['id'],html=html))
+        apply_event(doc,event(doc,'order',ids=[s['id']]+[v['id'] for v in middle_sections(doc) if v['id']!=s['id']]))
+        saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
+        reopened=f.store.flow(self.a['id'])['config']['draft']['emails'][2]['document']
+        self.assertEqual(reopened['middle_sections'][0]['html'],html)
+        self.assertEqual(reopened['recovery_discount'],offer)
+        newer=f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)
+        published=newer['config']['published_flow']['emails'][2]['document']
+        self.assertEqual(published['middle_sections'],reopened['middle_sections'])
+        self.assertEqual(published['recovery_discount'],offer)
+        self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(self.j['id'],),True)['steps'],old)
+        old_doc=f.store.template(old[2]['template_id'],old[2]['template_version'])['document']
+        self.assertIn('{{discount_value}}',next(s['html'] for s in old_doc['middle_sections'] if s['type']=='discount'))
+        verified=prepare(self.discounts,published,self.cart,self.cart['customer']['id'])
+        content=f.store.template(old[2]['template_id'],newer['config']['published_version'])
+        message=render(content,{'id':str(uuid.uuid4()),'shopify_customer_id':self.cart['customer']['id']},
+            'https://example.test/unsubscribe',{'_checkout':self.cart,'_checkout_id':self.cart['id'],
+                '_customer':self.cart['customer'],'_recovery_discount':verified})
+        urls=[u for u in inspect(message['html']).urls if '/checkouts/' in u]
+        self.assertTrue(urls);self.assertEqual(set(urls),{verified['url']})
+        verify(message,verified['url'],len(urls))
+        self.assertEqual(verified['original_url'],self.cart['abandonedCheckoutUrl'])
+        self.assertIn('Collector invitation: FIXTURE5',message['html'])
+        self.assertNotIn('{{discount_',message['html'])
+        self.assertEqual(published['recovery_discount'],offer)
+        f.provider.send.assert_not_called()
+
+    def setUp(self):
+        from tests.test_crm_native_automations import NativeAutomationTests
+        f=NativeAutomationTests();f.setUp();self.addCleanup(f.doCleanups);self.f=f
+        self.discounts=DiscountShop();f.shop.query.side_effect=self.discounts.query
+        cart=checkout(9751);cart['customer']=deepcopy(f.customer);cart['createdAt']=(now()+timedelta(seconds=1)).isoformat()
+        f.shop.checkout.return_value=cart;self.discounts.checkout.update(id=cart['id'],customer=deepcopy(f.customer),abandonedCheckoutUrl=cart['abandonedCheckoutUrl'])
+        self.cart=cart
+        a=f.store.create(ADMIN,'abandoned','Discount fixture');f.created.append(str(a['id']))
+        flow=deepcopy(a['config']['draft']);flow['emails']=[email_step(native_document(),d) for d in (0,43200,86400)]
+        third=flow['emails'][2]['document'];offer=doc(self.discounts)
+        third['recovery_discount']=offer['recovery_discount'];third['content'].update(subject=offer['content']['subject'],preheader=offer['content']['preheader'])
+        from crm_discount_section import migrate_editor
+        flow['emails'][2]['document']=migrate_editor(third)
+        self.flow=flow
+        a=f.store.save_flow(ADMIN,a['id'],a['name'],flow,1)
+        self.a=f.store.publish(ADMIN,a['id'],a['config']['revision'],env=LIVE)
+        self.j=enter(f.engine,self.a,f.customer['id'],cart['id'],str(uuid.uuid4()),now()+timedelta(seconds=2))
+        frequency=patch('crm_workspace_store.WorkspaceRecords.frequency_blocked',return_value=False);frequency.start();self.addCleanup(frequency.stop)
+    def send_step(self):
+        advance(self.f.engine,self.f.due(self.j));self.f.engine.send_one();advance(self.f.engine,self.f.due(self.j))
+    def test_email_three_only_frozen_versions_tracking_and_no_duplicates(self):
+        f=self.f;frozen=deepcopy(self.j['steps'])
+        self.send_step();self.send_step();self.assertEqual(self.discounts.calls,[])
+        # A newly published selection cannot rewrite this customer's frozen journey.
+        flow=deepcopy(self.flow)
+        from crm_middle_sections import commit_middle,middle_sections
+        third=flow['emails'][2]['document'];commit_middle(third,[s for s in middle_sections(third) if s['type']!='discount'])
+        flow['emails'][2]['document']['content'].update(subject='New future version',preheader='New future version')
+        saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
+        f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)
+        self.send_step();self.assertEqual(f.provider.send.call_count,3)
+        messages=[c.args[1] for c in f.provider.send.call_args_list]
+        self.assertNotIn('discount=',messages[0]['html']);self.assertNotIn('discount=',messages[1]['html'])
+        self.assertEqual(messages[2]['subject'],'Your offer: FIXTURE5');self.assertIn('A$5 off',messages[2]['html'])
+        self.assertIn('discount=FIXTURE5',messages[2]['html']);self.assertNotIn('{{',messages[2]['html'])
+        self.assertIn('AN EXCLUSIVE COLLECTOR OFFER',messages[2]['html'])
+        self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(self.j['id'],),True)['steps'],frozen)
+        f.engine.send_one();self.assertEqual(f.provider.send.call_count,3)
+        self.assertEqual(f.store.template(frozen[2]['template_id'],frozen[2]['template_version'])['document']['recovery_discount'],self.flow['emails'][2]['document']['recovery_discount'])
+    def test_expired_third_email_is_held_with_actionable_reason(self):
+        self.send_step();self.send_step();self.discounts.node['codeDiscount']['status']='EXPIRED';self.send_step()
+        self.assertEqual(self.f.provider.send.call_count,2)
+        row=self.f.store.q('SELECT status,error_code FROM crm_marketing_sends WHERE enrollment_id=%s AND step_index=2',(self.j['id'],),True)
+        self.assertEqual(row['status'],'BLOCKED');self.assertIn('discount_not_active',row['error_code'])
+        self.f.engine.send_one();self.assertEqual(self.f.provider.send.call_count,2)
+    def test_purchase_before_third_preserves_cancellation(self):
+        self.send_step();self.send_step();self.cart['completedAt']=now().isoformat();self.send_step()
+        self.assertEqual(self.f.provider.send.call_count,2);self.assertEqual(self.discounts.calls,[])
+    def test_verification_timeout_never_submits_or_retries_provider(self):
+        self.send_step();self.send_step();self.f.shop.query.side_effect=TimeoutError('Synthetic timeout')
+        self.send_step();self.f.engine.send_one();self.assertEqual(self.f.provider.send.call_count,2)
+        row=self.f.store.q('SELECT status,error_code FROM crm_marketing_sends WHERE enrollment_id=%s AND step_index=2',(self.j['id'],),True)
+        self.assertEqual(row['status'],'BLOCKED');self.assertIn('discount_verification_unavailable',row['error_code'])
+    def test_mocked_internal_provider_has_resolved_offer_and_owned_recovery(self):
+        f=self.f;f.store.step_id=self.flow['emails'][2]['step_id'];f.store.draft_identity=self.a['id']
+        f.store.preview_shop=f.shop;f.shop.abandoned_preview.return_value={'nodes':[self.cart],'pageInfo':{'hasNextPage':False}}
+        from crm_campaign_send import send_test
+        from tests.test_crm_customer_test import fixture,USER
+        _,cart,customer,evidence=fixture(f.shop,self.cart)
+        self.discounts.checkout.update(id=cart['id'],customer=customer,abandonedCheckoutUrl=cart['abandonedCheckoutUrl'])
+        editor=f.store.draft(self.a['id']);wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_checkout.contact_record',return_value=evidence):
+            send_test(f.store,USER,editor,'internal@example.test',str(uuid.uuid4()),env=LIVE,session=wire)
+        wire.post.assert_called_once();message=wire.post.call_args.kwargs['json']
+        self.assertEqual(message['subject'],'Your offer: FIXTURE5')
+        self.assertIn('discount=FIXTURE5',message['html']);self.assertNotIn('Recovery action disabled',message['html'])
+        self.assertNotIn('{{',message['html']);self.assertIn('A$5 off',message['html'])
+
+    def test_disconnected_offer_with_dependent_subject_is_saved_but_publication_held(self):
+        f=self.f;flow=deepcopy(self.flow);third=flow['emails'][2]['document']
+        from crm_middle_sections import commit_middle,middle_sections
+        commit_middle(third,[s for s in middle_sections(third) if s['type']!='discount'])
+        self.assertEqual(third['recovery_discount']['code'],'FIXTURE5')
+        from crm_discount_section import disconnect
+        disconnect(third)
+        saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
+        self.assertNotIn('recovery_discount',saved['config']['draft']['emails'][2]['document'])
+        with self.assertRaises(ValueError):f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)
+        self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(self.j['id'],),True)['steps'],self.j['steps'])
+        f.provider.send.assert_not_called()
+
+
+if __name__=='__main__':unittest.main()

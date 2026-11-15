@@ -1,0 +1,512 @@
+{
+  "schema_version": 1,
+  "template_id": "SC_Auto_Editions_Base_Template_V1",
+  "dropbox_file_id": "id:u1tYiAa2O-AAAAAAAAArqg",
+  "dropbox_revision": "0165dc16be75854000000036d367e13",
+  "dropbox_content_hash": "4a9f9d36bbfbafa3ca32fe242b56e5c9bf01a1e7884c90629c5015a4cad52076",
+  "sha256": "257422386b980bfaac7cad1501574a01fc1ff53f03b4577ee59926d3c210b4be",
+  "path": "/Sportscave Team Folder/03_ASSETS/Auto Editions/Templates/SC_Auto_Editions_Base_Template_V1.psd",
+  "inspected_on": "2026-10-14",
+  "inspection_engine": "Photoshop",
+  "document": {
+    "width_px": 11812,
+    "height_px": 8350,
+    "resolution": 300,
+    "mode": "DocumentMode.RGB",
+    "bits_per_channel": "BitsPerChannelType.EIGHT",
+    "profile": null
+  },
+  "required_layers": [
+    "SC_EDITION_NUMBER",
+    "SC_EDITION_PLAQUE",
+    "SC_EDITION_MATTING"
+  ],
+  "structure_scope": "layer naming only; coordinates must come from each finished PSD",
+  "inspection_warnings": [
+    {
+      "code": "smart_object_unavailable",
+      "path": [
+        {
+          "index": 2,
+          "layer_id": 13,
+          "name": "SC_EDITION_MATTING"
+        },
+        {
+          "index": 0,
+          "layer_id": 14,
+          "name": "Generative Fill 2"
+        },
+        {
+          "index": 0,
+          "layer_id": 11,
+          "name": "Generative Fill 2"
+        }
+      ]
+    },
+    {
+      "code": "smart_object_limit",
+      "path": [
+        {
+          "index": 2,
+          "layer_id": 13,
+          "name": "SC_EDITION_MATTING"
+        },
+        {
+          "index": 0,
+          "layer_id": 14,
+          "name": "Generative Fill 2"
+        },
+        {
+          "index": 1,
+          "layer_id": 10,
+          "name": "Generative Fill"
+        },
+        {
+          "index": 0,
+          "layer_id": 8,
+          "name": "Generative Fill"
+        }
+      ]
+    }
+  ],
+  "print_status": "NOT CONFIGURED",
+  "source_unchanged": true,
+  "layers": [
+    {
+      "layer_id": 20,
+      "path": [
+        {
+          "index": 0,
+          "layer_id": 20,
+          "name": "SC_EDITION_NUMBER"
+        }
+      ],
+      "smart_object_chain": [],
+      "visible": true,
+      "locked": false,
+      "bounds_px": [
+        1988,
+        7446,
+        2781,
+        7597
+      ],
+      "kind": "text",
+      "text": "001 / 100",
+      "editable": true,
+      "layout": {
+        "font": "Cinzel-Medium",
+        "size_pt": 14.4122882080078,
+        "tracking": 400,
+        "leading_pt": null,
+        "justification": "Justification.CENTER",
+        "orientation": "Direction.HORIZONTAL",
+        "text_kind": "TextType.POINTTEXT",
+        "position_px": [
+          2401.84650798964,
+          7545.37559679647
+        ],
+        "faux_bold": false,
+        "faux_italic": false
+      },
+      "text_descriptor": {
+        "textKey": "001 / 100",
+        "warp": {
+          "warpStyle": "warpNone",
+          "warpValue": 0,
+          "warpPerspective": 0,
+          "warpPerspectiveOther": 0,
+          "warpRotate": "horizontal"
+        },
+        "textClickPoint": {
+          "horizontal": {
+            "value": 20.3339528275452,
+            "unit": "percentUnit"
+          },
+          "vertical": {
+            "value": 90.363779602353,
+            "unit": "percentUnit"
+          }
+        },
+        "transform": {
+          "xx": 1.66215834257558,
+          "xy": -2.16632074365634e-15,
+          "yx": 0,
+          "yy": 1.66222870146241,
+          "tx": 0,
+          "ty": 0
+        },
+        "textGridding": "none",
+        "orientation": "horizontal",
+        "antiAlias": "antiAliasPlatformGray",
+        "textDynamicMagicPath": false,
+        "bounds": {
+          "left": {
+            "value": -52.4391064453125,
+            "unit": "pointsUnit"
+          },
+          "top": {
+            "value": -12.2503134155273,
+            "unit": "pointsUnit"
+          },
+          "right": {
+            "value": 52.4391137695312,
+            "unit": "pointsUnit"
+          },
+          "bottom": {
+            "value": 5.36128509521484,
+            "unit": "pointsUnit"
+          }
+        },
+        "boundingBox": {
+          "left": {
+            "value": -51.617607421875,
+            "unit": "pointsUnit"
+          },
+          "top": {
+            "value": -10.4344967651367,
+            "unit": "pointsUnit"
+          },
+          "right": {
+            "value": 51.6176147460938,
+            "unit": "pointsUnit"
+          },
+          "bottom": {
+            "value": 0.20177202701569,
+            "unit": "pointsUnit"
+          }
+        },
+        "textShape": [
+          {
+            "char": "paint",
+            "orientation": "horizontal",
+            "transform": {
+              "xx": 1,
+              "xy": 0,
+              "yx": 0,
+              "yy": 1,
+              "tx": 0,
+              "ty": 0
+            },
+            "rowCount": 1,
+            "columnCount": 1,
+            "rowMajorOrder": true,
+            "rowGutter": {
+              "value": 0,
+              "unit": "pointsUnit"
+            },
+            "columnGutter": {
+              "value": 0,
+              "unit": "pointsUnit"
+            },
+            "spacing": {
+              "value": 0,
+              "unit": "pointsUnit"
+            },
+            "frameBaselineAlignment": "alignByAscent",
+            "firstBaselineMinimum": {
+              "value": 0,
+              "unit": "pointsUnit"
+            },
+            "base": {
+              "horizontal": 0,
+              "vertical": 0
+            }
+          }
+        ],
+        "textStyleRange": [
+          {
+            "from": 0,
+            "to": 10,
+            "textStyle": {
+              "styleSheetHasParent": true,
+              "fontPostScriptName": "Cinzel-Medium",
+              "fontName": "Cinzel",
+              "fontStyleName": "Medium",
+              "fontScript": 0,
+              "fontTechnology": 1,
+              "fontAvailable": true,
+              "size": {
+                "value": 14.4122882080078,
+                "unit": "pointsUnit"
+              },
+              "impliedFontSize": {
+                "value": 23.9565191130999,
+                "unit": "pointsUnit"
+              },
+              "horizontalScale": 100,
+              "verticalScale": 100,
+              "syntheticBold": false,
+              "syntheticItalic": false,
+              "autoLeading": true,
+              "tracking": 400,
+              "baselineShift": {
+                "value": 0,
+                "unit": "pointsUnit"
+              },
+              "impliedBaselineShift": {
+                "value": 0,
+                "unit": "pointsUnit"
+              },
+              "autoKern": "metricsKern",
+              "fontCaps": "normal",
+              "digitSet": "arabicDigits",
+              "kashidas": "kashidaDefault",
+              "diacXOffset": {
+                "value": 0,
+                "unit": "pointsUnit"
+              },
+              "diacYOffset": {
+                "value": 0,
+                "unit": "pointsUnit"
+              },
+              "markYDistFromBaseline": {
+                "value": 0,
+                "unit": "pointsUnit"
+              },
+              "baseline": "normal",
+              "otbaseline": "normal",
+              "strikethrough": "strikethroughOff",
+              "underline": "underlineOff",
+              "ligature": true,
+              "altligature": false,
+              "contextualLigatures": true,
+              "fractions": false,
+              "ordinals": false,
+              "swash": false,
+              "titling": false,
+              "connectionForms": true,
+              "stylisticAlternates": false,
+              "stylisticSets": 0,
+              "ornaments": false,
+              "justificationAlternates": false,
+              "figureStyle": "normal",
+              "proportionalMetrics": false,
+              "kana": false,
+              "italics": false,
+              "baselineDirection": "withStream",
+              "textLanguage": "englishLanguage",
+              "japaneseAlternate": "defaultForm",
+              "mojiZume": 0,
+              "gridAlignment": "roman",
+              "noBreak": false,
+              "color": {
+                "red": 255,
+                "grain": 255,
+                "blue": 255
+              },
+              "strokeColor": {
+                "red": 0,
+                "grain": 0,
+                "blue": 0
+              },
+              "baseParentStyle": {
+                "fontPostScriptName": "MyriadPro-Regular",
+                "fontName": "Myriad Pro",
+                "fontStyleName": "Regular",
+                "fontScript": 0,
+                "fontTechnology": 0,
+                "fontAvailable": true,
+                "size": {
+                  "value": 12,
+                  "unit": "pointsUnit"
+                },
+                "impliedFontSize": {
+                  "value": 19.9467444175498,
+                  "unit": "pointsUnit"
+                },
+                "horizontalScale": 100,
+                "verticalScale": 100,
+                "syntheticBold": false,
+                "syntheticItalic": false,
+                "autoLeading": true,
+                "tracking": 0,
+                "baselineShift": {
+                  "value": 0,
+                  "unit": "pointsUnit"
+                },
+                "impliedBaselineShift": {
+                  "value": 0,
+                  "unit": "pointsUnit"
+                },
+                "characterRotation": 0,
+                "autoKern": "metricsKern",
+                "fontCaps": "normal",
+                "digitSet": "defaultDigits",
+                "dirOverride": "dirOverrideDefault",
+                "kashidas": "kashidaDefault",
+                "diacVPos": "diacVPosOpenType",
+                "diacXOffset": {
+                  "value": 0,
+                  "unit": "pointsUnit"
+                },
+                "diacYOffset": {
+                  "value": 0,
+                  "unit": "pointsUnit"
+                },
+                "markYDistFromBaseline": {
+                  "value": 100,
+                  "unit": "pointsUnit"
+                },
+                "baseline": "normal",
+                "otbaseline": "normal",
+                "strikethrough": "strikethroughOff",
+                "underline": "underlineOff",
+                "underlineOffset": {
+                  "value": 0,
+                  "unit": "pointsUnit"
+                },
+                "ligature": true,
+                "altligature": false,
+                "contextualLigatures": false,
+                "alternateLigatures": false,
+                "oldStyle": false,
+                "fractions": false,
+                "ordinals": false,
+                "swash": false,
+                "titling": false,
+                "connectionForms": false,
+                "stylisticAlternates": false,
+                "stylisticSets": 0,
+                "ornaments": false,
+                "justificationAlternates": false,
+                "figureStyle": "normal",
+                "proportionalMetrics": false,
+                "kana": false,
+                "italics": false,
+                "ruby": false,
+                "baselineDirection": "rotated",
+                "textLanguage": "englishLanguage",
+                "japaneseAlternate": "defaultForm",
+                "mojiZume": 0,
+                "gridAlignment": "roman",
+                "enableWariChu": false,
+                "wariChuCount": 2,
+                "wariChuLineGap": 0,
+                "wariChuScale": 0.5,
+                "wariChuWidow": 2,
+                "wariChuOrphan": 2,
+                "wariChuJustification": "wariChuAutoJustify",
+                "tcyUpDown": 0,
+                "tcyLeftRight": 0,
+                "leftAki": -1,
+                "rightAki": -1,
+                "jiDori": 0,
+                "noBreak": false,
+                "color": {
+                  "red": 0,
+                  "grain": 0,
+                  "blue": 0
+                },
+                "strokeColor": {
+                  "red": 0,
+                  "grain": 0,
+                  "blue": 0
+                },
+                "fill": true,
+                "stroke": false,
+                "fillFirst": true,
+                "fillOverPrint": false,
+                "strokeOverPrint": false,
+                "lineCap": "buttCap",
+                "lineJoin": "miterJoin",
+                "lineWidth": {
+                  "value": 1,
+                  "unit": "pointsUnit"
+                },
+                "miterLimit": {
+                  "value": 4,
+                  "unit": "pointsUnit"
+                },
+                "lineDashoffset": 0
+              }
+            }
+          }
+        ],
+        "paragraphStyleRange": [
+          {
+            "from": 0,
+            "to": 10,
+            "paragraphStyle": {
+              "styleSheetHasParent": true,
+              "align": "center",
+              "directionType": "dirLeftToRight",
+              "textComposerEngine": "textOptycaComposer",
+              "listStyle": {
+                "listStylePredefinedTag": "listStylePredefinedTagNone",
+                "bulletListStyleTag": "listStylePredefinedTagNone"
+              },
+              "listTier": 0
+            }
+          }
+        ],
+        "kerningRange": []
+      },
+      "fonts": [
+        {
+          "postscript_name": "Cinzel-Medium",
+          "installed": true
+        }
+      ]
+    },
+    {
+      "layer_id": 19,
+      "path": [
+        {
+          "index": 1,
+          "layer_id": 19,
+          "name": "SC_EDITION_PLAQUE"
+        }
+      ],
+      "smart_object_chain": [],
+      "visible": true,
+      "locked": false,
+      "bounds_px": [
+        883,
+        7004,
+        3287,
+        7787
+      ],
+      "kind": "smart_object",
+      "smart_object": {
+        "placed": "rasterizeContent",
+        "documentID": "adobe:docid:photoshop:77eb04b9-7af2-e849-b43d-9ddb68010341",
+        "compsList": {
+          "compID": -1,
+          "originalCompID": -1
+        },
+        "linked": false,
+        "fileReference": "limited-edition-plaque.psd"
+      }
+    },
+    {
+      "layer_id": 13,
+      "path": [
+        {
+          "index": 2,
+          "layer_id": 13,
+          "name": "SC_EDITION_MATTING"
+        }
+      ],
+      "smart_object_chain": [],
+      "visible": true,
+      "locked": false,
+      "bounds_px": [
+        -183,
+        -129,
+        11994,
+        8479
+      ],
+      "kind": "smart_object",
+      "smart_object": {
+        "placed": "rasterizeContent",
+        "documentID": "adobe:docid:photoshop:35295e4d-5596-124d-9325-2a04a4c0cf00",
+        "compsList": {
+          "compID": -1,
+          "originalCompID": -1
+        },
+        "linked": false,
+        "fileReference": "Generative Fill 2.psb"
+      }
+    }
+  ]
+}

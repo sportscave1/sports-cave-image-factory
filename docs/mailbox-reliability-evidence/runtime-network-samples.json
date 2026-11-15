@@ -1,0 +1,34 @@
+{
+  "commit": "5980a803e5c0073f2e430b7d8e495e10c9b7d78d",
+  "primary_service": "srv-d8kl4on7f7vs73dvavv0",
+  "primary_instance": "srv-d8kl4on7f7vs73dvavv0-75d57c5f9d-9ch8w",
+  "worker_service": "srv-d9ujm9navr4c73amurgg",
+  "worker_instance": "srv-d9ujm9navr4c73amurgg-79b85fbdd6-r8dzc",
+  "host": "ventraip.email",
+  "ipv4_address": "110.232.143.200",
+  "ipv6_address": "2400:b800:8::200",
+  "method": "Actual existing-instance dashboard shells. Serial stdlib Python probes. DNS getaddrinfo separately by family, TCP connect to resolved address, verified TLS with host SNI, recv greeting through newline (4096-byte cap). Five-second deadline per stage, 0.5 seconds between samples. No login, protocol commands, app imports, mail reads or sends. Times in ms; DNS may use resolver caches. TLS context creation excluded from handshake timer.",
+  "primary_samples": [
+    {"utc":"2026-10-26T00:01:32.516055+00:00","protocol":"IMAP","port":993,"family":"IPv4","sample":1,"dns_ms":3.502,"tcp_ms":158.561,"tls_ms":321.305,"greeting_ms":10.355,"ok":true},
+    {"utc":"2026-10-26T00:01:33.554827+00:00","protocol":"IMAP","port":993,"family":"IPv4","sample":2,"dns_ms":1.699,"tcp_ms":156.766,"tls_ms":320.189,"greeting_ms":15.716,"ok":true},
+    {"utc":"2026-10-26T00:01:34.579483+00:00","protocol":"IMAP","port":993,"family":"IPv6","sample":1,"dns_ms":4.662,"tcp_ms":0.063,"tls_ms":null,"greeting_ms":null,"ok":false,"stopped_at":"tcp","errno":101},
+    {"utc":"2026-10-26T00:01:35.084467+00:00","protocol":"IMAP","port":993,"family":"IPv6","sample":2,"dns_ms":1.285,"tcp_ms":0.043,"tls_ms":null,"greeting_ms":null,"ok":false,"stopped_at":"tcp","errno":101},
+    {"utc":"2026-10-26T00:01:35.586032+00:00","protocol":"SMTP","port":465,"family":"IPv4","sample":1,"dns_ms":1.389,"tcp_ms":157.794,"tls_ms":321.388,"greeting_ms":0.936,"ok":true},
+    {"utc":"2026-10-26T00:01:36.607008+00:00","protocol":"SMTP","port":465,"family":"IPv4","sample":2,"dns_ms":4.9,"tcp_ms":155.916,"tls_ms":319.007,"greeting_ms":9.699,"ok":true},
+    {"utc":"2026-10-26T00:01:37.627085+00:00","protocol":"SMTP","port":465,"family":"IPv6","sample":1,"dns_ms":6.276,"tcp_ms":0.048,"tls_ms":null,"greeting_ms":null,"ok":false,"stopped_at":"tcp","errno":101},
+    {"utc":"2026-10-26T00:01:38.133684+00:00","protocol":"SMTP","port":465,"family":"IPv6","sample":2,"dns_ms":1.249,"tcp_ms":0.045,"tls_ms":null,"greeting_ms":null,"ok":false,"stopped_at":"tcp","errno":101}
+  ],
+  "worker_control_samples": [
+    {"utc":"2026-10-26T00:05:01.923580+00:00","protocol":"IMAP","port":993,"family":"IPv4","sample":1,"dns_ms":7.81,"tcp_ms":156.441,"tls_ms":318.869,"greeting_ms":2.995,"ok":true},
+    {"utc":"2026-10-26T00:05:02.970071+00:00","protocol":"IMAP","port":993,"family":"IPv6","sample":1,"dns_ms":4.008,"tcp_ms":0.09,"tls_ms":null,"greeting_ms":null,"ok":false,"stopped_at":"tcp","errno":101},
+    {"utc":"2026-10-26T00:05:03.484892+00:00","protocol":"SMTP","port":465,"family":"IPv4","sample":1,"dns_ms":60.39,"tcp_ms":156.148,"tls_ms":320.242,"greeting_ms":0.561,"ok":true},
+    {"utc":"2026-10-26T00:05:04.562048+00:00","protocol":"SMTP","port":465,"family":"IPv6","sample":1,"dns_ms":1.75,"tcp_ms":0.065,"tls_ms":null,"greeting_ms":null,"ok":false,"stopped_at":"tcp","errno":101}
+  ],
+  "successful_greetings": {"IMAP":"* OK AXIGEN IMAP4rev1 service is ready","SMTP_primary":"220 fe.s3.ax.email Axigen ESMTP ready","SMTP_worker":"220 fe.s1.ax.email Axigen ESMTP ready"},
+  "tls": "TLSv1.2; default CA validation and hostname validation enabled",
+  "primary_outbound_cidrs_dashboard": ["74.220.48.0/24","74.220.56.0/24"],
+  "primary_non_secret_endpoint_settings": {"SPORTSCAVE_EMAIL_IMAP_HOST":"ventraip.email","SPORTSCAVE_EMAIL_IMAP_PORT":"993","SPORTSCAVE_EMAIL_IMAP_SSL":"true","SPORTSCAVE_EMAIL_SMTP_HOST":"ventraip.email","SPORTSCAVE_EMAIL_SMTP_PORT":"465","SPORTSCAVE_EMAIL_SMTP_SSL":"true"},
+  "worker_non_secret_endpoint_settings": "All six endpoint keys unset in supervisor and CRM process; code defaults match primary endpoints. Passwords, token values and full environments were not output or saved.",
+  "post_probe_primary_socket_snapshot": {"ipv6_disable_all":"0","mail_socket_states":{"IMAP":{"01":2},"SMTP":{}}},
+  "scope": "No auth, provider commands, production mailbox writes, deployment or service configuration changes. Provider limits and historical blocking logs not accessible. IPv6 TLS/greeting not attempted after TCP failure. Public NAT IP per connection not independently measured. No percentile claim with these small samples."
+}

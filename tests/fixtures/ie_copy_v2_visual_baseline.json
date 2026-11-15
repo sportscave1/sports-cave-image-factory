@@ -1,0 +1,26 @@
+[
+  {
+    "kwargs": {
+      "product_name": "Historic Collector Print",
+      "category": "Baseball",
+      "country": "USA",
+      "variation_token": "copy-v2",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "sha256": "ff5551521a0a2b316cda8f699eb2c9692a0f8526ce7d30a11aaa0bd3ae0d56d6"
+  },
+  {
+    "kwargs": {
+      "product_name": "Historic Collector Print",
+      "category": "Baseball",
+      "country": "Australia",
+      "variation_token": "copy-v2",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "sha256": "938dbc53c87c51460d1e7060fef7d98f6b2e7c60bc151855addd427f0e999e22"
+  }
+]

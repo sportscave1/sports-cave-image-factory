@@ -1,0 +1,321 @@
+"""Explicit campaign send boundary; reuses audience rules and the existing queue."""
+from copy import deepcopy
+import json
+import os
+import time
+import uuid
+from crm_campaign_content import preflight
+from crm_audience import selection_page
+from crm_navigation import require
+from crm_resend import Config, MarketingDisabled
+from crm_resend_marketing import single_email
+from crm_campaign_review_reads import timed
+
+OFF='Marketing delivery is currently OFF. No emails were sent.'
+
+
+def final_audience(shop,store,doc,*,clock=time.monotonic):
+    if doc.get('shopify_segment_ids'):
+        from crm_buyer_segments import audience
+        if not doc.get('market_audience'):
+            raise ValueError('Buyer segments require location audience mode; preserve and review the advanced audience.')
+        return verified_native_audience(audience(shop, store, doc))
+    if doc.get('market_audience'):
+        from crm_campaign_markets import calculate
+        return verified_native_audience(calculate(shop,store,doc.get('smart_hours',16),clock=clock,market=doc['market'])[doc['market']])
+    audience=doc['audience']
+    selection=audience if audience['kind']=='Selection' else {'kind':'Selection','name':audience['name'],'include':[audience],'exclude':[]}
+    if all(source['kind']=='Shopify' for source in selection['include']+selection['exclude']):
+        from crm_audience import native_selection
+        return verified_native_audience(native_selection(shop,store,selection,doc.get('smart_hours',16)))
+    started=clock();state=None
+    while state is None or not state['complete']:
+        if clock()-started>30:raise ValueError('Audience calculation timed out. Narrow the audience and review again.')
+        state=selection_page(shop,store,selection,state,smart_hours=doc.get('smart_hours',16),recipients=True)
+    return verified_native_audience(state)
+
+def verified_native_audience(state):
+    from crm_native_unsubscribe import native_unsubscribe_url
+    if any(not native_unsubscribe_url(state['profiles'].get(r['id'])) for r in state['recipients']):
+        raise ValueError('Missing Shopify marketing unsubscribe URL. No campaign was queued; review recipient data.')
+    return state
+
+
+def production_checks(doc,cfg,env=None,*,reviewed_audience=False,email_size=None):
+    from crm_campaign_sections import with_email_defaults
+    doc=with_email_defaults(doc,cfg)
+    env=os.environ if env is None else env
+    checks=preflight(doc,env,cfg)
+    live=dict(checks['live'])
+    if reviewed_audience:
+        # Once queued, the durable reviewed membership replaces the UI count TTL.
+        # Fresh consent, email identity and suppression checks still run per send.
+        counts=doc.get('counts') or {}
+        live['Fresh complete eligible audience']=bool(counts.get('complete') and counts.get('eligible',0)>0)
+    live.pop('One-click unsubscribe production path activated',None)
+    # Legacy human attestations remain readable in old settings, but are not
+    # Campaigns authorization or delivery gates. Validate the actual values.
+    for label in ('Business postal address configured and verified',
+                  'Contact identity configured and confirmed',
+                  'SPF/DKIM verification documented', 'DMARC confirmed before bulk activation',
+                  'Resend webhooks proven before bulk activation', 'Market legal review complete',
+                  'Broadcast provider activated'):
+        live.pop(label,None)
+    from crm_resend_marketing import single_email
+    from crm_campaign_content import https
+    live['Business contact identity configured']=bool(cfg.get('business') and single_email(cfg.get('contact','')) and https(cfg.get('website','')))
+    from crm_campaign_footer import has_unsubscribe_link
+    live['Visible unsubscribe footer / functional production link']=bool(not doc.get('html_sections') or has_unsubscribe_link(doc['html_sections']['footer']))
+    from crm_email_size import campaign_size,LIMIT_BYTES,SIZE_ERROR
+    test=dict(checks['test'])
+    test.pop('HTML size reviewed / below 95 KB',None)  # Production uses final tracked HTML.
+    try:live[SIZE_ERROR]=(email_size if email_size is not None else campaign_size(doc,cfg))['html_bytes']<=LIMIT_BYTES
+    except Exception:live['Production email size can be measured']=False
+    return {**test,**live,'Marketing delivery enabled':Config(env).enabled}
+
+def review(shop,store,editor,env=None,*,audience_job=None):
+    from email_loading import stage
+    from crm_campaign_review_reads import timed
+    doc=deepcopy(editor['document']);doc['copy_reviewed']=True
+    with stage('Campaign review','authoritative_audience'):
+        if audience_job is not None:
+            from crm_campaign_audience_prepare import fingerprint
+            if audience_job.identity != fingerprint(shop,doc,audience_job.settings):
+                raise ValueError('Audience changed; review again.')
+            state=audience_job.result()
+        else:state=final_audience(shop,store,doc)
+        from crm_campaign_reprepare import restrict
+        state=restrict(store,editor,state)
+    doc['counts']={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
+    with stage('Campaign review','render_settings'):
+        from crm_campaign_contract import capture
+        cfg=capture(store.render_settings(env),env)
+    tracking_ok=False;email_size=None
+    with timed('render_validation'):
+        from crm_email_size import analyze_rendered_email
+        try:
+            rendered=validate_tracking(doc,cfg,editor.get('id'))
+            email_size=analyze_rendered_email(rendered['html'],rendered['text'])
+            tracking_ok=bool(editor.get('id'))
+        except ValueError:pass
+        checks=production_checks(doc,cfg,env,email_size=email_size)
+    blockers=[k for k,v in checks.items() if not v]
+    if editor.get('id') and not tracking_ok:blockers.append('Sports Cave OS tracking validation failed')
+    from crm_campaign_schedule import plan
+    from crm_logic import now
+    schedule={}
+    try:schedule=plan(doc,state,now())
+    except ValueError as exc:blockers.append(str(exc))
+    from crm_campaign_snapshot import create
+    with timed('snapshot'):
+        snapshot_id=create(store,editor,doc,cfg,state,schedule) if not blockers else None
+    return {'document':doc,'counts':doc['counts'],'blockers':blockers,'snapshot_id':snapshot_id,'render_settings':cfg,'tracking_ok':tracking_ok,'email_size':email_size,'schedule':schedule}
+
+
+def validate_tracking(doc,cfg,campaign_id):
+    from crm_email_size import render_production
+    return render_production(doc,cfg,campaign_id)
+
+def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
+    """One explicit submission confirms reviewed copy; all backend guards still run."""
+    require(user,'crm_automations_manage' if getattr(store,'email_mode',None)=='automation' else 'crm_campaigns_manage')
+    recipient=recipient.strip() if isinstance(recipient,str) else recipient
+    if not single_email(recipient):raise ValueError('Enter one valid email address.')
+    doc=deepcopy(editor['document']);doc['copy_reviewed']=True
+    validation_doc=doc
+    automation=getattr(store,'email_mode',None)=='automation'
+    if automation:
+        from crm_test_recipient import authorize_internal
+        authorize_internal(user,recipient,env)
+        store.draft_identity=editor['id']
+    checks=preflight(validation_doc,env,store.render_settings(env)) if not automation else None
+    failed=[k for k,v in checks['test'].items() if not v] if checks else []
+    if failed:
+        from crm_campaign_issues import CampaignValidationError
+        raise CampaignValidationError(checks)
+    saved=store.draft(editor['id']) if editor.get('id') else None
+    if not saved or saved['document']!=doc or saved['name']!=editor['name']:
+        saved=store.save(user,editor['name'],doc,editor.get('id'),editor.get('version'),env=env)
+    editor.update(deepcopy(saved))
+    return store.test_campaign(user,saved['id'],saved['version'],recipient=recipient,confirmed=True,operation_id=operation_id,env=env,session=session)
+
+@timed('queue_total')
+def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=None,preparation_token=None):
+    require(user,'crm_campaigns_manage')
+    env=os.environ if env is None else env
+    if env.get('CRM_MARKETING_ENABLED','').lower()!='true':raise MarketingDisabled(OFF)
+    config=Config(env);config.require_send()
+    operation=str(uuid.UUID(str(operation_id)))
+    if not editor.get('id'):raise ValueError('Save this draft before sending.')
+    identity=str(editor['id'])
+    prior=store.q('SELECT * FROM crm_campaigns WHERE id=%s',(identity,),True)
+    if prior:return {'id':identity,'status':prior['status'],'already_started':True}
+    accepted=store.q('SELECT operation_id,snapshot_id FROM crm_campaign_preparation WHERE campaign_id=%s',(identity,),True)
+    if accepted and (not preparation_token or str(accepted['operation_id'])!=operation or str(accepted['snapshot_id'])!=str(snapshot_id)):
+        raise ValueError('This campaign is already accepted. Its worker owns preparation; do not submit again.')
+    saved=store.draft(identity)
+    if saved['version']!=editor['version'] or saved['document']!=editor['document'] or saved['archived_at']:
+        raise ValueError('Save the current editable draft and review again.')
+    from crm_campaign_snapshot import load
+    reviewed=load(store,identity,snapshot_id)
+    if reviewed['campaign_version']!=saved['version']:raise ValueError('Campaign changed; review again.')
+    doc=reviewed['document'];state={'recipients':reviewed['recipients']}
+    from crm_campaign_contract import capture,validate
+    cfg=validate(reviewed['render_settings'],capture(store.render_settings(env),env))
+    from crm_email_size import validate_rendered_email
+    with timed('queue_content_validation'):
+        rendered=validate_tracking(doc,cfg,identity)
+        email_size=validate_rendered_email(rendered)
+    blocked=[k for k,v in production_checks(doc,cfg,env,reviewed_audience=bool(preparation_token),email_size=email_size).items() if not v]
+    if blocked:raise ValueError('Campaign blocked: '+ '; '.join(blocked))
+    from crm_tracking import send_identity
+    from crm_catalogue import Catalogue, refresh_catalogues
+    if any(s['type']=='catalogue' and s['visible'] for s in doc.get('middle_sections',[])):
+        current=refresh_catalogues(doc,Catalogue(shop),fresh=True)
+        if current!=doc:raise ValueError('Catalogue facts changed. Refresh, save and review again.')
+    from crm_logic import now
+    schedule=reviewed['schedule']
+    if not state['recipients']:raise ValueError('No eligible recipients in this reviewed snapshot.')
+    if schedule and min(__import__('crm_logic').date(j['due_at']) for j in schedule.values())<=now():
+        raise ValueError('Schedule missed; choose a future time and review again.')
+    # Only remove newly unsafe recipients. Never add/recalculate a different audience.
+    from crm_logic import eligibility,recipient_hash,email as normalized_email
+    from crm_native_unsubscribe import native_unsubscribe_url
+    from crm_email_size import REPRESENTATIVE_UNSUBSCRIBE
+    blocked_recipients={}
+    delivery_recipients={}
+    current_members = None
+    if doc.get('shopify_segment_ids'):
+        from crm_buyer_segments import member_ids
+        current_members = member_ids(shop, store, doc)
+    from crm_campaign_review_reads import bounded_reads,batches
+    verification_deadline=time.monotonic()+120
+    # Signed consent changes arriving during verification must remain visible to
+    # native dispatch. A commit-time cutoff would miss that whole interval.
+    verification_started=store.q('SELECT clock_timestamp() AS at',one=True)['at']
+    with timed('queue_suppression_reads'):
+        suppressed=store.q('''SELECT recipient_hash,shopify_customer_id FROM crm_suppressions
+          WHERE recipient_hash=ANY(%s) OR shopify_customer_id=ANY(%s)''',
+          ([r['hash'] for r in state['recipients']],[r['id'] for r in state['recipients']])) or []
+        hashes={s['recipient_hash'] for s in suppressed};ids={s['shopify_customer_id'] for s in suppressed}
+    def fresh_batch(batch):
+        if time.monotonic()>verification_deadline:raise TimeoutError('Recipient verification timed out; no send work was released.')
+        method=getattr(type(shop),'campaign_customer_batch',None)
+        rows=method(shop,[r['id'] for r in batch]) if callable(method) else shop.customer_batch([r['id'] for r in batch],fresh=True)
+        profiles={c['id']:c for c in rows}
+        if len(rows)!=len(profiles) or set(profiles)-{r['id'] for r in batch}:
+            raise ValueError('Shopify recipient identities changed. Review again.')
+        return batch,profiles
+    with timed('queue_profile_fetch'):
+        for batch,profiles in bounded_reads(fresh_batch,batches(state['recipients'],50)):
+            from crm_smart_catalogue import enabled as smart_enabled,histories,BatchFacts
+            smart_history=histories(store,list(profiles)) if smart_enabled(doc) else {}
+            smart_facts=BatchFacts(shop,store.connect) if smart_enabled(doc) else None
+            smart_signals={}
+            if smart_facts:
+                from crm_smart_candidates import behaviours
+                new_customers=[cid for cid,c in profiles.items() if not smart_history[cid] and not int(c.get('numberOfOrders') or 0)]
+                try:smart_signals=behaviours(store,new_customers)
+                except Exception:smart_signals={cid:{'unavailable':True} for cid in new_customers}
+            smart_messages={}
+            for recipient in batch:
+                customer=profiles.get(recipient['id'])
+                valid,reason=eligibility(customer,recipient['hash'] in hashes or recipient['id'] in ids)
+                if current_members is not None and recipient['id'] not in current_members:reason='buyer_membership_changed'
+                if valid and recipient_hash(customer.get('email'))!=recipient['hash']:reason='recipient_changed'
+                if valid and not reason and 'policy_version' in doc.get('send_timing',{}):
+                    from crm_campaign_segments import COUNTRIES
+                    from crm_campaign_markets import country
+                    if doc['market'] in COUNTRIES and country(customer)!=COUNTRIES[doc['market']]:reason='market_country_mismatch'
+                if valid and not reason and doc.get('send_timing',{}).get('time_basis')=='recipient_local' and doc['send_timing'].get('policy_version')==2:
+                    from crm_campaign_schedule import recipient_zone
+                    try:current_zone=recipient_zone(customer)[0]
+                    except ValueError:reason='invalid_recipient_timezone'
+                    else:
+                        if current_zone!=schedule.get(recipient['hash'],{}).get('timezone'):reason='recipient_timezone_changed'
+                if valid and not reason and not native_unsubscribe_url(customer):reason='missing_shopify_marketing_unsubscribe_url'
+                if reason:blocked_recipients[recipient['hash']]=reason
+                else:
+                    # Delivery-only immutable values, captured by the existing fresh
+                    # authority check. Never reconstruct an audience in the worker.
+                    optout=native_unsubscribe_url(customer)
+                    if len(optout)>len(REPRESENTATIVE_UNSUBSCRIBE):
+                        blocked_recipients[recipient['hash']]='unsubscribe_url_size'
+                    else:
+                        frozen={'address':normalized_email(customer['email']),'unsubscribe_url':optout}
+                        from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
+                        from crm_personalisation import present,render as personalise,resolve,wanted
+                        personalized=doc
+                        if smart_enabled(doc):
+                            personalized=smart_hydrate(doc,store,smart_facts.shop,customer,catalogue=smart_facts,orders=smart_history[customer['id']],orders_complete=True,behaviour_data=smart_signals.get(customer['id']),fresh=True)
+                        if present(personalized):
+                            personalized=personalise(personalized,resolve({},customer,wanted=wanted(personalized)))
+                        if smart_enabled(doc) or present(doc):
+                            from crm_campaign_content import fingerprint
+                            render_key=fingerprint(personalized,cfg)
+                            if render_key not in smart_messages:
+                                smart_messages[render_key]=validate_tracking(personalized,cfg,identity)
+                                validate_rendered_email(smart_messages[render_key])
+                            frozen['message']=smart_messages[render_key]
+                        delivery_recipients[recipient['hash']]=frozen
+    template=str(uuid.uuid5(uuid.UUID(identity),'campaign-delivery-snapshot'))
+    # Same queue and worker, immutable template snapshot; no new storage architecture.
+    snapshot={'format':'campaign_delivery_v1','document':doc,'render_settings':cfg,'operation_id':operation,
+              'schedule':schedule,'audience_snapshot_id':snapshot_id,
+              'dispatch':{'version':1,'message':rendered,'recipients':delivery_recipients,
+                          'sender':config.sender,'reply_to':config.reply_to}}
+    status='SCHEDULED' if schedule else 'SENDING'
+    validate(cfg,capture(store.render_settings(env),env))
+    with store.db() as conn:
+        row=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+        prior=conn.execute('SELECT * FROM crm_campaigns WHERE id=%s',(identity,)).fetchone()
+        if prior:return {'id':identity,'status':prior['status'],'already_started':True}
+        from crm_campaign_preparation import fence
+        accepted=fence(conn,identity,preparation_token)
+        if accepted and (str(accepted['operation_id'])!=operation or str(accepted['snapshot_id'])!=str(snapshot_id)):
+            raise ValueError('Accepted review identity changed. No recipient work was released.')
+        if accepted:conn.execute("SELECT set_config('crm.campaign_preparation_token',%s,true)",(str(preparation_token),))
+        if row['version']!=saved['version'] or row['archived_at']:raise ValueError('Campaign changed; review again.')
+        if schedule:
+            db_now=conn.execute('SELECT clock_timestamp() AS at').fetchone()['at']
+            if min(__import__('crm_logic').date(j['due_at']) for j in schedule.values())<=__import__('crm_logic').date(db_now):
+                raise ValueError('Schedule missed during verification. No recipients were queued; review a future schedule.')
+        suppressed=conn.execute('''SELECT recipient_hash,shopify_customer_id FROM crm_suppressions WHERE active
+          AND (recipient_hash=ANY(%s) OR shopify_customer_id=ANY(%s))''',
+          ([r['hash'] for r in state['recipients']],[r['id'] for r in state['recipients']])).fetchall()
+        hashes={s['recipient_hash'] for s in suppressed};ids={s['shopify_customer_id'] for s in suppressed}
+        for recipient in state['recipients']:
+            if recipient['hash'] in hashes or recipient['id'] in ids:blocked_recipients[recipient['hash']]='local_suppression'
+        # A real stored definition satisfies the legacy FK; snapshot recipients are
+        # already frozen, so this campaign starts at SENDING, never BUILDING.
+        segment=conn.execute("INSERT INTO crm_segment_definitions(system_key,name,rules) VALUES(%s,%s,%s::jsonb) RETURNING id",('campaign-snapshot:'+identity,'Frozen campaign audience',json.dumps({'field':'consent','op':'eq','value':'SUBSCRIBED'}))).fetchone()
+        conn.execute("INSERT INTO crm_templates(id,template_key,name,kind,content) VALUES(%s,%s,%s,'Campaign',%s::jsonb)",(template,'campaign-delivery:'+identity,saved['name'],json.dumps(snapshot)))
+        conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,1,%s::jsonb)',(template,json.dumps(snapshot)))
+        conn.execute('''INSERT INTO crm_campaigns(id,name,template_id,template_version,segment_definition_id,status,
+          snapshot_at,audience_snapshot_id,campaign_key,campaign_send_id,scheduled_at,sending_started_at,locked_at,final_recipient_count)
+          VALUES(%s,%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+          (identity,saved['name'],template,segment['id'],status,reviewed['created_at'],snapshot_id,doc['campaign_key'],send_identity(identity),
+           min(j['due_at'] for j in schedule.values()) if schedule else None,now() if not schedule else None,
+           verification_started,len(state['recipients'])-len(blocked_recipients)))
+        jobs=[]
+        due_now=now().isoformat()
+        for recipient in state['recipients']:
+            reason=blocked_recipients.get(recipient['hash'],'')
+            jobs.append({'idempotency_key':'campaign:'+identity+':'+recipient['hash'],'shopify_customer_id':recipient['id'],
+                'recipient_hash':recipient['hash'],'due_at':schedule.get(recipient['hash'],{}).get('due_at') or due_now,
+                'status':'BLOCKED' if reason else 'PENDING','error_code':reason})
+        conn.execute('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,campaign_id,due_at,status,error_code)
+          SELECT j.idempotency_key,j.shopify_customer_id,j.recipient_hash,%s,1,%s,j.due_at,j.status,j.error_code
+          FROM jsonb_to_recordset(%s::jsonb) AS j(idempotency_key text,shopify_customer_id text,recipient_hash text,
+            due_at timestamptz,status text,error_code text) ON CONFLICT DO NOTHING''',(template,identity,json.dumps(jobs)))
+        # Small server-only timing projection avoids decompressing the full
+        # frozen recipient/content snapshot during bounded Home progress reads.
+        timing_receipt={'timing':doc.get('send_timing',{'mode':'now'}),'operation_id':operation,
+                        'due_at':min(j['due_at'] for j in schedule.values()) if schedule else None}
+        conn.execute('INSERT INTO crm_runtime_state(key,value) VALUES(%s,%s::jsonb)',
+                     ('campaign-timing:'+identity,json.dumps(timing_receipt)))
+        store._history(conn,{**row,'send_snapshot':{'operation_id':operation,'document':doc,'render_settings':cfg,'recipients':len(state['recipients'])}},'campaign_delivery_queued',str(user.get('id','')),row)
+        if accepted:
+            conn.execute("UPDATE crm_campaign_preparation SET status='READY',lease_token=NULL,lease_until=NULL,updated_at=now(),error_code='' WHERE campaign_id=%s",(identity,))
+    return {'id':identity,'status':status,'recipients':len(state['recipients'])-len(blocked_recipients),
+            'skipped_after_review':len(blocked_recipients),'already_started':False}

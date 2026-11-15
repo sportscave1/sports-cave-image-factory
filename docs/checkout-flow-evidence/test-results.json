@@ -1,0 +1,29 @@
+{
+  "focused_regression": {
+    "tests": 394,
+    "passed": 394,
+    "seconds": 65.203,
+    "fixture": "fresh loopback PGlite/PostgreSQL; mocked Shopify and Resend"
+  },
+  "browser_suites": {
+    "test_crm_checkout_progress_ui.cjs": "passed",
+    "test_crm_checkout_operations_ui.cjs": "passed",
+    "test_crm_checkout_live_ui.cjs": "passed"
+  },
+  "initial_run": {
+    "tests": 393,
+    "passed": 392,
+    "failed": [
+      "test_pause_prevents_entry_claim_and_submission_resume_preserves_wait"
+    ],
+    "subsequent_isolated_repeats": 3,
+    "final_run": "passed without changing the pause/resume code or test"
+  },
+  "production_changes_by_this_task": false,
+  "external_head_change": "675342a -> 72cabec, observed during task",
+  "limitations": [
+    "Production load/database/delivery timings not measured",
+    "Full unrelated CRM discovery suite not rerun",
+    "Initial pause/resume timing failure remains documented"
+  ]
+}

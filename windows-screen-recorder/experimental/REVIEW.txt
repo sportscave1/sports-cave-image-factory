@@ -1,0 +1,71 @@
+PHASE 3 REVIEW — EXISTING EDGE TAB TRANSITIONS
+21 October 2026. Local candidate only; not promoted to the verified launcher.
+
+CURRENT VERIFIED BASELINE
+The phase-two nine-action Edge / Notepad copy, minimize, return and paste test
+passed before this phase. Its saved task still has SHA256:
+01FD044F7229438F633BFB1CB3CB8018F98C56C463176279AB1EC14A61B9D38D
+All eight original preserved-run-20 files still match their manifest hashes.
+Start-VerifiedRecorder.cmd still selects phase2-build-3. Original helper files,
+installed app and the other task's worktree remain untouched.
+
+REVIEW FINDINGS
+1. Ctrl+Tab was classified as editor Tab and could silently omit a browser
+   transition. Generic selection also used the destination window title before
+   selecting the tab, so playback could not reliably find an inactive page.
+2. Edge UIA tab names contain changing memory-usage suffixes. Exact full-name
+   persistence is unstable. The first live capture exposed this and preserved
+   its partial draft rather than claiming success.
+3. Shared desktop input interfered with the second live capture. Its draft has
+   unrelated window/scroll actions and MUST NOT be replayed as an acceptance
+   workflow. No text contents were captured in those actions. The candidate is
+   stopped in draft review; the recording-name box also received unrelated
+   typing. Further desktop control was stopped to avoid interfering with it.
+
+IMPLEMENTED CANDIDATE (phase3-build-5)
+- Explicit browser_tab v2 / edge.tab.v2 action with exact source window context
+  and a named destination page. Restricted to Edge TabItem with empty scope and
+  no arbitrary payload. Existing saved tasks are not transformed.
+- Ctrl+Tab and Ctrl+PageUp/PageDown are separate from editor Tab. Clicks on
+  browser chrome TabItems use the same semantic action.
+- Capture requires an already-recorded action in the source window, selected
+  browser tab, matching parsed Edge window title and unique visible top-level
+  document. Unsupported/uncertain observations stop and preserve the draft.
+- Browser chrome ancestry is bounded and excludes controls inside documents.
+- Known English memory-usage decoration may vary; page prefixes, unknown
+  decorations and duplicate matching tabs do not supply an identity.
+- Replay requires the exact source window/application and independently
+  verifies its starting document, selects the unique destination through UIA,
+  then verifies selected tab and active document. It has cancellation, focus
+  checks, timeout and no repeated selection after an uncertain result.
+- Action log describes the new step as Switch browser tab.
+
+VALIDATION AND LIMITS
+54 Python tests pass, including save/reload and malformed tab contracts.
+33 native identity/keyboard policy assertions pass. Latest native build compiles.
+Live build2 capture stopped on the memory suffix; the partial diagnostic task
+was saved in phase3-tabs-test. Build3 capture was interrupted by unrelated input
+and remains in phase3-tabs-verified/desktop-v1/draft.json.
+There is NO successful live record/save/restart/replay result for browser tabs
+yet. Do not describe this phase as verified. Final build5 has not been run in
+the desktop UI. The candidate code is ready for isolated acceptance, not release.
+
+NEXT EXECUTION PLAN
+1. Preserve the stopped draft and any in-progress name before closing build3.
+   Run build5 against a NEW test-data directory, using prepared Edge mode.
+2. Start on the local capture fixture; record a checkbox action, Ctrl+Tab to
+   the adapter fixture, choose a dropdown value, click back to the first tab,
+   and edit Return text. Stop and save through the toolbar.
+3. Restart, reset fixture values, return to the source page, then play the saved
+   recording. Verify journal results AND both visible application states.
+4. Test duplicate tab titles, missing destination, changed active source and
+   manual interruption. A failure must retain the pending journal, not retry.
+5. Repeat the existing nine-action cross-app regression on the candidate.
+   Only after those checks promote the normal-mode launcher; injected input is
+   solely a test switch and must not be enabled in the user launcher.
+6. Then add page opening/navigation and detached windows with distinct stable
+   identity contracts; dynamic clipboard variables are a separate phase.
+7. Integrate the companion and task library into a local app preview with
+   backups, followed by long-session, DPI and additional-application testing.
+
+No commits, pushes, deployments or production changes were made.

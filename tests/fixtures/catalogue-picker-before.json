@@ -1,0 +1,22 @@
+{
+  "fixture_delay_ms": {
+    "index": 80,
+    "facts_and_editions": 160
+  },
+  "open_s": 0.6058684000163339,
+  "search_s": 0.24923160002799705,
+  "selection_s": 0.006467799947131425,
+  "calls_total": {
+    "search": 2,
+    "resolve": 2
+  },
+  "search_calls": {
+    "search": 1,
+    "resolve": 1
+  },
+  "selection_calls": {
+    "search": 0,
+    "resolve": 0
+  },
+  "exceptions": []
+}

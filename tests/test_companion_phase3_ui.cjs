@@ -1,0 +1,32 @@
+const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{for(const width of [1280,390]){
+ const page=await browser.newPage({viewport:{width,height:850}});let command=null,ack=false,supported=false,age=1,mode='Uploading',capability=2;const writes=[];
+ const settings={mode:'Balanced',manual_mbps:null,sustainable_mbps:null,headroom_percent:25,background_percent:25,download_mbps:null,paused:false};
+ const state=()=>({instance:'a'.repeat(24),age_seconds:age,requested:command,effective:supported?{capability,active_upload:mode!=='Cloud Ready',active_download:false,revision:ack?command.revision:'local',settings:ack?command.settings:settings,effective_mbps:ack?4:0,protection:ack?'Limited':'Calibration needed',pause_state:ack&&command.settings.paused?'Paused at chunk boundary':'Running',transfer:{resumable:capability===2,state:ack&&command.settings.paused?'Paused':mode,progress_bytes:['Uploaded, verifying','Cloud Ready'].includes(mode)?131072:65536,confirmed_bytes:65536,transfer_seconds:2,verification_seconds:mode==='Uploaded, verifying'?99:0,transport_bytes:mode==='Cloud Ready'?131072:65536,total_bytes:131072,payload_bytes_per_second:32768,eta_seconds:mode==='Uploading'?2:null,server_received_bytes:mode==='Cloud Ready'?131072:null}}:null});
+ const summary=()=>({overall:'Idle',current:null,updated_at:'Fixture',counts:{completed:1,eligible:1,remaining:0,review:0,repair:0,failed:0},progress:{completed:1,total:1},control:{paused:false},health:[],warnings:[],filters:{All:0},revision:'local',transfer_control:state()});
+ await page.route('**/*',route=>{const url=new URL(route.request().url());
+  if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/worker_health/index.html','utf8')});
+  if(url.pathname==='/api/worker-health/control'){const value=route.request().postDataJSON();writes.push(value);command={revision:'fixture-'+writes.length,settings:value.transfer_settings};ack=false;return route.fulfill({json:{requested:command}});}
+  if(['/api/worker-health/jobs','/api/worker-health/updates'].includes(url.pathname))return route.fulfill({json:{summary:summary(),jobs:[],removed:[],total_rows:0,next_cursor:null,scanned_to:'end'}});
+  throw Error('Unexpected request '+url.pathname);
+ });
+ await page.goto('https://health.fixture/');await page.locator('#transfer-status').getByText(/unsupported/).waitFor();assert(await page.locator('#transfer-apply').isDisabled());
+ supported=true;await page.locator('#refresh').click();await page.getByText(/Effective: Balanced.*Calibration needed/).waitFor();
+ await page.locator('#transfer-mode').selectOption('Manual');await page.locator('#transfer-manual').fill('4');await page.locator('#transfer-apply').click();
+ await page.getByText(/Requested Manual; awaiting companion acknowledgement.*Effective: Balanced/).waitFor();
+ assert.equal(writes[0].instance,'a'.repeat(24));assert.equal(writes[0].transfer_settings.manual_mbps,4);assert(!('paused' in writes[0]));
+ ack=true;await page.locator('#refresh').click();await page.getByText(/Effective: Manual.*Limited.*4.00 Mbps/).waitFor();
+ assert.match(await page.locator('#transfer-progress').innerText(),/65,536.*131,072.*ETA 2s/);
+ await page.locator('#transfer-pause').click();await page.getByText(/awaiting companion acknowledgement/).waitFor();assert.equal(writes[1].transfer_settings.paused,true);
+ ack=true;await page.locator('#refresh').click();await page.locator('#transfer-status').getByText(/Paused at chunk boundary/).waitFor();
+ await page.locator('#transfer-resume').click();assert.equal(writes.at(-1).transfer_settings.paused,false);ack=true;
+ mode='Uploaded, verifying';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Uploaded — verifying/).waitFor();assert(!/ETA/.test(await page.locator('#transfer-progress').innerText()));
+ mode='Resuming';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Resuming/).waitFor();
+ mode='Cloud Ready';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Cloud Ready.*server received 131,072 B/).waitFor();
+ age=151;await page.locator('#refresh').click();await page.getByText(/offline; settings acknowledgement unavailable/).waitFor();assert(await page.locator('#transfer-apply').isDisabled());
+ age=1;await page.locator('#refresh').click();await page.getByText(/Effective: Manual/).waitFor();
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ capability=1;await page.locator('#refresh').click();await page.waitForFunction(()=>document.getElementById('transfer-pause').textContent==='Pause after current transfer');capability=2;mode='Uploading';await page.locator('#refresh').click();await page.waitForFunction(()=>document.getElementById('transfer-pause').textContent==='Pause at chunk boundary');
+ fs.mkdirSync('output/companion-phase3',{recursive:true});await page.screenshot({path:`output/companion-phase3/worker-health-${width}.png`});await page.close();
+ console.log(`Phase 3 UI ${width}: unsupported, calibration, requested/effective, pause/resume, progress, verification and stale acknowledgement passed`);
+ }}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

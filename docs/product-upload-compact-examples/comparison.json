@@ -1,0 +1,35 @@
+{
+  "DRAFT": {
+    "before": {
+      "characters": 58000,
+      "words": 8611
+    },
+    "after": {
+      "characters": 10576,
+      "words": 1475
+    },
+    "reduction_percent": 81.8
+  },
+  "LIVE": {
+    "before": {
+      "characters": 66213,
+      "words": 9743
+    },
+    "after": {
+      "characters": 11494,
+      "words": 1603
+    },
+    "reduction_percent": 82.6
+  },
+  "UPDATE": {
+    "before": {
+      "characters": 49201,
+      "words": 7257
+    },
+    "after": {
+      "characters": 8597,
+      "words": 1197
+    },
+    "reduction_percent": 82.5
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "profile": "sRGB IEC61966-2.1",
+  "icc_sha256": "2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e",
+  "embed_icc": true,
+  "preserve_valid_embedded_profiles": true,
+  "convert_pixels": false,
+  "untagged_rgb8": "Require verified workflow membership or exact owner approval before assigning to a staged copy",
+  "cmyk_or_conflicting": "Separate review required",
+  "photoshop_export": {
+    "embed_color_profile": true,
+    "include_profile": true
+  },
+  "shared_template_replacement_authorised": false,
+  "original_sha256": "fb24e209f3fb6013e38cef2a8603728fa7eb30411584745a3779c3b584cd77a0",
+  "prepared_sha256": "deb8eed2a958168389acc7863418895cf17e13941df4923471c16f49541320e9",
+  "layers_and_pixels_unchanged": true
+}

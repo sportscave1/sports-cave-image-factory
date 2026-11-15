@@ -1,0 +1,82 @@
+{
+  "folder_count": 50,
+  "record_count": 48,
+  "missing_folders": [],
+  "unrecorded_folders": [
+    {
+      "hash": "3f64e368452aa47c5338a69751896c62e9ac97742bfd6f4829e5abc658b6ca54",
+      "path": "/Sportscave Team Folder/03_ASSETS/Auto Editions/Prepared/Masters/3f64e368452aa47c5338a69751896c62e9ac97742bfd6f4829e5abc658b6ca54"
+    },
+    {
+      "hash": "d9717124f857a72a1f3182f7d61f105fa29249ffb8d62ab278e7d3bf459b0c13",
+      "path": "/Sportscave Team Folder/03_ASSETS/Auto Editions/Prepared/Masters/d9717124f857a72a1f3182f7d61f105fa29249ffb8d62ab278e7d3bf459b0c13"
+    }
+  ],
+  "unreferenced": [
+    "d685d19de22148e9aad4af4ac5ebd3e9f229a2b80311ea0a16f16f113447cc23",
+    "e5126d7e2e02e695a8dec3448493c40b6ac340c5d8c6f4bd78f5d8887d9e5b6e"
+  ],
+  "unmapped": [],
+  "files_checked_by_id": 4848,
+  "sizes_checked": 2929,
+  "unrecorded_folder_files": 128,
+  "issues": [],
+  "revision_samples": [
+    {
+      "hash": "5329ce4506f019b94465abbe8bf2248235300f4b20cd15b6c6e24e635c195986",
+      "name": "master.png",
+      "matched": true,
+      "size": 37113891
+    },
+    {
+      "hash": "5329ce4506f019b94465abbe8bf2248235300f4b20cd15b6c6e24e635c195986",
+      "name": "number-1.png",
+      "matched": true,
+      "size": 75585
+    },
+    {
+      "hash": "5329ce4506f019b94465abbe8bf2248235300f4b20cd15b6c6e24e635c195986",
+      "name": "number-100.png",
+      "matched": true,
+      "size": 75574
+    },
+    {
+      "hash": "d685d19de22148e9aad4af4ac5ebd3e9f229a2b80311ea0a16f16f113447cc23",
+      "name": "master.png",
+      "matched": true,
+      "size": 5175762
+    },
+    {
+      "hash": "d685d19de22148e9aad4af4ac5ebd3e9f229a2b80311ea0a16f16f113447cc23",
+      "name": "number-1.png",
+      "matched": true,
+      "size": 17196
+    },
+    {
+      "hash": "d685d19de22148e9aad4af4ac5ebd3e9f229a2b80311ea0a16f16f113447cc23",
+      "name": "number-100.png",
+      "matched": true,
+      "size": 17462
+    },
+    {
+      "hash": "e5126d7e2e02e695a8dec3448493c40b6ac340c5d8c6f4bd78f5d8887d9e5b6e",
+      "name": "master.png",
+      "matched": true,
+      "size": 24567934
+    },
+    {
+      "hash": "e5126d7e2e02e695a8dec3448493c40b6ac340c5d8c6f4bd78f5d8887d9e5b6e",
+      "name": "number-1.png",
+      "matched": true,
+      "size": 53720
+    },
+    {
+      "hash": "e5126d7e2e02e695a8dec3448493c40b6ac340c5d8c6f4bd78f5d8887d9e5b6e",
+      "name": "number-100.png",
+      "matched": true,
+      "size": 53996
+    }
+  ],
+  "without_size_evidence": 1919,
+  "scope": "Read-only connector audit; not development fixture data; no pixel downloads or approvals"
+}

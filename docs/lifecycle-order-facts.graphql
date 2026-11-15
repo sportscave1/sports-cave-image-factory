@@ -1,0 +1,11 @@
+query LifecycleOrderFacts($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Order {
+      id
+      risk { recommendation }
+      disputes { status }
+      returnStatus
+      fulfillments { status createdAt deliveredAt }
+    }
+  }
+}

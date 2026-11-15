@@ -1,0 +1,24 @@
+query CollectorEmailOrder($id: ID!, $after: String) {
+  order(id: $id) {
+    id
+    customer { id }
+    cancelledAt
+    fullyPaid
+    displayFinancialStatus
+    lineItems(first: 100, after: $after) {
+      nodes {
+        id
+        title
+        variantTitle
+        quantity
+        product { id }
+        variant {
+          id
+          product { id }
+          image { url(transform: {maxWidth: 1000, preferredContentType: JPG}) }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}

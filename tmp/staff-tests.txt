@@ -1,0 +1,122 @@
+.PERF Prodigi cache miss view=Last 7 Days search=false limit=50
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi cache hit state=pending
+PERF Prodigi: dispatch rows async 0 ms status=ready
+PRODIGI_SYNTHETIC pending_renders=100 reads=1 elapsed_ms=0.59
+.PERF Prodigi cache miss view=Last 7 Days search=false limit=50
+PERF Prodigi: dispatch rows timeout 9000 ms
+PERF Prodigi cache miss view=Last 7 Days search=false limit=50
+PERF Prodigi: dispatch rows async 0 ms status=ready
+.PERF Prodigi: page start 0 ms
+Prodigi Shopify fetch skipped on initial load
+Prodigi full order snapshot skipped on initial load
+PERF Prodigi cache miss view=Last 7 Days search=false limit=50
+PERF Prodigi: page shell 2236 ms view=Last 7 Days state=loading
+PRODIGI_SYNTHETIC role=admin shell_ms=2258.68 db_pending=true reads=1 asset_downloads=0
+PERF Prodigi: dispatch rows 2037 ms view=Last 7 Days rows=0
+PERF Prodigi: page start 0 ms
+Prodigi Shopify fetch skipped on initial load
+Prodigi full order snapshot skipped on initial load
+PERF Prodigi cache miss view=Last 7 Days search=false limit=50
+PERF Prodigi: page shell 3 ms view=Last 7 Days state=loading
+PRODIGI_SYNTHETIC role=worker shell_ms=8.86 db_pending=true reads=1 asset_downloads=0
+PERF Prodigi: dispatch rows 1 ms view=Last 7 Days rows=0
+.
+4 passed in 2.96s

@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Sports Cave Image Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        --surface: #242424;
+        --surface-hover: #383838;
+        --border: #454545;
+        --text: #f5f5f5;
+        --muted: #b7b7b7;
+        --accent: #60aee8;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body { background: #171717; color: var(--text); }
+      button { color: inherit; font: inherit; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+      .viewer { display: grid; grid-template-rows: 42px minmax(0, 1fr) 30px; height: 100dvh; min-height: 0; }
+      .toolbar {
+        align-items: center;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 3px;
+        min-width: 0;
+        padding: 4px 7px;
+      }
+      .tool {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        display: inline-flex;
+        height: 32px;
+        justify-content: center;
+        min-width: 32px;
+        padding: 0 8px;
+      }
+      .tool:hover:not(:disabled) { background: var(--surface-hover); border-color: #505050; }
+      .tool:active:not(:disabled) { background: #454545; }
+      .tool:disabled { color: #777; }
+      .icon { font-size: 19px; line-height: 1; }
+      .separator { background: var(--border); height: 22px; margin: 0 3px; width: 1px; }
+      .file-name { font-weight: 600; margin-left: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .toolbar-spacer { flex: 1; }
+      .text-tool { gap: 6px; white-space: nowrap; }
+      .stage { cursor: default; min-height: 0; overflow: hidden; position: relative; touch-action: none; user-select: none; }
+      .stage.pannable { cursor: grab; }
+      .stage.panning { cursor: grabbing; }
+      .image {
+        display: none;
+        left: 50%;
+        max-height: none;
+        max-width: none;
+        pointer-events: auto;
+        position: absolute;
+        top: 50%;
+        transform-origin: center center;
+        user-select: auto;
+        -webkit-user-drag: none;
+        will-change: transform;
+      }
+      .image-error {
+        color: var(--muted);
+        display: none;
+        left: 50%;
+        max-width: min(440px, calc(100vw - 40px));
+        position: absolute;
+        text-align: center;
+        top: 50%;
+        transform: translate(-50%, -50%);
+      }
+      .image-error.visible { display: block; }
+      .image-error strong { color: var(--text); display: block; margin-bottom: 6px; }
+      .status {
+        align-items: center;
+        background: #202020;
+        border-top: 1px solid #393939;
+        color: var(--muted);
+        display: flex;
+        font-size: 12px;
+        justify-content: space-between;
+        min-width: 0;
+        padding: 0 10px;
+      }
+      .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0,0,0,0); }
+      @media (max-width: 700px) {
+        .tool-label { display: none; }
+        .text-tool { padding: 0 7px; }
+        .file-name { font-size: 13px; }
+      }
+      #pdf { width:100%; height:100%; overflow:auto; padding:12px; text-align:center; box-sizing:border-box; }
+      #pdf canvas { background:white; display:block; margin:auto; }
+      #pdf[hidden] { display:none; }
+      .preview-placeholder { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:180px; padding:42px 12px; border:1px solid #3c4247; border-radius:4px; background:#252a2e; color:#b9c0c5; text-align:center; pointer-events:none; }
+      .preview-placeholder[hidden] { display:none; }
+    </style>
+  </head>
+  <body>
+    <main class="viewer">
+      <div class="toolbar" role="toolbar" aria-label="Image controls">
+        <button class="tool" id="previousButton" type="button" title="Previous image" aria-label="Previous image"><span class="icon">&#8249;</span></button>
+        <button class="tool" id="nextButton" type="button" title="Next image" aria-label="Next image"><span class="icon">&#8250;</span></button>
+        <span class="separator" aria-hidden="true"></span>
+        <button class="tool" id="zoomOutButton" type="button" title="Zoom out" aria-label="Zoom out"><span class="icon">&#8722;</span></button>
+        <button class="tool" id="zoomInButton" type="button" title="Zoom in" aria-label="Zoom in"><span class="icon">+</span></button>
+        <button class="tool text-tool" id="fitButton" type="button" title="Fit to screen"><span class="icon">&#9635;</span><span class="tool-label">Fit</span></button>
+        <button class="tool text-tool" id="actualButton" type="button" title="Actual size"><span class="icon">1:1</span><span class="tool-label">Actual</span></button>
+        <span class="separator" aria-hidden="true"></span>
+        <button class="tool" id="rotateLeftButton" type="button" title="Rotate left" aria-label="Rotate left"><span class="icon">&#8634;</span></button>
+        <button class="tool" id="rotateRightButton" type="button" title="Rotate right" aria-label="Rotate right"><span class="icon">&#8635;</span></button>
+        <div class="file-name" id="fileName"></div>
+        <div class="toolbar-spacer"></div>
+        <button class="tool text-tool" id="copyImageButton" type="button" title="Copy original file"><span class="icon">&#x2398;</span><span class="tool-label">Copy</span></button>
+        <button class="tool text-tool" id="downloadButton" type="button" title="Download Original" aria-label="Download Original"><span class="icon">&#8681;</span><span class="tool-label">Download Original</span></button>
+        <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
+      </div>
+      <section class="stage" id="stage">
+        <div class="preview-placeholder" id="previewPlaceholder" role="status" hidden>Loading previewÃ¢â‚¬Â¦</div>
+        <img class="image" id="image" alt="" decoding="async" fetchpriority="high" draggable="false">
+        <div id="pdf" role="region" aria-label="PDF preview" hidden></div>
+        <div class="image-error" id="imageError" role="alert">
+          <strong>Preview unavailable</strong>
+          <span id="imageErrorDetail">Refresh Files and try again.</span>
+        </div>
+      </section>
+      <footer class="status"><span id="dimensions"></span><span id="zoomStatus"></span></footer>
+    </main>
+    <iframe class="sr-only" id="downloadFrame" title="Download"></iframe>
+    <script src="/files-original-actions.js"></script>
+    <script>
+      const IMAGE_VIEWER_MESSAGE = "sports-cave-image-viewer-open";
+      const IMAGE_VIEWER_PROTOCOL_VERSION = 1;
+      const elements = Object.fromEntries([
+        "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
+        "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "downloadButton", "closeButton",
+        "stage", "image", "pdf", "previewPlaceholder", "imageError", "imageErrorDetail", "dimensions", "zoomStatus",
+        "downloadFrame"
+      ].map(id => [id, document.getElementById(id)]));
+      const query = new URLSearchParams(location.search);
+      const embedded = window.parent !== window && query.get("embedded") === "1";
+      // The legacy Streamlit Files route owns its Back/breadcrumb controls.
+      if (query.get("legacy") === "1") elements.closeButton.hidden = true;
+      const previewHost = embedded ? window.parent : null;
+      const state = {
+        path: query.get("path") || "",
+        folder: query.get("folder") || "",
+        name: query.get("name") || "",
+        images: [],
+        previewCache: new Map(),
+        imageController: null,
+        folderController: null,
+        folderGeneration: 0,
+        original: false,
+        previewTier: 0,
+        requestedTier: 0,
+        revision: query.get("rev") || "",
+        navigationFolder: null,
+        index: -1,
+        naturalWidth: 0,
+        naturalHeight: 0,
+        scale: 1,
+        fitScale: 1,
+        rotation: 0,
+        panX: 0,
+        panY: 0,
+        pointer: null,
+        loadGeneration: 0,
+        sizingMode: "fit",
+        openerReadyAttempts: 0,
+        openerReadyTimer: 0,
+        openerReadyAcknowledged: false,
+        lastOpenRequestId: "",
+      };
+
+      function fileNameFromPath(path) {
+        const parts = String(path || "").split("/");
+        return parts[parts.length - 1] || "Image";
+      }
+
+      function currentName() {
+        return state.name || fileNameFromPath(state.path);
+      }
+
+      function applyTransform() {
+        elements.image.style.transform = `translate(-50%, -50%) translate(${state.panX}px, ${state.panY}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+        elements.zoomStatus.textContent = `${Math.round(state.scale * 100)}%`;
+        const pannable = state.scale > state.fitScale + 0.01 || Math.abs(state.rotation % 180) === 90;
+        elements.stage.classList.toggle("pannable", pannable);
+      }
+
+      function calculateFitScale() {
+        if (!state.naturalWidth || !state.naturalHeight) return 1;
+        const rotated = Math.abs(state.rotation % 180) === 90;
+        const width = rotated ? state.naturalHeight : state.naturalWidth;
+        const height = rotated ? state.naturalWidth : state.naturalHeight;
+        return Math.min(
+          Math.max(40, elements.stage.clientWidth - 40) / width,
+          Math.max(40, elements.stage.clientHeight - 40) / height,
+          state.previewTier === 0 ? Infinity : 1
+        );
+      }
+
+      function fitToScreen() {
+        if (state.pdfDocument) { state.pdfZoom=1; void renderPdfPage(state.pdfPage); return; }
+        state.sizingMode = "fit";
+        state.fitScale = calculateFitScale();
+        state.scale = state.fitScale;
+        state.panX = 0;
+        state.panY = 0;
+        applyTransform();
+      }
+
+      function actualSize() {
+        notify("Preview at 1:1. Copy Image or Download Original for full resolution.");
+        state.sizingMode = "actual";
+        state.scale = 1;
+        state.panX = 0;
+        state.panY = 0;
+        applyTransform();
+      }
+
+      function zoomBy(multiplier) {
+        if (state.pdfDocument) { state.pdfZoom=Math.min(4,Math.max(0.25,state.pdfZoom*multiplier)); void renderPdfPage(state.pdfPage); return; }
+        state.sizingMode = "custom";
+        state.scale = Math.max(0.05, Math.min(12, state.scale * multiplier));
+        applyTransform();
+        scheduleDetail();
+      }
+
+      function clearImage() {
+        elements.previewPlaceholder.hidden = true;
+        state.naturalWidth = 0;
+        state.naturalHeight = 0;
+        elements.image.style.display = "none";
+        elements.imageError.classList.remove("visible");
+        elements.dimensions.textContent = "";
+        elements.zoomStatus.textContent = "";
+      }
+
+      function showImageError(message) {
+        elements.stage.setAttribute("aria-busy", "false");
+        clearImage();
+        elements.imageErrorDetail.textContent = String(
+          message || "Refresh Files and try again."
+        );
+        elements.imageError.classList.add("visible");
+      }
+
+      function desiredTier() {
+        const dpr = Math.min(3, window.devicePixelRatio || 1);
+        const width = state.naturalWidth ? state.naturalWidth * state.scale : Math.max(40, elements.stage.clientWidth - 40);
+        const height = state.naturalHeight ? state.naturalHeight * state.scale : Math.max(40, elements.stage.clientHeight - 40);
+        return width*dpr <= 1024 && height*dpr <= 768 ? 1024 : width*dpr <= 1600 && height*dpr <= 1200 ? 1600 : 2048;
+      }
+
+      function scheduleDetail() {
+        clearTimeout(state.detailTimer);
+        if (state.original || state.suspended || !/\.(jpe?g|png|webp|psd)$/i.test(state.path)) return;
+        state.detailTimer = setTimeout(() => {
+          const tier = desiredTier();
+          if (tier > state.requestedTier) void loadImage(state.path, {name:state.name, tier});
+        }, 160);
+      }
+
+      async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true, original = false, revision = path === state.path ? state.revision : "", tier = null } = {}) {
+        const relativePath = String(path || "");
+        if (!relativePath) { showImageError("No image was selected."); return; }
+        state.suspended = false;
+        const generation = ++state.loadGeneration;
+        state.imageController?.abort();
+        const controller = new AbortController(); state.imageController = controller;
+        const sameImage = state.path === relativePath && state.revision === revision && state.naturalWidth > 0;
+        state.path = relativePath; state.folder = String(folder || "");
+        state.name = String(name || fileNameFromPath(relativePath));
+        state.revision = revision; state.original = original;
+        clearTimeout(state.detailTimer);
+        if (!sameImage) {
+          state.rotation = 0; state.panX = 0; state.panY = 0;
+          state.previewTier = 0; state.sizingMode = "fit";
+        }
+        elements.fileName.textContent = state.name; elements.fileName.title = state.name;
+        document.title = `${state.name} - Sports Cave Image Viewer`;
+        if (!sameImage) { clearImage(); elements.image.removeAttribute("src"); }
+        if (!sameImage) elements.dimensions.textContent = "";
+        elements.stage.setAttribute("aria-busy", "true");
+        if (replaceHistory && !embedded) {
+          const params = new URLSearchParams({ path: state.path, folder: state.folder, name: state.name });
+          history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+        }
+        const extension = relativePath.split(".").pop().toLowerCase();
+        const isImage = ["jpg","jpeg","png","webp","psd"].includes(extension);
+        elements.previewPlaceholder.hidden = !isImage || sameImage;
+        for (const [key,label] of [["previousButton","Previous"],["nextButton","Next"]]) {
+          elements[key].title = `${label} ${extension === "pdf" ? "page" : "image"}`;
+          elements[key].setAttribute("aria-label",elements[key].title);
+        }
+        stopPdf(); elements.pdf.hidden = true;
+        for (const key of ["zoomOutButton","zoomInButton","fitButton","actualButton","rotateLeftButton","rotateRightButton","copyImageButton"]) elements[key].disabled = !isImage;
+        if (extension === "pdf") {
+          elements.fitButton.disabled = false; elements.zoomInButton.disabled = false; elements.zoomOutButton.disabled = false;
+        }
+        if (!isImage && extension !== "pdf") {
+          showImageError("Unsupported Preview. Use Download to save this file."); syncNavigation(); return;
+        }
+        try {
+          const targetTier = tier || Math.max(sameImage ? state.requestedTier : 0, desiredTier());
+          state.requestedTier = targetTier;
+          const key = `${relativePath}|${revision}|${targetTier}`;
+          if (extension === "pdf") {
+            clearImage(); elements.dimensions.textContent = "";
+            let blob = state.pdfCache?.key === key && state.pdfCache.expires > Date.now() ? state.pdfCache.blob : null;
+            const rendererPromise = import("/files-preview-assets/6.4.299/build/pdf.min.mjs");
+            rendererPromise.catch(() => {});
+            if (!blob) {
+              const response = await fetch(`/api/files-pdf-preview?path=${encodeURIComponent(relativePath)}&rev=${encodeURIComponent(revision)}`, {credentials:"same-origin",signal:controller.signal,cache:"no-store"});
+              if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "PDF preview is unavailable. Use Download.");
+              blob = await response.blob();
+            }
+            if (generation !== state.loadGeneration) return;
+            if (blob.type !== "application/pdf" || blob.size > 25*1024*1024) throw new Error("PDF preview is unavailable. Use Download.");
+            if (blob.size <= 8*1024*1024) state.pdfCache = {key,blob,expires:Date.now()+30000};
+            const pdfjs = await rendererPromise;
+            if (generation !== state.loadGeneration) return;
+            const assets = "/files-preview-assets/6.4.299/";
+            pdfjs.GlobalWorkerOptions.workerSrc = assets + "build/pdf.worker.min.mjs";
+            const data = new Uint8Array(await blob.arrayBuffer());
+            if (generation !== state.loadGeneration) return;
+            const task = pdfjs.getDocument({data, cMapUrl:assets+"cmaps/", cMapPacked:true,
+              standardFontDataUrl:assets+"standard_fonts/", wasmUrl:assets+"wasm/", isEvalSupported:false});
+            state.pdfLoading = task;
+            const document = await task.promise;
+            if (generation !== state.loadGeneration) { await document.destroy(); return; }
+            state.pdfDocument = document; state.pdfZoom = 1;
+            elements.pdf.hidden = false;
+            await renderPdfPage(1); return;
+          }
+          let cached = state.previewCache.get(key);
+          if (cached && cached.expires <= Date.now()) {
+            URL.revokeObjectURL(cached.url); state.previewCache.delete(key); cached = null;
+          }
+          let url;
+          if (original) {
+            // Original transfer is an explicit user action; do not buffer a 35 MB file in JS.
+            url = `/api/files-image-preview?path=${encodeURIComponent(relativePath)}&original=1`;
+          } else if (cached) {
+            if (sameImage && elements.image.src === cached.url && elements.image.complete) {
+              elements.dimensions.textContent = `Preview Ã‚Â· ${state.naturalWidth} x ${state.naturalHeight} pixels`;
+              elements.stage.setAttribute("aria-busy", "false"); syncNavigation(); return;
+            }
+            url = cached.url;
+          }
+          else {
+            let response;
+            for (let attempt = 0; attempt < 90; attempt++) {
+              response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&tier=${targetTier}&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
+              if (response.status !== 202) break;
+              await response.body?.cancel();
+              await new Promise((resolve, reject) => {
+                const abort = () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); };
+                const timer = setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, Math.min(3000, 1000 + attempt * 250));
+                controller.signal.addEventListener("abort", abort, {once:true});
+                if (controller.signal.aborted) abort();
+              });
+              if (generation !== state.loadGeneration) return;
+            }
+            if (response.status === 202) throw new Error("Preview preparation is still pending. Reopen to retry, or use Download.");
+            if (response.status === 409) throw new Error("This file changed. Refresh the folder to view its current revision.");
+            if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "A lightweight preview is unavailable. Use Copy Image or Download Original.");
+            const blob = await response.blob();
+            if (!blob.type.startsWith("image/") || blob.size > 4 * 1024 * 1024) throw new Error("Preview representation is unavailable.");
+            if (generation !== state.loadGeneration) return;
+            url = URL.createObjectURL(blob);
+            state.previewCache.set(key, {url, bytes:blob.size, expires:Date.now()+30000});
+            while (state.previewCache.size > 12 || Array.from(state.previewCache.values()).reduce((n,c)=>n+c.bytes,0) > 16*1024*1024) {
+              const oldest=state.previewCache.keys().next().value;
+              URL.revokeObjectURL(state.previewCache.get(oldest).url); state.previewCache.delete(oldest);
+            }
+          }
+          if (generation !== state.loadGeneration) return;
+          // Decode off the displayed element: keep the current pixels visible until
+          // the new representation is ready, including during an explicit Original.
+          const decoded = new Image(); decoded.decoding = "async";
+          const abortDecode = () => { decoded.src = ""; };
+          controller.signal.addEventListener("abort", abortDecode, {once:true});
+          try { decoded.src = url; await decoded.decode(); }
+          finally { controller.signal.removeEventListener("abort", abortDecode); }
+          if (generation !== state.loadGeneration) return;
+          const oldWidth = state.naturalWidth;
+          const oldScale = state.scale;
+          elements.image.onload = () => {
+            if (generation !== state.loadGeneration) return;
+            state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+            state.previewTier = targetTier;
+            elements.stage.setAttribute("aria-busy", "false");
+            elements.previewPlaceholder.hidden = true;
+            elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
+            elements.image.alt = state.name; elements.image.style.display = "block";
+            elements.dimensions.textContent = `${original ? "Original" : "Preview"} Ã‚Â· ${state.naturalWidth} x ${state.naturalHeight} pixels`;
+            if (original) actualSize();
+            else if (oldWidth && state.sizingMode !== "fit") {
+              state.scale = oldScale * oldWidth / state.naturalWidth;
+              state.fitScale = calculateFitScale(); applyTransform();
+            } else fitToScreen();
+            syncNavigation();
+          };
+          elements.image.onerror = () => {
+            if (generation !== state.loadGeneration) return;
+            if (original && sameImage) {
+              void loadImage(relativePath, {name:state.name});
+              notify("The original could not be opened. Showing the preview; use Download or retry.");
+            } else showImageError("The image is unavailable or could not be decoded.");
+          };
+          elements.image.decoding = "async";
+          state.screenAssignedGeneration = generation;
+          elements.image.src = url;
+        } catch (error) {
+          if (generation !== state.loadGeneration || error.name === "AbortError") return;
+          state.original = false;
+          elements.stage.setAttribute("aria-busy", "false");
+          if ((sameImage || state.naturalWidth) && !error.message.includes("access expired")) { elements.dimensions.textContent = error.message; }
+          else showImageError(error.message);
+        }
+      }
+
+      function stopPdf() {
+        state.pdfRender?.cancel(); state.pdfRender = null;
+        state.pdfLoading?.destroy().catch(() => {}); state.pdfLoading = null;
+        state.pdfDocument = null; state.pdfPage = 0;
+        state.pdfPageGeneration = (state.pdfPageGeneration || 0) + 1;
+        elements.pdf.replaceChildren(); delete elements.pdf.dataset.renderedPage;
+      }
+
+      async function renderPdfPage(number) {
+        const pdf = state.pdfDocument;
+        if (!pdf || number < 1 || number > pdf.numPages) return;
+        const generation = ++state.pdfPageGeneration;
+        state.pdfRender?.cancel(); state.pdfPage = number;
+        elements.previousButton.disabled = number <= 1;
+        elements.nextButton.disabled = number >= pdf.numPages;
+        elements.dimensions.textContent = `Rendering PDF page ${number} of ${pdf.numPages}Ã¢â‚¬Â¦`;
+        try {
+          const page = await pdf.getPage(number);
+          if (generation !== state.pdfPageGeneration) return;
+          const base = page.getViewport({scale:1});
+          const fit = Math.min((elements.pdf.clientWidth-24)/base.width,(elements.pdf.clientHeight-24)/base.height);
+          const scale = Math.min(Math.max(0.1,fit*state.pdfZoom*(devicePixelRatio||1)), Math.sqrt(5_000_000/(base.width*base.height)));
+          const viewport = page.getViewport({scale});
+          const canvas = document.createElement("canvas");canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+          canvas.style.width = `${viewport.width/(devicePixelRatio||1)}px`;canvas.style.height = `${viewport.height/(devicePixelRatio||1)}px`;
+          canvas.setAttribute("aria-label",`PDF page ${number} of ${pdf.numPages}`);
+          const render = page.render({canvasContext:canvas.getContext("2d"),viewport});state.pdfRender=render;
+          await render.promise;
+          if (generation !== state.pdfPageGeneration) return;
+          elements.pdf.replaceChildren(canvas); elements.pdf.dataset.renderedPage=String(number);
+          elements.stage.setAttribute("aria-busy", "false");
+          elements.dimensions.textContent = `PDF Ã‚Â· Page ${number} of ${pdf.numPages}`;
+          elements.zoomStatus.textContent = `${Math.round(state.pdfZoom*100)}%`;
+        } catch (error) {
+          if (generation !== state.pdfPageGeneration || error.name === "RenderingCancelledException") return;
+          showImageError("PDF preview is unavailable. Use Download.");
+        }
+      }
+
+      function showQuickPreview(url) {
+        if (state.naturalWidth || state.screenAssignedGeneration === state.loadGeneration || typeof url !== "string" || !url.startsWith(`blob:${location.origin}/`)) return;
+        const generation = state.loadGeneration;
+        elements.image.onload = () => {
+          if (generation !== state.loadGeneration) return;
+          state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+          elements.previewPlaceholder.hidden = true;
+          elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
+          elements.image.style.display = "block"; elements.image.alt = state.name;
+          elements.dimensions.textContent = ""; fitToScreen();
+        };
+        elements.image.src = url;
+      }
+
+      function acceptNavigation(images, folder) {
+        if (!Array.isArray(images) || images.length > 20000 || folder !== state.folder) return false;
+        state.images = images.filter(item => item && validRelativeValue(item.path, {required:true}) && validViewerName(item.name) && item.path.split("/").slice(0,-1).join("/") === folder);
+        state.navigationFolder = folder;
+        state.index = state.images.findIndex(item => item.path === state.path);
+        syncNavigation(); return true;
+      }
+
+      async function loadFolderImages() {
+        if (embedded) return;
+        const generation = ++state.folderGeneration;
+        state.folderController?.abort();
+        if (state.navigationFolder === state.folder) {
+          state.index = state.images.findIndex(item => item.path === state.path); syncNavigation(); return;
+        }
+        // Allow the existing Files window to deliver metadata it already holds.
+        await new Promise(resolve => setTimeout(resolve, 250));
+        if (generation !== state.folderGeneration || state.navigationFolder === state.folder) return;
+        const folder = state.folder;
+        const controller = new AbortController(); state.folderController = controller;
+        state.images = []; state.index = -1; syncNavigation();
+        try {
+          let next = "";
+          do {
+            const params = new URLSearchParams({page_size:"100"});
+            if (folder) params.set("relative_path",folder);
+            if (next) params.set("page",next);
+            const response = await fetch(`/api/files-list?${params}`, { credentials: "same-origin", signal:controller.signal });
+            const payload = await response.json();
+            if (!response.ok || payload.ok === false) throw new Error(payload.message);
+            if (generation !== state.folderGeneration || folder !== state.folder) return;
+            state.images = Array.from(payload.items || []).filter(item => item.kind === "image" || item.extension === "psd").map(item => ({path:item.desktop_relative_path,name:item.name,revision:item.revision || ""}));
+            state.index = state.images.findIndex(item => item.path === state.path); syncNavigation();
+            next = payload.has_more ? payload.next_page : "";
+          } while (next);
+          state.navigationFolder = folder;
+        } catch (error) {
+          if (generation !== state.folderGeneration || error.name === "AbortError") return;
+          state.images = [{ path: state.path, name: currentName() }]; state.index = 0; syncNavigation();
+        }
+      }
+
+      function syncNavigation() {
+        if (state.pdfDocument) return;
+        elements.previousButton.disabled = state.index <= 0;
+        elements.nextButton.disabled = state.index < 0 || state.index >= state.images.length - 1;
+      }
+
+      function moveImage(offset) {
+        if (state.pdfDocument) { void renderPdfPage(state.pdfPage+offset); return; }
+        const next = state.images[state.index + offset];
+        if (!next) return;
+        state.index += offset;
+        loadImage(next.path, { name: next.name, revision: next.revision || "" });
+      }
+
+      function startDownload() {
+        if (embedded) { postToOpener({type:"sports-cave-image-viewer-download",version:1,path:state.path}); return; }
+        elements.downloadFrame.src = `/api/files-download?relative_path=${encodeURIComponent(state.path)}&download=${Date.now()}`;
+      }
+
+      function notify(message) {
+        elements.dimensions.textContent = message;
+        elements.dimensions.title = message;
+      }
+
+      async function copyImagePixels() {
+        const path = state.path;
+        notify("Copying…");
+        try {
+          await FilesOriginal.copy(FilesOriginal.snapshot([{path, name:state.name, url:`/api/files-download?relative_path=${encodeURIComponent(path)}`} ]));
+          notify("Copied 1 file");
+        } catch (error) {
+          notify(`${error.message || "Image copy failed."} Use Download Original.`);
+        }
+      }
+      elements.image.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        FilesOriginal.menu(event, copyImagePixels, startDownload);
+      });
+      window.sportsCaveCopyImagePixels = copyImagePixels;
+
+      elements.previousButton.onclick = () => moveImage(-1);
+      elements.nextButton.onclick = () => moveImage(1);
+      elements.zoomOutButton.onclick = () => zoomBy(1 / 1.2);
+      elements.zoomInButton.onclick = () => zoomBy(1.2);
+      elements.fitButton.onclick = fitToScreen;
+      elements.actualButton.onclick = actualSize;
+      elements.rotateLeftButton.onclick = () => { state.rotation -= 90; fitToScreen(); };
+      elements.rotateRightButton.onclick = () => { state.rotation += 90; fitToScreen(); };
+      elements.copyImageButton.onclick = copyImagePixels;
+      elements.downloadButton.querySelector(".tool-label").textContent = "Download Original";
+      elements.downloadButton.onclick = startDownload;
+      elements.closeButton.onclick = closePreview;
+
+      elements.stage.addEventListener("wheel", event => {
+        if (state.pdfDocument && !event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        zoomBy(event.deltaY < 0 ? 1.12 : 1 / 1.12);
+      }, { passive: false });
+      elements.stage.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || elements.image.style.display === "none") return;
+        state.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY };
+        elements.stage.setPointerCapture(event.pointerId);
+        elements.stage.classList.add("panning");
+      });
+      elements.stage.addEventListener("pointermove", event => {
+        if (!state.pointer || state.pointer.id !== event.pointerId) return;
+        state.panX = state.pointer.panX + event.clientX - state.pointer.x;
+        state.panY = state.pointer.panY + event.clientY - state.pointer.y;
+        applyTransform();
+      });
+      const stopPanning = event => {
+        if (state.pointer && state.pointer.id === event.pointerId) state.pointer = null;
+        elements.stage.classList.remove("panning");
+      };
+      elements.stage.addEventListener("pointerup", stopPanning);
+      elements.stage.addEventListener("pointercancel", stopPanning);
+      window.addEventListener("resize", () => {
+        state.fitScale = calculateFitScale();
+        if (state.sizingMode === "fit") fitToScreen();
+        scheduleDetail();
+      });
+      function validRelativeValue(value, { required = false, maxLength = 1024 } = {}) {
+        if (typeof value !== "string" || value.length > maxLength) return false;
+        if (!value) return !required;
+        if (
+          value.startsWith("/")
+          || value.includes("\\")
+          || value.includes(":")
+          || /[\0\r\n]/.test(value)
+        ) {
+          return false;
+        }
+        return value.split("/").every(part => part && part !== "." && part !== "..");
+      }
+
+      function validViewerName(value) {
+        return (
+          typeof value === "string"
+          && value.length > 0
+          && value.length <= 260
+          && !/[\0\r\n]/.test(value)
+        );
+      }
+
+      function validViewerOpenMessage(event) {
+        const message = event && event.data;
+        if (
+          event.origin !== location.origin
+          || event.source !== previewHost
+          || !message
+          || typeof message !== "object"
+          || message.type !== IMAGE_VIEWER_MESSAGE
+          || message.version !== IMAGE_VIEWER_PROTOCOL_VERSION
+        ) {
+          return false;
+        }
+        const keys = Object.keys(message);
+        if (keys.some(key => !["type", "version", "requestId", "path", "folder", "name", "images", "revision", "thumbnail"].includes(key))) {
+          return false;
+        }
+        return (
+          typeof message.requestId === "string"
+          && /^[A-Za-z0-9-]{8,80}$/.test(message.requestId)
+          && validRelativeValue(message.path, { required: true })
+          && validRelativeValue(message.folder)
+          && validViewerName(message.name)
+          && (message.revision == null || (typeof message.revision === "string" && message.revision.length <= 128))
+        );
+      }
+
+      function suspendPreview() {
+        clearTimeout(state.detailTimer);
+        elements.stage.setAttribute("aria-busy", "false");
+        state.loadGeneration += 1; state.folderGeneration += 1;
+        state.imageController?.abort(); state.folderController?.abort();
+        elements.image.removeAttribute("src"); stopPdf();
+        clearImage(); state.suspended = true;
+
+      }
+
+      function closePreview() {
+        if (query.get("legacy") === "1") return;
+        suspendPreview();
+        postToOpener({type:"sports-cave-image-viewer-close",version:1});
+      }
+
+      function postToOpener(message) {
+        try {
+          if (!previewHost || previewHost.closed) return false;
+          previewHost.postMessage(message, location.origin);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function acknowledgeViewerOpen(requestId) {
+        postToOpener({
+          type: "sports-cave-image-viewer-opened",
+          version: IMAGE_VIEWER_PROTOCOL_VERSION,
+          requestId,
+        });
+      }
+
+      window.addEventListener("message", event => {
+        const message = event && event.data;
+        if (event.origin === location.origin && event.source === previewHost && message?.type === "sports-cave-image-viewer-suspend") { suspendPreview(); return; }
+        if (
+          event.origin === location.origin
+          && event.source === previewHost
+          && message
+          && message.type === "sports-cave-image-viewer-parent-ready"
+          && message.version === IMAGE_VIEWER_PROTOCOL_VERSION
+        ) {
+          if (acceptNavigation(message.images, message.folder)) {
+            state.folderGeneration += 1; state.folderController?.abort();
+          }
+          if (message.path === state.path && message.revision === state.revision) showQuickPreview(message.thumbnail);
+          state.openerReadyAcknowledged = true;
+          window.clearTimeout(state.openerReadyTimer);
+          state.openerReadyTimer = 0;
+          return;
+        }
+        if (!validViewerOpenMessage(event)) return;
+        if (message.requestId === state.lastOpenRequestId) {
+          acknowledgeViewerOpen(message.requestId);
+          return;
+        }
+        state.lastOpenRequestId = message.requestId;
+        const same = message.path === state.path && message.folder === state.folder;
+        if (!same || state.suspended || state.revision !== (message.revision || "")) loadImage(message.path, { folder: message.folder, name: message.name, revision:message.revision || "" });
+        if (message.images) acceptNavigation(message.images, message.folder);
+        showQuickPreview(message.thumbnail);
+        loadFolderImages();
+        acknowledgeViewerOpen(message.requestId);
+        elements.closeButton.focus();
+      });
+      function notifyOpenerReady() {
+        if (state.openerReadyAcknowledged || state.openerReadyAttempts >= 20) return;
+        state.openerReadyAttempts += 1;
+        postToOpener({
+          type: "sports-cave-image-viewer-ready",
+          version: IMAGE_VIEWER_PROTOCOL_VERSION,
+          path: state.path,
+          revision: state.revision,
+          folder: state.folder,
+          name: state.name,
+        });
+        window.clearTimeout(state.openerReadyTimer);
+        state.openerReadyTimer = window.setTimeout(notifyOpenerReady, 250);
+      }
+      window.addEventListener("keydown", event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "c") {
+          event.preventDefault();
+          copyImagePixels();
+        }
+        else if (event.key === "Escape") closePreview();
+        else if (event.key === "ArrowLeft") moveImage(-1);
+        else if (event.key === "ArrowRight") moveImage(1);
+        else if (event.key === "+" || event.key === "=") zoomBy(1.2);
+        else if (event.key === "-") zoomBy(1 / 1.2);
+        else if (event.key === "0") fitToScreen();
+      });
+      window.addEventListener("beforeunload", () => {
+        state.loadGeneration += 1;
+        state.imageController?.abort(); state.folderController?.abort();
+        state.previewCache.forEach(value => URL.revokeObjectURL(value.url));
+        stopPdf(); state.pdfCache = null;
+        window.clearTimeout(state.openerReadyTimer);
+      });
+
+      if (state.path) loadImage(state.path, { folder: state.folder, name: state.name, revision: state.revision, replaceHistory: false });
+      loadFolderImages();
+      if (embedded) notifyOpenerReady();
+      elements.actualButton.title = "View preview pixels at 1:1";
+      elements.copyImageButton.title = "Copy original file (browser support required)";
+    </script>
+  </body>
+</html>

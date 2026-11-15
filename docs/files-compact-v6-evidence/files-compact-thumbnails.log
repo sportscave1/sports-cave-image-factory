@@ -1,0 +1,11 @@
+{
+  environment: 'Chrome, synthetic 500-image listing, 150 ms thumbnail/300 ms screen network fixture',
+  cachedAttachMs: 0.20000000298023224,
+  thumbnailBytes: 660,
+  thumbnailRequests: 33,
+  requestsBeforeScroll: 20,
+  peakMockInflightIncludingAborted: 8,
+  peakLiveBrowserRequests: 4,
+  layoutShift: false,
+  cachedAttachedBeforeObserver: true
+}

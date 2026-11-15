@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Recorder controls acceptance</title>
+<style>body{font:18px system-ui;max-width:700px;margin:40px}label,summary{padding:12px;display:block}input{margin-right:12px}#scroll-sample{height:180px;overflow:auto;border:2px solid #32618c;padding:12px}details{border:1px solid #aaa;margin:20px 0;padding:8px}</style>
+<h1>Recorder controls acceptance</h1>
+<p>Disposable local controls. No requests, accounts, uploads or external providers.</p>
+<section aria-label="Stop check preparation">
+<button id="hide-menu" type="button">Hide menu for stop check</button>
+<button id="restore-menu" type="button">Restore menu</button>
+<p id="stop-check-status" role="status">Menu available.</p>
+</section>
+<label>Protected test field <input id="protected-example" type="password" aria-label="Protected test field" autocomplete="off" value="synthetic-protected-value"></label>
+<p>Disposable masked field for the protected-input check. Click only; no typing needed.</p>
+<label><input id="enabled" type="checkbox">Example enabled</label>
+<fieldset><legend>Example choice</legend>
+<label><input type="radio" name="choice" id="first" checked>First choice</label>
+<label><input type="radio" name="choice" id="second">Second choice</label></fieldset>
+<details id="example-menu"><summary>Example menu</summary><p>Menu is open. This text is local.</p></details>
+<h2>Scrollable sample</h2><p>Place the pointer inside the bordered box and scroll down.</p>
+<div id="scroll-sample" role="region" aria-label="Scrollable sample" tabindex="0"></div>
+<script>
+const area=document.getElementById('scroll-sample');for(let n=1;n<=20;n++){const p=document.createElement('p');p.textContent='Local scroll row '+n;area.append(p);}
+const menu=document.getElementById('example-menu'),stopStatus=document.getElementById('stop-check-status');
+document.getElementById('hide-menu').onclick=()=>{menu.hidden=true;stopStatus.textContent='Menu hidden. Controls 21 will wait at its final step.';};
+document.getElementById('restore-menu').onclick=()=>{menu.hidden=false;stopStatus.textContent='Menu available.';};
+</script>
+</html>

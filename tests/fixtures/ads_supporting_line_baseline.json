@@ -1,0 +1,326 @@
+[
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "3e62aa9a7c6b212a872bb8ce7b2a5b7d840145ad92a6836cfdf4425f6c2cc642",
+    "visuals_sha256": "fa920355f5934ceb4c7c92843a1a439b6c871bc9c921e3c47a6d53529a4fa91a"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "8fb1437001bb8ab417f87ba402df2b7e0ed737f2b3ca6e4e9d3e713c0592e72f",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "109aa9da468d920e600194bf6f361d3dc7693c8f324db9b5f5bc925ea3bcd37e",
+    "visuals_sha256": "cb51388c02569794dc0ba3d0b7178603cf24c763ec19edeadb22e425d03ac819"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "aabcb774d5e64665359c82c4247d98ab5041936871158bc70c680c57a748906d",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "1144dfef3d182d2b08b1817b822b3a4cc8964e0b32aa6771c5679e45b6cc20e7",
+    "visuals_sha256": "57fea806fbbe9ad1e932f5f6894309c9f91bc14abd7abee1cee17e137c47a89d"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "f346f2ecf3234d3741368383fa2279544750716407b4d0f797aabce571f59236",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "4b8043988b4fa25caa6cb498f2ce40641930c944b8f766be5dae3848e099503e",
+    "visuals_sha256": "57fea806fbbe9ad1e932f5f6894309c9f91bc14abd7abee1cee17e137c47a89d"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "bb8f51cda238dc44402d771c2f8152fbdf010b303635397a6a973a7d62490816",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "b7e6e090d58d347b4426958d6b53f2bfc8ce4fea75845f780686cd73d6c809bb",
+    "visuals_sha256": "bf7f32d77ef034c70d606a32572423bf962c26665c7e245186799e4edacf0c6e"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "c2bce7e554bf37d2a4b89d4f6e55bcdac071f2669065ec5c8452c8fd4a2320d4",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "ad4a93c043c97a29f2c73801615e1a9f2e89fe2708ea1dafd1551f5b146ef4ea",
+    "visuals_sha256": "bf7f32d77ef034c70d606a32572423bf962c26665c7e245186799e4edacf0c6e"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "b17bcef5490bc48b34dc28af7d4bf5b49eb65e34ebdc4e2e6261867bf660741f",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "e209185fc5c7f919caca875dc9ea021c6bf2ce66ce9f2012dced02fd41205274",
+    "visuals_sha256": "13a32e27317f1f640f0256e69646e6355ca5e8b42ed2e60139f245fe7919a6b3"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "305d66859bf167cbb3f4b751bb219b2d989768e1c7cd7c8fb1d7b61a4bf69f8a",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "68e66357de9e2a4bb574031cdac5a809c5a02011f15342b4b7b925410bceca59",
+    "visuals_sha256": "13a32e27317f1f640f0256e69646e6355ca5e8b42ed2e60139f245fe7919a6b3"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "ece6f0ddf1557d048672219d348a1bf98ce4dc3d7feeec2a1f0e5b2a4341cbc8",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+]

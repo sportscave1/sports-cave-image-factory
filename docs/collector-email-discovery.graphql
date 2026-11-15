@@ -1,0 +1,6 @@
+query CollectorSportDiscovery($q0: String!, $q1: String!, $q2: String!, $q3: String!) {
+  s0: products(first: 12, query: $q0, sortKey: ID) { nodes { id } }
+  s1: products(first: 12, query: $q1, sortKey: ID) { nodes { id } }
+  s2: products(first: 12, query: $q2, sortKey: ID) { nodes { id } }
+  s3: products(first: 12, query: $q3, sortKey: ID) { nodes { id } }
+}

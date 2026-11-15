@@ -1,0 +1,14 @@
+{
+  "base": "6e2805d058713cc64cfa70e7a85ee23ea66db7e1",
+  "live_reference": "95b8c223baadf24717483c3fa5d9dbac0384d490",
+  "owner": "codex-mailbox-reliability-01a157b1-20261026",
+  "task": "20261025-35ed7e58",
+  "files": {
+    "support_email_reads.py": "fe62e86df475c73c57056edc7f9b6a212b7fae9ad0ef9a989490cfd96a172339",
+    "support_email_provider.py": "4b8930883c2421b015ef59dc4b48799f59d00cc24f0a08ba058475d036664d33",
+    "support_email_smtp.py": "d00714f24d3829b034c39fe0c33e5a9d48ae3c7debddc2f34ac7919833fea9a6",
+    "support_email_durable.py": "763f0cd9caa892ac179a69b16de14d03ca028f5e966cc2fbc68ec642ae922644",
+    "support_email_idle.py": "a86971183469811713f025e9f6b88d1f07ac9db572785ee773c296a1d9a1538f",
+    "components/support_email/mail.js": "67eff86f2d09f742c747656f89391da4db90ed86145a7b7d29f7448b9cd6b307"
+  }
+}

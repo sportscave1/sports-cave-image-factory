@@ -1,0 +1,23 @@
+{
+  "status": "PREPARED_ONLY_NOT_APPLIED",
+  "workspace_id": "tea-cut91gtsvqrc73e5acs0",
+  "service_id": "srv-d8kl4on7f7vs73dvavv0",
+  "service_name": "sports-cave-os",
+  "observed_utc": "2026-10-20T04:22:56Z",
+  "observed_resumable_flag": "enabled",
+  "evidence": "Existing unauthenticated uploads/status returns 403 Registered preparation host required; deployed code checks flag before authentication. No storage or accepted job reached.",
+  "observed_session_count": 0,
+  "proposed_environment_patch": {
+    "COMPANION_RESUMABLE_UPLOADS_ENABLED": "false"
+  },
+  "preserve_all_other_environment_and_service_settings": true,
+  "acceptance_variables": "Leave unset until reviewed native PostgreSQL, real provider and retention acceptance for the exact generation, with report hash.",
+  "execution_requirements": [
+    "Fresh explicit authority for production configuration restart; none granted in Phase 5",
+    "Recheck active jobs and retained sessions immediately before any authorised change",
+    "If a session exists, retain its backend, storage and packets and arrange compatible drain/recovery; never legacy replay",
+    "Keep the deployed commit; do not accidentally deploy this local worktree or another branch",
+    "Apply only the single flag correction, preserve omitted values, and verify legacy capability after restart"
+  ],
+  "production_mutated": false
+}

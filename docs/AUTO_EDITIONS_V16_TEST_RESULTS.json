@@ -1,0 +1,42 @@
+{
+  "status": "local_pass_real_production_evidence_blocked",
+  "baseline": "607d10cb743694f5b94b1567897adad8280dd159",
+  "policy_flag_default": false,
+  "approved_real_standards": 0,
+  "live_changes": false,
+  "regression": {
+    "passed": 133,
+    "skipped": 1
+  },
+  "final_quality": {
+    "passed": 37
+  },
+  "final_status_stability": {
+    "passed": 44
+  },
+  "browser_scenarios": 9,
+  "performance": {
+    "v15_baseline": {
+      "median_ms": 46.8,
+      "python_peak_bytes": 1130794,
+      "queries_per_refresh": 1,
+      "response_bytes": 70750,
+      "dropbox_calls": 0
+    },
+    "v16_on": {
+      "median_ms": 48.23,
+      "python_peak_bytes": 1123166,
+      "queries_per_refresh": 1,
+      "response_bytes": 70750,
+      "dropbox_calls": 0
+    }
+  },
+  "studio_verify": "blocked_by_inherited_baseline_whitespace",
+  "migration_applied": false,
+  "blockers": [
+    "Complete supplier requirements and variant coverage",
+    "Exact owner-approved artwork standards",
+    "Real profile/native-resolution/geometry evidence",
+    "Owner-approved release and host production acceptance"
+  ]
+}

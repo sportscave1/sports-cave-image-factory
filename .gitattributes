@@ -1,0 +1,13 @@
+# Predictable source checkout on Windows and Linux; binary detection stays on.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff2 binary

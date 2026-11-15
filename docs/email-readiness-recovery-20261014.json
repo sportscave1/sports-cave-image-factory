@@ -1,0 +1,50 @@
+{
+  "observed_at": "2026-10-14T12:53:46+11:00",
+  "production_ready": false,
+  "production_evidence": {
+    "store": "sportscave-nb.myshopify.com",
+    "fulfilment_webhook": "MISSING in production app-authenticated verification at 01:49:39Z; canonical app identity and Shopify API VERIFIED; subscription list empty.",
+    "receiver": "HTTP 200; routes ready; HMAC CONFIGURED; API 2026-04; https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/crm",
+    "signed_fulfilment_event": "No production event found. Local signed callback test passed; no synthetic production event submitted.",
+    "worker": "sports-cave-seo-worker, srv-d9ujm9navr4c73amurgg; one instance; running; not suspended; start command python sports_cave_worker.py supervises crm_worker.py.",
+    "delivery_checkpoint": "2026-10-14T01:53:31.809505Z",
+    "publication_checkpoint": "2026-10-14T01:53:39.216098Z",
+    "schedule_checkpoint": "2026-10-14T01:53:39.150076Z",
+    "deployment": "dep-db7dujegekts73dq2890 live at commit 7ea7c26b199f15361e3c5a0117f0261c87a1c010; externally triggered, not by this task.",
+    "post_checkout": "One live email at version 4; drafts 2/3 disabled. All-three publication remains blocked by ORDERS_FULFILLED.",
+    "other_flows": "Abandoned four required webhooks VERIFIED; Win Back ORDERS_PAID VERIFIED. Welcome consent-update webhook also MISSING. Fulfilment Follow-up requires ORDERS_FULFILLED."
+  },
+  "root_causes": [
+    "Fulfilment subscription absent, not callback/version mismatch. Its original omission or removal cannot be established from retained evidence.",
+    "Deployment handover: old CRM child stopped 01:38:13Z, forced shutdown 01:38:33Z; replacement acquired lease 01:43:44Z. Engine did not observe stop requests during long cycles; forced kill retained the five-minute lease. Completed-work evidence became stale during handover. Production subsequently recovered without intervention.",
+    "Full-cycle timestamps lag delivery checkpoints; existing readiness already accepts fresh completed delivery evidence. No threshold was relaxed."
+  ],
+  "modified_files": {
+    "crm_engine.py": "Cooperative cancellation at lease boundaries; bypass delivery error handlers and unwind through existing owner-fenced lease release.",
+    "crm_worker.py": "Wire existing SIGTERM/SIGINT stop event to engine cancellation; no additional worker.",
+    "crm_automation_readiness.py": "Show webhook failure details and completed-work age instead of unconditional restart advice; gates unchanged.",
+    "scripts/register_crm_webhooks.py": "Single-topic inspection/registration; identity verification for mutations; existing deduplication and callback/version re-read retained.",
+    "tests/test_crm_readiness_recovery.py": "Shutdown, lease, no-send cancellation, scoped registration and authenticated fulfilment callback regression tests."
+  },
+  "validation": {
+    "tests_run": 61,
+    "passed": 59,
+    "skipped": 2,
+    "skipped_reason": "Disposable-database tests not enabled; no production writes.",
+    "modules": ["test_crm_readiness_recovery", "test_crm_publication_readiness", "test_crm_automation_diagnostics", "test_crm_shopify_receiver_reliability", "test_crm_receiver_readiness_contract", "test_sports_cave_worker"],
+    "diff_check": "passed"
+  },
+  "remaining_actions_not_executed": [
+    "Review and explicitly deploy local changes to the existing app/worker. No Render topology or start-command change is needed.",
+    "In the configured Sports Cave server environment, inspect: python scripts/register_crm_webhooks.py --topic ORDERS_FULFILLED",
+    "After approving the production subscription change, run: python scripts/register_crm_webhooks.py --topic ORDERS_FULFILLED --apply",
+    "Rerun existing Diagnostics or allow the worker refresh; verify topic, callback and version plus fresh completed-work checkpoints. Inspect-only: python scripts/shopify_automation_diagnostics.py --inspect-only",
+    "Do not start another worker, delete leases, replay historical events, publish drafts or resume paused flows. Review due queues through existing controls before an authorized recovery rollout.",
+    "Welcome subscription setup is separate and is not a Post Checkout dependency."
+  ],
+  "limitations": [
+    "No local Sports Cave credentials configured. Shopify evidence came from the production worker's authenticated diagnostic, not a different connector app.",
+    "Cooperative cancellation cannot interrupt an external call that never returns; forced shutdown and lease-expiry safeguards remain.",
+    "Production registration, deployment and post-change verification remain outstanding. No deployment, restart, publication, customer message or live data mutation was performed."
+  ]
+}

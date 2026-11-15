@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+.local-data/
+native/bin/
+recovery/
+evidence/
+ownership.json
+verification.json
+windows-observations.json

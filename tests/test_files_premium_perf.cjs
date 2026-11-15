@@ -1,0 +1,6 @@
+const {chromium}=require('playwright'),fs=require('fs'),{execFileSync}=require('child_process');
+(async()=>{const b=await chromium.launch({channel:'chrome',headless:true});try{
+const sources={baseline:execFileSync('git',['show','HEAD:components/files_window/index.html'],{encoding:'utf8'}),premium:fs.readFileSync('components/files_window/index.html','utf8')};
+const items=Array.from({length:500},(_,i)=>({id:'id:'+i,path:'/Sportscave Team Folder/Artwork '+i+'.psd',name:'Artwork '+i+'.psd',tag:'file',kind:'psd',extension:'psd',type:'Photoshop document',size:2147483648,size_label:'2 GB'}));
+for(const [name,html] of Object.entries(sources)){let samples=[],requests=0;for(let i=0;i<3;i++){const p=await b.newPage();await p.route('**/*',r=>{if(r.request().url().includes('/api/files-list')){requests++;return r.fulfill({json:{root_path:'/Sportscave Team Folder',current_path:'/Sportscave Team Folder',items}});}return r.fulfill({contentType:'text/html',body:html});});const start=Date.now();await p.goto('http://files-perf.local.test/files-window');await p.locator('.file-item').last().waitFor();samples.push(Date.now()-start);await p.close();}samples.sort((a,b)=>a-b);console.log(name+': 500 mock PSD rows median '+samples[1]+'ms; folder requests '+requests+'/3 renders; master downloads 0.');}
+}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

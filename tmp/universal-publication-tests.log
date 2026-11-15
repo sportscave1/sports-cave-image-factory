@@ -1,0 +1,89 @@
+.email_thumbnail_ready key=4b4f64cf98fb bytes=6096
+email_thumbnail_ready key=f0e1078326d8 bytes=6096
+....automation_publication job_id=167ef9d8-4b7a-4720-b55f-86fd9618cf64 revision=3 state=FAILED error_class=ValueError
+email_thumbnail_ready key=14c2e59b483f bytes=3388
+email_thumbnail_ready key=b546c55ac739 bytes=3388
+..2026-10-14 13:37:59.592 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-14 13:38:00.611 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+email_thumbnail_ready key=4ce57930bf45 bytes=3388
+email_thumbnail_ready key=cdc5b1d563f2 bytes=3388
+2026-10-14 13:38:01.476 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-14 13:38:01.899 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-14 13:38:02.524 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+email_thumbnail_ready key=c85a76c7870f bytes=3388
+email_thumbnail_ready key=f7d424fe264a bytes=3388
+..automation_publication job_id=76c7784f-1075-48a7-bb9f-ebe203bffcf4 revision=4 state=FAILED error_class=ValueError
+.email_thumbnail_ready key=5394e977b79f bytes=3388
+email_thumbnail_ready key=c86713b07743 bytes=3388
+email_thumbnail_ready key=f1e4097bffa7 bytes=3388
+email_thumbnail_ready key=977ca1dd4aef bytes=3388
+..automation_publication job_id=d923329b-a600-48be-85cb-1750edfe5eb7 revision=4 state=FAILED error_class=ValueError
+email_thumbnail_ready key=081cdbf1368f bytes=3388
+email_thumbnail_ready key=5d2579a41b1c bytes=3388
+automation_publication job_id=dee8a069-98ad-4238-9c72-20d0e0869c46 revision=4 state=FAILED error_class=ValueError
+...email_thumbnail_ready key=10b52555712c bytes=3388
+email_thumbnail_ready key=d243e4a19646 bytes=3388
+email_thumbnail_ready key=a619e0f0df5b bytes=3388
+email_thumbnail_ready key=3e0551d529bc bytes=6096
+....email_thumbnail_ready key=fb5b895c7d87 bytes=6096
+email_thumbnail_ready key=66d8d4fd48c3 bytes=3388
+.2026-10-14 13:38:12.971 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..automation_publication job_id=3504fadc-4a91-46f2-b8e1-510eaaa1f691 revision=3 state=FAILED error_class=ValueError
+.automation_publication job_id=c103375b-4b68-4b46-80ad-b67b14b13eef revision=2 state=FAILED error_class=ValueError
+.email_thumbnail_ready key=d622bcfe8be2 bytes=3388
+email_thumbnail_ready key=de1ba1c92c87 bytes=3388
+...email_thumbnail_ready key=5709f5549ae8 bytes=3388
+email_thumbnail_ready key=f38304205603 bytes=3388
+...automation_publication job_id=902464a0-e068-4f78-9842-ff2ca8da0d63 revision=3 state=FAILED error_class=ValueError
+..automation_publication job_id=1a624bfb-bd80-4bda-9f12-d6586256f1f3 revision=2 state=FAILED error_class=ValueError
+..AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=11 rows=0
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=0
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=7 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=7 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=7 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+.email_thumbnail_ready key=86d2ee373893 bytes=3388
+email_thumbnail_ready key=2d0b4507aeb1 bytes=3388
+.......email_thumbnail_ready key=b9213ecfe0c7 bytes=3388
+email_thumbnail_ready key=d393acf73d35 bytes=3388
+.automation_publication job_id=dd5ce484-c5b4-4f1d-b8f5-ff4eec90a4cf revision=2 state=FAILED error_class=ValueError
+....automation_publication job_id=0fffd1d4-acfd-48cc-9a85-c12e44d7443a revision=2 state=FAILED error_class=ValueError
+automation_publication job_id=0fffd1d4-acfd-48cc-9a85-c12e44d7443a revision=2 state=FAILED error_class=ValueError
+.automation_publication job_id=ae62082e-0c3e-44b9-81df-577388096f14 revision=2 state=QUEUED error_class=StoreUnavailable
+email_thumbnail_ready key=368d80527ea1 bytes=3388
+email_thumbnail_ready key=cbd050b19d18 bytes=3388
+.............
+----------------------------------------------------------------------
+Ran 61 tests in 29.632s
+
+OK
+email_thumbnail_ready key=68b7bbbaf1b0 bytes=3388
+email_thumbnail_ready key=7ec9257df642 bytes=6096
+email_thumbnail_ready key=91cfcaf107b9 bytes=3388
+email_thumbnail_ready key=4d0dc26e97e2 bytes=3388
+email_thumbnail_ready key=8de8535c6447 bytes=3388
+email_thumbnail_ready key=427c3f343431 bytes=3388
+email_thumbnail_ready key=e1ac47a14a46 bytes=3388
+email_thumbnail_ready key=7cb62abb3b01 bytes=3388
+email_thumbnail_ready key=518756be8877 bytes=3388
+email_thumbnail_ready key=306ccc28d63f bytes=3388
+email_thumbnail_ready key=d223a24b9d82 bytes=3388
+email_thumbnail_ready key=9ae77157301d bytes=6096
+email_thumbnail_ready key=372acef555a0 bytes=3684
+email_thumbnail_ready key=d986a7c25e0c bytes=3684
+email_thumbnail_ready key=0a58871f0ef5 bytes=3388
+email_thumbnail_ready key=7f24c9291d59 bytes=3388
+email_thumbnail_ready key=17de97c2a514 bytes=3388
+email_thumbnail_ready key=5e46dba50bfc bytes=3388
+email_thumbnail_ready key=747dc0076713 bytes=3388
+email_thumbnail_ready key=2a1ef2c03bbc bytes=6096
+email_thumbnail_ready key=34b948039aef bytes=3388
+email_thumbnail_ready key=d1559d7a61b9 bytes=3388
+email_thumbnail_ready key=a09da09842fc bytes=3388
+Local durable publish acceptance: 11.7 ms

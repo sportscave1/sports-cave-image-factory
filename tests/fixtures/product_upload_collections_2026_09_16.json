@@ -1,0 +1,237 @@
+{
+  "read_only_snapshot": true,
+  "has_next_page": false,
+  "collections": [
+    {
+      "id": "gid://shopify/Collection/435971752243",
+      "title": "NBA Wall Art",
+      "handle": "nba",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/435973423411",
+      "title": "Horse Racing Wall Art",
+      "handle": "horse-racing-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/435974111539",
+      "title": "Motor Racing Wall Art",
+      "handle": "motor-racing-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/436228456755",
+      "title": "Tennis Wall Art",
+      "handle": "tennis-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/436686684467",
+      "title": "Cricket Wall Art",
+      "handle": "cricket",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/436761788723",
+      "title": "All Sports Wall Art",
+      "handle": "all-sports-wall-art",
+      "ruleSet": {
+        "appliedDisjunctively": false,
+        "rules": [
+          {
+            "column": "VARIANT_PRICE",
+            "relation": "GREATER_THAN",
+            "condition": "0.1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gid://shopify/Collection/436856127795",
+      "title": "Best Selling Sports Wall Art",
+      "handle": "best-selling-sports-art",
+      "ruleSet": {
+        "appliedDisjunctively": false,
+        "rules": [
+          {
+            "column": "VARIANT_PRICE",
+            "relation": "GREATER_THAN",
+            "condition": "20"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gid://shopify/Collection/437923119411",
+      "title": "Football Wall Art",
+      "handle": "soccer",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/444193407283",
+      "title": "New Sports Wall Art",
+      "handle": "new-products",
+      "ruleSet": {
+        "appliedDisjunctively": false,
+        "rules": [
+          {
+            "column": "VARIANT_PRICE",
+            "relation": "GREATER_THAN",
+            "condition": "20"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gid://shopify/Collection/466936168755",
+      "title": "Matilda's Wall Art",
+      "handle": "matildas",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/468552057139",
+      "title": "Motivational Quotes Sports Wall Art",
+      "handle": "motivational-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/468554481971",
+      "title": "Combat Wall Art",
+      "handle": "combat-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/473279562035",
+      "title": "Cristiano Ronaldo Wall Art",
+      "handle": "cristiano-ronaldo-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/473280348467",
+      "title": "Lionel Messi Wall Art",
+      "handle": "lionel-messi-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/479216599347",
+      "title": "Best Online Sports Wall Art",
+      "handle": "best-online-sellers",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/481089847603",
+      "title": "Michael Jordan Wall Art",
+      "handle": "michael-jordan-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/482924953907",
+      "title": "Lebron James Wall Art",
+      "handle": "lebron-james-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/482925052211",
+      "title": "Stephen Curry Wall Art",
+      "handle": "stephen-curry-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/482925248819",
+      "title": "Kobe Bryant Wall Art",
+      "handle": "kobe-bryant-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/490058514739",
+      "title": "Featured Sports Wall Art",
+      "handle": "featured-designs",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/493674004787",
+      "title": "All-Star Legends Wall Art",
+      "handle": "all-star-legends-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/493810909491",
+      "title": "Collector Series Wall Art",
+      "handle": "collector-series-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/494661140787",
+      "title": "Best Selling Wall Art UK",
+      "handle": "uk-best-selling-sport-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/501092057395",
+      "title": "Popular",
+      "handle": "popular",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/504219009331",
+      "title": "Rivalries Wall Art",
+      "handle": "greatest-sport-rivalries-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/504899305779",
+      "title": "NFL Wall Art",
+      "handle": "nfl-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/505442206003",
+      "title": "Ice Hockey Wall Art",
+      "handle": "ice-hockey-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/505475203379",
+      "title": "Baseball Wall Art",
+      "handle": "baseball-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/505567281459",
+      "title": "WWE Wrestling Wall Art",
+      "handle": "wwe-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/510445322547",
+      "title": "Apparel",
+      "handle": "apparel",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/510845157683",
+      "title": "Rugby League Wall Art",
+      "handle": "rugby-league-collection",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/511055626547",
+      "title": "AFL Wall Art",
+      "handle": "afl-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/511055659315",
+      "title": "Olympics Wall Art",
+      "handle": "olympics-wall-art",
+      "ruleSet": null
+    },
+    {
+      "id": "gid://shopify/Collection/511800574259",
+      "title": "Formula One Wall Art",
+      "handle": "formula-one-wall-art",
+      "ruleSet": null
+    }
+  ]
+}

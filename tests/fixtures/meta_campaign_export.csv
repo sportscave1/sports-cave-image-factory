@@ -1,0 +1,5 @@
+Reporting starts,Reporting ends,Campaign name,Purchase ROAS (return on ad spend),Website purchase ROAS (return on ad spend),Campaign delivery,Results,Result indicator,Reach,Frequency,Cost per results,Ad set budget,Ad set budget type,Amount spent (AUD),Impressions,"CPM (cost per 1,000 impressions) (AUD)",Link clicks,CPC (cost per link click) (AUD),CTR (link click-through rate),Website adds to cart,Adds to cart,Adds of payment info,Checkouts initiated,Results (initial),Results (initial) indicator
+2026-08-01,2026-08-30,Shane Warne Collector Winner,4.1,4.1,active,3,actions:purchase,10000,2.0,40,50,Daily,120,20000,6,240,0.50,1.20,18,18,7,9,3,actions:purchase
+2026-08-01,2026-08-30,Shane Warne Traffic Test,,,inactive,120,actions:link_click,8000,1.5,0.75,50,Daily,90,12000,7.5,120,0.75,1.00,NaN,,2,4,120,actions:link_click
+2026-08-01,2026-08-30,Legacy Cricket Retargeting,2.5,,archived,2,actions:offsite_conversion.fb_pixel_purchase,4000,2.5,30,500,Lifetime,60,10000,6,80,0.75,0.80,6,6,3,4,2,actions:offsite_conversion.fb_pixel_purchase
+2026-08-01,2026-08-30,,,,0,25000,reach,25000,1.76,,,,270,44000,6.136,440,0.6136,1.00,24,24,12,17,25000,reach

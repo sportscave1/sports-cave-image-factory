@@ -1,0 +1,260 @@
+{
+  "observed_at": "2026-10-11",
+  "purpose": "Read-only evidence, not runtime configuration. Discover IDs per connected store.",
+  "nodes": [
+    {
+      "id": "gid://shopify/Segment/508066988339",
+      "name": "Customers who haven't purchased",
+      "query": "number_of_orders = 0"
+    },
+    {
+      "id": "gid://shopify/Segment/508067021107",
+      "name": "Customers who have purchased more than once",
+      "query": "number_of_orders > 1"
+    },
+    {
+      "id": "gid://shopify/Segment/508067053875",
+      "name": "Abandoned checkouts in the last 30 days",
+      "query": "abandoned_checkout_date >= -30d"
+    },
+    {
+      "id": "gid://shopify/Segment/508067086643",
+      "name": "Email subscribers",
+      "query": "email_subscription_status = 'SUBSCRIBED'"
+    },
+    {
+      "id": "gid://shopify/Segment/543804719411",
+      "name": "Customers who have purchased at least once",
+      "query": "number_of_orders >= 1"
+    },
+    {
+      "id": "gid://shopify/Segment/554490757427",
+      "name": "Amazon",
+      "query": "customer_tags CONTAINS 'Amazon'"
+    },
+    {
+      "id": "gid://shopify/Segment/554490790195",
+      "name": "eBay",
+      "query": "customer_tags CONTAINS 'eBay'"
+    },
+    {
+      "id": "gid://shopify/Segment/564478574899",
+      "name": "Customers with orders",
+      "query": "orders_placed MATCHES () "
+    },
+    {
+      "id": "gid://shopify/Segment/575498027315",
+      "name": "Subscribers who opened or clicked on emails often recently but didn’t make a purchase",
+      "query": "email_subscription_status = 'SUBSCRIBED' AND (shopify_email.opened MATCHES (count >= 3, date >= -90d) OR shopify_email.clicked MATCHES (count >= 3, date >= -90d)) AND number_of_orders = 0"
+    },
+    {
+      "id": "gid://shopify/Segment/575498223923",
+      "name": "Customers with recently abandoned checkouts",
+      "query": "abandoned_checkout_date >= -30d AND last_order_date < -30d"
+    },
+    {
+      "id": "gid://shopify/Segment/575498256691",
+      "name": "Australian customers",
+      "query": "customer_countries CONTAINS 'AU' OR customer_tags CONTAINS 'SC_COUNTRY_AU'"
+    },
+    {
+      "id": "gid://shopify/Segment/575498289459",
+      "name": "NSW Customers",
+      "query": "customer_regions CONTAINS 'AU-NSW'"
+    },
+    {
+      "id": "gid://shopify/Segment/575498649907",
+      "name": "QLD CUSTOMERS",
+      "query": "customer_regions CONTAINS 'AU-QLD'"
+    },
+    {
+      "id": "gid://shopify/Segment/622663205171",
+      "name": "Customers with birthday today",
+      "query": "anniversary('metafields.facts.birth_date') = today"
+    },
+    {
+      "id": "gid://shopify/Segment/622664712499",
+      "name": "Winback customers",
+      "query": "last_order_date <= -60d AND email_subscription_status = 'SUBSCRIBED'"
+    },
+    {
+      "id": "gid://shopify/Segment/646833209651",
+      "name": "Customers not added to companies",
+      "query": "companies IS NULL"
+    },
+    {
+      "id": "gid://shopify/Segment/646833242419",
+      "name": "Customers added to companies",
+      "query": "companies IS NOT NULL"
+    },
+    {
+      "id": "gid://shopify/Segment/650028155187",
+      "name": "Australia",
+      "query": "customer_countries CONTAINS 'AU' OR customer_tags CONTAINS 'SC_COUNTRY_AU'"
+    },
+    {
+      "id": "gid://shopify/Segment/650028187955",
+      "name": "USA",
+      "query": "customer_countries CONTAINS 'US' OR customer_tags CONTAINS 'SC_COUNTRY_US'"
+    },
+    {
+      "id": "gid://shopify/Segment/650028220723",
+      "name": "Canada",
+      "query": "customer_countries CONTAINS 'CA' OR customer_tags CONTAINS 'SC_COUNTRY_CA'"
+    },
+    {
+      "id": "gid://shopify/Segment/650028253491",
+      "name": "UK",
+      "query": "customer_countries CONTAINS 'GB' OR customer_tags CONTAINS 'SC_COUNTRY_GB'"
+    },
+    {
+      "id": "gid://shopify/Segment/650028286259",
+      "name": "New Zealand",
+      "query": "customer_countries CONTAINS 'NZ' OR customer_tags CONTAINS 'SC_COUNTRY_NZ'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462304051",
+      "name": "Basketball Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_BASKETBALL') OR customer_tags CONTAINS 'SC_HIST_BASKETBALL'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462664499",
+      "name": "AFL Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_AFL') OR customer_tags CONTAINS 'SC_HIST_AFL'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462697267",
+      "name": "Baseball Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_BASEBALL') OR customer_tags CONTAINS 'SC_HIST_BASEBALL'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462730035",
+      "name": "Combat Sports Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_COMBAT') OR customer_tags CONTAINS 'SC_HIST_COMBAT'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462762803",
+      "name": "Cricket Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_CRICKET') OR customer_tags CONTAINS 'SC_HIST_CRICKET'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462795571",
+      "name": "Football Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_FOOTBALL') OR customer_tags CONTAINS 'SC_HIST_FOOTBALL'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462828339",
+      "name": "Formula One Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_FORMULA_ONE') OR customer_tags CONTAINS 'SC_HIST_FORMULA_ONE'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462861107",
+      "name": "Golf Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_GOLF') OR customer_tags CONTAINS 'SC_HIST_GOLF'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462893875",
+      "name": "Horse Racing Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_HORSE_RACING') OR customer_tags CONTAINS 'SC_HIST_HORSE_RACING'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462926643",
+      "name": "Ice Hockey Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_ICE_HOCKEY') OR customer_tags CONTAINS 'SC_HIST_ICE_HOCKEY'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462959411",
+      "name": "MotoGP Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_MOTOGP') OR customer_tags CONTAINS 'SC_HIST_MOTOGP'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179462992179",
+      "name": "Motorsport Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_MOTORSPORT') OR customer_tags CONTAINS 'SC_HIST_MOTORSPORT'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463024947",
+      "name": "NASCAR Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_NASCAR') OR customer_tags CONTAINS 'SC_HIST_NASCAR'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463057715",
+      "name": "NFL Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_NFL') OR customer_tags CONTAINS 'SC_HIST_NFL'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463090483",
+      "name": "Olympics Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_OLYMPICS') OR customer_tags CONTAINS 'SC_HIST_OLYMPICS'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463123251",
+      "name": "Rugby League Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_RUGBY_LEAGUE') OR customer_tags CONTAINS 'SC_HIST_RUGBY_LEAGUE'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463156019",
+      "name": "Rugby Union Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_RUGBY_UNION') OR customer_tags CONTAINS 'SC_HIST_RUGBY_UNION'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463188787",
+      "name": "Surfing Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_SURFING') OR customer_tags CONTAINS 'SC_HIST_SURFING'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463221555",
+      "name": "Tennis Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_TENNIS') OR customer_tags CONTAINS 'SC_HIST_TENNIS'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463254323",
+      "name": "V8 Supercars Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_V8_SUPERCARS') OR customer_tags CONTAINS 'SC_HIST_V8_SUPERCARS'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463287091",
+      "name": "WWE Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_WWE') OR customer_tags CONTAINS 'SC_HIST_WWE'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463319859",
+      "name": "Athletics Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_ATHLETICS') OR customer_tags CONTAINS 'SC_HIST_ATHLETICS'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463352627",
+      "name": "Apparel Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_CATEGORY_APPAREL') OR customer_tags CONTAINS 'SC_HIST_APPAREL'"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463876915",
+      "name": "Motocross Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_MOTOCROSS')"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463909683",
+      "name": "Rally Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_RALLY')"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463942451",
+      "name": "Motorcycle Road Racing Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_MOTORCYCLE_ROAD_RACING')"
+    },
+    {
+      "id": "gid://shopify/Segment/1179463975219",
+      "name": "Rally Raid Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_RALLY_RAID')"
+    },
+    {
+      "id": "gid://shopify/Segment/1179464007987",
+      "name": "IndyCar Buyers",
+      "query": "products_purchased MATCHES (tag CONTAINS 'SC_SPORT_INDYCAR')"
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": "eyJsaW1pdCI6NTAsInNvcnRfZmllbGRzIjoiY3JlYXRlZF9hdCIsInNvcnRfZGlyIjoiYXNjIiwibGFzdF9pZCI6MTE3OTQ2NDAwNzk4NywibGFzdF92YWx1ZSI6WyIyMDI2LTEwLTEwIDIzOjExOjExLjQyODI4OSJdLCJkaXJlY3Rpb24iOiJuZXh0In0="
+  }
+}

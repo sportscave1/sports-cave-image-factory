@@ -1,0 +1,20 @@
+{
+  "GLOBAL-CFP-A1": {
+    "product_kind": "framed",
+    "printable_mm": [
+      841,
+      594
+    ],
+    "pixel_dimensions": [
+      9933,
+      7016
+    ],
+    "recommended_ppi": 300,
+    "source": "Owner-confirmed Prodigi editor, 2026-10-14",
+    "verification_status": "Editor dimensions confirmed; certification incomplete",
+    "bleed_mm": null,
+    "safe_margins_mm": null,
+    "colour_profile": null,
+    "quality_approved": false
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "baseline_commit": "9b188dfad5ce0171a7c3a935397b2b6c3f9715e9",
+  "environment": "Local disposable PostgreSQL; mocked Shopify and mail provider; external browser requests blocked",
+  "crm_current": {
+    "run": 1175,
+    "passed": 1152,
+    "failures": 12,
+    "errors": 10,
+    "skipped": 1,
+    "seconds": 128.434
+  },
+  "crm_head": {
+    "run": 1154,
+    "passed": 1131,
+    "failures": 12,
+    "errors": 10,
+    "skipped": 1,
+    "seconds": 119.333
+  },
+  "additional_failure_names": [],
+  "existing_failure_names": [
+    "test_automation_activation_fails_closed (tests.test_crm_ui.UiTests.test_automation_activation_fails_closed)",
+    "test_automation_only_polling_and_debounce (tests.test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+    "test_bounce_cohort_deduplicates_verified_events_excludes_tests_and_old_sends (tests.test_crm_campaign_cleanup.DeletionSQLTests.test_bounce_cohort_deduplicates_verified_events_excludes_tests_and_old_sends)",
+    "test_delete_confirmation_is_explicit_and_cancel_retains_draft (tests.test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+    "test_deleted_linked_segment_fails_closed_retains_stale (tests.test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+    "test_edits_update_draft_render_not_draft_or_historical_snapshot (tests.test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+    "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (tests.test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+    "test_empty_list_and_healthy_settings_render (tests.test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+    "test_failure_not_cached (tests.test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+    "test_internal_test_uses_global_footer_production_render_and_never_resends (tests.test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+    "test_location_transfer_and_no_double_count (tests.test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+    "test_locked_assets_have_attribution_not_body_misattribution (tests.test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)",
+    "test_manifest_is_reviewed_and_check_never_connects (tests.test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+    "test_metadata_shared_sorted_and_copied_without_bodies (tests.test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+    "test_mocked_test_payload_uses_latest_defaults_and_native_link (tests.test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+    "test_outage_keeps_navigation_and_blocks_creating (tests.test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+    "test_recent_open_uses_same_editor_and_protects_unsaved_compose (tests.test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+    "test_segment_query_change_and_rename_preserve_id (tests.test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+    "test_subscribe_and_unsubscribe_refresh_au_and_global_only (tests.test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+    "test_tag_add_remove_with_no_address (tests.test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+    "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (tests.test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+    "test_ui_has_only_global_edit_actions_and_preserves_body (tests.test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)"
+  ],
+  "new_tests_passed": 21,
+  "edition_tests_passed": 94,
+  "render_benchmark_head_ms": 4.076,
+  "render_benchmark_current": {
+    "mode": "working_tree",
+    "legacy_hydrate_and_render_ms": 4.814,
+    "composable_hydrate_and_render_ms": 6.982,
+    "minimal_hydrate_and_render_ms": 2.256,
+    "cached_preview_output_ms": 0.028
+  },
+  "browser_suites": [
+    "recovery_elements",
+    "email_v4 (eight unchanged checkout editor cycles)",
+    "discount_selector",
+    "durable_automation_publication"
+  ],
+  "limitations": [
+    "No real Gmail/Outlook inbox rendering test",
+    "Existing full-suite failures remain",
+    "Complex HTML retains HTML editing",
+    "Stacked visual elements; custom adjacent layouts use HTML"
+  ],
+  "production_mutations": false,
+  "committed": false,
+  "pushed": false,
+  "deployed": false
+}

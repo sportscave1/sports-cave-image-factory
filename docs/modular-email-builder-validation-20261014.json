@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-14",
+  "task": "20261011-54d8ff88",
+  "status": "Implemented and tested locally; uncommitted",
+  "root_cause": "Automation Add Section emitted a replacement confirmation and routed templates to apply_template; automation preset payloads were not available to the incremental editor. A separate legacy library stage insertion path also replaced body/subject.",
+  "production_files": {
+    "crm_middle_sections.py": "One insertion transaction for all section types, optional validated position, unique copied section identities, no removal of empty/hidden existing HTML, no insertion-time template-ref replacement, editable Custom Button starter.",
+    "crm_section_ui.py": "Campaign and automation presets use the same body-source resolver and shared apply_event path. No Add Section path calls full replacement.",
+    "crm_template_library.py": "Reusable body-section source supports saved structured groups and edited builtin source without copying fixed branding or email settings.",
+    "crm_campaign_library.py": "Legacy insertion helpers use shared section insertion; removed stage replacement shortcut. Templates explicitly distinguish Insert section and Apply full template.",
+    "crm_template_library_ui.py": "Shared body-only replacement UI with warning, cancel, template-version validation and confirmation state scoped to the current email step. Uses draft autosave and targeted composer callback reruns.",
+    "crm_campaign_page.py": "Passes the current draft to the automation Templates tab.",
+    "components/crm_sections/composer.js": "Optimistic insertion for all modes, selectable position, independent group copies, automatic expansion, no replacement confirmation, safe fallback flushing, pending CTA/tab navigation preservation.",
+    "components/crm_sections/index.html": "Insertion position and Custom Button controls, explicit insertion/replacement distinction.",
+    "components/crm_sections/style.css": "Compact responsive Add Section menu and position selector.",
+    "crm_automation_store.py": "Preview-only fix: use the already bound preview trigger instead of reading a missing draft_identity when the body contains lifestyle content."
+  },
+  "test_files": [
+    "tests/test_crm_modular_builder.py",
+    "tests/test_crm_modular_builder_ui.cjs",
+    "tests/test_crm_template_picker.py"
+  ],
+  "validation": {
+    "python": "131 tests passed with no skips against a fresh disposable loopback PGlite/PostgreSQL fixture.",
+    "browser": "Actual shared Streamlit campaign and automation editors passed at 1440px and 390px; all external browser requests blocked.",
+    "scenarios": [
+      "Wall preset after Catalogue without replacement",
+      "structured multi-section preset insertion",
+      "multiple independent HTML sections",
+      "insertion between existing sections",
+      "reorder using existing drag-handle keyboard control",
+      "duplicate and independent copy edits",
+      "hide/delete/undo",
+      "SQL save and browser reload",
+      "Settings/Editor/Templates navigation",
+      "rapid CTA edit then immediate tab switch",
+      "preview includes complete section content",
+      "full-template warning, cancel and confirm",
+      "subject preserved",
+      "fixed branding preserved by server contracts",
+      "customer preview and frozen test/live payload preserve rendered order"
+    ],
+    "syntax": "JavaScript syntax and git diff --check passed."
+  },
+  "commands": [
+    "CRM_FIXTURE_SQL_PORT=18893 node tests/crm_postgres_server.mjs (PowerShell: set environment variable separately)",
+    "PYTHONPATH=.tmp-flow-preview/deps CRM_TEST_POSTGRES=1 CRM_FIXTURE_SQL_PORT=18893 python -m unittest tests.test_crm_modular_builder tests.test_crm_modular_catalogue tests.test_crm_wall_preview_template tests.test_crm_local_editor tests.test_crm_section_ux tests.test_crm_template_picker tests.test_crm_image_sections tests.test_crm_checkout_section tests.test_crm_collector_v2 tests.test_crm_flow_customer_preview tests.test_crm_html_personalisation tests.test_crm_smart_matching",
+    "Local fixtures: tests/fixtures/crm_automation_preview.py on 18895 and tests/fixtures/crm_smart_catalogue_ui.py on 18894 using the same disposable SQL port.",
+    "node tests/test_crm_modular_builder_ui.cjs",
+    "MODULAR_WIDTH=390 node tests/test_crm_modular_builder_ui.cjs",
+    "node --check components/crm_sections/composer.js",
+    "git diff --check"
+  ],
+  "remaining_limitations": [
+    "Existing platform document-size, product-count and sanitisation limits remain in force.",
+    "Dynamic preset data still needs its existing compatible recipient/flow context; this change does not relax publication or eligibility safeguards.",
+    "No real test emails or native inbox delivery were exercised; test/live output validation used synthetic hydrated documents and frozen payloads.",
+    "An additional pre-existing test_crm_template_library_v4.test_builtin_edit_keeps_identity_and_merge_markers test references retired post_purchase-1. Its StopIteration was reproduced against HEAD library rows, which also exclude that retired preset. It was not changed; the final 131-test focused suite is fully passing."
+  ],
+  "safety": "No commits, pushes, deployments, email sends, publication, automation activation or live customer-data changes. Only disposable local fixture records were written."
+}

@@ -1,0 +1,370 @@
+{
+  "baseline-clean": {
+    "cold": {
+      "firstUsefulMs": {
+        "n": 12,
+        "p50": 542.4,
+        "p95": 1323
+      },
+      "previewReadyMs": {
+        "n": 12,
+        "p50": 622.4,
+        "p95": 1328.2
+      },
+      "reads": {
+        "n": 12,
+        "p50": 4.0,
+        "p95": 8
+      },
+      "dbWaitMs": {
+        "n": 12,
+        "p50": 25.6,
+        "p95": 172.4
+      },
+      "editorTabMs": {
+        "n": 12,
+        "p50": 224.9,
+        "p95": 237.5
+      },
+      "templatesMs": {
+        "n": 12,
+        "p50": 121.9,
+        "p95": 218.4
+      },
+      "previewSwitchMs": {
+        "n": 12,
+        "p50": 85.8,
+        "p95": 119.2
+      },
+      "backMs": {
+        "n": 12,
+        "p50": 210.6,
+        "p95": 235.1
+      }
+    },
+    "warm": {
+      "firstUsefulMs": {
+        "n": 12,
+        "p50": 379.5,
+        "p95": 843.8
+      },
+      "previewReadyMs": {
+        "n": 12,
+        "p50": 395.6,
+        "p95": 846.2
+      },
+      "reads": {
+        "n": 12,
+        "p50": 3.0,
+        "p95": 3
+      },
+      "dbWaitMs": {
+        "n": 12,
+        "p50": 13.7,
+        "p95": 58.2
+      },
+      "editorTabMs": {
+        "n": 12,
+        "p50": 214.2,
+        "p95": 242.9
+      },
+      "templatesMs": {
+        "n": 12,
+        "p50": 121.6,
+        "p95": 212.8
+      },
+      "previewSwitchMs": {
+        "n": 12,
+        "p50": 94.6,
+        "p95": 102.8
+      },
+      "backMs": {
+        "n": 12,
+        "p50": 207.0,
+        "p95": 285.5
+      }
+    }
+  },
+  "current-clean": {
+    "cold": {
+      "firstUsefulMs": {
+        "n": 12,
+        "p50": 321.2,
+        "p95": 822.6
+      },
+      "previewReadyMs": {
+        "n": 12,
+        "p50": 343.8,
+        "p95": 825.3
+      },
+      "reads": {
+        "n": 12,
+        "p50": 3.0,
+        "p95": 7
+      },
+      "dbWaitMs": {
+        "n": 12,
+        "p50": 11.4,
+        "p95": 51.3
+      },
+      "editorTabMs": {
+        "n": 12,
+        "p50": 217.4,
+        "p95": 244.9
+      },
+      "templatesMs": {
+        "n": 12,
+        "p50": 119.0,
+        "p95": 225.5
+      },
+      "previewSwitchMs": {
+        "n": 12,
+        "p50": 87.8,
+        "p95": 113.8
+      },
+      "backMs": {
+        "n": 12,
+        "p50": 193.0,
+        "p95": 272.8
+      }
+    },
+    "warm": {
+      "firstUsefulMs": {
+        "n": 12,
+        "p50": 304.9,
+        "p95": 358.9
+      },
+      "previewReadyMs": {
+        "n": 12,
+        "p50": 307.9,
+        "p95": 366
+      },
+      "reads": {
+        "n": 12,
+        "p50": 3.0,
+        "p95": 3
+      },
+      "dbWaitMs": {
+        "n": 12,
+        "p50": 23.5,
+        "p95": 61.3
+      },
+      "editorTabMs": {
+        "n": 12,
+        "p50": 206.9,
+        "p95": 240.4
+      },
+      "templatesMs": {
+        "n": 12,
+        "p50": 116.0,
+        "p95": 236
+      },
+      "previewSwitchMs": {
+        "n": 12,
+        "p50": 86.9,
+        "p95": 120.2
+      },
+      "backMs": {
+        "n": 12,
+        "p50": 211.2,
+        "p95": 256.3
+      }
+    }
+  },
+  "v4_regressions": {
+    "baseline": {
+      "run": 1088,
+      "failures_and_errors": [
+        "test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+        "test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+        "test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+        "test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+        "test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+        "test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+        "test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+        "test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+        "test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+        "test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)",
+        "test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+        "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+        "test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+        "test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+        "test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)",
+        "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+        "test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+        "test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+        "test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+        "test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+        "test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)"
+      ],
+      "skipped": 1
+    },
+    "after": {
+      "run": 1104,
+      "failures_and_errors": [
+        "test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+        "test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+        "test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+        "test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+        "test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+        "test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+        "test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+        "test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+        "test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+        "test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)",
+        "test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+        "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+        "test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+        "test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+        "test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)",
+        "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+        "test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+        "test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+        "test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+        "test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+        "test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)"
+      ],
+      "skipped": 1
+    },
+    "new": [],
+    "focused": {
+      "run": 455,
+      "failures": 0,
+      "seconds": 104.176
+    },
+    "mail_navigation_worker": {
+      "run": 86,
+      "failures": 0,
+      "seconds": 2.804
+    }
+  },
+  "regression_runs": {
+    "baseline": {
+      "run": 1195,
+      "seconds": 206.855,
+      "failures": [
+        "test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+        "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+        "test_slow_checkout_does_not_block_other_results_and_bounded_parallelism (test_crm_checkout_enrollment_requests.RequestTests.test_slow_checkout_does_not_block_other_results_and_bounded_parallelism)",
+        "test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+        "test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+        "test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)",
+        "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+        "test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+        "test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+        "test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+        "test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+        "test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)"
+      ],
+      "errors": [
+        "test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+        "test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+        "test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+        "test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+        "test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+        "test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+        "test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+        "test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+        "test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+        "test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)"
+      ],
+      "skipped": 1,
+      "passed": 1172,
+      "failures_and_errors": [
+        "test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+        "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+        "test_slow_checkout_does_not_block_other_results_and_bounded_parallelism (test_crm_checkout_enrollment_requests.RequestTests.test_slow_checkout_does_not_block_other_results_and_bounded_parallelism)",
+        "test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+        "test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+        "test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)",
+        "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+        "test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+        "test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+        "test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+        "test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+        "test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)",
+        "test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+        "test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+        "test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+        "test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+        "test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+        "test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+        "test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+        "test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+        "test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+        "test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)"
+      ]
+    },
+    "final": {
+      "run": 1197,
+      "seconds": 204.843,
+      "failures": [
+        "test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+        "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+        "test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+        "test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+        "test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)",
+        "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+        "test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+        "test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+        "test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+        "test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+        "test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)"
+      ],
+      "errors": [
+        "test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+        "test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+        "test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+        "test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+        "test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+        "test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+        "test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+        "test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+        "test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+        "test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)"
+      ],
+      "skipped": 1,
+      "passed": 1175,
+      "failures_and_errors": [
+        "test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)",
+        "test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)",
+        "test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)",
+        "test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)",
+        "test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)",
+        "test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)",
+        "test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)",
+        "test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)",
+        "test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)",
+        "test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)",
+        "test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)",
+        "test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)",
+        "test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)",
+        "test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)",
+        "test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)",
+        "test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)",
+        "test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)",
+        "test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)",
+        "test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)",
+        "test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)",
+        "test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)"
+      ]
+    },
+    "focused": {
+      "run": 178,
+      "seconds": 101.01,
+      "failures": [],
+      "errors": [],
+      "skipped": 0,
+      "passed": 178
+    },
+    "final_popover": {
+      "run": 32,
+      "seconds": 6.063,
+      "failures": [],
+      "errors": [],
+      "skipped": 0,
+      "passed": 32
+    }
+  },
+  "new_regressions": []
+}

@@ -1,0 +1,26 @@
+const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs');
+(async()=>{const b=await chromium.launch({channel:'chrome',headless:true}),report=[];
+try{for(const kind of ['abandoned','welcome','post_purchase','win_back','fulfilled']){
+ const p=await b.newPage({viewport:{width:1440,height:1000}});
+ await p.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ await p.goto(`http://127.0.0.1:18752/?flow=${kind}&profile=1`);await p.locator('summary').first().click();
+ const f=p.frameLocator('iframe').first();await f.locator('tbody tr').nth(49).waitFor();
+ await f.locator('tbody input').first().check();await f.getByText('50 shown · 1 selected',{exact:true}).waitFor();
+ const detail=f.getByRole('button',{name:'Details Fixture customer 0',exact:true});await detail.click();
+ const close=p.getByRole('button',{name:'Close details',exact:true});await close.waitFor();
+ await p.waitForFunction(()=>document.querySelector('iframe')?.contentDocument?.querySelector('.customer')?.getAttribute('aria-expanded')==='true');
+ await detail.focus();await detail.press('Escape');await close.waitFor({state:'hidden'});
+ assert.equal(await f.locator('tbody input:checked').count(),1);
+ await detail.click();await close.waitFor();await close.click();await close.waitFor({state:'hidden'});
+ await p.waitForTimeout(1100);
+ const metrics=async()=>JSON.parse((await p.getByText(/^FIXTURE_METRICS/).innerText()).replace('FIXTURE_METRICS ',''));
+ const before=await metrics(),at=Date.now();await p.getByRole('button',{name:kind==='abandoned'?'Next checkouts':'Next',exact:true}).click();
+ await f.getByRole('button',{name:'Details Fixture customer 50',exact:true}).waitFor();const pageMs=Date.now()-at;
+ await f.getByText('50 shown · 1 selected',{exact:true}).waitFor();await p.waitForTimeout(1100);
+ const after=await metrics();assert.equal(after.reads-before.reads,1);assert.equal(after.fragment_ms.length-before.fragment_ms.length,1,'one fragment per page action: '+kind);
+ await f.locator('thead input').check();await f.locator('thead input').uncheck();await f.getByText('50 shown · 0 selected',{exact:true}).waitFor();
+ await p.screenshot({path:`.tmp-email-v2/${kind}-desktop.png`,fullPage:true});
+ await p.setViewportSize({width:390,height:900});await p.waitForTimeout(300);assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await p.screenshot({path:`.tmp-email-v2/${kind}-mobile.png`,fullPage:true});
+ assert.equal(await p.getByTestId('stException').count(),0);report.push({kind,pageMs,fragmentRuns:1,detailsCloseAndEscape:true,desktopMobile:true});console.log(JSON.stringify(report.at(-1)));await p.close();
+}fs.writeFileSync('.tmp-email-v2/interactions.json',JSON.stringify(report,null,2));}finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});

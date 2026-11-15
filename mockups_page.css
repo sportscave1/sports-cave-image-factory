@@ -1,0 +1,40 @@
+/* Scoped exclusively to the Mockups workspace; no processing or source-image changes. */
+[data-testid="stAppViewContainer"]:has(.st-key-mockups-workspace) [data-testid="stMainBlockContainer"] {padding-top:14px;padding-bottom:24px;}
+.st-key-mockups-workspace {container-type:inline-size;font-family:"Segoe UI",system-ui,sans-serif;}
+.st-key-mockups-workspace [data-testid="stVerticalBlock"] {gap:10px;}
+.st-key-mockups-workspace h1 {font-size:26px;padding:0;line-height:1.3;margin:0;}
+.st-key-mockups-workspace h3 {font-size:17px;padding:5px 0;line-height:1.3;margin:0;}
+.st-key-mockups-workspace [data-testid="stCaptionContainer"] {font-size:12px;line-height:1.4;}
+.st-key-mockups-workspace button {min-height:36px;border-radius:6px!important;padding:6px 12px;font-size:14px;font-weight:500;box-shadow:none!important;}
+.st-key-mockups-workspace button[kind="secondary"],.st-key-mockups-workspace [data-testid="stDownloadButton"] button {background:#fff;color:#242424;border:1px solid #dedbd4;}
+.st-key-mockups-workspace button[kind="primary"] {background:var(--sc-gold,#D4A54C);color:#161616;}
+.st-key-mockups-workspace button:focus-visible {outline:2px solid #997322;outline-offset:2px;}
+.st-key-mockups-workspace button:disabled {opacity:.5;cursor:not-allowed;}
+.st-key-mockups-workspace [data-testid="stFileUploaderDropzone"] {padding:8px 10px;min-height:64px;gap:8px;border-radius:6px;}
+.st-key-mockups-workspace [data-testid="stFileUploaderDropzone"] svg {width:20px;height:20px;}
+.st-key-mockups-workspace [data-testid="stFileUploaderDropzone"] small {font-size:11px;}
+.st-key-mockups-workspace [data-testid="stAlert"] {padding:8px 12px;border-radius:6px;}
+.st-key-mockups-workspace [data-baseweb="input"],.st-key-mockups-workspace [data-baseweb="select"] > div {min-height:36px;border-radius:6px;}
+.st-key-mockups-gallery,.st-key-mockups-lifestyle-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start;}
+.st-key-mockups-gallery [class*="st-key-mockups-image-"],.st-key-mockups-lifestyle-grid [class*="st-key-mockups-lifestyle-"] {min-width:0;border:1px solid #e5e1d8;border-radius:7px;padding:12px;background:#fff;}
+.st-key-mockups-workspace [class*="st-key-mockups-thumb-"] [data-testid="stImage"] {width:100%!important;}
+.st-key-mockups-workspace [class*="st-key-mockups-thumb-"] img {max-height:240px;width:100%;object-fit:contain;}
+@container (max-width:900px) {
+ .st-key-mockups-gallery,.st-key-mockups-lifestyle-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@container (max-width:580px) {
+ .st-key-mockups-gallery,.st-key-mockups-lifestyle-grid {grid-template-columns:minmax(0,1fr);}
+ .st-key-mockups-workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {flex-wrap:wrap;}
+ .st-key-mockups-workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {width:100%!important;flex:1 1 100%!important;min-width:0;}
+}
+/* Override the shell's high-specificity gold upload/secondary defaults only here. */
+.st-key-mockups-workspace div[data-testid="stButton"] button,
+.st-key-mockups-workspace div[data-testid="stDownloadButton"] button,
+.st-key-mockups-workspace div[data-testid="stFileUploader"] button {border-radius:6px!important;min-height:36px!important;padding:6px 12px!important;font-weight:500!important;}
+.st-key-mockups-workspace div[data-testid="stButton"] button[kind="secondary"],
+.st-key-mockups-workspace div[data-testid="stDownloadButton"] button,
+.st-key-mockups-workspace div[data-testid="stFileUploader"] button {background:#fff!important;color:#242424!important;border:1px solid #d5d1c8!important;}
+.st-key-mockups-workspace div[data-testid="stFileUploader"] {padding:10px!important;border-radius:6px!important;}
+.st-key-mockups-workspace section[data-testid="stFileUploaderDropzone"] {padding:4px!important;min-height:42px!important;}
+.st-key-mockups-workspace button:hover:not(:disabled) {border-color:#a88743!important;}
+.st-key-mockups-workspace [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {background:#fff!important;border:1px solid #d5d1c8!important;border-radius:6px!important;padding:6px 12px!important;min-height:36px!important;}

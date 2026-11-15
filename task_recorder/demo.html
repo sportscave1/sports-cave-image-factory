@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Task Recorder local demonstration</title><link rel="stylesheet" href="/ui.css"><script src="/demo.js" defer></script></head>
+<body><header><h1>Local demonstration</h1><span>Synthetic data only</span></header><nav><a href="/demo">Home</a><a href="/demo/form">Product form</a><a href="/demo/signin">Sign-in safety fixture</a></nav>
+<section id="home"><h2>Practice task</h2><p>Navigate to the product form, enter values, choose a category, upload one file, reveal delayed content and submit a local result.</p><a href="/demo/form">Start product form</a></section>
+<section id="formPage" hidden><form id="productForm">
+<p><label>Product name <input name="product" id="product" required></label></p>
+<p><label>Headline <input name="headline" id="headline" required></label></p>
+<p><label>Destination URL <input name="destination" id="destination" type="url" required></label></p>
+<p><label for="category">Category</label> <select id="category"><option value="art">Art</option><option value="sport">Sport</option></select></p>
+<p><label>Image <input id="image" type="file" accept="image/*,.txt"></label></p><p id="uploadStatus" role="status"></p>
+<p><label><input id="approved" type="checkbox"> Approved</label></p>
+<button id="reveal" type="button">Reveal delayed content</button><div id="delayed"></div>
+<p><button type="submit">Save demo product</button></p></form><div id="result" role="status"></div></section>
+<section id="signin" hidden><h2>Fake sign-in (do not enter real credentials)</h2><label>Username <input autocomplete="username" id="username"></label><label>Password <input type="password" id="password" autocomplete="current-password"></label><button id="fakeLogin">Return to demo</button></section>
+</body></html>

@@ -1,0 +1,789 @@
+{
+  "date": "2026-10-13",
+  "baseline_commit": "8a593ef4ccf8eac094777adf665b65de0de56c9d",
+  "task": "20261011-54d8ff88",
+  "owner": "me/email-flow-fix",
+  "synthetic_only": true,
+  "paired_panel_medians_and_samples": [
+    {
+      "kind": "abandoned",
+      "samples": {
+        "before": [
+          {
+            "coldMs": 355,
+            "warmMs": 249
+          },
+          {
+            "coldMs": 239,
+            "warmMs": 251
+          },
+          {
+            "coldMs": 225,
+            "warmMs": 240
+          },
+          {
+            "coldMs": 246,
+            "warmMs": 245
+          },
+          {
+            "coldMs": 227,
+            "warmMs": 231
+          }
+        ],
+        "after": [
+          {
+            "coldMs": 822,
+            "warmMs": 233
+          },
+          {
+            "coldMs": 228,
+            "warmMs": 233
+          },
+          {
+            "coldMs": 236,
+            "warmMs": 247
+          },
+          {
+            "coldMs": 262,
+            "warmMs": 246
+          },
+          {
+            "coldMs": 234,
+            "warmMs": 250
+          }
+        ]
+      },
+      "before": {
+        "coldMs": 239,
+        "warmMs": 245
+      },
+      "after": {
+        "coldMs": 236,
+        "warmMs": 246
+      }
+    },
+    {
+      "kind": "welcome",
+      "samples": {
+        "before": [
+          {
+            "coldMs": 1392,
+            "warmMs": 235
+          },
+          {
+            "coldMs": 1362,
+            "warmMs": 250
+          },
+          {
+            "coldMs": 1350,
+            "warmMs": 235
+          },
+          {
+            "coldMs": 1371,
+            "warmMs": 231
+          },
+          {
+            "coldMs": 1370,
+            "warmMs": 234
+          }
+        ],
+        "after": [
+          {
+            "coldMs": 236,
+            "warmMs": 250
+          },
+          {
+            "coldMs": 245,
+            "warmMs": 248
+          },
+          {
+            "coldMs": 253,
+            "warmMs": 251
+          },
+          {
+            "coldMs": 234,
+            "warmMs": 250
+          },
+          {
+            "coldMs": 235,
+            "warmMs": 266
+          }
+        ]
+      },
+      "before": {
+        "coldMs": 1370,
+        "warmMs": 235
+      },
+      "after": {
+        "coldMs": 236,
+        "warmMs": 250
+      }
+    },
+    {
+      "kind": "post_purchase",
+      "samples": {
+        "before": [
+          {
+            "coldMs": 240,
+            "warmMs": 247
+          },
+          {
+            "coldMs": 241,
+            "warmMs": 250
+          },
+          {
+            "coldMs": 254,
+            "warmMs": 234
+          },
+          {
+            "coldMs": 346,
+            "warmMs": 247
+          },
+          {
+            "coldMs": 232,
+            "warmMs": 245
+          }
+        ],
+        "after": [
+          {
+            "coldMs": 234,
+            "warmMs": 249
+          },
+          {
+            "coldMs": 234,
+            "warmMs": 265
+          },
+          {
+            "coldMs": 233,
+            "warmMs": 249
+          },
+          {
+            "coldMs": 219,
+            "warmMs": 248
+          },
+          {
+            "coldMs": 235,
+            "warmMs": 251
+          }
+        ]
+      },
+      "before": {
+        "coldMs": 241,
+        "warmMs": 247
+      },
+      "after": {
+        "coldMs": 234,
+        "warmMs": 249
+      }
+    },
+    {
+      "kind": "win_back",
+      "samples": {
+        "before": [
+          {
+            "coldMs": 1378,
+            "warmMs": 249
+          },
+          {
+            "coldMs": 1349,
+            "warmMs": 245
+          },
+          {
+            "coldMs": 1372,
+            "warmMs": 232
+          },
+          {
+            "coldMs": 1348,
+            "warmMs": 246
+          },
+          {
+            "coldMs": 1368,
+            "warmMs": 253
+          }
+        ],
+        "after": [
+          {
+            "coldMs": 252,
+            "warmMs": 254
+          },
+          {
+            "coldMs": 229,
+            "warmMs": 233
+          },
+          {
+            "coldMs": 229,
+            "warmMs": 233
+          },
+          {
+            "coldMs": 233,
+            "warmMs": 247
+          },
+          {
+            "coldMs": 232,
+            "warmMs": 240
+          }
+        ]
+      },
+      "before": {
+        "coldMs": 1368,
+        "warmMs": 246
+      },
+      "after": {
+        "coldMs": 232,
+        "warmMs": 240
+      }
+    },
+    {
+      "kind": "fulfilled",
+      "samples": {
+        "before": [],
+        "after": [
+          {
+            "coldMs": 227,
+            "warmMs": 234
+          },
+          {
+            "coldMs": 242,
+            "warmMs": 249
+          },
+          {
+            "coldMs": 234,
+            "warmMs": 221
+          },
+          {
+            "coldMs": 230,
+            "warmMs": 248
+          },
+          {
+            "coldMs": 242,
+            "warmMs": 249
+          }
+        ]
+      },
+      "before": {
+        "coldMs": null,
+        "warmMs": null
+      },
+      "after": {
+        "coldMs": 234,
+        "warmMs": 248
+      }
+    }
+  ],
+  "sustained_panels": [
+    {
+      "kind": "abandoned",
+      "width": 1440,
+      "coldMs": 878,
+      "warmMs": 251,
+      "readsDuringWindow": 5,
+      "windowSeconds": 65,
+      "readSamples": [
+        21,
+        20.51,
+        21.01,
+        20.66,
+        20.98
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 1440,
+      "coldMs": 249,
+      "warmMs": 266,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.11,
+        20.83,
+        20.86
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 1440,
+      "coldMs": 261,
+      "warmMs": 266,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.04,
+        20.74,
+        20.58
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 1440,
+      "coldMs": 241,
+      "warmMs": 14,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.91,
+        21.07,
+        20.61
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "width": 1440,
+      "coldMs": 253,
+      "warmMs": 248,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.99,
+        20.88,
+        21.32
+      ]
+    },
+    {
+      "kind": "abandoned",
+      "width": 390,
+      "coldMs": 236,
+      "warmMs": 21,
+      "readsDuringWindow": 5,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.01,
+        21.09,
+        21.02,
+        20.59,
+        20.95
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 390,
+      "coldMs": 243,
+      "warmMs": 24,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.28,
+        20.81,
+        21.38
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 390,
+      "coldMs": 382,
+      "warmMs": 251,
+      "readsDuringWindow": 2,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.9,
+        21.17
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 390,
+      "coldMs": 240,
+      "warmMs": 16,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.14,
+        20.55,
+        20.58
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "width": 390,
+      "coldMs": 233,
+      "warmMs": 246,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.85,
+        20.79,
+        20.78
+      ]
+    }
+  ],
+  "baseline_sustained_panels": [
+    {
+      "kind": "abandoned",
+      "width": 1440,
+      "coldMs": 355,
+      "preservedScroll": 210,
+      "remounts": 0,
+      "warmMs": 250,
+      "readsDuringWindow": 5,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.45,
+        20.53,
+        20.86,
+        21.19,
+        20.6
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 1440,
+      "coldMs": 1354,
+      "preservedScroll": 0,
+      "remounts": 0,
+      "warmMs": 249,
+      "readsDuringWindow": 2,
+      "windowSeconds": 65,
+      "readSamples": [
+        35.41,
+        39.62
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 1440,
+      "coldMs": 336,
+      "preservedScroll": 210,
+      "remounts": 0,
+      "warmMs": 253,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.13,
+        21.11,
+        21.03
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 1440,
+      "coldMs": 1369,
+      "preservedScroll": 0,
+      "remounts": 0,
+      "warmMs": 264,
+      "readsDuringWindow": 2,
+      "windowSeconds": 65,
+      "readSamples": [
+        33.65,
+        39.8
+      ]
+    }
+  ],
+  "slow_reads": [
+    {
+      "kind": "abandoned",
+      "width": 1440,
+      "coldMs": 1378,
+      "warmMs": 248,
+      "readsDuringWindow": 3,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.76,
+        250.75,
+        250.67
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 1440,
+      "coldMs": 864,
+      "warmMs": 230,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        251.03,
+        250.63
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 1440,
+      "coldMs": 861,
+      "warmMs": 250,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.89,
+        251.02
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 1440,
+      "coldMs": 833,
+      "warmMs": 237,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.8,
+        251.07
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "width": 1440,
+      "coldMs": 856,
+      "warmMs": 243,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.85,
+        250.64
+      ]
+    }
+  ],
+  "editor": [
+    {
+      "kind": "abandoned",
+      "editorMs": 707,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "welcome",
+      "editorMs": 602,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "post_purchase",
+      "editorMs": 854,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "win_back",
+      "editorMs": 856,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "fulfilled",
+      "editorMs": 2457,
+      "saveReload": true,
+      "mobile": true
+    }
+  ],
+  "sql_before": [
+    {
+      "flow": "welcome",
+      "query": "first_page",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 51,
+      "warm_samples_ms": [
+        41.69,
+        42.6,
+        41.41,
+        41.19,
+        41.28
+      ],
+      "median_ms": 41.41
+    },
+    {
+      "flow": "welcome",
+      "query": "search",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 1,
+      "warm_samples_ms": [
+        41.54,
+        41.31,
+        41.48,
+        41.76,
+        42.55
+      ],
+      "median_ms": 41.54
+    },
+    {
+      "flow": "post_purchase",
+      "query": "first_page",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 51,
+      "warm_samples_ms": [
+        54.98,
+        70.31,
+        68.86,
+        69.46,
+        43.31
+      ],
+      "median_ms": 68.86
+    },
+    {
+      "flow": "post_purchase",
+      "query": "search",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 1,
+      "warm_samples_ms": [
+        57.36,
+        57.09,
+        55.72,
+        71.42,
+        55.71
+      ],
+      "median_ms": 57.09
+    },
+    {
+      "flow": "win_back",
+      "query": "first_page",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 51,
+      "warm_samples_ms": [
+        53.12,
+        53.41,
+        64.22,
+        52.76,
+        53.75
+      ],
+      "median_ms": 53.41
+    },
+    {
+      "flow": "win_back",
+      "query": "search",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 1,
+      "warm_samples_ms": [
+        57.57,
+        60.97,
+        58.73,
+        58.09,
+        58.19
+      ],
+      "median_ms": 58.19
+    }
+  ],
+  "sql_after": [
+    {
+      "flow": "welcome",
+      "query": "first_page",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 51,
+      "warm_samples_ms": [
+        45.95,
+        44.23,
+        43.67,
+        52.41,
+        41.78
+      ],
+      "median_ms": 44.23
+    },
+    {
+      "flow": "welcome",
+      "query": "search",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 1,
+      "warm_samples_ms": [
+        41.72,
+        41.56,
+        41.36,
+        41.27,
+        41.18
+      ],
+      "median_ms": 41.36
+    },
+    {
+      "flow": "post_purchase",
+      "query": "first_page",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 51,
+      "warm_samples_ms": [
+        44.66,
+        43.19,
+        43.17,
+        42.92,
+        42.82
+      ],
+      "median_ms": 43.17
+    },
+    {
+      "flow": "post_purchase",
+      "query": "search",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 1,
+      "warm_samples_ms": [
+        55.4,
+        55.27,
+        55.84,
+        55.45,
+        55.15
+      ],
+      "median_ms": 55.4
+    },
+    {
+      "flow": "win_back",
+      "query": "first_page",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 51,
+      "warm_samples_ms": [
+        54.51,
+        54.8,
+        56.16,
+        55.21,
+        54.24
+      ],
+      "median_ms": 54.8
+    },
+    {
+      "flow": "win_back",
+      "query": "search",
+      "synthetic_customers": 10000,
+      "synthetic_orders": 10000,
+      "queries_per_call": 1,
+      "shopify_calls": 0,
+      "rows": 1,
+      "warm_samples_ms": [
+        62.32,
+        59.13,
+        58.43,
+        58.89,
+        58.69
+      ],
+      "median_ms": 58.89
+    }
+  ],
+  "python_regression": {
+    "tests": 137,
+    "passed": true,
+    "seconds": 49.166
+  },
+  "shared_followup": {
+    "tests": 8,
+    "passed": true
+  },
+  "controls": {
+    "all_five_flows": true,
+    "warm_scroll_and_retained_filters": true,
+    "initial_failure_and_retry": true
+  },
+  "topology": "passed",
+  "branch_audit": "Pre-existing unrelated findings; see report"
+}

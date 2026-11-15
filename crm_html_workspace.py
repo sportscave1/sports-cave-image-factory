@@ -1,0 +1,231 @@
+"""Shared, source-first white canvas for campaign and inactive flow emails."""
+from copy import deepcopy
+from pathlib import Path
+import streamlit as st
+import streamlit.components.v1 as components
+from crm_preview_cache import preview as cached_preview
+from crm_email_blocks import render_blocks,legacy_blocks
+
+
+def html_document(document):
+    """Create an editable HTML snapshot without deleting the original structured data.
+
+    Persistence is explicit; existing draft/template versions retain the prior document.
+    Pasted HTML is never converted to blocks or normalized.
+    """
+    doc=deepcopy(document)
+    if doc.get('content_mode')!='HTML':
+        doc['custom_html']=render_blocks(doc.get('blocks') or legacy_blocks(doc['content']),market=doc['market'])[0]
+        # Blocks render table rows. Keep the same table context in the HTML snapshot.
+        if doc['custom_html']:doc['custom_html']='<table role="presentation" width="100%">'+doc['custom_html']+'</table>'
+        doc['content_mode']='HTML'
+    doc.setdefault('custom_html','')
+    return doc
+
+
+def workspace_styles():
+    st.html('''<style>
+    [data-testid="stMainBlockContainer"]:has(.st-key-crm-email-layout){padding-top:max(64px, calc(var(--sc-topbar-height, 0px) + 12px));padding-bottom:10px}
+    .st-key-crm-workspace{gap:.5rem}
+    .st-key-crm-email-canvas{background:#fff;border:1px solid #e6e2da;border-radius:8px;padding:10px;min-width:320px}
+    .st-key-crm-email-controls{background:#faf9f6;padding:8px;border-radius:8px}
+    .st-key-crm-workspace button[kind="primary"]{background:#d6a548;border-color:#d6a548;color:#171717}
+    </style>''')
+
+
+def canvas(doc,cfg,key):
+    """One surface; no side-by-side preview and no block controls."""
+    with st.container(key='crm-email-canvas'):
+        _,toggle=st.columns([3,2])
+        view=toggle.radio('Email workspace',('HTML','Preview'),horizontal=True,
+                          key=key+'view',label_visibility='collapsed')
+        if view=='HTML':
+            editor=components.declare_component('crm_html_canvas',path=str(Path(__file__).parent/'components'/'crm_html_editor'))
+            original=doc.get('custom_html','')
+            value=editor(source=original,height=440,key=key+'html_source',default=original)
+            if value!=original:doc['copy_reviewed']=False
+            doc['custom_html']=value
+        else:
+            flow_preview(doc,cfg,key)
+        return view
+
+
+@st.fragment
+def flow_preview(doc,cfg,key):
+    # Only presentation controls rerun independently. Source edits still run the
+    # parent editor's dirty-state/review checks before Save/Test controls render.
+    controls=st.columns([2,2,4])
+    width=controls[0].selectbox('Width',(600,430,390,375,320),format_func=lambda w:'Desktop' if w==600 else str(w),key=key+'width',label_visibility='collapsed')
+    mode=controls[1].selectbox('Preview display',('Email','Images off','Plain text'),key=key+'display',label_visibility='collapsed')
+    try:
+        rendered=cached_preview(st.session_state,doc,cfg,images_off=mode=='Images off',
+                                loading=lambda:st.spinner('Updating preview…'))
+        if mode=='Plain text':st.text_area('Plain text',rendered['text'],height=410,disabled=True,key=key+'plain')
+        else:
+            with st.container(horizontal=True,horizontal_alignment='center'):
+                components.html(rendered['html'],width=width,height=410,scrolling=True)
+    except ValueError as exc:st.warning(str(exc))
+
+
+
+def composer_styles():
+    from crm_composer_style import polished_styles
+    polished_styles()
+    from crm_template_library_style import styles
+    styles()
+    # Campaign-only overrides: the shell, Inbox and Flow canvas keep their styles.
+    st.html("""<style>
+    .st-key-crm-campaign-toolbar{gap:8px!important;flex-wrap:wrap!important;margin-bottom:8px}
+    .st-key-crm-campaign-toolbar button{min-height:36px;padding:4px 10px;white-space:nowrap}
+    .st-key-crm-campaign-toolbar button p{font-size:13px}
+    .st-key-crm-campaign-toolbar>[data-testid="stElementContainer"]{flex:0 0 auto;width:auto}
+    .st-key-crm-campaign-toolbar>[data-testid="stElementContainer"]:has(.sc-campaign-title){flex:1 1 200px;min-width:0}
+    .sc-campaign-title{display:flex;align-items:center;gap:8px;min-width:0}
+    .sc-campaign-title strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sc-campaign-title span{font-size:11px;color:#68716a;white-space:nowrap}
+    .st-key-crm-campaign-actions{flex-wrap:wrap!important;gap:6px!important}
+    @media(max-width:760px){
+      .st-key-crm-selected-campaign .st-key-crm-composer-layout{flex-wrap:wrap!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-layout>div{width:100%!important;flex-basis:100%!important;min-width:0!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-controls{width:100%!important;min-width:0!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-preview{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-crm-composer-layout){max-width:none;padding:calc(var(--sc-topbar-height, 64px) + 8px) 18px 10px !important}
+    [data-testid="stMainBlockContainer"]:has(.st-key-crm-composer-layout)>[data-testid="stVerticalBlock"]{gap:0 !important}
+    .st-key-crm-workspace:has(.st-key-crm-composer-layout){gap:8px}
+    .st-key-crm-workspace:has(.st-key-crm-composer-layout) h3{padding:0;margin:0;font-size:20px}
+    .st-key-crm-composer-layout{--crm-panel-height:calc(100dvh - var(--sc-topbar-height, 64px) - 120px);align-items:stretch}
+    .st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:360px !important;flex:0 0 360px !important;height:var(--crm-panel-height) !important}
+    .st-key-crm-composer-controls{width:100% !important;flex:1 1 auto !important;height:var(--crm-panel-height) !important;min-height:440px;background:#faf9f6;border:1px solid #e5e2da;border-radius:10px;padding:0 16px 16px;overflow-y:auto;isolation:isolate;scroll-padding-top:60px}
+    .st-key-crm-composer-controls [data-testid="stVerticalBlock"]{gap:8px}
+    .st-key-crm-composer-controls [data-testid="stTabs"]>div>div:has(>[role="tablist"]){position:sticky;top:0;z-index:20;background:#111111;isolation:isolate}
+    .st-key-crm-composer-controls label p{font-size:12px}
+    .st-key-crm-composer-controls [role="tablist"]{position:sticky;top:0;z-index:20;isolation:isolate;display:flex;gap:2px;box-sizing:border-box;height:50px;min-height:50px;width:calc(100% + 32px);max-width:none;margin:0 -16px 8px;padding:0 10px;background:#111111!important;border-bottom:1px solid #34312b;border-radius:9px 9px 0 0;overflow:hidden}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"],
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"]{height:49px;min-height:49px;min-width:0;flex:1 1 0;padding:0 8px;background:transparent !important;border:0 !important;border-bottom:2px solid transparent!important;border-radius:0;box-shadow:none !important;color:#f5f5f5 !important;transition:background-color 100ms,color 100ms}
+    html body .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"] p{font:500 13px/1.2 'Segoe UI',Arial,sans-serif;color:#f5f5f5!important;white-space:nowrap}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"]{color:#C6A044 !important;border-bottom-color:#C6A044!important;background:#1c1b18!important}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"]:hover{background:#242321 !important}
+    html body .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"] p{font-weight:600;color:#C6A044!important}
+    .st-key-crm-composer-controls .react-aria-SelectionIndicator,.st-key-crm-composer-controls [data-baseweb="tab-highlight"]{display:none}
+    .st-key-crm-composer-controls [data-baseweb="tab-border"]{background:transparent}
+    .st-key-crm-composer-controls [role="tab"]:focus-visible,
+    .st-key-crm-composer-controls button:focus-visible,
+    .st-key-crm-composer-controls summary:focus-visible{outline:2px solid var(--sc-gold,#c9a33f) !important;outline-offset:2px}
+    .st-key-crm-composer-controls [role="tab"]:focus-visible{outline-offset:-4px!important}
+    .st-key-crm-composer-controls textarea{font:13px/1.6 Consolas,monospace !important;background:#f6f6f3 !important;padding:10px !important;resize:vertical;border-radius:6px}
+    .st-key-crm-composer-controls [data-baseweb="input"],
+    .st-key-crm-composer-controls [data-baseweb="select"]>div{border-radius:6px}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"],
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] details{border-radius:7px !important;border-color:#e5e2da !important;background:transparent !important}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary{min-height:50px;padding:10px !important;border-radius:6px !important;background:transparent !important}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary *{background:transparent !important}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary p{font-size:14px !important;font-weight:600}
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] summary:hover,
+    html body [data-testid="stAppViewContainer"] .st-key-crm-composer-controls div[data-testid="stExpander"] details[open] summary{background:#f0f0eb !important}
+    .st-key-crm-fixed-header summary::after,.st-key-crm-fixed-footer summary::after{content:"Fixed  ⌄";white-space:nowrap;margin-left:auto;font-size:11px;color:#73736c}
+    .st-key-crm-fixed-header details[open] summary::after,.st-key-crm-fixed-footer details[open] summary::after{content:"Fixed  ⌃"}
+    .st-key-crm-composer-preview{flex:0 0 auto;height:var(--crm-panel-height);min-height:440px;background:white;border:1px solid #e5e2da;border-radius:8px;padding:10px;min-width:0;overflow:hidden}
+    .st-key-crm-composer-preview iframe{max-width:100%;height:max(370px,calc(var(--crm-panel-height) - 65px)) !important}
+    .st-key-crm-composer-preview [data-testid="stElementContainer"]:has(>iframe){height:max(370px,calc(var(--crm-panel-height) - 65px)) !important}
+    .st-key-crm-preview-devices button{padding:3px 8px;min-height:30px}
+    .st-key-crm-workspace:has(.st-key-crm-composer-layout) button[kind="secondary"],
+    .st-key-crm-workspace:has(.st-key-crm-composer-layout) button[kind="tertiary"]{background:#fff !important;color:#242424 !important;border:1px solid #ddd8ce !important;box-shadow:none !important;min-height:32px;padding:5px 10px;font-size:13px}
+    .st-key-crm-workspace:has(.st-key-crm-composer-layout) button[kind="primary"]{background:#c9a33f !important;border-color:#b99436 !important;min-height:32px;padding:5px 10px;font-size:13px}
+    .st-key-crm-workspace:has(.st-key-crm-composer-layout) .st-key-crm-composer-preview button[kind="primary"]{background:#ece7dc !important;color:#242424 !important;border-color:#b49450 !important}
+    @media(max-width:1450px){.st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:330px !important;flex-basis:330px !important}}
+    @media(max-width:1000px){.st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:300px !important;flex-basis:300px !important}}
+    @media(max-width:700px){
+      .st-key-crm-composer-layout{flex-direction:column!important;flex-wrap:nowrap!important;align-items:stretch!important}
+      .st-key-crm-composer-layout>div{width:100%!important;flex:0 0 auto!important;min-width:0!important}
+      .st-key-crm-composer-layout>div:has(>.st-key-crm-composer-controls){width:100%!important;flex-basis:auto!important;height:auto!important;max-height:none!important;overflow:visible!important}
+      .st-key-crm-composer-controls{width:100%!important;max-width:100%!important}
+    }
+    </style>""")
+
+
+def section_editor(doc,cfg,key,store=None,user=None,choices=None,shop=None):
+    with st.container(key='crm-fixed-header'), st.expander('Header',expanded=False,icon=':material/lock:'):
+        st.caption('Default Header · Edit in Templates → Email defaults')
+    from crm_section_ui import middle_editor
+    middle_editor(doc,key,shop,store)
+    with st.container(key='crm-fixed-footer'), st.expander('Footer',expanded=False,icon=':material/lock:'):
+        st.caption('Default Footer · Edit in Templates → Email defaults')
+
+
+PREVIEW_WIDTHS=(600,430,390,375,320)
+
+
+def _preview_device(key,label):
+    st.session_state[key+'preview_device']=label
+
+
+def composer_canvas(doc,cfg,key,store=None):
+    if getattr(store,'email_mode',None)=='automation':
+        from crm_abandoned_checkout_ui import automation_canvas
+        automation_canvas(doc,cfg,key,store)
+    else:_campaign_canvas(doc,cfg,key,store)
+
+
+@st.fragment
+def _campaign_canvas(doc,cfg,key,store=None):
+    _composer_canvas(doc,cfg,key,store)
+
+
+def _composer_canvas(doc,cfg,key,store=None,*,live=False):
+    """Only check default revisions; no campaigns, template library or audience fetch."""
+    with st.container(key='crm-automation-live-preview' if live else 'crm-composer-preview'):
+        with st.container(horizontal=True,vertical_alignment='center'):
+            st.markdown('**Email Preview**')
+            from crm_smart_catalogue import enabled as smart_enabled,control as smart_control
+            from crm_personalisation import present
+            if store is not None and (smart_enabled(doc) or present(doc)):smart_control(st.session_state,store)
+            with st.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-live-preview-devices' if live else 'crm-preview-devices'):
+                mode=st.session_state.get(key+'preview_device','Desktop')
+                for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
+                    st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',
+                              on_click=_preview_device,args=(key,label))
+        from crm_store import StoreUnavailable
+        if store is not None and not live:
+            from crm_local_preview import canvas,loading_canvas
+            from crm_flow_preview import NoPreviewCustomer
+            try:canvas(doc,cfg,key,store)
+            except NoPreviewCustomer:
+                loading_canvas(doc,cfg,key)
+                from crm_preview_toolbar import arm
+                arm(key,seconds=.3)
+            return
+        try:
+            # Existing emails own header/footer snapshots. Their preview must
+            # neither query nor follow the current master on every tab click.
+            if store and 'email_defaults' not in cfg and 'html_sections' not in doc:
+                cfg={**cfg,'email_defaults':store.default_sections(cfg)}
+            preview_doc=doc
+            if getattr(store,'email_mode',None)!='automation':
+                from crm_checkout_preview import needs_checkout,document,sample
+                if needs_checkout(doc):
+                    preview_doc=document(doc,sample(doc),test=True)[0]
+                    from crm_lifestyle_images import present as lifestyle_present,NO_CONTEXT
+                    st.caption(NO_CONTEXT if lifestyle_present(doc) else 'Sample checkout · sending requires a checkout recovery automation.')
+                from crm_personalisation import render as personalise,campaign_preview_values
+                preview_doc=personalise(preview_doc,campaign_preview_values(st.session_state,store))
+            if getattr(store,'email_mode',None)=='automation':
+                preview_doc,note=store.preview_document(doc)
+                if note:st.caption(note)
+                if getattr(store,'preview_warning',''):st.caption(store.preview_warning)
+            if live:
+                from crm_preview_cache import preview_key
+                from crm_email_size import render_production
+                token=preview_key(preview_doc,cfg)
+                cache=st.session_state.get(key+'production_preview')
+                if not cache or cache['token']!=token:
+                    cache={'token':token,'message':render_production(preview_doc,cfg)}
+                    st.session_state[key+'production_preview']=cache
+                rendered=cache['message']
+            else:rendered=cached_preview(st.session_state,preview_doc,cfg)
+            st.session_state[key+'review_preview_settings']=deepcopy(cfg)
+            with st.container(horizontal=True,horizontal_alignment='center'):
+                components.html(rendered['html'],width=600 if mode=='Desktop' else 390,height=480 if live else 680,scrolling=True)
+        except (ValueError,StoreUnavailable) as exc:
+            if getattr(store,'email_mode',None)=='automation':st.caption(str(exc))
+            else:st.warning(str(exc))

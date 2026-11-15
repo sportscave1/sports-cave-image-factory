@@ -1,0 +1,58 @@
+[
+  {
+    "channel": "chrome",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "status": "PASS",
+    "shop": "sportscave-nb.myshopify.com",
+    "theme": 189389340979,
+    "url": "https://www.sportscaveshop.com/products/peter-brock-tribute-art?variant=52547812589875&utm_source=email&utm_campaign=wall-preview-verification",
+    "variant": "52547812589875",
+    "cameraRequests": 0,
+    "loader": "https://www.sportscaveshop.com/cdn/shop/t/66/assets/sports-cave-wall-preview-loader.js?v=141024799056202201671791456231"
+  },
+  {
+    "channel": "chrome",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "status": "PASS",
+    "shop": "sportscave-nb.myshopify.com",
+    "theme": 189389340979,
+    "url": "https://www.sportscaveshop.com/products/peter-brock-tribute-art?variant=52547812589875&utm_source=email&utm_campaign=wall-preview-verification",
+    "variant": "52547812589875",
+    "cameraRequests": 0,
+    "loader": "https://www.sportscaveshop.com/cdn/shop/t/66/assets/sports-cave-wall-preview-loader.js?v=141024799056202201671791456231"
+  },
+  {
+    "channel": "msedge",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "status": "PASS",
+    "shop": "sportscave-nb.myshopify.com",
+    "theme": 189389340979,
+    "url": "https://www.sportscaveshop.com/products/peter-brock-tribute-art?variant=52547812589875&utm_source=email&utm_campaign=wall-preview-verification",
+    "variant": "52547812589875",
+    "cameraRequests": 0,
+    "loader": "https://www.sportscaveshop.com/cdn/shop/t/66/assets/sports-cave-wall-preview-loader.js?v=141024799056202201671791456231"
+  },
+  {
+    "channel": "msedge",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "status": "PASS",
+    "shop": "sportscave-nb.myshopify.com",
+    "theme": 189389340979,
+    "url": "https://www.sportscaveshop.com/products/peter-brock-tribute-art?variant=52547812589875&utm_source=email&utm_campaign=wall-preview-verification",
+    "variant": "52547812589875",
+    "cameraRequests": 0,
+    "loader": "https://www.sportscaveshop.com/cdn/shop/t/66/assets/sports-cave-wall-preview-loader.js?v=141024799056202201671791456231"
+  }
+]

@@ -1,0 +1,33 @@
+// Disposable CRM fixture only; no external network or delivery.
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});
+try{
+ const context=await browser.newContext();await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ const page=await context.newPage();page.setDefaultTimeout(20000);await page.setViewportSize({width:1440,height:950});
+ await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_run=personalise'+Date.now());
+ await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
+ const subject=page.getByRole('textbox',{name:'Subject',exact:true}),preview=page.getByRole('textbox',{name:'Preview text',exact:true});
+ const trigger=()=>page.getByRole('button',{name:'Personalise Subject',exact:true});
+ await trigger().waitFor();
+ const original=await subject.inputValue();
+ await trigger().click();await page.getByRole('menuitem',{name:'First name',exact:true}).press('Escape');assert.equal(await subject.inputValue(),original);
+ await subject.fill('Hello NAME, see your artwork');await subject.evaluate(e=>{e.focus();e.setSelectionRange(6,10);e.dispatchEvent(new Event('select'));});
+ const began=Date.now();await trigger().click();await page.getByRole('menuitem',{name:'First name',exact:true}).click();
+ assert.equal(await subject.inputValue(),'Hello {{first_name}}, see your artwork');const insertMs=Date.now()-began;
+ await subject.press('Control+z');assert.equal(await subject.inputValue(),'Hello NAME, see your artwork');
+ await subject.press('Control+y');assert.equal(await subject.inputValue(),'Hello {{first_name}}, see your artwork');
+ await subject.press('End');await trigger().click();await page.getByRole('menuitem',{name:'Short product name',exact:true}).click();
+ assert.ok((await subject.inputValue()).endsWith('{{short_product_name}}'));
+ await preview.fill('Your ');await preview.press('End');await page.getByRole('button',{name:'Personalise Preview text',exact:true}).click();
+ const first=page.getByRole('menuitem',{name:'First name',exact:true});await first.press('ArrowDown');await page.keyboard.press('Enter');
+ assert.equal(await preview.inputValue(),'Your {{product_name}}');
+ await preview.press('Tab');await page.waitForTimeout(1000);
+ const headers=page.locator('.sc-personalised-headers');await headers.waitFor();
+ const rendered=await headers.innerText();assert.ok(!rendered.includes('{{'));assert.ok(rendered.includes('Your '));
+ const savedSubject=await subject.inputValue();await page.getByRole('button',{name:'Personalise Subject',exact:true}).click();
+ await page.getByRole('menuitem',{name:'First name',exact:true}).press('Escape');assert.equal(await subject.inputValue(),savedSubject);
+ assert.equal(await page.getByTestId('stException').count(),0);
+ await page.setViewportSize({width:390,height:950});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+ console.log(JSON.stringify({insertMs,cursor:true,selection:true,undoRedo:true,keyboard:true,multiple:true,mobileOverflow:false}));
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1);});

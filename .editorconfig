@@ -1,0 +1,15 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_final_newlines = true
+trim_trailing_whitespace = true
+
+# Markdown hard breaks and literal content must keep their whitespace.
+[*.{py,md,html,htm,liquid,js,jsx,ts,tsx,ps1}]
+trim_trailing_whitespace = false
+
+[*.{bat,cmd}]
+end_of_line = crlf

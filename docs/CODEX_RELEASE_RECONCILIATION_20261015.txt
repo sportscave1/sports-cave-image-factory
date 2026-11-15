@@ -1,0 +1,45 @@
+Codex release reconciliation — 15 October 2026
+
+Authorized scope: deploy SC3303 safeguards/correction and bring completed Codex
+work into GitHub and existing Render services. Base: ae1734b4, verified live.
+Source worktrees were inspected read-only and retained. Integration uses Studio
+task 20261015-6cce2bd0, owner codex-approved-release-01a13f42.
+
+Completed features already on main
+Git ancestry, patch equivalence and file-content comparison confirmed that
+Files V6/performance/original downloads, Ads posting, Instant Experience V3,
+Auto Editions V15/V16/Reset, Dropbox PSD linking, direct Google reporting,
+Settings V2, Design Studio V4, email upgrades and completed V9 editor code are
+already represented in production. Older source branch hashes differ because
+releases used cherry-picks or combined integrations. Re-merging those full old
+trees would replace newer changes. No feature reset is required.
+
+Missing completed updates included here
+- SC3303 active-search predicate fix and executable SQL regression.
+- Instant Experience footer assertions matching deployed V3 rules.
+- Meta posting local browser fixture uses an available loopback port and
+  reliably terminates its owned fixture process.
+- Navigation regression accommodates deferred inbox metadata loading.
+- Synthetic Settings access/profile/password/logout tests and their fixture.
+- V9 verified-source navigation tests omitted from the combined release.
+- Offline reporting-retirement benchmark and guarded cleanup-plan generator,
+  with eight tests. These tools do not execute production cleanup; publishing
+  their source does not approve deleting Google reporting data.
+
+Preserved local material, not production updates
+- Superseded V5/V8/V9 intermediate source versions and QA-only experiments.
+- Aborted Files/Reset merge worktrees containing unresolved conflicts.
+- Local Photoshop inspection/standardisation experiments and unapplied schema
+  proposals, whose notes identify incomplete production/print-readiness evidence.
+- Old release manifests and one-use deployment scripts with stale base commits.
+- Generated screenshots, downloaded assets, benchmark output, temporary source
+  copies and local inspection/customer evidence. These are not release inputs.
+
+No source worktree was reset, stashed, cleaned, force-pushed or deleted. This
+release updates completed, compatible work; it does not certify preserved
+unfinished experiments as production-ready.
+
+Render topology
+The existing primary sports-cave-os, webhook receiver and worker deploy main.
+The daily SEO sync cron is explicitly user-suspended, and therefore intentionally
+does not track newer deployments. It is not resumed by this release.

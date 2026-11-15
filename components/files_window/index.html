@@ -1,0 +1,3353 @@
+<!doctype html>
+<html data-sc-table-host="files" lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Sports Cave Files</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23f6c343' d='M6 16a6 6 0 0 1 6-6h14l6 7h20a6 6 0 0 1 6 6v5H6z'/%3E%3Cpath fill='%23ffd865' d='M6 24h52v28a6 6 0 0 1-6 6H12a6 6 0 0 1-6-6z'/%3E%3Cpath fill='%230f6cbd' d='M22 40h30v14H22a4 4 0 0 1-4-4v-6a4 4 0 0 1 4-4z'/%3E%3Cpath fill='%235db6f2' d='M24 44h22v3H24z'/%3E%3C/svg%3E">
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        --accent: #0f6cbd;
+        --accent-soft: #e8f2fb;
+        --accent-selected: #d9ebf8;
+        --border: #d8dadd;
+        --border-soft: #e9eaec;
+        --surface: #ffffff;
+        --surface-subtle: #f6f7f8;
+        --text: #202124;
+        --muted: #60666c;
+        --disabled: #9da2a7;
+        --danger: #b42318;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body { background: var(--surface); color: var(--text); }
+      button, input, select { font: inherit; }
+      button { color: inherit; }
+      button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+      .app {
+        display: grid;
+        grid-template-rows: auto auto auto minmax(0, 1fr) 27px;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .app:has(#editionResolution:not([hidden])) {
+        grid-template-rows: auto auto auto minmax(0, 1fr) auto 27px;
+      }
+      .app-title {
+        align-items: center;
+        background: #fafafa;
+        border-bottom: 1px solid var(--border-soft);
+        display: flex;
+        font-size: 13px;
+        font-weight: 600;
+        gap: 8px;
+        height: 34px;
+        padding: 0 12px;
+        user-select: none;
+      }
+      .app-mark {
+        background: #ffd45c;
+        border: 1px solid #d7a821;
+        border-radius: 2px 2px 3px 3px;
+        box-shadow: inset 0 -2px 0 rgba(226, 170, 35, 0.35);
+        height: 15px;
+        position: relative;
+        width: 20px;
+      }
+      .app-mark::before {
+        background: #ffe38a;
+        border: 1px solid #d7a821;
+        border-bottom: 0;
+        border-radius: 2px 2px 0 0;
+        content: "";
+        height: 6px;
+        left: -1px;
+        position: absolute;
+        top: -6px;
+        width: 11px;
+      }
+      .app-mark::after {
+        background: #1b82d1;
+        border-radius: 2px 2px 0 0;
+        bottom: 0;
+        content: "";
+        height: 5px;
+        position: absolute;
+        right: 3px;
+        width: 11px;
+      }
+      .address-row {
+        align-items: center;
+        background: var(--surface);
+        display: grid;
+        gap: 7px;
+        grid-template-columns: auto minmax(240px, 1fr) minmax(210px, 340px);
+        min-height: 49px;
+        padding: 7px 10px;
+      }
+      .nav-controls { display: flex; gap: 2px; }
+      .icon-button {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: default;
+        display: inline-flex;
+        height: 34px;
+        justify-content: center;
+        padding: 0;
+        width: 34px;
+      }
+      .icon-button:hover:not(:disabled), .command:hover:not(:disabled), .menu-button:hover:not(:disabled) {
+        background: #eef1f3;
+        border-color: #e1e4e7;
+      }
+      .icon-button:active:not(:disabled), .command:active:not(:disabled), .menu-button:active:not(:disabled) {
+        background: #e1e8ed;
+      }
+      button:disabled { color: var(--disabled); cursor: default; opacity: 0.72; }
+      .glyph { font-size: 20px; font-weight: 400; line-height: 1; }
+      .address-bar {
+        align-items: center;
+        border: 1px solid #c9cdd1;
+        border-radius: 4px;
+        display: flex;
+        height: 34px;
+        min-width: 0;
+        overflow: hidden;
+        padding: 0 4px;
+      }
+      .breadcrumbs {
+        align-items: stretch;
+        display: flex;
+        height: 100%;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .crumb {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        border-radius: 3px;
+        cursor: default;
+        display: inline-flex;
+        flex: 0 1 auto;
+        gap: 5px;
+        min-width: 0;
+        padding: 0 7px;
+        white-space: nowrap;
+      }
+      .crumb:hover:not(:disabled) { background: #edf3f7; }
+      .crumb span { overflow: hidden; text-overflow: ellipsis; }
+      .crumb::after { color: #74797e; content: ">"; font-size: 13px; }
+      .crumb:last-child { font-weight: 600; }
+      .crumb:last-child::after { content: ""; }
+      .search-wrap { min-width: 0; position: relative; }
+      .search-wrap::before {
+        color: #646a70;
+        content: "\2315";
+        font-size: 18px;
+        left: 10px;
+        pointer-events: none;
+        position: absolute;
+        top: 7px;
+        transform: rotate(-20deg);
+      }
+      .search {
+        background: #fff;
+        border: 1px solid #c9cdd1;
+        border-radius: 4px;
+        color: var(--text);
+        height: 34px;
+        min-width: 0;
+        padding: 0 34px 0 34px;
+        width: 100%;
+      }
+      .search-clear {
+        background: transparent;
+        border: 0;
+        border-radius: 3px;
+        height: 26px;
+        position: absolute;
+        right: 4px;
+        top: 4px;
+        width: 26px;
+      }
+      .command-bar {
+        align-items: center;
+        background: var(--surface-subtle);
+        border-bottom: 1px solid var(--border);
+        border-top: 1px solid var(--border-soft);
+        display: flex;
+        gap: 2px;
+        min-height: 45px;
+        overflow: visible;
+        padding: 5px 9px;
+        position: relative;
+        z-index: 20;
+      }
+      .command {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: default;
+        display: inline-flex;
+        gap: 7px;
+        height: 34px;
+        padding: 0 9px;
+        white-space: nowrap;
+      }
+      .command .command-icon { color: #34383c; font-size: 17px; line-height: 1; }
+      .command:disabled .command-icon { color: var(--disabled); }
+      .command-separator { background: #dfe1e3; height: 24px; margin: 0 3px; width: 1px; }
+      .results-shell { min-height: 0; overflow: hidden; position: relative; }
+      .sc-loading-only {
+        align-items: center;
+        background: rgba(255,255,255,.72);
+        display: flex;
+        inset: 0;
+        justify-content: center;
+        pointer-events: none;
+        position: absolute;
+        z-index: 12;
+      }
+      .sc-loading-only[hidden] { display: none !important; }
+      .sc-loading-spinner {
+        animation: sc-loading-spin .72s linear infinite;
+        border: 2px solid rgba(183,146,67,.24);
+        border-radius: 50%;
+        border-top-color: #b79243;
+        box-sizing: border-box;
+        display: inline-block;
+        height: 22px;
+        width: 22px;
+      }
+      @keyframes sc-loading-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .sc-loading-spinner { animation: none; } }
+      .results {
+        height: 100%;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 8px 10px 10px;
+        container-type: inline-size;
+        position: relative;
+        scrollbar-color: #b9bdc1 #f4f5f6;
+        scrollbar-width: auto;
+      }
+      .results.busy { cursor: progress; }
+      .file-icon { position: relative; }
+      .file-icon > img.thumbnail { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+      .file-icon > img.thumbnail:not([src]) { visibility: hidden; }
+      .file-icon.has-thumbnail > svg { visibility: hidden; }
+      .file-icon.thumbnail-capable:not(.thumbnail-failed) > svg { visibility: hidden; }
+      .thumbnail-skeleton { position:absolute; inset:4%; border-radius:3px; background:#e8ecef; border:1px solid #dce2e6; pointer-events:none; }
+      .file-icon.has-thumbnail .thumbnail-skeleton, .file-icon.thumbnail-failed .thumbnail-skeleton { display:none; }
+      .file-icon > img.thumbnail { opacity:0; transition:opacity 90ms ease-out; }
+      .file-icon.has-thumbnail > img.thumbnail { opacity:1; }
+      .file-icon.thumbnail-cached > img.thumbnail { transition:none; }
+      @media (prefers-reduced-motion: reduce) { .file-icon > img.thumbnail { transition:none; } }
+      .items { min-height: 100%; }
+      .items.virtual { display: block !important; min-height: 0; position: relative; }
+      .items.virtual > .file-item { position: absolute; box-sizing: border-box; overflow: hidden; }
+      .items.view-large, .items.view-medium {
+        align-content: start;
+        display: grid;
+        gap: 6px;
+        grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+      }
+      .items.view-large { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); }
+      .file-item {
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: var(--text);
+        cursor: default;
+        min-width: 0;
+        position: relative;
+        user-select: none;
+      }
+      .view-medium .file-item, .view-large .file-item {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        height: 100px;
+        padding: 6px;
+        gap: 6px;
+        text-align: center;
+      }
+      .view-large .file-item { height: 112px; padding: 8px; }
+      .file-item:hover { background: #f0f6fa; border-color: #dbe8f1; }
+      .file-item.selected { background: var(--accent-selected); border-color: #9cc7e4; }
+      .file-item.focused { box-shadow: inset 0 0 0 1px var(--accent); }
+      .file-item.selected::after { content:"✓"; position:absolute; top:2px; right:3px; width:15px; height:15px; line-height:15px; border-radius:3px; background:#246ca3; color:white; text-align:center; font-size:11px; pointer-events:none; }
+      .selection-rectangle { position:absolute; pointer-events:none; z-index:5; border:1px solid #287dc0; background:#3d96d533; }
+      .results.selecting { user-select:none; }
+      .file-item.cut-pending { opacity: 0.45; }
+      .file-icon {
+        align-items: center;
+        display: flex;
+        flex: 0 0 auto;
+        height: 48px;
+        justify-content: center;
+        pointer-events: none;
+        width: 48px;
+      }
+      .view-large .file-icon { height: 56px; width: 56px; }
+      .file-icon svg, .file-icon img { display: block; height: 100%; max-width: 100%; object-fit: contain; width: 100%; }
+      .thumbnail { border-radius: 3px; object-fit: contain; }
+      .item-name {
+        display: -webkit-box;
+        font-size: 13px;
+        line-height: 1.25;
+        max-width: 100%;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+        text-overflow: ellipsis;
+        word-break: break-word;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+      .view-large .item-name { font-size: 13px; }
+      .items.view-small {
+        align-content: start;
+        display: grid;
+        gap: 2px 6px;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+      }
+      .items.view-list { display: grid; gap: 1px; grid-template-columns: 1fr; }
+      .view-small .file-item, .view-list .file-item {
+        align-items: center;
+        display: grid;
+        gap: 7px;
+        grid-template-columns: 28px minmax(0, 1fr);
+        height: 36px;
+        padding: 2px 7px;
+      }
+      .view-list .file-item { grid-template-columns: 28px minmax(0, 1fr) 160px 80px; }
+      .view-small .file-icon, .view-list .file-icon { height: 24px; width: 24px; }
+      .view-small .item-name, .view-list .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+      .item-secondary { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .details-header {
+        background: #fafafa;
+        border: 1px solid var(--border);
+        color: #4c5156;
+        display: none;
+        font-size: 12px;
+        grid-template-columns: minmax(250px, 1fr) 100px 180px 190px 100px;
+        height: 34px;
+        position: sticky;
+        top: -8px;
+        z-index: 5;
+      }
+      .details-header.visible { display: grid; }
+      .details-header > span { align-items: center; border-right: 1px solid #e5e6e8; display: flex; padding: 0 8px; }
+      .details-sort-button {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        color: inherit;
+        display: inline-flex;
+        gap: 5px;
+        height: 100%;
+        padding: 0;
+        text-align: left;
+        width: 100%;
+      }
+      .details-sort-button:hover { color: #202124; }
+      .sort-arrow { color: #6f757a; font-size: 11px; min-width: 10px; }
+      .items.view-details { border: 1px solid var(--border); border-top: 0; min-height: auto; }
+      .view-details .file-item {
+        align-items: center;
+        border: 0;
+        border-bottom: 1px solid #eef0f1;
+        border-radius: 0;
+        display: grid;
+        grid-template-columns: minmax(250px, 1fr) 100px 180px 190px 100px;
+        height: 36px;
+      }
+      .view-details .file-item:last-child { border-bottom: 0; }
+      .details-name { align-items: center; display: flex; gap: 8px; min-width: 0; padding: 3px 8px; }
+      .view-details .file-icon { height: 24px; width: 24px; }
+      .view-details .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+      .detail-cell { color: #42464a; min-width: 0; overflow: hidden; padding: 0 8px; text-overflow: ellipsis; white-space: nowrap; }
+      .detail-modified {
+        color: #6a7076;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.3;
+      }
+      .empty-state {
+        align-items: center;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        justify-content: center;
+        min-height: 240px;
+        text-align: center;
+      }
+      .status-bar {
+        align-items: center;
+        background: #fafafa;
+        border-top: 1px solid var(--border);
+        color: #555b60;
+        display: flex;
+        font-size: 12px;
+        justify-content: space-between;
+        min-width: 0;
+        padding: 0 10px;
+      }
+      .status-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .drop-overlay {
+        align-items: center;
+        background: rgba(236, 246, 253, 0.96);
+        border: 2px dashed #6aa8d4;
+        color: #174f76;
+        display: none;
+        font-size: 16px;
+        font-weight: 600;
+        inset: 8px;
+        justify-content: center;
+        pointer-events: none;
+        position: absolute;
+        z-index: 30;
+      }
+      .drop-overlay.visible { display: flex; }
+      .menu {
+        background: #fff;
+        border: 1px solid #d3d6d9;
+        border-radius: 7px;
+        box-shadow: 0 10px 28px rgba(27, 34, 40, 0.18);
+        display: none;
+        min-width: 214px;
+        padding: 5px;
+        position: fixed;
+        z-index: 100;
+      }
+      .menu.open { display: block; }
+      .menu-button {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: default;
+        display: flex;
+        gap: 9px;
+        height: 32px;
+        justify-content: flex-start;
+        padding: 0 9px;
+        text-align: left;
+        width: 100%;
+      }
+      .menu-button .check { color: var(--accent); display: inline-block; width: 14px; }
+      .menu-icon {
+        color: #353a3f;
+        display: inline-flex;
+        font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
+        font-size: 15px;
+        justify-content: center;
+        width: 18px;
+      }
+      .menu-button .arrow { color: #6c7176; margin-left: auto; }
+      .menu-separator { background: #e6e7e9; height: 1px; margin: 4px; }
+      .menu-label { color: #747a80; font-size: 11px; padding: 5px 9px 3px; text-transform: uppercase; }
+      .file-tooltip {
+        background: #fffff4;
+        border: 1px solid #8d8d8d;
+        box-shadow: 2px 3px 8px rgba(0, 0, 0, 0.16);
+        color: #202124;
+        display: none;
+        font-size: 12px;
+        line-height: 1.35;
+        max-width: min(340px, calc(100vw - 16px));
+        padding: 6px 8px;
+        pointer-events: none;
+        position: fixed;
+        z-index: 210;
+      }
+      .file-tooltip.visible { display: block; }
+      .file-tooltip-name {
+        font-weight: 600;
+        margin-bottom: 3px;
+        overflow-wrap: anywhere;
+      }
+      .file-tooltip-line { white-space: nowrap; }
+      .modal-backdrop {
+        align-items: center;
+        background: rgba(25, 30, 35, 0.28);
+        display: none;
+        inset: 0;
+        justify-content: center;
+        padding: 20px;
+        position: fixed;
+        z-index: 130;
+      }
+      .modal-backdrop.open { display: flex; }
+      .modal {
+        background: #fff;
+        border: 1px solid #cfd3d6;
+        border-radius: 7px;
+        box-shadow: 0 18px 48px rgba(26, 32, 38, 0.23);
+        max-height: min(620px, calc(100dvh - 40px));
+        max-width: 100%;
+        overflow: auto;
+        padding: 20px;
+        width: 440px;
+      }
+      .modal h2 { font-size: 18px; font-weight: 600; margin: 0 0 11px; }
+      .modal p { color: #4f555a; line-height: 1.45; margin: 0 0 13px; }
+      .modal label { color: #42474c; display: block; font-size: 12px; margin-bottom: 5px; }
+      .modal input[type="text"] { border: 1px solid #bfc4c8; border-radius: 4px; height: 34px; padding: 0 9px; width: 100%; }
+      .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+      .dialog-button { background: #fff; border: 1px solid #aeb4b9; border-radius: 4px; height: 34px; min-width: 88px; padding: 0 14px; }
+      .dialog-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .dialog-button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+      .delete-list { background: #f7f8f9; border: 1px solid #e1e3e5; max-height: 150px; overflow: auto; padding: 8px 10px; }
+      .delete-list div { overflow-wrap: anywhere; padding: 2px 0; }
+      .properties { display: grid; gap: 9px; grid-template-columns: 110px minmax(0, 1fr); }
+      .properties dt { color: #6a7076; }
+      .properties dd { margin: 0; overflow-wrap: anywhere; }
+      .toast {
+        align-items: center;
+        background: #25282b;
+        border-radius: 5px;
+        bottom: 38px;
+        box-shadow: 0 8px 22px rgba(25, 29, 33, 0.22);
+        color: #fff;
+        display: none;
+        gap: 12px;
+        left: 50%;
+        max-width: min(620px, calc(100vw - 24px));
+        min-height: 40px;
+        padding: 9px 12px;
+        position: fixed;
+        transform: translateX(-50%);
+        z-index: 160;
+      }
+      .toast.visible { display: flex; }
+      .toast.error { background: #8f2f27; }
+      .toast.success { background: #215c3d; }
+      .toast button { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 3px; color: #fff; height: 28px; margin-left: auto; white-space: nowrap; }
+      .upload-panel {
+        background: #fff;
+        border: 1px solid #cfd3d6;
+        border-radius: 7px;
+        bottom: 36px;
+        box-shadow: 0 12px 34px rgba(28, 34, 40, 0.2);
+        display: none;
+        max-height: min(330px, calc(100dvh - 160px));
+        overflow: auto;
+        position: fixed;
+        right: 12px;
+        width: min(520px, calc(100vw - 24px));
+        z-index: 120;
+      }
+      .upload-panel.visible { display: block; }
+      .upload-head { align-items: center; border-bottom: 1px solid #e2e4e6; display: flex; font-weight: 600; height: 40px; justify-content: space-between; padding: 0 11px; }
+      .upload-row { border-bottom: 1px solid #eceeef; display: grid; gap: 7px; grid-template-columns: minmax(0, 1fr) auto; padding: 9px 11px; }
+      .upload-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .upload-status { color: var(--muted); font-size: 12px; margin-top: 4px; }
+      .progress-track { background: #e8eaec; height: 4px; margin-top: 7px; overflow: hidden; }
+      .progress-bar { background: var(--accent); height: 100%; transition: width 120ms linear; }
+      .upload-actions button { background: transparent; border: 1px solid #c8ccd0; border-radius: 3px; height: 28px; margin-left: 4px; }
+      .sr-only { clip: rect(0,0,0,0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+      @media (max-width: 920px) {
+        .address-row { grid-template-columns: auto minmax(180px, 1fr) minmax(160px, 260px); }
+        .command span.command-label { display: none; }
+        .command { padding: 0 8px; }
+        .details-header, .view-details .file-item { grid-template-columns: minmax(220px, 1fr) 160px 100px; }
+        .details-header > span:nth-child(2), .details-header > span:nth-child(4), .view-details .detail-status, .view-details .detail-type { display: none; }
+      }
+      @media (max-width: 680px) {
+        .address-row { grid-template-columns: auto minmax(0, 1fr); }
+        .search-wrap { grid-column: 1 / -1; }
+        .address-row { padding-bottom: 6px; }
+        .command-bar { flex-wrap: wrap; }
+        .command-separator { display: none; }
+        .command { min-width: 40px; height: 40px; }
+        .view-list .file-item { grid-template-columns: 28px minmax(0, 1fr); }
+        .view-list .item-secondary { display: none; }
+      }
+      @media (max-width: 560px) {
+        .details-header, .view-details .file-item { grid-template-columns: minmax(0, 1fr) 124px; }
+        .details-header > span:nth-child(5), .view-details .detail-size { display: none; }
+      }
+      @container (max-width: 540px) {
+        .items.view-medium { grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); }
+        .items.view-large { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+        .view-medium .file-icon { width: 40px; height: 40px; }
+        .view-medium .file-item { height: 92px; }
+      }
+      @media (pointer: coarse) {
+        .icon-button, .command { min-width: 44px; min-height: 44px; }
+        .view-small .file-item, .view-list .file-item, .view-details .file-item { height: 44px; }
+      }
+      #previewPanel { position:fixed; inset:0; z-index:100; background:#181818; display:flex; flex-direction:column; }
+      #previewPanel[hidden] { display:none; }
+      #previewPanel header { height:34px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 10px; background:#f3f3f3; border-bottom:1px solid #ccc; }
+      #previewTitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #previewClose { border:1px solid #bbb; background:white; padding:3px 9px; border-radius:3px; }
+      #previewMount { display:flex; flex:1; min-height:0; }
+      #previewFrame { flex:1; width:100%; min-height:0; border:0; }
+    </style>
+  <style id="sc-table-design-v3">
+/* Sports Cave OS tables V3. Explicit table scopes only. */
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stDataFrame"], [data-testid="stTable"],
+    html[data-sc-table-host] .table-wrap, html[data-sc-table-host="checkout"] .wrap,
+    html[data-sc-table-host] .view-details, html[data-sc-table-host] .view-list,
+    html[data-sc-table-host] .details-header, html[data-sc-table-host="uploads"] .uploads,
+    html[data-sc-table-host="planner"] .task-row, html[data-sc-table-host="planner"] .task-header,
+    html[data-sc-table-host="planner"] .tactic-row) {
+  --sc-table-paper: #fffefa;
+  --sc-table-head: #f3f2ec;
+  --sc-table-line: #eeece5;
+  --sc-table-border: #e4e2da;
+  --sc-table-hover: #f7f5ef;
+  --sc-table-selected: #eee7d7;
+  --sc-table-ink: #30332e;
+  --sc-table-muted: #64665f;
+  --sc-table-focus: #9a7937;
+  scrollbar-color: #c8c5bb transparent;
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    html[data-sc-table-host] .table-wrap, html[data-sc-table-host="checkout"] .wrap) {
+  max-width: 100%; overflow: auto; border: 1px solid var(--sc-table-border);
+  border-radius: 5px; background: var(--sc-table-paper);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-family: inherit; font-size: 13px; color: var(--sc-table-ink);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) :is(td, th) {
+  box-sizing: border-box; height: 34px; padding: 6px 10px;
+  border: 0; border-bottom: 1px solid var(--sc-table-line);
+  vertical-align: middle; line-height: 20px;
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) th {
+  background: var(--sc-table-head); color: var(--sc-table-muted);
+  font-size: 12px; font-weight: 600; text-transform: none;
+  text-align: left; border-bottom-color: var(--sc-table-border);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    html[data-sc-table-host] .table-wrap) th { position: sticky; top: 0; z-index: 1; }
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) td { background: var(--sc-table-paper); }
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) tbody tr:hover td { background: var(--sc-table-hover); }
+:is(.sc-table, html[data-sc-table-host="checkout"] .wrap) tr:has(input[type="checkbox"]:checked) td {
+  background: var(--sc-table-selected);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) :is(button, a, input, select):focus-visible {
+  outline: 2px solid var(--sc-table-focus); outline-offset: 2px;
+}
+.sc-table .sc-table-number { text-align: right; font-variant-numeric: tabular-nums; }
+.sc-table .sc-table-action { min-height: 28px; padding: 3px 8px; font: inherit; }
+.sc-table .sc-table-success { color: #28633e; }
+.sc-table .sc-table-pending { color: #826222; }
+.sc-table .sc-table-error { color: #a13a32; }
+.sc-table .sc-table-neutral { color: #64665f; }
+[data-testid="stDataFrame"] { border-radius: 5px; }
+[data-testid="stTable"] { max-width: 100%; overflow-x: auto; }
+/* Preserve checkout frozen-column geometry and its focus/scroll implementation. */
+html[data-sc-table-host="checkout"] .wrap :is(td, th):first-child { padding: 4px 6px; }
+@media (max-width: 600px) {
+  html[data-sc-table-host="checkout"] .wrap :is(td, th) { padding: 6px 8px; }
+  html[data-sc-table-host="checkout"] .wrap :is(td, th):first-child { padding: 4px 6px; }
+}
+/* Planner inputs/timers retain their natural multiline row height. */
+html[data-sc-table-host="planner"] .table-wrap table { min-width: max-content; }
+html[data-sc-table-host="planner"] .table-wrap td { font-size: 13px; }
+html[data-sc-table-host="planner"] :is(.task-row, .tactic-row) {
+  border: 0; border-bottom: 1px solid var(--sc-table-line); border-radius: 0;
+  margin-bottom: 0; background: var(--sc-table-paper);
+}
+html[data-sc-table-host="planner"] .task-header {
+  background: var(--sc-table-head); color: var(--sc-table-muted);
+  min-height: 34px; align-items: center; font-size: 12px; font-weight: 600; text-transform: none;
+}
+html[data-sc-table-host="planner"] :is(.task-row, .tactic-row):hover { background: var(--sc-table-hover); }
+/* File manager Details/List only; thumbnail/icon views are not data tables. */
+html[data-sc-table-host="files"] .details-header {
+  background: var(--sc-table-head); color: var(--sc-table-muted); border-color: var(--sc-table-border);
+  font-weight: 600;
+}
+html[data-sc-table-host="files"] .details-header > span { border-right: 0; }
+html[data-sc-table-host="files"] :is(.view-details, .view-list) .file-item {
+  background: var(--sc-table-paper); border-bottom: 1px solid var(--sc-table-line);
+  min-height: 38px; border-radius: 0;
+}
+html[data-sc-table-host="files"] .view-details .detail-modified { line-height: 38px; }
+html[data-sc-table-host="files"] :is(.view-details, .view-list) .file-item:hover { background: var(--sc-table-hover); }
+html[data-sc-table-host="files"] :is(.view-details, .view-list) .file-item.selected { background: var(--sc-table-selected); }
+html[data-sc-table-host="uploads"] .upload-row { background: var(--sc-table-paper); border-bottom-color: var(--sc-table-line); }
+html[data-sc-table-host="uploads"] .upload-row:hover { background: var(--sc-table-hover); }
+html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
+</style>
+<style>
+/* Premium Files polish: presentation only; existing view and scroll geometry retained. */
+.app-title{background:linear-gradient(180deg,#faf9f6,#f2f1ed);letter-spacing:.01em;color:#26313c}
+.address-bar,.search{border-radius:8px;background:#fcfcfa;box-shadow:0 1px 2px #17212b06}
+.command-bar{background:#fbfaf7;gap:3px;padding-top:5px;padding-bottom:5px}
+.command,.icon-button{border-radius:7px;transition:background-color .12s ease,box-shadow .12s ease}
+.command:hover:not(:disabled),.icon-button:hover:not(:disabled){background:#e9edf1;box-shadow:inset 0 0 0 1px #ccd3db}
+.command:active:not(:disabled){background:#dfe5eb}.command-icon svg{width:17px;height:17px;display:block}
+.crumb{border-radius:5px}.crumb:hover:not(:disabled){background:#edf0f3}
+.file-item.focused{outline:2px solid var(--accent);outline-offset:-2px}
+html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.selected{background:#e3ebf4;box-shadow:inset 3px 0 #526f94}
+.menu{border-radius:10px;box-shadow:0 12px 38px #18263424;border-color:#d5dae2;padding:5px}
+.menu-button{border-radius:5px;min-height:32px}.menu-button:hover:not(:disabled){background:#e9edf3}
+.modal{border-radius:12px;box-shadow:0 20px 65px #17212b30;max-width:min(480px,94vw)}
+@media(max-width:600px){.command{min-height:36px;padding:6px 8px}.address-row{gap:5px}.menu{max-width:calc(100vw - 16px)}.modal-backdrop{padding:10px}}
+@media(pointer:coarse){.menu-button{min-height:44px}.command,.icon-button{min-width:44px;min-height:44px}}
+@media(prefers-reduced-motion:reduce){.command,.icon-button{transition:none}}
+</style>
+</head>
+  <body>
+    <div class="app" id="app">
+      <div class="app-title"><span class="app-mark" aria-hidden="true"></span><span>Files</span></div>
+      <div class="address-row">
+        <nav class="nav-controls" aria-label="Folder navigation">
+          <button class="icon-button" id="backButton" type="button" title="Back" aria-label="Back"><span class="glyph">&#8592;</span></button>
+          <button class="icon-button" id="forwardButton" type="button" title="Forward" aria-label="Forward"><span class="glyph">&#8594;</span></button>
+          <button class="icon-button" id="upButton" type="button" title="Up one folder" aria-label="Up one folder"><span class="glyph">&#8593;</span></button>
+          <button class="icon-button" id="refreshButton" type="button" title="Refresh" aria-label="Refresh"><span class="glyph">&#8635;</span></button>
+        </nav>
+        <div class="address-bar"><div class="breadcrumbs" id="breadcrumbs" aria-label="Address"></div></div>
+        <div class="search-wrap">
+          <label class="sr-only" for="searchInput">Search current folder</label>
+          <input class="search" id="searchInput" type="search" autocomplete="off" placeholder="Search this folder">
+          <button class="search-clear" id="searchClear" type="button" title="Clear search" aria-label="Clear search">&#215;</button>
+        </div>
+      </div>
+      <div class="command-bar" id="commandBar" role="toolbar" aria-label="Files commands">
+        <button class="command" id="openButton" type="button" disabled><span class="command-icon">&#8599;</span><span class="command-label">Open</span></button>
+        <span class="command-separator" aria-hidden="true"></span>
+        <button class="command" id="newButton" type="button"><span class="command-icon">+</span><span class="command-label">New</span></button>
+        <button class="command" id="uploadButton" type="button"><span class="command-icon">&#8593;</span><span class="command-label">Upload</span></button>
+        <button class="command" id="copyButton" type="button" disabled><span class="command-icon">&#x2398;</span><span class="command-label">Copy</span></button>
+        <button class="command" id="downloadButton" type="button" disabled><span class="command-icon">&#8681;</span><span class="command-label">Download Original</span></button>
+        <span class="command-separator" aria-hidden="true"></span>
+        <button class="command" id="renameButton" type="button" disabled><span class="command-icon">&#9998;</span><span class="command-label">Rename</span></button>
+        <button class="command" id="deleteButton" type="button" disabled><span class="command-icon">&#9003;</span><span class="command-label">Delete</span></button>
+        <span class="command-separator" aria-hidden="true"></span>
+        <button class="command" id="sortButton" type="button"><span class="command-icon">&#8645;</span><span class="command-label">Sort</span></button>
+        <button class="command" id="viewButton" type="button"><span class="command-icon">&#9638;</span><span class="command-label">View</span></button>
+        <button class="command" id="moreButton" type="button" title="More"><span class="command-icon">&#8230;</span><span class="command-label">More</span></button>
+      </div>
+      <div class="results-shell" id="resultsShell">
+        <div class="results" id="results" tabindex="0" aria-label="Files in current folder">
+          <div class="details-header" id="detailsHeader" aria-hidden="true">
+            <span>Name</span><span>Status</span><span><button class="details-sort-button" id="dateModifiedHeader" type="button" aria-label="Sort by date modified">Date modified <span class="sort-arrow" id="modifiedSortArrow" aria-hidden="true"></span></button></span><span>Type</span><span>Size</span>
+          </div>
+          <div class="items view-medium" id="items" role="listbox" aria-multiselectable="true"></div>
+        </div>
+        <div class="drop-overlay" id="dropOverlay" role="status">Drop files to upload to this folder</div>
+        <div class="sc-loading-only" id="loadingIndicator" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>
+      </div>
+      <details id="editionResolution" hidden style="flex:none;padding:6px 10px;max-height:180px;overflow:auto;font:12px system-ui;overflow-wrap:anywhere">
+        <summary id="editionResolutionSummary"></summary><p id="editionResolutionDetails"></p><small id="editionResolutionNotes"></small>
+        <p>Download Original retains the checksum-verified archived JPEG bytes. Viewer previews are for viewing. This browser cannot copy a native file list; download the original for Windows file copying.</p>
+      </details>
+      <footer class="status-bar"><span id="itemCount"></span><span id="selectionCount"></span></footer>
+    </div>
+
+    <input id="filesInput" type="file" multiple hidden>
+    <input id="folderInput" type="file" multiple webkitdirectory directory hidden>
+    <div class="menu" id="menu" role="menu"></div>
+    <div class="file-tooltip" id="fileTooltip" role="tooltip" aria-hidden="true"></div>
+    <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button id="toastAction" type="button"></button></div>
+    <section class="upload-panel" id="uploadPanel" aria-label="Uploads">
+      <div class="upload-head"><span id="uploadTitle">Uploads</span><button class="icon-button" id="uploadClose" type="button" title="Hide uploads" aria-label="Hide uploads">&#215;</button></div>
+      <div id="uploadRows"></div>
+    </section>
+
+    <section id="previewPanel" role="dialog" aria-modal="true" aria-label="File preview" hidden>
+      <header><span id="previewTitle">Preview</span><button id="previewClose" type="button">Close preview</button></header>
+      <div id="previewMount"></div>
+    </section>
+    <script src="/files-original-actions.js"></script>
+    <script>
+      const STORAGE_KEY = "sports-cave-files-state-v2";
+      const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1";
+      const CHUNK_BYTES = 8 * 1024 * 1024;
+      const MAX_UPLOAD_CONCURRENT = 2;
+      const MAX_THUMBNAIL_CONCURRENT = 4;
+      const MAX_CLIENT_THUMBNAILS = 160;
+      const FOLDER_PAGE_SIZE = 500;
+      const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+      const MAX_CLIENT_FOLDER_CACHE = 24;
+      const CLIENT_FOLDER_REVALIDATE_SECONDS = 20;
+      const VIEW_MODES = ["large", "medium", "small", "list", "details"];
+      const VIEW_LABELS = { large: "Comfortable icons", medium: "Compact icons", small: "Small icons", list: "List", details: "Details" };
+      const SORT_LABELS = { name: "Name", modified: "Date modified", type: "Type", size: "Size" };
+
+      const elements = Object.fromEntries([
+        "backButton", "forwardButton", "upButton", "refreshButton", "breadcrumbs", "searchInput", "searchClear",
+        "openButton", "newButton", "uploadButton", "copyButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
+        "results", "resultsShell", "detailsHeader", "dateModifiedHeader", "modifiedSortArrow", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
+        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "loadingIndicator",
+        "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
+        "previewPanel", "previewTitle", "previewClose", "previewFrame", "previewMount"
+      ].map(id => [id, document.getElementById(id)]));
+      document.querySelectorAll(".command").forEach(button => {
+        const label = button.querySelector(".command-label")?.textContent.trim();
+        if (label) { button.setAttribute("aria-label", label); button.title = label; }
+      });
+
+      function restoredState() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") || {}; }
+        catch (_) { return {}; }
+      }
+
+      function restoredClipboard() {
+        try {
+          const value = JSON.parse(sessionStorage.getItem(CLIPBOARD_KEY) || "null");
+          return value && ["copy", "cut"].includes(value.mode) && Array.isArray(value.items)
+            ? value
+            : { mode: "", items: [] };
+        } catch (_) {
+          return { mode: "", items: [] };
+        }
+      }
+
+      const restored = restoredState();
+      const query = new URLSearchParams(location.search);
+      const linkedProduct = query.get('psd_product_gid');
+      let savedEditionId = null;
+      let savedEditionResolution = null;
+      const requestedRelativePath = query.get("relative_path") || "";
+      const state = {
+        rootPath: "",
+        rootName: "Sportscave Team Folder",
+        cacheNamespace: "",
+        currentPath: requestedRelativePath ? "" : (query.get("path") || String(restored.currentPath || "")),
+        timeZone: "UTC",
+        back: Array.isArray(restored.back) ? restored.back.slice(-30) : [],
+        forward: Array.isArray(restored.forward) ? restored.forward.slice(-30) : [],
+        view: VIEW_MODES.includes(query.get("view")) ? query.get("view") : (VIEW_MODES.includes(restored.view) ? restored.view : "medium"),
+        sortKey: Object.hasOwn(SORT_LABELS, query.get("sort")) ? query.get("sort") : (Object.hasOwn(SORT_LABELS, restored.sortKey) ? restored.sortKey : "name"),
+        sortDir: (query.get("dir") || restored.sortDir) === "desc" ? "desc" : "asc",
+        searchByPath: restored.searchByPath && typeof restored.searchByPath === "object" ? restored.searchByPath : {},
+        items: [],
+        canDelete: false,
+        selection: new Set(),
+        focusedPath: "",
+        anchorIndex: -1,
+        loading: false,
+        loadingMore: false,
+        navigationToken: 0,
+        folderCache: new Map(),
+        folderPositions: new Map(),
+        virtual: null,
+        scrollFrame: 0,
+        folderRequests: new Map(),
+        folderControllers: new Map(),
+        visibleItemsCache: { items: null, search: "", sortKey: "", sortDir: "", value: [] },
+        openStamp: { path: "", time: 0 },
+        toastTimer: 0,
+        toastIdentity: "",
+        imageViewerWindow: null,
+        imageViewerReady: false,
+        imageViewerPending: null,
+        imageViewerRetryTimer: 0,
+        menuParent: null,
+        thumbnailObserver: null,
+        thumbnailQueue: [],
+        thumbnailActive: 0,
+        thumbnailControllers: new Set(),
+        thumbnailTasks: new Map(),
+        thumbnailInFlight: new Set(),
+        thumbnailCache: new Map(),
+        thumbnailFailures: new Map(),
+        thumbnailGeneration: 0,
+        dragDepth: 0,
+        uploadRows: [],
+        uploadQueue: [],
+        uploadActive: 0,
+        uploadRefreshTimer: 0,
+        uploadConflict: restored.uploadConflict || "cancel",
+        clipboard: restoredClipboard(),
+        clipboardBusy: false,
+        tooltipTimer: 0,
+        tooltipItem: null,
+        tooltipPointer: { x: 0, y: 0 },
+      };
+
+      function persistState() {
+        const payload = {
+          currentPath: state.currentPath,
+          back: state.back.slice(-30),
+          forward: state.forward.slice(-30),
+          view: state.view,
+          sortKey: state.sortKey,
+          sortDir: state.sortDir,
+          searchByPath: state.searchByPath,
+          uploadConflict: state.uploadConflict,
+        };
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (_) {}
+        const params = new URLSearchParams();
+        if (state.currentPath) params.set("path", state.currentPath);
+        params.set("view", state.view);
+        params.set("sort", state.sortKey);
+        params.set("dir", state.sortDir);
+        const search = currentSearch();
+        if (search) params.set("q", search);
+        history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+      }
+
+      function persistClipboard() {
+        try {
+          if (state.clipboard.items.length) sessionStorage.setItem(CLIPBOARD_KEY, JSON.stringify(state.clipboard));
+          else sessionStorage.removeItem(CLIPBOARD_KEY);
+        } catch (_) {}
+      }
+
+      function currentSearch() {
+        return String(state.searchByPath[state.currentPath] || "");
+      }
+
+      function apiJson(path, options) {
+        return fetch(path, Object.assign({ credentials: "same-origin" }, options || {})).then(async response => {
+          let payload = {};
+          try { payload = await response.json(); } catch (_) {}
+          if (!response.ok || payload.ok === false) {
+            const error = new Error(payload.message || "Files could not complete this action.");
+            error.code = payload.code || "files_error";
+            error.status = response.status;
+            error.offset = payload.offset;
+            error.conflicts = Array.from(payload.conflicts || []);
+            error.payload = payload;
+            throw error;
+          }
+          return payload;
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+      }
+
+      function pathId(path) {
+        let hash = 2166136261;
+        for (const char of String(path || "")) {
+          hash ^= char.codePointAt(0);
+          hash = Math.imul(hash, 16777619);
+        }
+        return `files-item-${(hash >>> 0).toString(16)}`;
+      }
+
+      function formatDate(value, { includeZone = false } = {}) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "-";
+        let formatter;
+        try {
+          formatter = new Intl.DateTimeFormat("en-AU", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: state.timeZone,
+            ...(includeZone ? { timeZoneName: "short" } : {}),
+          });
+        } catch (_) {
+          formatter = new Intl.DateTimeFormat("en-AU", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "UTC",
+            ...(includeZone ? { timeZoneName: "short" } : {}),
+          });
+        }
+        const parts = Object.fromEntries(
+          formatter.formatToParts(date)
+            .filter(part => part.type !== "literal")
+            .map(part => [part.type, part.value])
+        );
+        const base = `${parts.day} ${parts.month} ${parts.year}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod || "").toUpperCase()}`;
+        if (!includeZone) return base;
+        const zone = state.timeZone === "Asia/Manila" ? "PHT" : String(parts.timeZoneName || "UTC");
+        return `${base} ${zone}`;
+      }
+
+      function hideFileTooltip() {
+        window.clearTimeout(state.tooltipTimer);
+        state.tooltipTimer = 0;
+        state.tooltipItem = null;
+        elements.fileTooltip.classList.remove("visible");
+        elements.fileTooltip.setAttribute("aria-hidden", "true");
+        elements.fileTooltip.replaceChildren();
+      }
+
+      function positionFileTooltip() {
+        if (!elements.fileTooltip.classList.contains("visible")) return;
+        const offset = 14;
+        const bounds = elements.fileTooltip.getBoundingClientRect();
+        const left = Math.max(6, Math.min(state.tooltipPointer.x + offset, window.innerWidth - bounds.width - 6));
+        const preferredTop = state.tooltipPointer.y + offset;
+        const top = preferredTop + bounds.height <= window.innerHeight - 6
+          ? preferredTop
+          : Math.max(6, state.tooltipPointer.y - bounds.height - 8);
+        elements.fileTooltip.style.left = `${left}px`;
+        elements.fileTooltip.style.top = `${top}px`;
+      }
+
+      function showFileTooltip(item) {
+        if (!item || state.loading) return;
+        elements.fileTooltip.replaceChildren();
+        const name = document.createElement("div");
+        name.className = "file-tooltip-name";
+        name.textContent = item.name;
+        elements.fileTooltip.appendChild(name);
+        const lines = [];
+        if (item.tag === "folder") {
+          lines.push(`Item type: ${item.tooltip_type || "File folder"}`);
+          if (item.latest_activity) {
+            lines.push(`Latest known activity: ${item.latest_activity_tooltip_label || formatDate(item.latest_activity, { includeZone: true })}`);
+          }
+        } else {
+          lines.push(`Item type: ${item.tooltip_type || item.type || "File"}`);
+          lines.push(`Date modified: ${item.modified_tooltip_label || formatDate(item.modified, { includeZone: true })}`);
+          lines.push(`Size: ${item.tooltip_size_label || item.size_label || "0 B"}`);
+          const dimensions = item.kind === "image" ? item.dimensions : null;
+          const width = Number(dimensions && dimensions.width);
+          const height = Number(dimensions && dimensions.height);
+          if (width > 0 && height > 0) lines.push(`Dimensions: ${width} \u00d7 ${height}`);
+        }
+        lines.forEach(text => {
+          const line = document.createElement("div");
+          line.className = "file-tooltip-line";
+          line.textContent = text;
+          elements.fileTooltip.appendChild(line);
+        });
+        state.tooltipItem = item;
+        elements.fileTooltip.classList.add("visible");
+        elements.fileTooltip.setAttribute("aria-hidden", "false");
+        positionFileTooltip();
+      }
+
+      function scheduleFileTooltip(item, event) {
+        hideFileTooltip();
+        state.tooltipPointer = { x: event.clientX, y: event.clientY };
+        state.tooltipTimer = window.setTimeout(() => showFileTooltip(item), 600);
+      }
+
+      function moveFileTooltip(event) {
+        state.tooltipPointer = { x: event.clientX, y: event.clientY };
+        positionFileTooltip();
+      }
+
+      const TEMPORARY_TOAST_MS = 3000;
+      function showToast(message, { kind = "", duration = TEMPORARY_TOAST_MS, actionLabel = "", action = null } = {}) {
+        const identity = `${kind}:${String(message || "")}:${String(actionLabel || "")}`;
+        if (state.toastIdentity === identity && elements.toast.classList.contains("visible")) {
+          // Repeated copy failures may have a new selection snapshot.
+          elements.toastAction.onclick = action || null;
+          return;
+        }
+        window.clearTimeout(state.toastTimer);
+        state.toastIdentity = identity;
+        elements.toast.className = `toast visible${kind ? ` ${kind}` : ""}`;
+        elements.toastText.textContent = String(message || "");
+        elements.toastAction.style.display = actionLabel ? "block" : "none";
+        elements.toastAction.textContent = actionLabel;
+        elements.toastAction.onclick = action || null;
+        if (duration > 0) {
+          state.toastTimer = window.setTimeout(() => {
+            elements.toast.classList.remove("visible");
+            elements.toastText.textContent = "";
+            elements.toastAction.onclick = null;
+            state.toastIdentity = "";
+            state.toastTimer = 0;
+          }, duration);
+        }
+      }
+
+      function itemIcon(item, { thumbnail = true } = {}) {
+        const ext = String(item.extension || "").toUpperCase();
+        if (item.kind === "photoshop") {
+          const label = ext === "PSB" ? "PSB" : "PSD";
+          return `<svg viewBox="0 0 104 120" role="img" aria-label="${label} Photoshop document"><path d="M8 3h65l23 23v91H8z" fill="#001d35" stroke="#23a8f2" stroke-width="4"/><path d="M73 3v24h23" fill="#0b4f79" stroke="#23a8f2" stroke-width="4"/><text x="52" y="65" text-anchor="middle" fill="#31a8ff" font-family="Segoe UI,Arial,sans-serif" font-size="39" font-weight="700">Ps</text><text x="52" y="96" text-anchor="middle" fill="#ffffff" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="600">${label}</text></svg>`;
+        }
+        if (item.kind === "folder") {
+          return `<svg viewBox="0 0 56 48" aria-hidden="true"><path d="M4 14V9a3 3 0 0 1 3-3h14l5 6h23a3 3 0 0 1 3 3v24a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="#e5c16a" stroke="#ad8735" stroke-width="1.4"/><path d="M4 17h48v22a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="#f2d58b" stroke="#ad8735" stroke-width="1.4"/></svg>`;
+        }
+        if (thumbnail && item.thumbnail_url) {
+          return `${itemIcon(item, {thumbnail:false})}<span class="thumbnail-skeleton" aria-hidden="true"></span><img class="thumbnail" alt="" decoding="async" data-thumbnail-url="${escapeHtml(item.thumbnail_url)}" data-thumbnail-key="${escapeHtml(item.thumbnail_key || item.thumbnail_url)}">`;
+        }
+        const colors = {
+          image: ["#287a4b", "IMG"], pdf: ["#b3261e", "PDF"], document: ["#185abd", ext || "DOC"],
+          sheet: ["#107c41", ext || "XLS"], video: ["#744da9", "VID"], archive: ["#8a6419", ext || "ZIP"],
+          design: ["#7b3fa0", ext || "ART"], file: ["#65717b", ext || "FILE"]
+        };
+        const [color, badge] = colors[item.kind] || colors.file;
+        return `<svg viewBox="0 0 96 112" aria-hidden="true"><path d="M9 3h56l22 22v84H9z" fill="#f8fafb" stroke="#aeb7bd" stroke-width="3"/><path d="M65 3v23h22" fill="#e4e9ec" stroke="#aeb7bd" stroke-width="3"/><rect x="18" y="54" width="60" height="29" rx="3" fill="${color}"/><text x="48" y="74" text-anchor="middle" fill="#fff" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="700">${escapeHtml(String(badge).slice(0, 5))}</text></svg>`;
+      }
+
+      function visibleItems() {
+        const search = currentSearch().trim().toLocaleLowerCase();
+        const cached = state.visibleItemsCache;
+        if (
+          cached.items === state.items
+          && cached.search === search
+          && cached.sortKey === state.sortKey
+          && cached.sortDir === state.sortDir
+        ) {
+          return cached.value;
+        }
+        const filtered = search ? state.items.filter(item => item.name.toLocaleLowerCase().includes(search)) : state.items.slice();
+        const direction = state.sortDir === "desc" ? -1 : 1;
+        const value = filtered.sort((left, right) => {
+          if (left.tag !== right.tag) return left.tag === "folder" ? -1 : 1;
+          let a;
+          let b;
+          if (state.sortKey === "modified") {
+            a = Date.parse(left.modified || "");
+            b = Date.parse(right.modified || "");
+            const aValid = Number.isFinite(a);
+            const bValid = Number.isFinite(b);
+            if (aValid !== bValid) return aValid ? -1 : 1;
+            if (!aValid && !bValid) return nameCollator.compare(String(left.name), String(right.name));
+          }
+          else if (state.sortKey === "size") { a = Number(left.size || 0); b = Number(right.size || 0); }
+          else if (state.sortKey === "type") { a = left.type; b = right.type; }
+          else { a = left.name; b = right.name; }
+          if (typeof a === "number") return (a - b) * direction;
+          return nameCollator.compare(String(a), String(b)) * direction;
+        });
+        state.visibleItemsCache = {
+          items: state.items,
+          search,
+          sortKey: state.sortKey,
+          sortDir: state.sortDir,
+          value,
+        };
+        return value;
+      }
+
+      function renderBreadcrumbs() {
+        elements.breadcrumbs.replaceChildren();
+        const root = state.rootPath;
+        const relative = state.currentPath && root && state.currentPath.toLocaleLowerCase().startsWith(root.toLocaleLowerCase())
+          ? state.currentPath.slice(root.length).replace(/^\/+/, "") : "";
+        const crumbs = [{ label: state.rootName || "Files", path: root }];
+        let built = root;
+        for (const part of relative.split("/").filter(Boolean)) {
+          built = `${built}/${part}`.replace(/\/{2,}/g, "/");
+          crumbs.push({ label: part, path: built });
+        }
+        crumbs.forEach((crumb, index) => {
+          const button = document.createElement("button");
+          button.className = "crumb";
+          button.type = "button";
+          button.title = crumb.label;
+          const label = document.createElement("span");
+          label.textContent = crumb.label;
+          button.appendChild(label);
+          button.disabled = index === crumbs.length - 1;
+          button.onclick = () => navigateTo(crumb.path);
+          elements.breadcrumbs.appendChild(button);
+        });
+      }
+
+      function createItemElement(item, index) {
+        const row = document.createElement("div");
+        row.className = "file-item";
+        row.id = pathId(item.path);
+        row.dataset.path = item.path;
+        row.dataset.index = String(index);
+        row._item = item;
+        row._view = state.view;
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-label", `${item.name}, ${item.type}`);
+        row.tabIndex = item.path === state.focusedPath ? 0 : -1;
+        row.draggable = false;
+
+        const icon = document.createElement("span");
+        icon.className = "file-icon";
+        icon.innerHTML = itemIcon(item);
+        const thumbnailImage = item.thumbnail_url && item.kind !== "photoshop" && item.kind !== "folder" ? icon.querySelector("img.thumbnail") : null;
+        if (thumbnailImage) icon.classList.add("thumbnail-capable");
+        if (thumbnailImage && (state.thumbnailFailures.get(thumbnailImage.dataset.thumbnailKey) || 0) > Date.now()) icon.classList.add("thumbnail-failed");
+        const thumbnailEntry = thumbnailImage && state.thumbnailCache.get(thumbnailImage.dataset.thumbnailKey);
+        if (thumbnailEntry && thumbnailEntry.expires > Date.now()) {
+          icon.classList.add("thumbnail-cached");
+          installThumbnail(thumbnailImage, thumbnailImage.dataset.thumbnailKey, thumbnailEntry.url);
+        }
+        const name = document.createElement("span");
+        name.className = "item-name";
+        name.textContent = item.name;
+        name.title = item.name;
+
+        if (state.view === "details") {
+          const nameCell = document.createElement("span");
+          nameCell.className = "details-name";
+          nameCell.append(icon, name);
+          row.append(
+            nameCell,
+            detailCell(item.status, "detail-status"),
+            detailCell(item.modified_label || formatDate(item.modified), "detail-modified"),
+            detailCell(item.type, "detail-type"),
+            detailCell(item.size_label, "detail-size")
+          );
+        } else {
+          row.append(icon, name);
+          if (state.view === "list") {
+            row.append(detailCell(item.modified_label || formatDate(item.modified), "item-secondary"), detailCell(item.size_label, "item-secondary"));
+          }
+        }
+
+        row.addEventListener("mouseenter", event => scheduleFileTooltip(item, event));
+        row.addEventListener("mousemove", moveFileTooltip);
+        row.addEventListener("mouseleave", hideFileTooltip);
+        row.addEventListener("mousedown", hideFileTooltip);
+        row.addEventListener("click", event => {
+          if (event.detail > 1) return;
+          row.focus({preventScroll:true});
+          if (event.ctrlKey || event.metaKey) selectByIndex(Number(row.dataset.index), { toggle: true });
+          else if (event.shiftKey) selectByIndex(Number(row.dataset.index), { range: true });
+          else {
+            setSingleSelection(item.path, Number(row.dataset.index));
+          }
+        });
+        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); setSingleSelection(item.path,Number(row.dataset.index));openPreferredItem(item); });
+        row.addEventListener("contextmenu", event => {
+          hideFileTooltip();
+          event.preventDefault();
+          event.stopPropagation();
+          if (!state.selection.has(item.path)) setSingleSelection(item.path, Number(row.dataset.index));
+          showItemContextMenu(item, event.clientX, event.clientY);
+        });
+        row.addEventListener("keydown", event => handleItemKeydown(event, item, Number(row.dataset.index)));
+        row.addEventListener("dragstart", event => {
+          hideFileTooltip();
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        return row;
+      }
+
+      function detailCell(text, className) {
+        const cell = document.createElement("span");
+        cell.className = `detail-cell ${className || ""}`;
+        cell.textContent = text || "-";
+        return cell;
+      }
+
+      function renderModifiedSortHeader() {
+        const active = state.sortKey === "modified";
+        elements.modifiedSortArrow.textContent = active ? (state.sortDir === "desc" ? "\u2193" : "\u2191") : "";
+        elements.dateModifiedHeader.setAttribute("aria-pressed", active ? "true" : "false");
+        elements.dateModifiedHeader.title = active
+          ? `Date modified, ${state.sortDir === "desc" ? "newest first" : "oldest first"}`
+          : "Sort by date modified";
+      }
+
+      function renderItems() {
+        finishSelectionDrag(true);
+        hideFileTooltip();
+        const activePath = document.activeElement?.closest?.(".file-item")?.dataset.path;
+        const retained = new Map(Array.from(elements.items.children).filter(row => row._view === state.view).map(row => [row.dataset.path, row]));
+        state.retainedRows = retained;
+        state.virtual = null;
+        elements.items.style.height = "";
+        elements.items.className = `items view-${state.view}`;
+        elements.detailsHeader.classList.toggle("visible", state.view === "details");
+        elements.detailsHeader.setAttribute("aria-hidden", state.view === "details" ? "false" : "true");
+        renderModifiedSortHeader();
+        elements.items.replaceChildren();
+        if (state.loading && !state.items.length) {
+          return;
+        }
+        const items = visibleItems();
+        if (!items.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.textContent = state.items.length ? "No items match your search" : "This folder is empty";
+          elements.items.appendChild(empty);
+        } else {
+          const fragment = document.createDocumentFragment();
+          if (items.length > 200) {
+            const probe = createItemElement(items[0], 0);
+            elements.items.appendChild(probe);
+            const style = getComputedStyle(elements.items);
+            const columns = style.display === "grid" ? style.gridTemplateColumns.split(" ").length : 1;
+            const gapX = parseFloat(style.columnGap) || 0;
+            const gapY = parseFloat(style.rowGap) || 0;
+            const height = probe.offsetHeight;
+            const width = (elements.items.clientWidth - (columns - 1) * gapX) / columns;
+            probe.remove();
+            state.virtual = { items, columns, gapX, gapY, height, width, start: -1, end: -1 };
+            elements.items.classList.add("virtual");
+            elements.items.style.height = `${Math.ceil(items.length / columns) * (height + gapY) - gapY}px`;
+            renderVirtualRows();
+          } else items.forEach((item, index) => fragment.appendChild(reuseItemElement(item, index)));
+          elements.items.appendChild(fragment);
+        }
+        updateSelectionUi();
+        setupLazyThumbnails();
+        state.retainedRows = null;
+        if (activePath) document.getElementById(pathId(activePath))?.focus({preventScroll:true});
+      }
+
+      function reuseItemElement(item, index) {
+        const old = state.retainedRows?.get(item.path);
+        // Metadata objects are reused within a page/view; changing metadata rebuilds safely.
+        if (old && (old._item === item || JSON.stringify(old._item) === JSON.stringify(item))) {
+          old.dataset.index = String(index); old.style.cssText = "";
+          return old;
+        }
+        return createItemElement(item, index);
+      }
+
+      function renderVirtualRows() {
+        const v = state.virtual;
+        if (!v) return;
+        const stride = v.height + v.gapY;
+        const top = Math.max(0, elements.results.scrollTop - elements.items.offsetTop);
+        // Dense icon rows expose more items. One buffered row keeps nearby
+        // content ready without multiplying offscreen DOM/thumbnail work.
+        const overscan = ["medium", "large"].includes(state.view) ? 1 : 2;
+        const start = Math.max(0, Math.floor(top / stride) - overscan) * v.columns;
+        const end = Math.min(v.items.length, (Math.ceil((top + elements.results.clientHeight) / stride) + overscan) * v.columns);
+        if (start === v.start && end === v.end) return;
+        v.start = start; v.end = end;
+        const existing = new Map(Array.from(elements.items.children, row => [Number(row.dataset.index), row]));
+        for (const [index, row] of existing) if (index < start || index >= end) row.remove();
+        for (let index = start; index < end; index++) {
+          const row = existing.get(index) || reuseItemElement(v.items[index], index);
+          row.style.top = `${Math.floor(index / v.columns) * stride}px`;
+          row.style.left = `${(index % v.columns) * (v.width + v.gapX)}px`;
+          row.style.width = `${v.width}px`; row.style.height = `${v.height}px`;
+          row.setAttribute("aria-posinset", String(index + 1));
+          row.setAttribute("aria-setsize", String(v.items.length));
+          if (!row.isConnected) elements.items.appendChild(row);
+        }
+        updateSelectionUi();
+        setupLazyThumbnails();
+      }
+
+      function revealItem(path, focus = false) {
+        const index = visibleItems().findIndex(item => item.path === path);
+        if (index < 0) return;
+        if (state.virtual) {
+          const v = state.virtual;
+          elements.results.scrollTop = elements.items.offsetTop + Math.floor(index / v.columns) * (v.height + v.gapY);
+          renderVirtualRows();
+        }
+        const row = document.getElementById(pathId(path));
+        row?.scrollIntoView({ block: "nearest" });
+        if (focus) row?.focus({ preventScroll: true });
+      }
+
+      function renderNavigation() {
+        elements.backButton.disabled = state.back.length === 0;
+        elements.forwardButton.disabled = state.forward.length === 0;
+        elements.upButton.disabled = !state.rootPath || state.currentPath.toLocaleLowerCase() === state.rootPath.toLocaleLowerCase();
+        elements.refreshButton.disabled = state.loading;
+        renderBreadcrumbs();
+        elements.searchInput.value = currentSearch();
+        const folderName = state.currentPath.split("/").filter(Boolean).pop() || state.rootName || "this folder";
+        elements.searchInput.placeholder = `Search ${folderName}`;
+        elements.searchClear.hidden = !currentSearch();
+      }
+
+      function renderStatus() {
+        const resolution = document.getElementById('editionResolution');
+        const selection = selectedItems();
+        resolution.hidden = !(savedEditionId && selection.length === 1 && selection[0].id === savedEditionId);
+        if (!resolution.hidden) {
+          const info = savedEditionResolution || {summary:'Resolution not verified',details:'Legacy output dimensions and source/scaling provenance are unknown.',notes:[],output_status:'Output approval unknown'};
+          document.getElementById('editionResolutionSummary').textContent = info.output_status + ' · ' + info.summary;
+          document.getElementById('editionResolutionDetails').textContent = info.details;
+          document.getElementById('editionResolutionNotes').textContent = (info.notes || []).join(' ');
+        }
+        elements.loadingIndicator.hidden = !(state.loading && !state.items.length);
+        if (state.loading && !state.items.length) {
+          elements.itemCount.textContent = "";
+          elements.selectionCount.textContent = "";
+          return;
+        }
+        const visible = visibleItems().length;
+        elements.itemCount.textContent = currentSearch()
+          ? `${visible} of ${state.items.length} items`
+          : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
+        if (state.loadingMore) elements.itemCount.textContent += " Â· loading moreâ€¦";
+        else if (state.incomplete) elements.itemCount.textContent += " Â· incomplete â€” Refresh to retry";
+        const clipboardCount = state.clipboard.items.length;
+        elements.selectionCount.textContent = state.selection.size
+          ? `${state.selection.size} selected`
+          : (clipboardCount
+            ? `${clipboardCount} item${clipboardCount === 1 ? "" : "s"} ${state.clipboard.mode === "cut" ? "ready to move" : "ready to paste in Files"}`
+            : "");
+      }
+
+      function selectedItems() {
+        const selected = state.selection;
+        return state.items.filter(item => selected.has(item.path));
+      }
+
+      function updateSelectionUi() {
+        document.querySelectorAll(".file-item").forEach(row => {
+          const selected = state.selection.has(row.dataset.path);
+          row.classList.toggle("selected", selected);
+          row.classList.toggle("focused", row.dataset.path === state.focusedPath);
+          row.classList.toggle(
+            "cut-pending",
+            state.clipboard.mode === "cut" && state.clipboard.items.some(item => item.path === row.dataset.path)
+          );
+          row.setAttribute("aria-selected", selected ? "true" : "false");
+          row.tabIndex = row.dataset.path === state.focusedPath ? 0 : -1;
+        });
+        const chosen = selectedItems();
+        const allFiles = chosen.length > 0 && chosen.every(item => item.tag !== "folder");
+        elements.openButton.disabled = chosen.length !== 1;
+        elements.downloadButton.disabled = !allFiles;
+        elements.copyButton.disabled = !allFiles || Boolean(state.originalCopyBusy);
+        if (!state.originalCopyBusy && !state.copyResetTimer) setCopyLabel(chosen.length > 1 ? `Copy ${chosen.length} files` : "Copy");
+        elements.renameButton.disabled = chosen.length !== 1 || chosen[0].protected;
+        elements.deleteButton.disabled = !state.canDelete || !chosen.length || chosen.some(item => item.protected);
+        renderStatus();
+      }
+
+      function setSingleSelection(path, index) {
+        state.selection = new Set(path ? [path] : []);
+        state.focusedPath = path || "";
+        state.anchorIndex = Number.isInteger(index) ? index : visibleItems().findIndex(item => item.path === path);
+        updateSelectionUi();
+      }
+
+      function clearSelection() {
+        state.selection.clear();
+        state.focusedPath = "";
+        state.anchorIndex = -1;
+        updateSelectionUi();
+      }
+
+      function selectByIndex(index, { toggle = false, range = false } = {}) {
+        const items = visibleItems();
+        const item = items[index];
+        if (!item) return;
+        if (range) {
+          const anchor = state.anchorIndex >= 0 ? state.anchorIndex : index;
+          const next = new Set();
+          for (let cursor = Math.min(anchor, index); cursor <= Math.max(anchor, index); cursor += 1) next.add(items[cursor].path);
+          state.selection = next;
+        } else if (toggle) {
+          if (state.selection.has(item.path)) state.selection.delete(item.path);
+          else state.selection.add(item.path);
+          state.anchorIndex = index;
+        } else {
+          state.selection = new Set([item.path]);
+          state.anchorIndex = index;
+        }
+        state.focusedPath = item.path;
+        updateSelectionUi();
+      }
+
+      function renderAll() {
+        renderNavigation();
+        renderItems();
+        if (state.restorePosition) {
+          const saved = state.restorePosition; state.restorePosition = null;
+          state.selection = new Set(saved.selection.filter(path => state.items.some(item => item.path === path)));
+          state.focusedPath = saved.focused;
+          elements.results.scrollTop = saved.scroll;
+          renderVirtualRows(); updateSelectionUi();
+        }
+        renderStatus();
+        persistState();
+      }
+
+      function folderCacheKey(path) {
+        return [
+          String(state.cacheNamespace || "anonymous"),
+          String(state.rootPath || ""),
+          String(path || "").replace(/\/+$/, ""),
+        ].join("|").toLocaleLowerCase();
+      }
+
+      function cachedFolder(path) {
+        const entry = cachedFolderEntry(path);
+        return entry ? entry.payload : null;
+      }
+
+      function cachedFolderEntry(path) {
+        const key = folderCacheKey(path);
+        const cached = state.folderCache.get(key);
+        if (!cached || cached.expiresAt <= Date.now()) {
+          if (cached) state.folderCache.delete(key);
+          return null;
+        }
+        state.folderCache.delete(key);
+        state.folderCache.set(key, cached);
+        return cached;
+      }
+
+      function rememberFolder(payload, requestedPath) {
+        const seconds = Math.max(1, Math.min(180, Number(payload.cached_for_seconds || 30)));
+        const entry = {
+          payload,
+          cachedAt: Date.now(),
+          expiresAt: Date.now() + seconds * 1000,
+        };
+        const previousNamespace = state.cacheNamespace;
+        const previousRoot = state.rootPath;
+        state.cacheNamespace = String(payload.cache_namespace || previousNamespace || "");
+        state.rootPath = String(payload.root_path || previousRoot || "");
+        for (const path of [requestedPath, payload.current_path]) {
+          const key = folderCacheKey(path);
+          if (!key) continue;
+          state.folderCache.delete(key);
+          state.folderCache.set(key, entry);
+        }
+        state.cacheNamespace = previousNamespace;
+        state.rootPath = previousRoot;
+        while (state.folderCache.size > MAX_CLIENT_FOLDER_CACHE) {
+          state.folderCache.delete(state.folderCache.keys().next().value);
+        }
+      }
+
+      function invalidateClientFolderCache(...paths) {
+        const targets = paths.map(path => folderCacheKey(path)).filter(Boolean);
+        if (!targets.length) {
+          state.folderCache.clear();
+          return;
+        }
+        for (const key of Array.from(state.folderCache.keys())) {
+          if (targets.includes(key)) state.folderCache.delete(key);
+        }
+      }
+
+      function requestFolder(path, refresh, page = "", relativePath = "") {
+        const params = new URLSearchParams();
+        if (relativePath) params.set("relative_path", relativePath);
+        else if (path) params.set("path", path);
+        if (refresh) params.set("refresh", "1");
+        params.set("page_size", String(FOLDER_PAGE_SIZE));
+        if (page) params.set("page", page);
+        const requestKey = `${relativePath ? `relative:${relativePath}` : folderCacheKey(path)}|${refresh ? "refresh" : "normal"}|${page || "first"}`;
+        if (!page && state.folderRequests.has(requestKey)) {
+          return state.folderRequests.get(requestKey);
+        }
+        const controller = typeof AbortController === "function" ? new AbortController() : null;
+        if (controller) state.folderControllers.set(requestKey, controller);
+        const controlledRequest = apiJson(
+          `/api/files-list?${params.toString()}`,
+          controller ? { signal: controller.signal } : {}
+        ).finally(() => {
+          if (state.folderControllers.get(requestKey) === controller) {
+            state.folderRequests.delete(requestKey);
+            state.folderControllers.delete(requestKey);
+          }
+        });
+        if (!page) state.folderRequests.set(requestKey, controlledRequest);
+        return controlledRequest;
+      }
+
+      function abortStaleFolderRequests(exceptPath = null) {
+        const keepPrefix = exceptPath == null ? "" : `${folderCacheKey(exceptPath)}|`;
+        for (const [key, controller] of Array.from(state.folderControllers.entries())) {
+          if (keepPrefix && key.startsWith(keepPrefix)) continue;
+          if (controller && typeof controller.abort === "function") controller.abort();
+          state.folderControllers.delete(key);
+          state.folderRequests.delete(key);
+        }
+      }
+
+      function applyFolderPayload(payload) {
+        if (state.cacheNamespace && payload.cache_namespace && state.cacheNamespace !== String(payload.cache_namespace)) {
+          stopThumbnailLoading();
+          state.thumbnailCache.forEach(value => URL.revokeObjectURL(value.url));
+          state.thumbnailCache.clear(); state.thumbnailFailures.clear(); state.folderCache.clear();
+          closePreview(); elements.previewFrame?.remove(); elements.previewFrame = null;
+          state.imageViewerWindow = null; state.imageViewerReady = false;
+        }
+        state.rootPath = String(payload.root_path || "");
+        state.rootName = String(payload.root_name || "Files");
+        state.cacheNamespace = String(payload.cache_namespace || state.cacheNamespace || "");
+        state.currentPath = String(payload.current_path || state.rootPath);
+        state.timeZone = String(payload.timezone || "UTC");
+        state.items = Array.from(payload.items || []);
+        if (state.pinnedItem && state.pinnedFolder === state.currentPath && payload.has_more && !state.items.some(item => item.id === state.pinnedItem.id)) state.items.push(state.pinnedItem);
+        const availablePaths = new Set(state.items.map(item => item.path));
+        state.selection = new Set(Array.from(state.selection).filter(path => availablePaths.has(path)));
+        state.canDelete = Boolean(payload.can_delete);
+        state.searchByPath[state.currentPath] = state.searchByPath[state.currentPath] || "";
+      }
+
+
+      function parentPath(path) {
+        const clean = String(path || "").replace(/\/+$/, "");
+        if (!clean || clean.toLocaleLowerCase() === state.rootPath.toLocaleLowerCase()) return state.rootPath;
+        const parent = clean.slice(0, clean.lastIndexOf("/"));
+        return parent.toLocaleLowerCase().startsWith(state.rootPath.toLocaleLowerCase()) ? parent : state.rootPath;
+      }
+
+      async function loadFolder(path, { refresh = false, preserveScroll = false, relativePath = "" } = {}) {
+        state.openStamp = {path:"",time:0};
+        const token = ++state.navigationToken;
+        state.incomplete = false;
+        if (state.currentPath && state.items.length) {
+          state.folderPositions.set(state.currentPath, { scroll:elements.results.scrollTop, selection:Array.from(state.selection), focused:state.focusedPath });
+          while (state.folderPositions.size > 24) state.folderPositions.delete(state.folderPositions.keys().next().value);
+        }
+        const position = state.folderPositions.get(path);
+        const oldScroll = preserveScroll ? elements.results.scrollTop : (position?.scroll || 0);
+        preserveScroll = preserveScroll || Boolean(position);
+        state.restorePosition = position || null;
+        if (path !== state.pinnedFolder) state.pinnedItem = null;
+        abortStaleFolderRequests(path);
+        const cachedEntry = refresh ? null : cachedFolderEntry(path);
+        if (cachedEntry) {
+          const cached = cachedEntry.payload;
+          const needsMorePages = Boolean(cached.has_more && cached.next_page);
+          const shouldRevalidate = !needsMorePages && Date.now() - cachedEntry.cachedAt > CLIENT_FOLDER_REVALIDATE_SECONDS * 1000;
+          closeMenus();
+          clearSelection();
+          stopThumbnailLoading();
+          applyFolderPayload(cached);
+          state.loading = false;
+          state.loadingMore = needsMorePages || shouldRevalidate;
+          renderAll();
+          elements.results.scrollTop = preserveScroll ? oldScroll : 0;
+          if (needsMorePages) {
+            await continueFolderPages(path, cached, token, oldScroll, preserveScroll);
+            return true;
+          }
+          if (!shouldRevalidate) return true;
+          requestFolder(path, true)
+            .then(async payload => {
+              if (token !== state.navigationToken) return;
+              rememberFolder(payload, path);
+              applyFolderPayload(payload);
+              state.loading = false;
+              state.loadingMore = Boolean(payload.has_more && payload.next_page);
+              renderAll();
+              await continueFolderPages(path, payload, token, oldScroll, preserveScroll);
+            })
+            .catch(() => {
+              if (token !== state.navigationToken) return;
+              state.loadingMore = false; state.incomplete = true;
+              showToast("Cached folder could not be refreshed. Refresh to retry.", {kind:"error",duration:6000});
+              renderStatus();
+            });
+          return true;
+        }
+        state.loading = true;
+        state.loadingMore = false;
+        if (path !== state.currentPath || relativePath) { state.currentPath = path; state.items = []; }
+        closeMenus();
+        clearSelection();
+        stopThumbnailLoading();
+        renderItems();
+        renderNavigation();
+        renderStatus();
+        try {
+          const payload = await requestFolder(path, refresh, "", relativePath);
+          if (token !== state.navigationToken) return false;
+          const resolvedPath = String(payload.current_path || path || "");
+          rememberFolder(payload, resolvedPath);
+          applyFolderPayload(payload);
+          state.loading = false;
+          state.loadingMore = Boolean(payload.has_more && payload.next_page);
+          renderAll();
+          elements.results.scrollTop = preserveScroll ? oldScroll : 0;
+          await continueFolderPages(resolvedPath, payload, token, oldScroll, preserveScroll);
+          return true;
+        } catch (error) {
+          if (token !== state.navigationToken) return false;
+          state.loading = false;
+          state.loadingMore = false;
+          state.items = [];
+          renderAll();
+          const message = error.status === 403
+            ? "Files access expired. Sign in again in Sports Cave OS, then reopen Files."
+            : (error.message || "This folder could not be loaded right now.");
+          showToast(message, { kind: "error", duration: 6000 });
+          return false;
+        }
+      }
+
+      async function continueFolderPages(path, firstPayload, token, oldScroll, preserveScroll) {
+        let payload = firstPayload;
+        while (payload && payload.has_more && payload.next_page) {
+          try {
+            payload = await requestFolder(path, false, payload.next_page);
+          } catch (error) {
+            if (token === state.navigationToken) {
+              state.loadingMore = false;
+              state.incomplete = true;
+              showToast("Folder listing is incomplete. Refresh to retry.", {kind:"error",duration:6000});
+              renderStatus();
+            }
+            return;
+          }
+          if (token !== state.navigationToken) return;
+          rememberFolder(payload, path);
+          applyFolderPayload(payload);
+          state.loading = false;
+          state.loadingMore = Boolean(payload.has_more && payload.next_page);
+          renderAll();
+          if (preserveScroll) elements.results.scrollTop = oldScroll;
+        }
+        if (token === state.navigationToken) {
+          state.loadingMore = false;
+          renderStatus();
+        }
+      }
+
+      async function navigateTo(path, { remember = true, refresh = false, preserveScroll = false } = {}) {
+        const target = String(path || state.rootPath || "");
+        if (!refresh && target && target === state.currentPath) return true;
+        const previous = state.currentPath;
+        if (remember && previous && previous !== target) {
+          state.back.push(previous);
+          state.back = state.back.slice(-30);
+          state.forward = [];
+        }
+        const navigation = state.navigationToken + 1;
+        const loaded = await loadFolder(target, { refresh, preserveScroll });
+        if (navigation === state.navigationToken && !loaded && remember && previous && state.back[state.back.length - 1] === previous) state.back.pop();
+        return loaded;
+      }
+
+      async function navigateBack() {
+        if (!state.back.length) return;
+        const destination = state.back.pop();
+        if (state.currentPath) state.forward.push(state.currentPath);
+        const navigation = state.navigationToken + 1;
+        if (!await loadFolder(destination) && navigation === state.navigationToken) {
+          state.forward.pop();
+          state.back.push(destination);
+        }
+      }
+
+      async function navigateForward() {
+        if (!state.forward.length) return;
+        const destination = state.forward.pop();
+        if (state.currentPath) state.back.push(state.currentPath);
+        const navigation = state.navigationToken + 1;
+        if (!await loadFolder(destination) && navigation === state.navigationToken) {
+          state.back.pop();
+          state.forward.push(destination);
+        }
+      }
+
+      function relativeFolderPath() {
+        const root = String(state.rootPath || "");
+        const current = String(state.currentPath || "");
+        return root && current.toLocaleLowerCase().startsWith(root.toLocaleLowerCase())
+          ? current.slice(root.length).replace(/^\/+/, "")
+          : "";
+      }
+
+      function viewerThumbnail(path) {
+        const item = state.items.find(item => item.desktop_relative_path === path);
+        const cached = item && state.thumbnailCache.get(item.thumbnail_key || item.thumbnail_url);
+        return cached && cached.expires > Date.now() ? cached.url : "";
+      }
+
+      function viewerNavigation() {
+        return visibleItems().filter(item => item.kind === "image" || item.extension === "psd")
+          .map(item => ({path:item.desktop_relative_path, name:item.name, revision:item.revision || ""}));
+      }
+
+      function clearImageViewerDelivery(requestId = "") {
+        if (
+          requestId
+          && state.imageViewerPending
+          && state.imageViewerPending.requestId !== requestId
+        ) {
+          return;
+        }
+        window.clearTimeout(state.imageViewerRetryTimer);
+        state.imageViewerRetryTimer = 0;
+        state.imageViewerPending = null;
+      }
+
+      function deliverPendingImageViewerRequest() {
+        const pending = state.imageViewerPending;
+        const viewer = state.imageViewerWindow;
+        if (!pending || !viewer || viewer.closed || !state.imageViewerReady) return;
+        try {
+          viewer.postMessage({
+            type: "sports-cave-image-viewer-open",
+            version: 1,
+            requestId: pending.requestId,
+            path: pending.path,
+            folder: pending.folder,
+            name: pending.name,
+            images: viewerNavigation(),
+            revision: pending.revision,
+            thumbnail: viewerThumbnail(pending.path),
+          }, location.origin);
+        } catch (_) {
+          state.imageViewerReady = false;
+          return;
+        }
+        pending.attempts += 1;
+        window.clearTimeout(state.imageViewerRetryTimer);
+        if (pending.attempts < 8) {
+          state.imageViewerRetryTimer = window.setTimeout(
+            deliverPendingImageViewerRequest,
+            300
+          );
+        } else {
+          clearImageViewerDelivery(pending.requestId);
+          showToast("The image viewer did not accept the selected image.", {
+            kind: "error",
+            duration: 0,
+            actionLabel: "Close preview",
+            action: closePreview,
+          });
+        }
+      }
+
+      function queueImageViewerRequest(viewerRequest) {
+        window.clearTimeout(state.imageViewerRetryTimer);
+        state.imageViewerRetryTimer = 0;
+        state.imageViewerPending = {
+          ...viewerRequest,
+          requestId: dragRequestId(),
+          attempts: 0,
+        };
+        deliverPendingImageViewerRequest();
+      }
+
+      function openImageViewer(item) {
+        const viewerRequest = {
+          path: String(item.desktop_relative_path || ""),
+          folder: relativeFolderPath(), name: String(item.name || "File"),
+          revision: String(item.rev || item.revision || ""),
+        };
+        state.previewOpener = document.activeElement;
+        elements.previewTitle.textContent = viewerRequest.name;
+        elements.previewPanel.hidden = false;
+        for (const child of document.body.children) {
+          if (child !== elements.previewPanel && child.tagName !== "SCRIPT") child.inert = true;
+        }
+        if (!elements.previewFrame) {
+          elements.previewFrame = document.createElement("iframe");
+          elements.previewFrame.id = "previewFrame"; elements.previewFrame.title = "File preview";
+          elements.previewFrame.allow = "clipboard-write";
+          elements.previewFrame.src = "/files-image-viewer?" + new URLSearchParams({
+            embedded:"1", path:viewerRequest.path, folder:viewerRequest.folder,
+            name:viewerRequest.name, rev:viewerRequest.revision,
+          });
+          elements.previewMount.appendChild(elements.previewFrame);
+        }
+        state.imageViewerWindow = elements.previewFrame.contentWindow;
+        queueImageViewerRequest(viewerRequest);
+        elements.previewClose.focus();
+      }
+
+      function closePreview() {
+        if (elements.previewPanel.hidden) return;
+        clearImageViewerDelivery();
+        state.imageViewerWindow?.postMessage({type:"sports-cave-image-viewer-suspend", version:1}, location.origin);
+        elements.previewPanel.hidden = true;
+        for (const child of document.body.children) child.inert = false;
+        state.openStamp = {path:"",time:0};
+        if (state.previewOpener?.isConnected) state.previewOpener.focus();
+        else revealItem(state.focusedPath, true);
+      }
+
+      function originalDownloadUrl(item) {
+        return savedEditionId === item.id
+          ? '/api/auto-editions/file?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job'))
+          : `/api/files-download?path=${encodeURIComponent(item.path)}`;
+      }
+
+      function setCopyLabel(label) {
+        elements.copyButton.querySelector(".command-label").textContent = label;
+        elements.copyButton.setAttribute("aria-label", label);
+        elements.copyButton.title = label;
+      }
+
+      async function copyOriginalFiles(items = selectedItems()) {
+        if (state.originalCopyBusy) return;
+        const files = items.filter(item => item.tag !== "folder");
+        if (!files.length || files.length !== items.length) return;
+        const snapshot = FilesOriginal.snapshot(files.map(item => ({...item, url:originalDownloadUrl(item)})));
+        clearTimeout(state.copyResetTimer); state.copyResetTimer = 0;
+        state.originalCopyBusy = true;
+        setCopyLabel("Copying…"); updateSelectionUi();
+        try {
+          await FilesOriginal.copy(snapshot);
+          setCopyLabel(`Copied ${snapshot.length} files`);
+        } catch (error) {
+          setCopyLabel("Copy unavailable");
+          showToast(error.message || "File copy failed. Use Download Original.", {
+            kind:"error", duration:0, actionLabel:"Download Original",
+            action:() => startDownload(snapshot),
+          });
+        } finally {
+          state.originalCopyBusy = false;
+          state.copyResetTimer = setTimeout(() => {
+            state.copyResetTimer = 0; updateSelectionUi();
+          }, 2000);
+          updateSelectionUi();
+        }
+      }
+
+      function openItem(item) {
+        if (!item) return;
+        const now = Date.now();
+        if (state.openStamp.path === item.path && now - state.openStamp.time < 650) return;
+        state.openStamp = { path: item.path, time: now };
+        closeMenus();
+        if (item.kind === "folder") {
+          navigateTo(item.path);
+        } else {
+          openImageViewer(item);
+        }
+      }
+
+      function startDownload(items = selectedItems()) {
+        const files = items.filter(item => item.tag !== "folder");
+        if (!files.length || files.length !== items.length) {
+          showToast("Select one or more files. Folder download is not available.", { kind: "error", duration: 4500 });
+          return;
+        }
+        const identity = files.map(item => item.id || item.path).sort().join("|");
+        if (state.downloadStamp?.identity === identity && Date.now() - state.downloadStamp.time < 650) return;
+        state.downloadStamp = {identity, time:Date.now()};
+        showToast(files.length === 1 ? `Downloading ${files[0].name}...` : `Starting ${files.length} downloads. Your browser may ask to allow multiple downloads.`, { duration: 5000 });
+        files.forEach((item, index) => {
+          const downloadUrl = item.url || originalDownloadUrl(item);
+          window.setTimeout(() => {
+            const frame = document.createElement("iframe");
+            frame.hidden = true;
+            frame.src = downloadUrl;
+            document.body.appendChild(frame);
+            window.setTimeout(() => frame.remove(), 120000);
+          }, index * 350);
+        });
+      }
+
+      function copyText(value) {
+        const text = String(value || "");
+        const fallback = () => {
+          const input = document.createElement("textarea");
+          input.value = text;
+          input.style.position = "fixed";
+          input.style.opacity = "0";
+          document.body.appendChild(input);
+          input.select();
+          document.execCommand("copy");
+          input.remove();
+        };
+        const operation = navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(text) : Promise.resolve(fallback());
+        operation.then(() => showToast("Path copied", { kind: "success" })).catch(() => {
+          fallback();
+          showToast("Path copied", { kind: "success" });
+        });
+      }
+
+      function displayPath(item) {
+        return [state.rootName, String(item.desktop_relative_path || "").replaceAll("/", "\\")].filter(Boolean).join("\\");
+      }
+
+      function closeMenus() {
+        document.querySelectorAll(".menu.open").forEach(menu => menu.classList.remove("open"));
+        document.querySelectorAll(".submenu").forEach(menu => menu.remove());
+        elements.menu.replaceChildren();
+      }
+
+      function menuDivider() { return { separator: true }; }
+
+      function fillMenu(menu, definitions) {
+        menu.replaceChildren();
+        definitions.forEach(definition => {
+          if (definition.separator) {
+            const divider = document.createElement("div");
+            divider.className = "menu-separator";
+            menu.appendChild(divider);
+            return;
+          }
+          if (definition.heading) {
+            const label = document.createElement("div");
+            label.className = "menu-label";
+            label.textContent = definition.heading;
+            menu.appendChild(label);
+            return;
+          }
+          const button = document.createElement("button");
+          button.className = "menu-button";
+          button.type = "button";
+          button.disabled = Boolean(definition.disabled);
+          const check = document.createElement("span");
+          check.className = "check";
+          check.textContent = definition.checked ? "\u2713" : "";
+          const icon = document.createElement("span");
+          icon.className = "menu-icon";
+          icon.textContent = definition.icon || "";
+          const label = document.createElement("span");
+          label.textContent = definition.label;
+          button.append(check, icon, label);
+          if (definition.submenu) {
+            const arrow = document.createElement("span");
+            arrow.className = "arrow";
+            arrow.textContent = ">";
+            button.appendChild(arrow);
+            const showChild = () => showSubmenu(button, definition.submenu);
+            button.addEventListener("mouseenter", showChild);
+            button.addEventListener("click", event => { event.stopPropagation(); showChild(); });
+          } else {
+            button.addEventListener("click", event => {
+              event.preventDefault();
+              event.stopPropagation();
+              closeMenus();
+              if (definition.action) definition.action();
+            });
+          }
+          menu.appendChild(button);
+        });
+      }
+
+      function positionMenu(menu, x, y) {
+        menu.style.left = `${Math.max(4, x)}px`;
+        menu.style.top = `${Math.max(4, y)}px`;
+        menu.classList.add("open");
+        const bounds = menu.getBoundingClientRect();
+        menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - bounds.width - 6))}px`;
+        menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - bounds.height - 6))}px`;
+      }
+
+      function showMenu(definitions, x, y) {
+        closeMenus();
+        fillMenu(elements.menu, definitions);
+        positionMenu(elements.menu, x, y);
+        const first = elements.menu.querySelector("button:not(:disabled)");
+        if (first) first.focus({ preventScroll: true });
+      }
+
+      function showSubmenu(parent, definitions) {
+        document.querySelectorAll(".submenu").forEach(menu => menu.remove());
+        const child = document.createElement("div");
+        child.className = "menu submenu";
+        document.body.appendChild(child);
+        fillMenu(child, definitions);
+        child.classList.add("open");
+        const parentBounds = parent.getBoundingClientRect();
+        const bounds = child.getBoundingClientRect();
+        const x = parentBounds.right + bounds.width <= window.innerWidth - 5 ? parentBounds.right - 2 : parentBounds.left - bounds.width + 2;
+        const y = Math.min(parentBounds.top, window.innerHeight - bounds.height - 6);
+        child.style.left = `${Math.max(4, x)}px`;
+        child.style.top = `${Math.max(4, y)}px`;
+      }
+
+      function sortMenuDefinitions() {
+        return [
+          ...Object.entries(SORT_LABELS)
+            .filter(([key]) => key !== "modified")
+            .map(([key, label]) => ({ label, checked: state.sortKey === key, action: () => setSort(key, state.sortDir) })),
+          { label: "Date modified \u2014 newest first", checked: state.sortKey === "modified" && state.sortDir === "desc", action: () => setSort("modified", "desc") },
+          { label: "Date modified \u2014 oldest first", checked: state.sortKey === "modified" && state.sortDir === "asc", action: () => setSort("modified", "asc") },
+          menuDivider(),
+          { label: "Ascending", checked: state.sortDir === "asc", action: () => setSort(state.sortKey, "asc") },
+          { label: "Descending", checked: state.sortDir === "desc", action: () => setSort(state.sortKey, "desc") },
+        ];
+      }
+
+      function viewMenuDefinitions() {
+        return VIEW_MODES.map(view => ({ label: VIEW_LABELS[view], checked: state.view === view, action: () => setView(view) }));
+      }
+
+      function uploadMenuDefinitions() {
+        return [
+          { label: "Upload files", action: () => elements.filesInput.click() },
+          { label: "Upload folder", action: () => elements.folderInput.click() },
+          menuDivider(),
+          { heading: "If a name already exists" },
+          { label: "Cancel", checked: state.uploadConflict === "cancel", action: () => setUploadConflict("cancel") },
+          { label: "Keep both", checked: state.uploadConflict === "keep_both", action: () => setUploadConflict("keep_both") },
+          { label: "Replace", checked: state.uploadConflict === "replace", action: () => setUploadConflict("replace") },
+        ];
+      }
+
+      function setSort(key, direction) {
+        state.sortKey = key;
+        state.sortDir = direction;
+        state.anchorIndex = -1;
+        renderItems();
+        renderStatus();
+        persistState();
+        const directionLabel = key === "modified"
+          ? (direction === "desc" ? "newest first" : "oldest first")
+          : (direction === "asc" ? "ascending" : "descending");
+        showToast(`Sorted by ${SORT_LABELS[key]}, ${directionLabel}`, { duration: 1800 });
+      }
+
+      function setView(view) {
+        if (!VIEW_MODES.includes(view)) return;
+        state.view = view;
+        renderItems();
+        persistState();
+      }
+
+      function setUploadConflict(conflict) {
+        state.uploadConflict = conflict;
+        persistState();
+        showToast(`Upload conflict: ${conflict.replace("_", " ")}`, { duration: 1800 });
+      }
+
+      function clipboardPayload(items) {
+        return items.map(item => ({
+          path: String(item.path || ""),
+          relative_path: String(item.desktop_relative_path || ""),
+          name: String(item.name || ""),
+          tag: String(item.tag || "file"),
+          kind: String(item.kind || "file"),
+          size: Number(item.size || 0),
+          extension: String(item.extension || ""),
+          id: String(item.id || ""),
+          revision: String(item.revision || ""),
+        })).filter(item => item.relative_path);
+      }
+
+      function setFilesClipboard(mode, items = selectedItems()) {
+        const chosen = clipboardPayload(items);
+        if (!chosen.length || !["copy", "cut"].includes(mode)) return;
+        state.clipboard = { mode, items: chosen, createdAt: Date.now() };
+        persistClipboard();
+        updateSelectionUi();
+        const count = chosen.length;
+        showToast(mode === "cut"
+          ? `${count} item${count === 1 ? "" : "s"} ready to move inside Sports Cave Files`
+          : `${count} item${count === 1 ? "" : "s"} copied inside Sports Cave Files`,
+          {kind:"success", duration:2200});
+      }
+
+      function clearFilesClipboard() {
+        state.clipboard = { mode: "", items: [] };
+        persistClipboard();
+        updateSelectionUi();
+      }
+
+      function canPasteHere() {
+        if (state.clipboardBusy || !state.clipboard.items.length || !state.currentPath) return false;
+        const destination = relativeFolderPath().toLocaleLowerCase();
+        if (state.clipboard.items.some(item => {
+          const source = item.relative_path.toLocaleLowerCase();
+          return item.tag === "folder" && (destination === source || destination.startsWith(`${source}/`));
+        })) return false;
+        if (state.clipboard.mode === "cut") {
+          const movable = state.clipboard.items.some(item => {
+            const sourceParent = item.relative_path.includes("/")
+              ? item.relative_path.slice(0, item.relative_path.lastIndexOf("/"))
+              : "";
+            return sourceParent.toLocaleLowerCase() !== destination;
+          });
+          if (!movable) return false;
+        }
+        return true;
+      }
+
+      async function pasteFiles(conflict = "prompt") {
+        if (!canPasteHere()) return;
+        const operation = state.clipboard.mode === "cut" ? "move" : "copy";
+        state.clipboardBusy = true;
+        closeMenus();
+        showToast("Pasting items...", { duration: 1800 });
+        try {
+          const payload = await apiJson("/api/files-paste", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paths: state.clipboard.items.map(item => item.relative_path),
+              destination: relativeFolderPath(),
+              operation,
+              conflict,
+            }),
+          });
+          const successful = Array.from(payload.successful || []);
+          const failed = Array.from(payload.failed || []);
+          const skipped = Array.from(payload.skipped || []);
+          if (operation === "move" && successful.length) {
+            const movedPaths = new Set(successful.map(item => String(item.source_path || "").toLocaleLowerCase()));
+            state.clipboard.items = state.clipboard.items.filter(
+              item => !movedPaths.has(String(item.path || "").toLocaleLowerCase())
+            );
+            if (state.clipboard.items.length) {
+              persistClipboard();
+              updateSelectionUi();
+            } else {
+              clearFilesClipboard();
+            }
+          }
+          const folderName = state.currentPath.split("/").filter(Boolean).pop() || state.rootName;
+          if (failed.length) {
+            showToast(`Pasted ${successful.length}; ${failed.length} failed. Failed items remain in the clipboard.`, { kind: "error", duration: 6000 });
+          } else if (skipped.length && successful.length) {
+            showToast(`Pasted ${successful.length}; ${skipped.length} skipped. Skipped items remain in the clipboard.`, { duration: 4500 });
+          } else if (skipped.length && !successful.length) {
+            showToast("No items were pasted.", { duration: 3000 });
+          } else {
+            showToast(`${operation === "move" ? "Moved" : "Copied"} to ${folderName}`, { kind: "success", duration: 2400 });
+          }
+          invalidateClientFolderCache(state.currentPath);
+          await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
+        } catch (error) {
+          if (error.code === "paste_conflict" && error.conflicts.length) showPasteConflictDialog(error.conflicts);
+          else showToast(error.message, { kind: "error", duration: 6000 });
+        } finally {
+          state.clipboardBusy = false;
+          updateSelectionUi();
+        }
+      }
+
+      function showPasteConflictDialog(conflicts) {
+        openModal(modal => {
+          const count = conflicts.length;
+          modalHeading(
+            modal,
+            `${count} item${count === 1 ? "" : "s"} already exist`,
+            "Choose what to do with items that have the same name."
+          );
+          const list = document.createElement("div");
+          list.className = "delete-list";
+          conflicts.forEach(item => {
+            const row = document.createElement("div");
+            row.textContent = item.name;
+            list.appendChild(row);
+          });
+          modal.appendChild(list);
+          const actions = document.createElement("div");
+          actions.className = "modal-actions";
+          const choice = (label, policy, className = "dialog-button") => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = className;
+            button.textContent = label;
+            button.onclick = () => { closeModal(); pasteFiles(policy); };
+            return button;
+          };
+          const cancel = choice("Cancel", "", "dialog-button");
+          cancel.onclick = closeModal;
+          actions.append(
+            cancel,
+            choice("Skip", "skip"),
+            choice("Keep both", "keep_both"),
+            choice("Replace", "replace", "dialog-button danger")
+          );
+          modal.appendChild(actions);
+        });
+      }
+
+      function dragRequestId() {
+        return crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,14)}`;
+      }
+
+      function openPreferredItem(item) { openItem(item); }
+      function previewItem(item) { openItem(item); }
+
+      function showItemContextMenu(item, x, y) {
+        const chosen = selectedItems();
+        const single = chosen.length === 1;
+        const canDelete = state.canDelete && chosen.length > 0 && chosen.every(selected => !selected.protected);
+        const allFiles = chosen.length > 0 && chosen.every(selected => selected.tag !== "folder");
+        if (item.kind === "folder") {
+          showMenu([
+            { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
+            menuDivider(),
+            { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
+            { label: "Copy in Files", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
+            { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
+            menuDivider(),
+            { label: "Download Original", disabled: !allFiles, action: () => startDownload(chosen) },
+            { label: "Rename", disabled: !single, action: () => showRenameDialog(item) },
+            { label: "Delete", disabled: !canDelete, action: showDeleteDialog },
+            menuDivider(),
+            { label: "Copy path", action: () => copyText(displayPath(item)) },
+            { label: "Properties", action: () => showProperties(item) },
+          ], x, y);
+        } else {
+          const definitions = [
+            { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
+          ];
+          definitions.push(
+            { label: "Preview", disabled: !single, action: () => previewItem(item) },
+            { label: chosen.length > 1 ? `Copy ${chosen.length} files` : "Copy", disabled: !allFiles, action: () => copyOriginalFiles(chosen) },
+            menuDivider(),
+            { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
+            { label: "Copy in Files", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
+            { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
+            menuDivider(),
+            { label: "Download Original", action: () => startDownload(chosen.length ? chosen : [item]) },
+            { label: "Rename", disabled: !single, action: () => showRenameDialog(item) },
+            { label: "Delete", disabled: !canDelete, action: showDeleteDialog },
+            menuDivider(),
+            { label: "Copy path", action: () => copyText(displayPath(item)) },
+            { label: "Properties", action: () => showProperties(item) },
+          );
+          showMenu(definitions, x, y);
+        }
+      }
+
+      function showEmptyContextMenu(x, y) {
+        showMenu([
+          { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
+          menuDivider(),
+          { label: "New folder", action: showNewFolderDialog },
+          { label: "Upload", action: () => elements.filesInput.click() },
+          { label: "Refresh", action: () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true }) },
+          menuDivider(),
+          { label: "Sort by", submenu: sortMenuDefinitions() },
+          { label: "View", submenu: viewMenuDefinitions() },
+        ], x, y);
+      }
+
+      function openModal(contentBuilder) {
+        state.modalOpener = document.activeElement;
+        closeMenus();
+        elements.modal.replaceChildren();
+        contentBuilder(elements.modal);
+        elements.modalBackdrop.classList.add("open");
+        const focusTarget = elements.modal.querySelector("input, button");
+        if (focusTarget) window.setTimeout(() => focusTarget.focus(), 0);
+      }
+
+      function closeModal() {
+        const opener = state.modalOpener;
+        elements.modalBackdrop.classList.remove("open");
+        elements.modal.replaceChildren();
+        if (opener?.isConnected) opener.focus();
+      }
+
+      function modalHeading(modal, title, message = "") {
+        const heading = document.createElement("h2");
+        heading.textContent = title;
+        modal.appendChild(heading);
+        if (message) {
+          const support = document.createElement("p");
+          support.textContent = message;
+          modal.appendChild(support);
+        }
+      }
+
+      function modalActions(modal, primaryLabel, action, { danger = false } = {}) {
+        const actions = document.createElement("div");
+        actions.className = "modal-actions";
+        const cancel = document.createElement("button");
+        cancel.className = "dialog-button";
+        cancel.type = "button";
+        cancel.textContent = "Cancel";
+        cancel.onclick = closeModal;
+        const primary = document.createElement("button");
+        primary.className = `dialog-button ${danger ? "danger" : "primary"}`;
+        primary.type = "button";
+        primary.textContent = primaryLabel;
+        primary.onclick = () => action(primary);
+        actions.append(cancel, primary);
+        modal.appendChild(actions);
+        return primary;
+      }
+
+      function showNewFolderDialog() {
+        openModal(modal => {
+          modalHeading(modal, "New folder", "Create a folder in the open Dropbox folder.");
+          const label = document.createElement("label");
+          label.htmlFor = "newFolderName";
+          label.textContent = "Folder name";
+          const input = document.createElement("input");
+          input.type = "text";
+          input.id = "newFolderName";
+          input.autocomplete = "off";
+          modal.append(label, input);
+          const submit = async button => {
+            if (button.disabled) return;
+            const name = input.value.trim();
+            if (!name) { showToast("Enter a folder name.", { kind: "error" }); input.focus(); return; }
+            button.disabled = true;
+            button.textContent = "Creating...";
+            try {
+              await apiJson("/api/files-folder", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ current_path: state.currentPath, name, conflict: "cancel" }),
+              });
+              closeModal();
+              showToast(`Created ${name}`, { kind: "success" });
+              invalidateClientFolderCache(state.currentPath);
+              await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
+            } catch (error) {
+              button.disabled = false;
+              button.textContent = "Create";
+              showToast(error.message, { kind: "error", duration: 5000 });
+            }
+          };
+          modalActions(modal, "Create", submit);
+          input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); submit(modal.querySelector(".primary")); } });
+        });
+      }
+
+      function showRenameDialog(item = selectedItems()[0]) {
+        if (!item || selectedItems().length !== 1) return;
+        openModal(modal => {
+          modalHeading(modal, `Rename ${item.name}`);
+          const label = document.createElement("label");
+          label.htmlFor = "renameName";
+          label.textContent = "Name";
+          const input = document.createElement("input");
+          input.type = "text";
+          input.id = "renameName";
+          input.value = item.name;
+          input.autocomplete = "off";
+          modal.append(label, input);
+          const submit = async button => {
+            if (button.disabled) return;
+            const name = input.value.trim();
+            if (!name || name === item.name) { if (name === item.name) closeModal(); else input.focus(); return; }
+            button.disabled = true;
+            button.textContent = "Renaming...";
+            try {
+              await apiJson("/api/files-rename", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ current_path: state.currentPath, path: item.path, name }),
+              });
+              closeModal();
+              showToast(`Renamed to ${name}`, { kind: "success" });
+              invalidateClientFolderCache(state.currentPath, item.path);
+              await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
+            } catch (error) {
+              button.disabled = false;
+              button.textContent = "Rename";
+              showToast(error.message, { kind: "error", duration: 5000 });
+            }
+          };
+          modalActions(modal, "Rename", submit);
+          input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); submit(modal.querySelector(".primary")); } });
+          window.setTimeout(() => input.select(), 0);
+        });
+      }
+
+      function showDeleteDialog() {
+        const items = selectedItems();
+        if (!items.length || !state.canDelete) return;
+        openModal(modal => {
+          const countText = `${items.length} item${items.length === 1 ? "" : "s"}`;
+          modalHeading(modal, `Delete ${countText}?`, `Move ${countText} to Dropbox Deleted Files? This action is recoverable in Dropbox.`);
+          const list = document.createElement("div");
+          list.className = "delete-list";
+          items.forEach(item => {
+            const row = document.createElement("div");
+            row.textContent = item.name;
+            list.appendChild(row);
+          });
+          modal.appendChild(list);
+          modalActions(modal, `Delete ${countText}`, async button => {
+            button.disabled = true;
+            button.textContent = "Deleting...";
+            try {
+              const payload = await apiJson("/api/files-delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ current_path: state.currentPath, paths: items.map(item => item.path) }),
+              });
+              const successful = Array.from(payload.successful || []);
+              const failed = Array.from(payload.failed || []);
+              closeModal();
+              clearSelection();
+              if (failed.length) showToast(`Deleted ${successful.length}; ${failed.length} could not be deleted.`, { kind: "error", duration: 6000 });
+              else showToast(`Deleted ${successful.length} item${successful.length === 1 ? "" : "s"}`, { kind: "success" });
+              invalidateClientFolderCache(state.currentPath, ...items.map(item => item.path));
+              await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
+            } catch (error) {
+              button.disabled = false;
+              button.textContent = `Delete ${countText}`;
+              showToast(error.message, { kind: "error", duration: 6000 });
+            }
+          }, { danger: true });
+        });
+      }
+
+      function showProperties(item = selectedItems()[0]) {
+        if (!item) return;
+        openModal(modal => {
+          modalHeading(modal, item.name);
+          const details = document.createElement("dl");
+          details.className = "properties";
+          const rows = [
+            ["Type", item.type],
+            ["Location", displayPath(item)],
+            ["Size", item.size_label || "-"],
+            ["Modified", formatDate(item.modified) || "-"],
+            ["Status", item.status || "Online"],
+          ];
+          rows.forEach(([label, value]) => {
+            const term = document.createElement("dt");
+            term.textContent = label;
+            const description = document.createElement("dd");
+            description.textContent = value;
+            details.append(term, description);
+          });
+          modal.appendChild(details);
+          const actions = document.createElement("div");
+          actions.className = "modal-actions";
+          const close = document.createElement("button");
+          close.className = "dialog-button primary";
+          close.type = "button";
+          close.textContent = "OK";
+          close.onclick = closeModal;
+          actions.appendChild(close);
+          modal.appendChild(actions);
+        });
+      }
+
+      function stopThumbnailLoading() {
+        state.thumbnailGeneration += 1;
+        if (state.thumbnailObserver) state.thumbnailObserver.disconnect();
+        state.thumbnailObserver = null;
+        state.thumbnailQueue = [];
+        state.thumbnailControllers.forEach(controller => controller.abort());
+        state.thumbnailControllers.clear();
+        state.thumbnailInFlight.clear();
+        // Aborted requests still occupy a slot until their finally block runs.
+      }
+
+      function rememberThumbnail(key, objectUrl) {
+        if (state.thumbnailCache.has(key)) URL.revokeObjectURL(state.thumbnailCache.get(key).url);
+        state.thumbnailCache.delete(key);
+        state.thumbnailCache.set(key, {url:objectUrl, expires:Date.now()+30000});
+        while (state.thumbnailCache.size > MAX_CLIENT_THUMBNAILS) {
+          const oldest = state.thumbnailCache.keys().next().value;
+          URL.revokeObjectURL(state.thumbnailCache.get(oldest).url);
+          state.thumbnailCache.delete(oldest);
+        }
+      }
+
+      function installThumbnail(image, key, objectUrl) {
+        if (
+          image
+          && image.dataset.thumbnailKey === key
+        ) {
+          image.style.visibility = "";
+          image.onload = () => {
+            if (image.dataset.thumbnailKey !== key || image.getAttribute("src") !== objectUrl) return;
+            image.parentElement?.classList.remove("thumbnail-failed");
+            state.thumbnailFailures.delete(key);
+            image.parentElement?.classList.add("has-thumbnail");
+          };
+          image.onerror = () => {
+            if (image.getAttribute("src") !== objectUrl) return;
+            image.removeAttribute("src"); image.parentElement?.classList.remove("has-thumbnail");
+            thumbnailUnavailable(image, key);
+          };
+          image.src = objectUrl;
+          if (image.complete && image.naturalWidth) image.onload();
+        }
+      }
+
+      function thumbnailUnavailable(image, key) {
+        image.parentElement?.classList.add("thumbnail-failed");
+        state.thumbnailFailures.set(key, Date.now()+10000);
+        while(state.thumbnailFailures.size>256) state.thumbnailFailures.delete(state.thumbnailFailures.keys().next().value);
+      }
+
+      async function fetchThumbnail(task) {
+        const controller = new AbortController();
+        state.thumbnailControllers.add(controller);
+        state.thumbnailTasks.set(controller, task);
+        task.image.dataset.thumbnailPending = "1";
+        try {
+          let response;
+          for (let attempt=0; attempt<15; attempt++) {
+            response = await fetch(task.url, { credentials: "same-origin", signal: controller.signal });
+            if (response.status !== 202) break;
+            await response.body?.cancel();
+            await new Promise((resolve,reject)=>{
+              const abort=()=>{clearTimeout(timer);reject(new DOMException("Aborted","AbortError"));};
+              const timer=setTimeout(()=>{controller.signal.removeEventListener("abort",abort);resolve();},1000);
+              controller.signal.addEventListener("abort",abort,{once:true});
+              if(controller.signal.aborted)abort();
+            });
+          }
+          if(response.status===202){ thumbnailUnavailable(task.image,task.key); return; }
+          if (!response.ok || task.generation !== state.thumbnailGeneration) {
+            if (!response.ok && task.image.isConnected) thumbnailUnavailable(task.image,task.key);
+            return;
+          }
+          const blob = await response.blob();
+          if (task.generation !== state.thumbnailGeneration) return;
+          if (!blob.type.startsWith("image/") || blob.size > 4*1024*1024) { thumbnailUnavailable(task.image,task.key); return; }
+          const objectUrl = URL.createObjectURL(blob);
+          rememberThumbnail(task.key, objectUrl);
+          installThumbnail(task.image, task.key, objectUrl);
+        } catch (error) {
+          if (error.name !== "AbortError") thumbnailUnavailable(task.image,task.key);
+        } finally {
+          state.thumbnailControllers.delete(controller);
+          state.thumbnailTasks.delete(controller);
+          delete task.image.dataset.thumbnailPending;
+          if (task.generation === state.thumbnailGeneration) state.thumbnailInFlight.delete(task.key);
+          state.thumbnailActive = Math.max(0, state.thumbnailActive - 1);
+          drainThumbnailQueue();
+        }
+      }
+
+      function drainThumbnailQueue() {
+        while (state.thumbnailActive < MAX_THUMBNAIL_CONCURRENT && state.thumbnailQueue.length) {
+          const task = state.thumbnailQueue.shift();
+          if (!task || !task.image.isConnected || task.generation !== state.thumbnailGeneration || state.thumbnailInFlight.has(task.key)) continue;
+          state.thumbnailInFlight.add(task.key);
+          state.thumbnailActive += 1;
+          fetchThumbnail(task);
+        }
+      }
+
+      function setupLazyThumbnails() {
+        state.thumbnailObserver?.disconnect();
+        state.thumbnailQueue = state.thumbnailQueue.filter(task => task.image.isConnected);
+        state.thumbnailTasks.forEach((task, controller) => { if (!task.image.isConnected) controller.abort(); });
+        const generation = state.thumbnailGeneration;
+        const images = Array.from(elements.items.querySelectorAll("img[data-thumbnail-url]"));
+        if (!images.length) return;
+        state.thumbnailObserver = new IntersectionObserver(records => {
+          records.forEach(record => {
+            const image = record.target;
+            const key = image.dataset.thumbnailKey;
+            if (!record.isIntersecting) {
+              state.thumbnailQueue = state.thumbnailQueue.filter(task => task.image !== image);
+              state.thumbnailTasks.forEach((task, controller) => { if (task.image === image) controller.abort(); });
+              return;
+            }
+            if (image.getAttribute("src") || image.dataset.thumbnailPending) return;
+            if ((state.thumbnailFailures.get(key)||0)>Date.now()) {image.parentElement?.classList.add("thumbnail-failed");return;}
+            image.parentElement?.classList.remove("thumbnail-failed");
+            const cached = state.thumbnailCache.get(key);
+            if (cached && cached.expires > Date.now()) {
+              installThumbnail(image,key,cached.url); return;
+            }
+            if (cached) { URL.revokeObjectURL(cached.url); state.thumbnailCache.delete(key); }
+            if (!state.thumbnailQueue.some(task => task.image === image)) state.thumbnailQueue.push({ image, key, url: image.dataset.thumbnailUrl, generation });
+          });
+          drainThumbnailQueue();
+        }, { root: elements.results, rootMargin: "120px 0px", threshold: 0.01 });
+        images.forEach(image => state.thumbnailObserver.observe(image));
+      }
+
+      function sizeLabel(bytes) {
+        const value = Number(bytes || 0);
+        if (!value) return "0 B";
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        const index = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+        const amount = value / Math.pow(1024, index);
+        return `${amount < 10 && index ? amount.toFixed(1) : Math.round(amount)} ${units[index]}`;
+      }
+
+      function createUploadRow(file, relativePath, destinationPath) {
+        return {
+          clientId: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+          file,
+          name: file.name,
+          relativePath: relativePath || file.webkitRelativePath || file.name,
+          destinationPath,
+          size: Number(file.size || 0),
+          uploaded: 0,
+          status: "queued",
+          error: "",
+          errorCode: "",
+          uploadId: "",
+          uploadSecret: "",
+        };
+      }
+
+      function addFiles(items, destinationPath = state.currentPath) {
+        const rows = Array.from(items || []).map(item => createUploadRow(item.file || item, item.relativePath, destinationPath));
+        if (!rows.length) return;
+        state.uploadRows.push(...rows);
+        state.uploadQueue.push(...rows);
+        elements.uploadPanel.classList.add("visible");
+        showToast(`Queued ${rows.length} file${rows.length === 1 ? "" : "s"} for upload`, { duration: 2200 });
+        renderUploads();
+        drainUploadQueue();
+      }
+
+      function renderUploads() {
+        elements.uploadRows.replaceChildren();
+        const active = state.uploadRows.filter(row => row.status !== "completed").length;
+        elements.uploadTitle.textContent = active ? `Uploads (${active})` : "Uploads complete";
+        state.uploadRows.forEach(row => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "upload-row";
+          const information = document.createElement("div");
+          const name = document.createElement("div");
+          name.className = "upload-name";
+          name.textContent = row.relativePath;
+          const status = document.createElement("div");
+          status.className = "upload-status";
+          const percent = row.size ? Math.min(100, Math.round((row.uploaded / row.size) * 100)) : (row.status === "completed" ? 100 : 0);
+          status.textContent = row.status === "failed" ? row.error : (row.status === "completed" ? "Uploaded" : `Uploading ${percent}% - ${sizeLabel(row.uploaded)} of ${sizeLabel(row.size)}`);
+          const track = document.createElement("div");
+          track.className = "progress-track";
+          const bar = document.createElement("div");
+          bar.className = "progress-bar";
+          bar.style.width = `${percent}%`;
+          track.appendChild(bar);
+          information.append(name, status, track);
+          const actions = document.createElement("div");
+          actions.className = "upload-actions";
+          if (row.status === "failed") {
+            const retry = document.createElement("button");
+            retry.type = "button";
+            retry.textContent = "Retry";
+            retry.onclick = () => retryUpload(row);
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.textContent = "Remove";
+            remove.onclick = () => removeUpload(row);
+            actions.append(retry, remove);
+          } else if (row.status === "completed") {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.textContent = "Clear";
+            remove.onclick = () => { state.uploadRows = state.uploadRows.filter(candidate => candidate !== row); renderUploads(); };
+            actions.appendChild(remove);
+          }
+          wrapper.append(information, actions);
+          elements.uploadRows.appendChild(wrapper);
+        });
+        if (!state.uploadRows.length) elements.uploadPanel.classList.remove("visible");
+      }
+
+      let verifiedColourWorkflow=null;
+      const workflowLabel=document.createElement('label');workflowLabel.style.cssText='font:12px system-ui;margin:6px';
+      workflowLabel.textContent='Verified PSD workflow (administrator): ';
+      const workflowInput=document.createElement('input');workflowInput.type='file';workflowInput.accept='.json';workflowInput.title='Independent creation/export manifest, up to 64 KB. Leave empty for ordinary uploads.';
+      workflowLabel.append(workflowInput);workflowLabel.hidden=true;document.body.append(workflowLabel);
+      fetch('/api/auto-editions/status/colour-workflows',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{workflowLabel.hidden=!d?.workflows?.length;}).catch(()=>{});
+      workflowInput.onchange=async()=>{verifiedColourWorkflow=null;const f=workflowInput.files[0];if(!f)return;try{if(f.size>65536)throw Error('Workflow manifest must be at most 64 KB.');const v=JSON.parse(await f.text());if(v.verified_workflow!==true||!v.workflow_id||!/^[a-f0-9]{64}$/.test(v.content_hash||'')||!Array.isArray(v.provenance)||!v.provenance.length)throw Error('Manifest requires verified_workflow, workflow_id, the exact Dropbox content_hash and independent hashed provenance.');verifiedColourWorkflow=v;}catch(e){workflowInput.value='';alert(e.message);}};
+      async function startUpload(row) {
+        const payload = await apiJson("/api/files-upload/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            current_path: row.destinationPath,
+            relative_path: row.relativePath,
+            ...(row.relativePath.toLowerCase().endsWith(".psd") && verifiedColourWorkflow ? {colour_workflow:verifiedColourWorkflow} : {}),
+            size: row.size,
+            conflict: state.uploadConflict,
+          }),
+        });
+        row.uploadId = payload.upload_id;
+        row.uploadSecret = payload.upload_secret;
+        row.uploaded = Number(payload.offset || 0);
+      }
+
+      function uploadStatus(row) {
+        return apiJson(`/api/files-upload/status?upload_id=${encodeURIComponent(row.uploadId)}`, {
+          headers: { "X-Upload-Secret": row.uploadSecret },
+        });
+      }
+
+      async function uploadChunk(row, blob, final) {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            return await apiJson("/api/files-upload/chunk", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Id": row.uploadId,
+                "X-Upload-Secret": row.uploadSecret,
+                "X-Upload-Offset": String(row.uploaded),
+                "X-Upload-Final": final ? "true" : "false",
+              },
+              body: blob,
+            });
+          } catch (error) {
+            if (error.code === "offset_mismatch") {
+              const status = await uploadStatus(row);
+              row.uploaded = Number(status.offset || row.uploaded);
+              return status;
+            }
+            if (attempt === 2) throw error;
+            await new Promise(resolve => window.setTimeout(resolve, 500 * (attempt + 1)));
+          }
+        }
+      }
+
+      async function runUpload(row) {
+        row.status = "uploading";
+        row.error = "";
+        row.errorCode = "";
+        renderUploads();
+        try {
+          if (!row.uploadId) await startUpload(row);
+          else {
+            const status = await uploadStatus(row);
+            row.uploaded = Number(status.offset || 0);
+            if (status.state === "completed") return completeUpload(row);
+          }
+          while (row.uploaded < row.size || (row.size === 0 && row.uploaded === 0)) {
+            const end = Math.min(row.size, row.uploaded + CHUNK_BYTES);
+            const final = end >= row.size;
+            const payload = await uploadChunk(row, row.file.slice(row.uploaded, end), final);
+            row.uploaded = Number(payload.offset || end);
+            renderUploads();
+            if (payload.state === "completed" || final) return completeUpload(row);
+          }
+        } catch (error) {
+          row.status = "failed";
+          row.error = error.message || "Upload interrupted. Retry to continue.";
+          row.errorCode = error.code || "upload_error";
+          renderUploads();
+          showToast(`Upload failed: ${row.name}. ${row.error}`, { kind: "error", duration: 6500 });
+        }
+      }
+
+      function completeUpload(row) {
+        row.status = "completed";
+        row.uploaded = row.size;
+        renderUploads();
+        showToast(`Uploaded ${row.name}`, { kind: "success" });
+        invalidateClientFolderCache();
+        if (row.destinationPath === state.currentPath) {
+          window.clearTimeout(state.uploadRefreshTimer);
+          state.uploadRefreshTimer = window.setTimeout(
+            () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true }),
+            450,
+          );
+        }
+      }
+
+      function drainUploadQueue() {
+        while (state.uploadActive < MAX_UPLOAD_CONCURRENT && state.uploadQueue.length) {
+          const row = state.uploadQueue.shift();
+          state.uploadActive += 1;
+          runUpload(row).finally(() => { state.uploadActive -= 1; drainUploadQueue(); });
+        }
+      }
+
+      function retryUpload(row) {
+        if (row.status !== "failed") return;
+        if (row.errorCode === "upload_missing") {
+          row.uploadId = "";
+          row.uploadSecret = "";
+          row.uploaded = 0;
+        }
+        row.status = "queued";
+        row.error = "";
+        state.uploadQueue.push(row);
+        renderUploads();
+        drainUploadQueue();
+      }
+
+      async function removeUpload(row) {
+        if (row.uploadId) {
+          try {
+            await apiJson("/api/files-upload/remove", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Upload-Secret": row.uploadSecret },
+              body: JSON.stringify({ upload_id: row.uploadId }),
+            });
+          } catch (error) {
+            showToast(error.message, { kind: "error", duration: 5000 });
+            return;
+          }
+        }
+        state.uploadRows = state.uploadRows.filter(candidate => candidate !== row);
+        renderUploads();
+      }
+
+      async function walkEntry(entry, prefix) {
+        if (entry.isFile) {
+          const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+          return [{ file, relativePath: `${prefix}${file.name}` }];
+        }
+        if (!entry.isDirectory) return [];
+        const reader = entry.createReader();
+        const children = [];
+        while (true) {
+          const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+          if (!batch.length) break;
+          children.push(...batch);
+        }
+        return (await Promise.all(children.map(child => walkEntry(child, `${prefix}${entry.name}/`)))).flat();
+      }
+
+      async function droppedItems(dataTransfer) {
+        const entries = Array.from(dataTransfer.items || []).map(item => item.webkitGetAsEntry && item.webkitGetAsEntry()).filter(Boolean);
+        if (entries.length) return (await Promise.all(entries.map(entry => walkEntry(entry, "")))).flat();
+        return Array.from(dataTransfer.files || []).map(file => ({ file, relativePath: file.name }));
+      }
+
+      function hasExternalFiles(event) {
+        return Boolean(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"));
+      }
+
+      function handleItemKeydown(event, item, index) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          openPreferredItem(item);
+        } else if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          const direction = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
+          const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+          const columns = state.virtual?.columns || getComputedStyle(elements.items).gridTemplateColumns.split(" ").length;
+          const step = vertical && ["large", "medium", "small"].includes(state.view) ? columns : 1;
+          focusVisibleIndex(Math.max(0, Math.min(visibleItems().length - 1, index + direction * step)), event.shiftKey);
+        }
+      }
+
+      function focusVisibleIndex(index, extend = false) {
+        const items = visibleItems();
+        const item = items[index];
+        if (!item) return;
+        selectByIndex(index, { range: extend });
+        revealItem(item.path, true);
+      }
+
+      elements.backButton.onclick = navigateBack;
+      elements.forwardButton.onclick = navigateForward;
+      elements.upButton.onclick = () => navigateTo(parentPath(state.currentPath));
+      elements.refreshButton.onclick = () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
+      elements.openButton.onclick = () => openPreferredItem(selectedItems()[0]);
+      elements.newButton.onclick = showNewFolderDialog;
+      elements.copyButton.onclick = () => copyOriginalFiles();
+      elements.downloadButton.onclick = () => startDownload();
+      elements.renameButton.onclick = () => showRenameDialog();
+      elements.deleteButton.onclick = showDeleteDialog;
+      elements.uploadButton.onclick = event => { const bounds = event.currentTarget.getBoundingClientRect(); showMenu(uploadMenuDefinitions(), bounds.left, bounds.bottom + 3); };
+      elements.sortButton.onclick = event => { const bounds = event.currentTarget.getBoundingClientRect(); showMenu(sortMenuDefinitions(), bounds.left, bounds.bottom + 3); };
+      elements.dateModifiedHeader.onclick = () => {
+        const direction = state.sortKey === "modified" && state.sortDir === "desc" ? "asc" : "desc";
+        setSort("modified", direction);
+      };
+      elements.viewButton.onclick = event => { const bounds = event.currentTarget.getBoundingClientRect(); showMenu(viewMenuDefinitions(), bounds.left, bounds.bottom + 3); };
+      elements.moreButton.onclick = event => {
+        const chosen = selectedItems();
+        const item = chosen.length === 1 ? chosen[0] : null;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        showMenu([
+          { label: "Open", disabled: !item, action: () => openItem(item) },
+          { label: "Copy path", disabled: !item, action: () => copyText(displayPath(item)) },
+          { label: "Properties", disabled: !item, action: () => showProperties(item) },
+          menuDivider(),
+        ], bounds.left, bounds.bottom + 3);
+      };
+      elements.previewClose.onclick = closePreview;
+
+      elements.searchInput.addEventListener("input", () => {
+        state.searchByPath[state.currentPath] = elements.searchInput.value;
+        state.anchorIndex = -1;
+        clearSelection();
+        elements.results.scrollTop = 0;
+        cancelAnimationFrame(state.searchFrame || 0);
+        state.searchFrame = requestAnimationFrame(() => { renderItems(); renderStatus(); persistState(); });
+        elements.searchClear.hidden = !currentSearch();
+      });
+      elements.searchClear.onclick = () => {
+        state.searchByPath[state.currentPath] = "";
+        elements.searchInput.value = "";
+        elements.searchInput.focus();
+        renderItems();
+        renderStatus();
+        elements.searchClear.hidden = true;
+        persistState();
+      };
+
+      let selectionDrag = null;
+      let suppressSelectionClick = false;
+      function selectionPoint(clientX, clientY) {
+        const bounds = elements.results.getBoundingClientRect();
+        const sx = bounds.width / elements.results.offsetWidth || 1;
+        const sy = bounds.height / elements.results.offsetHeight || 1;
+        return {
+          x:(clientX - bounds.left) / sx + elements.results.scrollLeft,
+          y:(clientY - bounds.top) / sy + elements.results.scrollTop,
+          sx, sy, bounds,
+        };
+      }
+      function updateSelectionRectangle() {
+        const drag = selectionDrag;
+        if (!drag?.moved) return;
+        const point = selectionPoint(drag.clientX, drag.clientY);
+        const x = Math.max(0, Math.min(elements.results.clientWidth, point.x));
+        const y = Math.max(0, Math.min(elements.results.scrollHeight, point.y));
+        const box = {left:Math.min(drag.start.x,x), top:Math.min(drag.start.y,y),
+          right:Math.max(drag.start.x,x), bottom:Math.max(drag.start.y,y)};
+        Object.assign(drag.rectangle.style, {left:box.left+"px", top:box.top+"px",
+          width:(box.right-box.left)+"px", height:(box.bottom-box.top)+"px"});
+        const intersects = rect => rect.right >= box.left && rect.left <= box.right && rect.bottom >= box.top && rect.top <= box.bottom;
+        const next = new Set(drag.base);
+        const v = state.virtual;
+        if (v) {
+          // Include virtual cards outside the viewport; materializing them would
+          // inflate thumbnail work and miss cards scrolled past during a drag.
+          const origin = elements.items.getBoundingClientRect();
+          const offset = selectionPoint(origin.left, origin.top);
+          v.items.forEach((item,index) => {
+            const left=offset.x+(index%v.columns)*(v.width+v.gapX);
+            const top=offset.y+Math.floor(index/v.columns)*(v.height+v.gapY);
+            if (intersects({left,top,right:left+v.width,bottom:top+v.height})) next.add(item.path);
+          });
+        } else {
+          elements.items.querySelectorAll(".file-item").forEach(row => {
+            const rect = row.getBoundingClientRect();
+            const start = selectionPoint(rect.left,rect.top), end = selectionPoint(rect.right,rect.bottom);
+            if (intersects({left:start.x,top:start.y,right:end.x,bottom:end.y})) next.add(row.dataset.path);
+          });
+        }
+        state.selection = next; updateSelectionUi();
+      }
+      function selectionScrollFrame() {
+        const drag = selectionDrag;
+        if (!drag) return;
+        if (drag.moved) {
+          const {bounds,sy} = selectionPoint(drag.clientX,drag.clientY);
+          const edge=32;
+          const speed = drag.clientY < bounds.top+edge ? -Math.min(24,(bounds.top+edge-drag.clientY)/sy/3)
+            : drag.clientY > bounds.bottom-edge ? Math.min(24,(drag.clientY-bounds.bottom+edge)/sy/3) : 0;
+          if (speed) elements.results.scrollTop += speed;
+          updateSelectionRectangle();
+        }
+        drag.frame = requestAnimationFrame(selectionScrollFrame);
+      }
+      function finishSelectionDrag(cancel = false) {
+        const drag = selectionDrag;
+        if (!drag) return;
+        selectionDrag = null; cancelAnimationFrame(drag.frame);
+        if (elements.results.hasPointerCapture(drag.pointerId)) elements.results.releasePointerCapture(drag.pointerId);
+        drag.rectangle.remove(); elements.results.classList.remove("selecting");
+        if (cancel) { state.selection = new Set(drag.before); updateSelectionUi(); }
+        if (drag.moved) {
+          suppressSelectionClick = true;
+          setTimeout(() => { suppressSelectionClick = false; }, 0);
+        }
+      }
+      elements.results.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || event.pointerType === "touch" || selectionDrag ||
+            event.target.closest(".file-item, button, input, textarea, select, a, [contenteditable], [role=menu], .details-header")) return;
+        const point = selectionPoint(event.clientX,event.clientY);
+        // The native scrollbar occupies the part beyond clientWidth/clientHeight.
+        if (point.x-elements.results.scrollLeft >= elements.results.clientWidth ||
+            point.y-elements.results.scrollTop >= elements.results.clientHeight) return;
+        const rectangle = document.createElement("div");
+        rectangle.className = "selection-rectangle"; rectangle.hidden = true;
+        elements.results.appendChild(rectangle);
+        selectionDrag = {pointerId:event.pointerId,start:point,clientX:event.clientX,clientY:event.clientY,
+          initialX:event.clientX,initialY:event.clientY,before:new Set(state.selection),base:event.ctrlKey||event.metaKey ? new Set(state.selection) : new Set(),rectangle,moved:false};
+        elements.results.focus({preventScroll:true});
+        elements.results.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        selectionDrag.frame = requestAnimationFrame(selectionScrollFrame);
+      });
+      elements.results.addEventListener("pointermove", event => {
+        const drag = selectionDrag;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        drag.clientX = event.clientX; drag.clientY = event.clientY;
+        if (!drag.moved && Math.hypot(event.clientX-drag.initialX,event.clientY-drag.initialY) > 4) {
+          drag.moved = true; drag.rectangle.hidden = false; elements.results.classList.add("selecting");
+        }
+        updateSelectionRectangle();
+      });
+      elements.results.addEventListener("pointerup", event => {
+        if (selectionDrag?.pointerId !== event.pointerId) return;
+        if (!selectionDrag.moved && !event.ctrlKey && !event.metaKey) clearSelection();
+        finishSelectionDrag();
+      });
+      elements.results.addEventListener("pointercancel", () => finishSelectionDrag(true));
+      elements.results.addEventListener("lostpointercapture", () => finishSelectionDrag(true));
+      window.addEventListener("blur", () => finishSelectionDrag(true));
+
+      elements.results.addEventListener("click", event => {
+        if (suppressSelectionClick) { suppressSelectionClick = false; return; }
+        const point = selectionPoint(event.clientX,event.clientY);
+        if (point.x-elements.results.scrollLeft >= elements.results.clientWidth ||
+            point.y-elements.results.scrollTop >= elements.results.clientHeight) return;
+        if (!event.target.closest(".file-item, button, input, select, textarea, [role=menu]")) clearSelection();
+      });
+      elements.results.addEventListener("scroll", () => {
+        hideFileTooltip();
+        if (!state.scrollFrame) state.scrollFrame = requestAnimationFrame(() => {
+          state.scrollFrame = 0; renderVirtualRows();
+        });
+      }, { passive: true });
+      new ResizeObserver(() => {
+        if (!state.virtual || state.resizeFrame) return;
+        state.resizeFrame = requestAnimationFrame(() => { state.resizeFrame = 0; renderItems(); });
+      }).observe(elements.results);
+      elements.results.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        if (!event.target.closest(".file-item")) {
+          clearSelection();
+          showEmptyContextMenu(event.clientX, event.clientY);
+        }
+      });
+      elements.modalBackdrop.addEventListener("pointerdown", event => { if (event.target === elements.modalBackdrop) closeModal(); });
+      elements.uploadClose.onclick = () => elements.uploadPanel.classList.remove("visible");
+      elements.filesInput.onchange = () => { addFiles(Array.from(elements.filesInput.files || [])); elements.filesInput.value = ""; };
+      elements.folderInput.onchange = () => { addFiles(Array.from(elements.folderInput.files || [])); elements.folderInput.value = ""; };
+
+      window.addEventListener("dragenter", event => {
+        if (!hasExternalFiles(event)) return;
+        event.preventDefault();
+        state.dragDepth += 1;
+        elements.dropOverlay.classList.add("visible");
+      });
+      window.addEventListener("dragover", event => {
+        if (!hasExternalFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      });
+      window.addEventListener("dragleave", event => {
+        if (!hasExternalFiles(event)) return;
+        state.dragDepth = Math.max(0, state.dragDepth - 1);
+        if (!state.dragDepth) elements.dropOverlay.classList.remove("visible");
+      });
+      window.addEventListener("drop", async event => {
+        if (!hasExternalFiles(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        state.dragDepth = 0;
+        elements.dropOverlay.classList.remove("visible");
+        showToast("Preparing upload...", { duration: 1200 });
+        try { addFiles(await droppedItems(event.dataTransfer), state.currentPath); }
+        catch (error) { showToast(error.message || "Dropped files could not be read.", { kind: "error", duration: 5000 }); }
+      });
+
+      document.addEventListener("pointerdown", event => {
+        hideFileTooltip();
+        if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
+      }, true);
+      document.addEventListener("keydown", event => {
+        const typing = event.target.closest?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+        if (event.key === "Escape") {
+          event.preventDefault();
+          if (selectionDrag) { finishSelectionDrag(); clearSelection(); }
+          else if (!elements.previewPanel.hidden) closePreview();
+          else if (elements.modalBackdrop.classList.contains("open")) closeModal();
+          else if (document.querySelector(".menu.open")) closeMenus();
+          else if (linkedProduct !== null && window.parent !== window) parent.postMessage({type:'sports-cave-psd-cancel'},location.origin);
+          else clearSelection();
+          return;
+        }
+        if (typing || !elements.previewPanel.hidden || elements.modalBackdrop.classList.contains("open")) return;
+        if ((event.ctrlKey || event.metaKey) && ["a", "c"].includes(event.key.toLowerCase()) && !elements.results.contains(document.activeElement)) return;
+        const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey;
+        const key = event.key.toLocaleLowerCase();
+        if (shortcut && key === "c" && state.selection.size) {
+          event.preventDefault();
+          copyOriginalFiles();
+        } else if (shortcut && key === "x" && state.selection.size) {
+          event.preventDefault();
+          setFilesClipboard("cut");
+        } else if (shortcut && key === "v" && canPasteHere()) {
+          event.preventDefault();
+          pasteFiles();
+        } else if ((event.altKey && event.key === "ArrowLeft") || event.key === "Backspace") {
+          event.preventDefault();
+          navigateBack();
+        } else if (event.altKey && event.key === "ArrowRight") {
+          event.preventDefault();
+          navigateForward();
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "a") {
+          event.preventDefault();
+          state.selection = new Set(visibleItems().map(item => item.path));
+          if (visibleItems()[0]) { state.focusedPath = visibleItems()[0].path; state.anchorIndex = 0; }
+          updateSelectionUi();
+        } else if (event.key === "Enter") {
+          const item = state.items.find(candidate => candidate.path === state.focusedPath) || selectedItems()[0];
+          if (item) { event.preventDefault(); openPreferredItem(item); }
+        } else if (event.key === "Delete" && state.selection.size) {
+          event.preventDefault();
+          showDeleteDialog();
+        } else if (event.key === "F2" && state.selection.size === 1) {
+          event.preventDefault();
+          showRenameDialog();
+        } else if (event.key === "Home" && visibleItems().length) {
+          event.preventDefault();
+          focusVisibleIndex(0, event.shiftKey);
+        } else if (event.key === "End" && visibleItems().length) {
+          event.preventDefault();
+          focusVisibleIndex(visibleItems().length - 1, event.shiftKey);
+        } else if (event.key === "PageDown" || event.key === "PageUp") {
+          event.preventDefault();
+          elements.results.scrollBy({ top: (event.key === "PageDown" ? 1 : -1) * elements.results.clientHeight * 0.88, behavior: "instant" });
+        }
+      });
+
+      window.addEventListener("beforeunload", () => {
+        hideFileTooltip();
+        stopThumbnailLoading();
+        abortStaleFolderRequests();
+        clearImageViewerDelivery();
+        state.thumbnailCache.forEach(value => URL.revokeObjectURL(value.url));
+      });
+      window.addEventListener("blur", hideFileTooltip);
+      window.addEventListener("focus", setupLazyThumbnails);
+
+      window.addEventListener("message", event => {
+        if (
+          event.origin !== location.origin
+          || event.source !== state.imageViewerWindow
+          || !event.data
+          || event.data.version !== 1
+        ) {
+          return;
+        }
+        if (event.data.type === "sports-cave-image-viewer-download" && !elements.previewPanel.hidden) {
+          const item = state.items.find(item => item.desktop_relative_path === event.data.path);
+          if (item) startDownload([item]);
+          return;
+        }
+        if (event.data.type === "sports-cave-image-viewer-close") { closePreview(); return; }
+        if (event.data.type === "sports-cave-image-viewer-ready") {
+          state.imageViewerReady = true;
+          try {
+            state.imageViewerWindow.postMessage({
+              type: "sports-cave-image-viewer-parent-ready",
+              version: 1,
+              folder: relativeFolderPath(), images: viewerNavigation(),
+              path: event.data.path, revision: event.data.revision || "",
+              thumbnail: viewerThumbnail(event.data.path),
+            }, location.origin);
+          } catch (_) {
+            state.imageViewerReady = false;
+            return;
+          }
+          const pending = state.imageViewerPending;
+          if (
+            pending
+            && event.data.path === pending.path
+            && event.data.folder === pending.folder
+            && event.data.name === pending.name
+          ) {
+            clearImageViewerDelivery(pending.requestId);
+          } else {
+            deliverPendingImageViewerRequest();
+          }
+          return;
+        }
+        if (
+          event.data.type === "sports-cave-image-viewer-opened"
+          && typeof event.data.requestId === "string"
+        ) {
+          clearImageViewerDelivery(event.data.requestId);
+        }
+      });
+
+      async function openLinkedProduct() {
+        const navigation = ++state.navigationToken;
+        abortStaleFolderRequests(); clearSelection(); state.restorePosition=null;
+        try {
+          const target = await apiJson('/api/files-psd-open?product_gid='+encodeURIComponent(linkedProduct), {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'files'})});
+          if (navigation !== state.navigationToken) return;
+          const payload = await apiJson('/api/files-resolve?id='+encodeURIComponent(target.file_id));
+          if (navigation !== state.navigationToken) return;
+          const item = payload.item;
+          if (!item || item.id !== target.file_id || payload.current_path !== target.folder_path || item.extension !== 'psd') throw new Error('The exact linked PSD is unavailable. Retry Open from Files.');
+          state.searchByPath[payload.current_path] = '';
+          state.pinnedItem = item; state.pinnedFolder = payload.current_path;
+          applyFolderPayload(payload); state.loading=false; state.loadingMore=true;
+          renderAll(); setSingleSelection(item.path); revealItem(item.path,true);
+          showToast('Linked PSD selected. Use Open or Download.',{duration:5000});
+          const listing = cachedFolder(payload.current_path) || await requestFolder(payload.current_path,false);
+          if (navigation !== state.navigationToken) return;
+          rememberFolder(listing,payload.current_path); applyFolderPayload(listing);
+          state.loadingMore=Boolean(listing.has_more); renderAll(); revealItem(item.path);
+          await continueFolderPages(payload.current_path,listing,navigation,0,false);
+        } catch (error) {
+          if (navigation !== state.navigationToken) return;
+          state.loadingMore=false; renderStatus();
+          showToast(error.message || 'Sign in with Files access and retry Open from Files.',{kind:'error',duration:8000});
+        }
+      }
+
+      async function openSavedEdition() {
+        const selectionRequest=++editionSelectionRequest;
+        const navigation = ++state.navigationToken;
+        abortStaleFolderRequests(); clearSelection(); savedEditionId=null; savedEditionResolution=null; state.restorePosition=null;
+        try {
+          const target = await apiJson('/api/auto-editions/location?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')||''));
+          if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
+          const payload = await apiJson('/api/files-resolve?id='+encodeURIComponent(target.file_id)+'&rev='+encodeURIComponent(target.revision||''));
+          if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
+          const item = payload.item;
+          if (!item || item.id !== target.file_id || item.tag !== 'file' || payload.current_path !== target.folder_path) throw new Error('The exact saved JPG is unavailable. Retry Open from Orders.');
+          state.searchByPath[payload.current_path]='';
+          state.pinnedItem=item; state.pinnedFolder=payload.current_path;
+          applyFolderPayload(payload); state.loading=false; state.loadingMore=true;
+          renderAll(); savedEditionId=item.id; savedEditionResolution=target.resolution_info; setSingleSelection(item.path); revealItem(item.path,true);
+          document.body.dataset.editionSelected=target.file_id;
+          showToast('Saved edition JPG selected - TEST / NOT PRINT READY. Use Download for the full-resolution file.',{duration:7000});
+          // The exact file is already usable while the containing folder arrives.
+          const cached = cachedFolder(payload.current_path);
+          const listing = cached || await requestFolder(payload.current_path,false);
+          if (navigation!==state.navigationToken) return;
+          rememberFolder(listing,payload.current_path); applyFolderPayload(listing);
+          state.loadingMore=Boolean(listing.has_more); renderAll(); revealItem(item.path);
+          await continueFolderPages(payload.current_path,listing,navigation,0,false);
+        } catch(error) {
+          if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
+          state.loadingMore=false;
+          if (!savedEditionId) clearSelection();
+          renderStatus(); showToast(error.message||'Retry Open from Orders.',{kind:'error',duration:10000});
+        }
+      }
+
+      let editionSelectionRequest=0;
+      window.addEventListener('message',event=>{
+        if(event.origin!==location.origin||(event.source!==parent&&event.source!==opener)||event.data?.type!=='sc-files-navigate')return;
+        const {allocation,job}=event.data;
+        if(!/^\d+$/.test(String(allocation||''))||! /^[a-f0-9]{64}$/.test(String(job||'')))return;
+        query.set('edition_allocation',allocation);query.set('edition_job',job);
+        delete document.body.dataset.editionSelected;void openSavedEdition();
+      });
+
+      async function initialise() {
+        document.title = "Sports Cave Files";
+        document.body.dataset.filesReady="1";
+        if(query.has('edition_allocation')){await openSavedEdition();return;}
+        if (linkedProduct !== null) { await openLinkedProduct(); return; }
+        state.searchByPath[state.currentPath] = query.get("q") || state.searchByPath[state.currentPath] || "";
+        const requestedPath = state.currentPath;
+        const loaded = requestedRelativePath
+          ? await loadFolder("", {relativePath: requestedRelativePath})
+          : await loadFolder(requestedPath);
+        if (!loaded && (requestedPath || requestedRelativePath)) {
+          state.back = [];
+          state.forward = [];
+          state.currentPath = "";
+          await loadFolder("");
+        }
+      }
+
+      const premiumIcons={openButton:'M5 15L15 5M5 5h10v10',uploadButton:'M12 17V3M6 9l6-6 6 6M4 16v5h16v-5',downloadButton:'M12 3v14M6 11l6 6 6-6M4 16v5h16v-5',newButton:'M3 7V4h7l3 3h8v13H3zM12 11v6M9 14h6'};
+      for(const [id,path] of Object.entries(premiumIcons)){const icon=document.getElementById(id)?.querySelector('.command-icon');if(icon)icon.innerHTML='<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="'+path+'"/></svg>';}
+      initialise();
+    </script>
+  </body>
+</html>

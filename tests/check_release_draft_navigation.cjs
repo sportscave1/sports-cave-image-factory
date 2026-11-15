@@ -1,0 +1,20 @@
+const {chromium}=require(process.env.PLAYWRIGHT_PACKAGE||'playwright'),assert=require('node:assert/strict');
+(async()=>{for(const channel of ['chrome','msedge']){const browser=await chromium.launch({channel,headless:true});try{
+const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(20000);
+await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+const url=`${process.env.PICKER_URL}/?fixture_checkout=1&fixture_run=${Date.now()}`;
+await page.goto(url);
+const open=async()=>{await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();await page.getByRole('tab',{name:'Editor',exact:true}).click();};
+await open();
+const frame=page.frameLocator('iframe[title="crm_section_ui.crm_middle_sections_v2"]'),area=frame.locator('textarea').first();
+await area.waitFor();const original=await area.inputValue(),marker='Release draft '+channel+' '+Date.now(),html=original+'<p>'+marker+'</p>';
+await area.fill(html);await page.getByRole('tab',{name:'Settings',exact:true}).click();
+const choose=async index=>{const previous=page.url();await page.locator('[class*="st-key-auto_flow_step_"]').getByRole('combobox').click();await page.getByRole('option').nth(index).click();await page.waitForURL(u=>u.href!==previous);await page.waitForTimeout(500);};
+await choose(1);await page.getByRole('tab',{name:'Editor',exact:true}).click();await area.waitFor();assert.equal((await area.inputValue()).includes(marker),false,'Sibling email stays independent');
+await page.getByRole('tab',{name:'Settings',exact:true}).click();await choose(0);await page.getByRole('tab',{name:'Editor',exact:true}).click();await area.waitFor();assert.equal(await area.inputValue(),html,'Switch and reopen preserves exact authored HTML');
+const finalHtml=html+'<p>Explicit save</p>';await area.fill(finalHtml);await page.getByRole('button',{name:'Save draft',exact:true}).click();
+await page.waitForFunction(()=>document.querySelector('#sc-campaign-save-status')?.textContent.startsWith('Saved'));
+await page.goto(url);await open();await area.waitFor();assert.equal(await area.inputValue(),finalHtml,'New page load restores persisted HTML');
+assert.equal(await page.getByTestId('stException').count(),0);
+console.log(channel+' rapid switch, sibling isolation, reopen, explicit save and reload PASS');
+}finally{await browser.close();}}})().catch(e=>{console.error(e);process.exit(1)});

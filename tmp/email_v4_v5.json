@@ -1,0 +1,127 @@
+{
+  "scope": "isolated loopback PGlite; tracemalloc enabled; 12 independent samples per email count",
+  "cpu_seconds": 11.734375,
+  "peak_python_bytes": 23369093,
+  "metrics": {
+    "1_emails/accept": {
+      "n": 12,
+      "p50": 20.956,
+      "p95": 88.791
+    },
+    "1_emails/validate": {
+      "n": 12,
+      "p50": 79.617,
+      "p95": 216.721
+    },
+    "1_emails/worker": {
+      "n": 12,
+      "p50": 129.162,
+      "p95": 270.037
+    },
+    "1_emails/readback": {
+      "n": 12,
+      "p50": 6.004,
+      "p95": 21.592
+    },
+    "1_emails/compare": {
+      "n": 12,
+      "p50": 0.419,
+      "p95": 0.758
+    },
+    "1_emails/no_change_publish": {
+      "n": 12,
+      "p50": 26.013,
+      "p95": 58.213
+    },
+    "1_emails/unchanged_save": {
+      "n": 12,
+      "p50": 0.008,
+      "p95": 0.015
+    },
+    "1_emails/unchanged_save_calls": {
+      "n": 12,
+      "p50": 0,
+      "p95": 0
+    },
+    "3_emails/accept": {
+      "n": 12,
+      "p50": 35.353,
+      "p95": 79.957
+    },
+    "3_emails/validate": {
+      "n": 12,
+      "p50": 254.001,
+      "p95": 334.453
+    },
+    "3_emails/worker": {
+      "n": 12,
+      "p50": 315.124,
+      "p95": 389.258
+    },
+    "3_emails/readback": {
+      "n": 12,
+      "p50": 18.86,
+      "p95": 46.074
+    },
+    "3_emails/compare": {
+      "n": 12,
+      "p50": 1.771,
+      "p95": 2.255
+    },
+    "3_emails/no_change_publish": {
+      "n": 12,
+      "p50": 34.216,
+      "p95": 78.655
+    },
+    "3_emails/unchanged_save": {
+      "n": 12,
+      "p50": 0.009,
+      "p95": 0.021
+    },
+    "3_emails/unchanged_save_calls": {
+      "n": 12,
+      "p50": 0,
+      "p95": 0
+    },
+    "6_emails/accept": {
+      "n": 12,
+      "p50": 35.935,
+      "p95": 97.0
+    },
+    "6_emails/validate": {
+      "n": 12,
+      "p50": 440.051,
+      "p95": 544.16
+    },
+    "6_emails/worker": {
+      "n": 12,
+      "p50": 535.225,
+      "p95": 677.819
+    },
+    "6_emails/readback": {
+      "n": 12,
+      "p50": 19.395,
+      "p95": 54.506
+    },
+    "6_emails/compare": {
+      "n": 12,
+      "p50": 3.531,
+      "p95": 4.111
+    },
+    "6_emails/no_change_publish": {
+      "n": 12,
+      "p50": 36.592,
+      "p95": 60.529
+    },
+    "6_emails/unchanged_save": {
+      "n": 12,
+      "p50": 0.009,
+      "p95": 0.022
+    },
+    "6_emails/unchanged_save_calls": {
+      "n": 12,
+      "p50": 0,
+      "p95": 0
+    }
+  }
+}

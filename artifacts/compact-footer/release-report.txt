@@ -1,0 +1,7 @@
+Authorised release 25 October 2026 (Australia/Sydney).
+User explicitly authorised commit, Git push and Render deployment of footer change only.
+Release is based on live commit 51fca93820256018147a5cd9c99883bfcd7606e9, not the older task base or unrelated pending main changes.
+Preserved production six-headline bank, saved selections, quantity verification, scene selection, thumbnail-visible glazing and all non-footer behaviour. Internal legacy supporting-copy data retained solely to preserve exact headline selection; omitted from image prompt payloads and refresh context.
+47 focused release tests passed (compact_footer, ie_glazing, ie_scarcity_pairs, ie_refresh_realism_priority, refresh_generation, ie_context_typography). Exact live baseline headline selections matched for three seeds. Render topology validation passed; render.yaml and service settings unchanged in source. Initial local logs describe the earlier task base, not release validation.
+No new sample image generated. Full example prompt regenerated using the live approved bank and verified synthetic 100-edition metadata.
+Deploy exact release SHA only; main contains unrelated undeployed recorder changes. Preserve those in Git without releasing them.

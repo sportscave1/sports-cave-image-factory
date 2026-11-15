@@ -1,0 +1,9 @@
+Production release verified 25 October 2026 (Australia/Sydney).
+Live source: 4937a6894b10d1f9f059c30f8bf36a30f1434a5e.
+Git main integration: 30c562d9 (skip render; preserves unrelated pending work).
+Canonical service: sports-cave-os / srv-d8kl4on7f7vs73dvavv0.
+Render deployment: dep-dbej7drncjis73ee3de0; live at 2026-10-24T22:42:41.749189Z.
+Health: /_stcore/health HTTP 200 after live confirmation. No app error logs in deployment interval.
+Auto-deploy restored to original yes / commit; no topology changes.
+53 focused tests pass on both release and integrated source. Central shared builder serves admin and staff; no account-specific prompt overrides added.
+Final prompt samples and three individual image prompts for both new and refresh are in this directory. They use synthetic test metadata. No actual image generation or pixel-level validation was performed.

@@ -1,0 +1,5 @@
+query LifecycleProductAvailability($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Product { id totalInventory tracksInventory createdAt }
+  }
+}

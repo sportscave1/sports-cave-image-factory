@@ -1,0 +1,21 @@
+{
+  "scope": "Read-only observations on 2026-10-09; no V5 code deployed and no production benchmark writes",
+  "inspected_commit": "051d57b1598ff71eef11f4e8938c4239041edbec",
+  "primary_service": "srv-d8kl4on7f7vs73dvavv0",
+  "primary_deploy_finished_utc": "2026-10-09T05:39:22Z",
+  "existing_worker": "srv-d9ujm9navr4c73amurgg",
+  "worker_deploy_finished_utc": "2026-10-09T05:37:45Z",
+  "publication_jobs": [
+    {"requested_utc":"2026-10-09T04:17:01.684351Z", "queue_seconds":2.090959,"processing_timestamp_seconds":3.372749,"total_timestamp_seconds":5.463708,"attempts":1,"state":"SUCCEEDED"},
+    {"requested_utc":"2026-10-09T04:42:59.305055Z", "queue_seconds":2.079167,"processing_timestamp_seconds":2.757498,"total_timestamp_seconds":4.836665,"attempts":1,"state":"SUCCEEDED"}
+  ],
+  "publication_stage_logs": [
+    {"at_utc":"2026-10-09T04:17:08.987Z","claim_ms":907.7,"validate_ms":2465.1,"commit_ms":1916.9},
+    {"at_utc":"2026-10-09T04:43:05.731Z","claim_ms":863.8,"validate_ms":1893.9,"commit_ms":1667.5}
+  ],
+  "timestamp_caveat":"PostgreSQL transaction timestamps differ from perf_counter stage intervals; these are not additive measures of one identical clock boundary.",
+  "due_send_observation":{"non_test_submitted_samples":1,"due_to_first_submission_seconds":36.367091,"overdue_pending_at_snapshot":0,"limitation":"Includes validation and dispatch; not a measurement of worker claim latency or proof of non-interference."},
+  "database_snapshot":{"idle":10,"idle_in_transaction":1,"active_inspection":1,"extension":2,"subsequent_idle_transaction_age_seconds":0.952564},
+  "due_publication_explain":{"index":"crm_automation_publish_due","planning_ms":5.357,"execution_ms":0.113,"shared_hit_blocks":5,"eligible_rows":0},
+  "worker_metrics":{"window_utc":"2026-10-09T04:00:00Z/2026-10-09T05:45:00Z","resolution_minutes":15,"observed_cpu_core_min":0.01314,"observed_cpu_core_max":0.01406,"rss_bytes_min":198320130,"rss_bytes_max":217509890,"limitation":"Coarse observations across deployment instances, not a controlled before/after CPU or memory benchmark."}
+}

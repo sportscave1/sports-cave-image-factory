@@ -1,0 +1,64 @@
+// Run against the explicit mocked Streamlit fixture on loopback only.
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+(async () => {
+  const browser = await chromium.launch({channel: 'chrome', headless: true});
+  try {
+    const page = await browser.newPage({viewport: {width: 1280, height: 900}});
+    await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(process.env.POSTING_FIXTURE_URL || 'http://127.0.0.1:8891');
+    await page.getByRole('button', {name: 'Create 3 Paused Meta Ads', exact: true}).waitFor();
+    const start = Date.now();
+    await page.getByRole('button', {name: 'Create 3 Paused Meta Ads', exact: true}).click();
+    await page.locator('.st-key-posting_notification summary').click();
+    await page.getByRole('heading', {name: 'Creating Meta Ads…', exact: true}).waitFor();
+    const responseMs = Date.now() - start;
+    const progressFill = page.locator('.st-key-posting_notification').locator('[role="progressbar"] > div > div');
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    await page.screenshot({path: 'tmp/meta-posting-creating.png', fullPage: true});
+    await page.waitForURL(/meta_posting_job=/);
+    const identity = new URL(page.url()).searchParams.get('meta_posting_job');
+    await page.reload();
+    await page.locator('.st-key-posting_notification summary').click();
+    await page.getByRole('heading', {name: 'Creating Meta Ads…', exact: true}).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get('meta_posting_job'), identity);
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    await page.getByRole('button', {name: 'Retry incomplete steps', exact: true}).waitFor({timeout: 20000});
+    assert.ok(await page.locator('.st-key-posting_notification').locator('[data-testid="stAlert"]').count());
+    await page.screenshot({path: 'tmp/meta-posting-partial.png', fullPage: true});
+    // Full refresh also enables the fixture's formerly failing mocked request.
+    await page.reload();
+    await page.locator('.st-key-posting_notification summary').click();
+    await page.getByRole('button', {name: 'Retry incomplete steps', exact: true}).click();
+    await page.locator('.st-key-posting_notification summary').filter({hasText: 'Ads created'}).waitFor({timeout: 20000});
+    const dialog = page.locator('.st-key-posting_notification');
+    await dialog.locator('summary').click();
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    assert.deepEqual(await dialog.getByRole('button').allTextContents(), ['Dismiss']);
+    assert.equal(await dialog.getByText('Open in Ads Manager').count(), 0);
+    assert.equal(await dialog.getByText('View Posting Details').count(), 0);
+    assert.equal(new URL(page.url()).searchParams.has('meta_posting_job'), false);
+    await page.waitForTimeout(500); // Let the expander opening transition settle.
+    await page.screenshot({path: 'tmp/meta-posting-complete.png', fullPage: true});
+    const box = await dialog.boundingBox();
+    assert.ok(box.width >= 300 && box.width <= 350);
+    assert.ok(box.y < 110);
+    await page.setViewportSize({width: 390, height: 844});
+    await page.screenshot({path: 'tmp/meta-posting-mobile.png', fullPage: true});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const buttons = await dialog.getByRole('button').all();
+    const boxes = await Promise.all(buttons.map(b => b.boundingBox()));
+    assert.equal(boxes.length, 1);
+    await dialog.getByRole('button', {name: 'Dismiss', exact:true}).click();
+    await dialog.waitFor({state:'hidden'});
+    await page.reload();
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    assert.equal(await page.locator('[data-testid="stException"]').count(), 0);
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({responseMs, refreshRestored: true, partialRetry: true, completedCleared: true, mobileOverflow: false}));
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

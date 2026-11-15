@@ -1,0 +1,377 @@
+"""Real disposable SQL: no production providers, files, Photoshop or uploads."""
+from copy import deepcopy
+from datetime import datetime,timezone,timedelta
+import json
+from pathlib import Path
+from unittest.mock import patch
+import pytest
+import auto_editions_recovery as recovery
+from tests.test_auto_editions_technical import flow
+from tests.test_worker_health_queue import operations,telemetry,continuous,store,database,pglite_database,failed,rows
+
+CONFIG=dict(policies=[],memberships=[],default_group='')
+
+
+def resize_runtime():
+    from auto_editions_preflight import preparation_code_hash
+    return dict(seen_at=datetime.now(timezone.utc),payload=dict(state='Idle',protocol=1,
+        preparation_code_hash=preparation_code_hash(),processor_lock=False,checkpoint_pending=False,recovery_failures=0))
+
+
+@pytest.mark.parametrize('reason',[
+    'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
+    'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
+    'Photoshop inspection failed: Photoshop is busy before script dispatch (HRESULT 0x80010001)',
+    'Photoshop inspection failed: Inspector failure: Error: Cannot open the file because the open options are incorrect'])
+def test_new_design_resize_failure_recovers_once_without_historical_scope(backlog,monkeypatch,reason):
+    d,sql=backlog
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    monkeypatch.delenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED')
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    pid,source=source_job(d,sql,2001,reason)
+    protected={t:deepcopy(rows(sql,t)) for t in ('edition_products','edition_allocations','product_psd_mappings')}
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG),patch.object(recovery,'native_runtime',return_value=resize_runtime()):
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+        claimed=d.queue.claim('synthetic-companion')
+        assert claimed['product_gid']==pid
+        assert d.queue.claim('duplicate-companion') is None
+        sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason=%s,source=%s::jsonb,lease_token=NULL,lease_until=NULL WHERE product_gid=%s",(reason,json.dumps(source),pid))
+        sql.execute("UPDATE auto_edition_onboarding_audit SET created_at=now()-interval '1 hour' WHERE event=%s",(recovery.EVENT,))
+        # A restart and elapsed backoff do not reset the shared-fix budget.
+        assert recovery.scan(d.connect,metadata)==[]
+    assert {t:rows(sql,t) for t in protected}==protected
+
+
+@pytest.mark.parametrize('change',[{'state':'Live'},{'processor_lock':True},{'checkpoint_pending':True},
+    {'preparation_code_hash':'old'},{'recovery_failures':1}])
+def test_resize_recovery_waits_for_idle_fixed_runtime(change):
+    runtime=resize_runtime();runtime['payload'].update(change)
+    assert not recovery.resize_fix_available(runtime)
+
+
+def test_resize_recovery_identity_ignores_unrelated_web_release(monkeypatch):
+    runtime=resize_runtime()
+    monkeypatch.setenv('RENDER_GIT_COMMIT','unrelated-web-release')
+    assert recovery.resize_fix_available(runtime)
+    runtime['seen_at']-=timedelta(minutes=3)
+    assert not recovery.resize_fix_available(runtime)
+
+
+def test_ended_native_lease_recovers_through_shared_idle_guard(backlog,monkeypatch):
+    d,sql=backlog
+    pid,source=source_job(d,sql,2010,'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.')
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()+interval '45 minutes' WHERE product_gid=%s",(pid,))
+    runtime=resize_runtime()
+    from worker_health import record_heartbeat
+    record_heartbeat(d.connect,'Companion','fixture',runtime['payload'])
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG),patch.object(recovery,'native_runtime',return_value=runtime):
+        assert recovery.plan(d.connect,CONFIG)[0]['waiting']==''
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert d.queue.claim('companion')['product_gid']==pid
+
+
+@pytest.mark.parametrize('change',[{'state':'Live'},{'processor_lock':True},{'checkpoint_pending':True},
+    {'product_gid':'gid://shopify/Product/2010'},{'preparation_code_hash':'old'}])
+def test_unexpired_terminal_lease_still_protects_uncertain_work(change):
+    row=dict(status='Blocked',lease_until=datetime.now(timezone.utc)+timedelta(minutes=45))
+    runtime=resize_runtime();runtime['payload'].update(change)
+    assert recovery.lease_protects(row,runtime)
+    assert recovery.lease_protects({**row,'preparation_hash':'retained'},resize_runtime())
+
+
+def test_unscoped_transient_failure_retries_with_existing_budget(backlog,monkeypatch):
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    test_restart_backoff_and_retry_ceiling(backlog)
+
+
+@pytest.mark.parametrize('reason',['Preparation failed: Transient preparation connection: HTTP 503. Existing PSD and mapping are preserved.',
+    'Preparation failed: HTTPError. Existing PSD and mapping are preserved.'])
+def test_preparation_service_failure_uses_bounded_shared_network_recovery(backlog,monkeypatch,reason):
+    d,sql=backlog
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    pid,source=source_job(d,sql,2011,reason)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        plan=recovery.plan(d.connect,CONFIG)[0]
+        assert plan['decision']['category']=='Upload/network'
+        assert plan['decision']['max_attempts']==3
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+
+
+@pytest.mark.parametrize('code',[408,429,500,502,503,504,400,401,403,404])
+def test_preparation_http_diagnostics_preserve_status_and_retry_class(tmp_path,code):
+    import sys
+    from urllib.error import HTTPError
+    sys.path.insert(0,str(Path(__file__).parents[1]/'scripts/studio'))
+    from auto_editions_local import failure_detail
+    from worker_diagnostics import explain
+    reason=failure_detail(dict(folder=tmp_path),'Preparation',HTTPError('https://example.test/private',code,'unavailable',{},None))
+    assert 'HTTP '+str(code) in reason
+    assert 'example.test' not in reason
+    assert (explain(reason)['code']=='CONNECTION_INTERRUPTED')==(code in (408,429,500,502,503,504))
+
+
+def test_corrected_input_resumes_without_manual_retry(backlog,monkeypatch):
+    from tests.test_auto_editions_discovery import asset
+    d,sql=backlog;pid,source=source_job(d,sql,2002,'Exactly one visible, editable edition-number layer is required.')
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    changed=asset(id=source['file_id'],rev='a2',content_hash='b'*64)
+    # The discovery inventory is the persisted signal that corrected input arrived.
+    sql.execute("INSERT INTO auto_edition_source_inventory(file_id,name_key,path_lower,metadata) VALUES(%s,'corrected','/corrected.psd',%s::jsonb)",(source['file_id'],json.dumps(changed)))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,lambda _:changed)==[pid]
+        assert recovery.scan(d.connect,lambda _:changed)==[]
+    assert rows(sql,'auto_edition_onboarding')[0]['status']=='Awaiting preparation'
+
+
+@pytest.fixture(autouse=True)
+def fixture_recovery_scope(monkeypatch):
+    # Disposable test products are explicitly selected; no production scope read.
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{'gid://shopify/Product/'+str(n):1 for n in range(1,3000)})
+
+
+@pytest.fixture
+def backlog(operations,monkeypatch):
+    d,sql=operations
+    sql.execute(Path('supabase/migrations/20261017001547_auto_editions_technical_completion.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED','true')
+    return d,sql
+
+
+def source_job(d,sql,n=1000,reason='Download interrupted'):
+    pid=failed(d,sql,n)
+    source=dict(product_gid=pid,file_id='id:source'+str(n),revision='a1',content_hash='a'*64)
+    sql.execute("UPDATE auto_edition_onboarding SET source=%s::jsonb,reason=%s WHERE product_gid=%s",(json.dumps(source),reason,pid))
+    return pid,source
+
+
+def metadata(fid):
+    return dict(id=fid,rev='a1',content_hash='a'*64)
+
+
+def test_full_backlog_duplicate_priority_and_atomic_journal(backlog):
+    d,sql=backlog
+    # More than a displayed page of deterministic failures must not hide work.
+    for n in range(1000,1052):source_job(d,sql,n,'Exactly one visible, editable edition-number layer is required.')
+    pid,source=source_job(d,sql,1052)
+    before={t:deepcopy(rows(sql,t)) for t in ('edition_products','edition_allocations','synthetic_certificates','product_psd_mappings')}
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+    q=next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==pid)
+    assert q['status']=='Awaiting preparation' and q['priority']==8
+    assert sum(r['event']==recovery.EVENT for r in rows(sql,'auto_edition_onboarding_audit'))==1
+    assert {t:rows(sql,t) for t in before}==before
+    assert not any(r['status']=='Cloud Ready' for r in rows(sql,'auto_edition_onboarding'))
+
+
+def test_restart_backoff_and_retry_ceiling(backlog):
+    d,sql=backlog;pid,source=source_job(d,sql)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        for attempt in range(3):
+            assert recovery.scan(d.connect,metadata)==[pid]
+            sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason='Download interrupted',source=%s::jsonb",(json.dumps(source),))
+            assert recovery.scan(d.connect,metadata)==[]
+            sql.execute("UPDATE auto_edition_onboarding_audit SET created_at=now()-interval '1 hour' WHERE event=%s",(recovery.EVENT,))
+        assert recovery.scan(d.connect,metadata)==[]
+    assert sum(r['event']==recovery.EVENT for r in rows(sql,'auto_edition_onboarding_audit'))==3
+
+
+def test_owned_lease_pause_changed_source_and_peer_progress(backlog):
+    d,sql=backlog;first,_=source_job(d,sql);second,_=source_job(d,sql,1001)
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()+interval '1 hour' WHERE product_gid=%s",(first,))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[second]
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==first)['status']=='Blocked'
+
+
+def test_failed_admission_journal_prevents_starvation(backlog):
+    d,sql=backlog;first,_=source_job(d,sql);second,_=source_job(d,sql,1001)
+    def current(fid):
+        if fid=='id:source1000':raise TimeoutError('synthetic provider timeout')
+        return metadata(fid)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,current,limit=1)==[]
+        assert recovery.scan(d.connect,current,limit=1)==[second]
+    assert any(r['detail'].get('accepted') is False for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==recovery.EVENT)
+
+
+def test_unknown_colour_and_ambiguous_artwork_fail_closed():
+    base=dict(status='Needs PSD Repair',priority=8,source=dict(file_id='id:source',revision='a1',content_hash='a'*64),dropbox_file_id='id:source')
+    for reason in ('Colour policy awaiting approval: missing source profile','A unique recognised collector plaque is required; manual role review needed.','Preparation failed: RuntimeError. Existing PSD and mapping are preserved.','Photoshop cleanup is unproven; processor lock retained'):
+        assert recovery.classify({**base,'reason':reason},CONFIG)['action'] is None
+
+
+def test_current_replacement_failure_supersedes_retained_technical_error():
+    source=dict(product_gid='gid://shopify/Product/987',file_id='id:original',revision='a1',content_hash='a'*64)
+    row=dict(status='Blocked',priority=8,source=source,dropbox_file_id='id:original',
+        preparation_hash='a'*64,technical_reason='Embedded ICC profile required.',
+        replacement=dict(stage='Failed',source=source,reason='The exact edition-number font is unavailable.'))
+    result=recovery.classify(row,CONFIG)
+    assert result['category']=='Plaque/layers' and result['action'] is None
+    assert 'font is unavailable' in result['reason']
+
+
+def test_relevant_fix_and_policy_changes_reassess_without_unrelated_revision(monkeypatch):
+    row=dict(source={'file_id':'id:x'},preparation_hash=None)
+    decision=dict(category='Colour/provenance')
+    first=recovery.key(row,decision,CONFIG)
+    monkeypatch.setenv('RENDER_GIT_COMMIT','unrelated')
+    assert recovery.key(row,decision,CONFIG)==first
+    # An unrelated membership never replenishes this source's retry budget.
+    assert recovery.key(row,decision,{**CONFIG,'memberships':[{'receipt_hash':'changed'}]})==first
+    with patch('auto_editions_colour_policy.resolve',return_value=(b'icc',{'approval_hash':'new-approved-policy'})):
+        assert recovery.key(row,decision,CONFIG)!=first
+    now=datetime.now(timezone.utc)
+    assert recovery.budget([dict(created_at=now)],3,now)=='Waiting for capped retry backoff.'
+    assert recovery.budget([dict(created_at=now-timedelta(hours=1))]*3,3,now).startswith('Retry limit')
+
+
+def test_tagged_retained_export_repair_preserves_original_package(flow,monkeypatch):
+    from auto_editions_technical import Technical
+    d,sql,record,assets,root=flow
+    sql.execute(Path('supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED','true')
+    service=Technical(d.connect);service.seed();job=service.claim()
+    service.fail(job,'Embedded ICC profile required.',False)
+    before=deepcopy(rows(sql,'auto_edition_preparations'))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        result=recovery.scan(d.connect,lambda fid:dict(id=fid,rev='a1',content_hash='a'*64))
+        assert result==[job['product_gid']], [r['detail'] for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==recovery.EVENT]
+    assert rows(sql,'auto_edition_preparations')==before
+    q=rows(sql,'auto_edition_onboarding')[0]
+    assert q['preparation_hash']==record['hash'] and q['replacement']['stage']=='Discovering'
+    assert q['priority']==2
+    assert recovery.scan(d.connect,metadata)==[]
+
+
+def test_pause_and_disabled_scanner_never_mutate(backlog,monkeypatch):
+    from worker_health import set_pause
+    d,sql=backlog;source_job(d,sql)
+    monkeypatch.delenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED')
+    assert recovery.scan(d.connect,lambda _:pytest.fail('Disabled scanner called provider'))==[]
+    monkeypatch.setenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED','true')
+    set_pause(d.connect,True,'owner')
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[]
+    assert rows(sql,'auto_edition_onboarding')[0]['status']=='Blocked'
+
+
+def test_broken_historical_receipts_get_fresh_export_not_false_completion(flow,monkeypatch):
+    from auto_editions_technical import Technical
+    d,sql,record,assets,root=flow
+    sql.execute(Path('supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED','true')
+    sql.execute("UPDATE auto_edition_preparations SET receipts='{}'::jsonb WHERE hash=%s",(record['hash'],))
+    service=Technical(d.connect);service.seed();job=service.claim()
+    service.fail(job,'Complete immutable upload receipts required.',False)
+    before=deepcopy(rows(sql,'auto_edition_preparations'))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,lambda fid:dict(id=fid,rev='a1',content_hash='a'*64))==[job['product_gid']]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert rows(sql,'auto_edition_preparations')==before
+    q=rows(sql,'auto_edition_onboarding')[0]
+    assert q['status']=='Blocked' and q['replacement']['stage']=='Discovering'
+    assert not rows(sql,'auto_edition_layouts')
+
+
+def test_healthy_native_retry_is_admitted_once_and_unchanged_failure_stops(backlog,monkeypatch):
+    from worker_health import record_heartbeat
+    from tests.test_ordered_design_recovery import healthy_native
+    observed=healthy_native(monkeypatch);d,sql=backlog
+    reason='Photoshop inspection failed: OSError. Retry after checking Photoshop.'
+    pid,source=source_job(d,sql,reason=reason)
+    record_heartbeat(d.connect,'Companion','fixture',observed['payload'])
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+        sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason=%s,source=%s::jsonb,lease_token=NULL,lease_until=NULL WHERE product_gid=%s",(reason,json.dumps(source),pid))
+        record_heartbeat(d.connect,'Companion','fixture',observed['payload'])
+        assert recovery.scan(d.connect,metadata)==[]
+    events=[r for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==recovery.EVENT]
+    assert len(events)==1 and events[0]['detail']['action']=='retry_native'
+
+
+def test_health_distinguishes_admission_and_uploaded_package_from_verified_completion(flow,monkeypatch):
+    import worker_health as health
+    from auto_editions_onboarding_store import Queue
+    from auto_editions_technical import Technical
+    d,sql,record,assets,root=flow;pid=record['manifest']['source']['product_gid']
+    sql.execute(Path('supabase/migrations/20261015200847_worker_health_telemetry.sql').read_text())
+    with d.connect() as conn,conn.cursor() as cur:
+        Queue.audit(cur,pid,'fixture','preparation_metrics',dict(preparation_hash=record['hash']))
+        Queue.audit(cur,pid,'fixture',recovery.EVENT,dict(category='Colour/provenance',attempt=1))
+    before=health.Health(d.connect).snapshot()
+    assert before['last_completed'] is None and before['colour']['repaired']==0
+    assert before['colour']['affected']==1
+    assert Technical(d.connect).run_one(assets)=='Cloud Ready'
+    after=health.Health(d.connect).snapshot()
+    assert after['last_completed'] is not None and after['colour']['repaired']==1
+    assert after['colour']['affected']==1 and after['counts']['completed']==1
+
+
+def test_temporary_guard_contention_backs_off_without_spending_native_attempt(backlog,monkeypatch):
+    from worker_health import record_heartbeat
+    from tests.test_ordered_design_recovery import healthy_native
+    observed=healthy_native(monkeypatch);d,sql=backlog
+    pid,_=source_job(d,sql,reason='Photoshop inspection failed: OSError. Retry after checking Photoshop.')
+    record_heartbeat(d.connect,'Companion','fixture',observed['payload'])
+    class Busy(Exception):sqlstate='55P03'
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        with patch('worker_health_queue.submit',side_effect=Busy('queue busy')):
+            assert recovery.scan(d.connect,metadata)==[]
+        assert recovery.scan(d.connect,metadata)==[]
+        sql.execute("UPDATE auto_edition_onboarding_audit SET created_at=now()-interval '2 minutes' WHERE event=%s",(recovery.EVENT,))
+        assert recovery.scan(d.connect,metadata)==[pid]
+    attempts=[r for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==recovery.EVENT]
+    assert len(attempts)==2 and attempts[0]['detail']['transient_admission'] is True
+    assert attempts[1]['detail']['attempt']==1 and attempts[1]['detail']['admission_attempt']==2
+
+
+def test_source_revision_reassessment_requires_changed_bytes():
+    from tests.test_auto_editions_discovery import asset
+    base=dict(product_gid='gid://shopify/Product/987',status='Needs PSD Repair',priority=8,
+        reason='A unique recognised collector plaque is required; manual role review needed.',
+        source=dict(product_gid='gid://shopify/Product/987',file_id='id:original',revision='a1',content_hash='a'*64),
+        dropbox_file_id='id:original')
+    assert recovery.classify({**base,'inventory_metadata':asset(rev='a2')},CONFIG)['action'] is None
+    revised={**base,'inventory_metadata':asset(rev='a2',content_hash='b'*64)}
+    assert recovery.classify(revised,CONFIG)['action']=='retry_source'
+    assert recovery.key(revised,dict(category='Stale/source'),CONFIG)!=recovery.key(base,dict(category='Stale/source'),CONFIG)
+
+
+def test_recovery_health_has_wait_reason_and_review_resolution(backlog,monkeypatch):
+    import worker_health as health
+    d,sql=backlog;pid,_=source_job(d,sql,reason='A unique recognised collector plaque is required; manual role review needed.')
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()+interval '1 hour' WHERE product_gid=%s",(pid,))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[]
+    result=health.Health(d.connect).snapshot()
+    assert result['recovery']['needs_review']==1
+    assert result['recovery']['runnable']==0 and result['recovery']['verified']==0
+    assert next(j for j in result['jobs'] if j['id']==pid)['category']=='Needs Review'
+    assert 'manual role review' in next(j for j in result['jobs'] if j['id']==pid)['reason']
+    state=next(h for h in result['health'] if h['component']=='Recovery')
+    assert state['status']=='Waiting' and 'No eligible failures' in state['reason']
+
+
+def test_ordered_scope_excludes_peer_and_preserves_priority(backlog,monkeypatch):
+    d,sql=backlog;outside,_=source_job(d,sql,1000,'Unreviewed native artwork error');selected,_=source_job(d,sql,1001)
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{selected:231})
+    before=next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[selected]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)==before
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==selected)['priority']==8
+
+
+def test_next_claim_uses_sales_within_existing_priority_band(backlog,monkeypatch):
+    d,sql=backlog;first,_=source_job(d,sql,1000);higher,_=source_job(d,sql,1001)
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{first:2,higher:139})
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[higher,first]
+    claim=__import__('auto_editions_onboarding_store').Queue(d.connect).claim('operator')
+    assert claim['product_gid']==higher and claim['priority']==8

@@ -1,0 +1,153 @@
+"""Lazy desktop mail workspace using the OS's existing custom-component pattern."""
+import html
+import logging
+import time
+from pathlib import Path
+from threading import Lock
+
+import streamlit as st
+import streamlit.components.v1 as components
+from streamlit.errors import StreamlitAPIException
+
+import os_accounts
+from support_email_provider import load_configuration
+from support_email_smtp import load_smtp_configuration
+from support_email_workspace import Workspace
+
+LOGGER = logging.getLogger(__name__)
+_COMPONENT = None
+_LOCK = Lock()
+_COMPONENT_KEY = "support-email-desktop"
+_READER_EVENTS = {"open_thread", "open_message", "load_visible_body"}
+
+
+def get_component():
+    global _COMPONENT
+    if _COMPONENT is None:
+        with _LOCK:
+            if _COMPONENT is None:
+                _COMPONENT = components.declare_component("support_email_desktop", path=str(Path(__file__).parent / "components" / "support_email"))
+    return _COMPONENT
+
+
+def _safe_text(value, *, note=False):
+    st.html(f'<div style="white-space:pre-wrap">{html.escape(str(value))}</div>')
+
+
+def render_page(user):
+    if not os_accounts.can_access_page(user, "Email"):
+        from support_email_completion import revoke
+        revoke(st.session_state.get('support_email_workspace', {}).get('reader_session'))
+        st.session_state.get('support_email_workspace', {})['image_grants'] = set()
+        st.info("Your OS account does not have Email access.")
+        return
+    email_shell_styles()
+    with st.container(key="support-email-shell"):
+        _render_workspace(user)
+
+
+def email_shell_styles():
+    """Scoped to this page's marker: existing OS navigation/sidebar CSS is untouched."""
+    st.html("""<style>
+    [data-testid="stMain"]:has(.st-key-support-email-shell) {
+        overflow: hidden !important;
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) {
+        max-width: none !important;
+        width: 100% !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+        padding-top: calc(var(--sc-topbar-height, 0px) + 6px) !important;
+        padding-bottom: 0 !important;
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) > [data-testid="stVerticalBlock"] {
+        gap: 0 !important;
+    }
+    .st-key-support-email-shell { min-height: 0; }
+    .st-key-support-email-shell iframe,
+    [data-testid="stMainBlockContainer"]:has(.st-key-support-email-shell) iframe[height="0"] {
+        display: block;
+    }
+    </style>""")
+
+
+def rerun_email():
+    """Normal clicks stay in the fragment; a reconnect during a full run must rerun the app."""
+    try:
+        st.rerun(scope="fragment")
+    except StreamlitAPIException:
+        st.rerun()
+
+
+def _complete_loaded_navigation(state, epoch):
+    if not state.get("loaded") or state.get("error") or state.get("initial_load_pending") or state.get("body_pending"):
+        return
+    transition = dict(st.session_state.get("navigation_transition") or {})
+    if (st.session_state.get("current_page") != "Email" or transition.get("to") != "Email"
+            or transition.get("epoch") != epoch or transition.get("status") != "loading"):
+        return
+    transition.update(status="ready", error_type="", duration_ms=max(0, int(
+        (time.monotonic() - float(transition.get("started_at") or time.monotonic())) * 1000)))
+    st.session_state["navigation_transition"] = transition
+    st.session_state["navigation_last_ready_page"] = "Email"
+
+
+def _handle_reader_event(workspace, epoch):
+    """Apply a selection before the fragment builds its next component model."""
+    event = st.session_state.get(_COMPONENT_KEY)
+    if (not isinstance(event, dict) or event.get("action") not in _READER_EVENTS
+            or st.session_state.get("current_page", "Email") != "Email"
+            or st.session_state.get("navigation_epoch", 0) != epoch
+            or st.session_state.get("support_email_workspace") is not workspace.state):
+        return
+    try:
+        if workspace.handle(event):
+            workspace.state["navigation_epoch"] = epoch
+    except Exception as error:
+        # The normal fragment path retains its existing safe error handling.
+        LOGGER.warning("Email reader callback unavailable (%s)", type(error).__name__)
+
+
+@st.fragment
+def _render_workspace(user):
+    started = time.monotonic()
+    config, smtp = load_configuration(), load_smtp_configuration()
+    scope = (config.scope, str(user.get("id")))
+    if st.session_state.get("support_email_scope") != scope:
+        st.session_state["support_email_scope"] = scope
+        st.session_state["support_email_workspace"] = {}
+    state = st.session_state.setdefault("support_email_workspace", {})
+    workspace = Workspace(state, user, config, smtp)
+    try:
+        epoch = st.session_state.get("navigation_epoch", 0)
+        if not state.get("initial_load_attempted") and not state.get("loaded") and not state.get("recovery_state"):
+            state["initial_load_pending"] = True
+        elif state.get("navigation_epoch") != epoch:
+            # Returning is discovery, not permission to reopen an old composer.
+            state['view'] = 'mail'
+            state['image_grants'] = set()
+            if state.get('loaded'):
+                state.update(discovery_pending=True, navigation_refresh_pending=True)
+            else:
+                workspace.load(defer_body=True, essential_only=True)
+                state['discovery_pending'] = True
+            state["navigation_epoch"] = epoch
+        target = {key: str(st.query_params.get("email_" + key, ""))[:998]
+                  for key in ("uid", "uidvalidity", "message_id")}
+        identity = tuple(target.values())
+        if not state.get("initial_load_pending") and target["uid"] and state.get("notification_target") != identity:
+            state["notification_target"] = identity
+            with st.spinner("Loading message…"):
+                workspace.open_notification(target)
+        LOGGER.info("Email shell/list ready duration_ms=%.1f", (time.monotonic()-started)*1000)
+        model = workspace.model()
+        model["navigation_epoch"] = epoch
+        event = get_component()(model=model, key=_COMPONENT_KEY, default=None,
+                                on_change=lambda: _handle_reader_event(workspace, epoch))
+        if event and workspace.handle(event):
+            state["navigation_epoch"] = epoch
+            rerun_email()
+        _complete_loaded_navigation(state, epoch)
+    except Exception as error:
+        LOGGER.warning("Email workspace unavailable (%s)", type(error).__name__)
+        st.warning("Email is temporarily unavailable. Refresh Email to reconnect.")

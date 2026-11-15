@@ -1,0 +1,64 @@
+{
+  "engine": "Photoshop",
+  "engine_version": "27.10.0",
+  "document": {
+    "width_px": 3543,
+    "height_px": 2505,
+    "mode": "DocumentMode.RGB",
+    "profile": "sRGB IEC61966-2.1",
+    "profile_state": "tagged",
+    "bits_per_channel": "BitsPerChannelType.EIGHT"
+  },
+  "layers": [
+    {
+      "layer_id": 308,
+      "path": [
+        {
+          "index": 2,
+          "layer_id": 308,
+          "name": "No. 001 / 100"
+        }
+      ],
+      "bounds_px": [
+        1523,
+        2301,
+        2015,
+        2347
+      ],
+      "kind": "text",
+      "visible": true,
+      "editable": true,
+      "locked": false,
+      "smart_object_chain": [],
+      "text": "No. 001 / 100",
+      "fonts": [
+        {
+          "postscript_name": "Cinzel-Medium",
+          "installed": true
+        }
+      ],
+      "layout": {
+        "font": "Cinzel-Medium"
+      }
+    },
+    {
+      "layer_id": 307,
+      "path": [
+        {
+          "index": 3,
+          "layer_id": 307,
+          "name": "Layer 2"
+        }
+      ],
+      "bounds_px": [
+        1238,
+        2193,
+        2303,
+        2378
+      ],
+      "kind": "raster",
+      "visible": true,
+      "smart_object_chain": []
+    }
+  ]
+}

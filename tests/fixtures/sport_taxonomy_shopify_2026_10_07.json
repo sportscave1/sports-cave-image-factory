@@ -1,0 +1,176 @@
+{
+  "audited_at": "2026-10-07",
+  "source": "Read-only Sports Cave Shopify audit; reduced public taxonomy regression fixture. Full local export remains in ignored docs/evidence.",
+  "collections_complete": true,
+  "active_products_complete": true,
+  "collections": [
+    {
+      "title": "AFL Wall Art",
+      "handle": "afl-wall-art"
+    },
+    {
+      "title": "All Sports Wall Art",
+      "handle": "all-sports-wall-art"
+    },
+    {
+      "title": "All-Star Legends Wall Art",
+      "handle": "all-star-legends-wall-art"
+    },
+    {
+      "title": "Apparel",
+      "handle": "apparel"
+    },
+    {
+      "title": "Baseball Wall Art",
+      "handle": "baseball-wall-art"
+    },
+    {
+      "title": "Best Online Sports Wall Art",
+      "handle": "best-online-sellers"
+    },
+    {
+      "title": "Best Selling Sports Wall Art",
+      "handle": "best-selling-sports-art"
+    },
+    {
+      "title": "Best Selling Wall Art UK",
+      "handle": "uk-best-selling-sport-art"
+    },
+    {
+      "title": "Collector Series Wall Art",
+      "handle": "collector-series-art"
+    },
+    {
+      "title": "Combat Wall Art",
+      "handle": "combat-art"
+    },
+    {
+      "title": "Cricket Wall Art",
+      "handle": "cricket"
+    },
+    {
+      "title": "Cristiano Ronaldo Wall Art",
+      "handle": "cristiano-ronaldo-wall-art"
+    },
+    {
+      "title": "Featured Sports Wall Art",
+      "handle": "featured-designs"
+    },
+    {
+      "title": "Football Wall Art",
+      "handle": "soccer"
+    },
+    {
+      "title": "Formula One Wall Art",
+      "handle": "formula-one-wall-art"
+    },
+    {
+      "title": "Horse Racing Wall Art",
+      "handle": "horse-racing-wall-art"
+    },
+    {
+      "title": "Ice Hockey Wall Art",
+      "handle": "ice-hockey-wall-art"
+    },
+    {
+      "title": "Kobe Bryant Wall Art",
+      "handle": "kobe-bryant-wall-art"
+    },
+    {
+      "title": "Lebron James Wall Art",
+      "handle": "lebron-james-wall-art"
+    },
+    {
+      "title": "Lionel Messi Wall Art",
+      "handle": "lionel-messi-wall-art"
+    },
+    {
+      "title": "Matilda's Wall Art",
+      "handle": "matildas"
+    },
+    {
+      "title": "Michael Jordan Wall Art",
+      "handle": "michael-jordan-wall-art"
+    },
+    {
+      "title": "Motivational Quotes Sports Wall Art",
+      "handle": "motivational-art"
+    },
+    {
+      "title": "MotoGP Wall Art",
+      "handle": "motogp-wall-art"
+    },
+    {
+      "title": "Motor Racing Wall Art",
+      "handle": "motor-racing-wall-art"
+    },
+    {
+      "title": "NASCAR Wall Art",
+      "handle": "nascar-wall-art"
+    },
+    {
+      "title": "NBA Wall Art",
+      "handle": "nba"
+    },
+    {
+      "title": "New Sports Wall Art",
+      "handle": "new-products"
+    },
+    {
+      "title": "NFL Wall Art",
+      "handle": "nfl-wall-art"
+    },
+    {
+      "title": "Olympics Wall Art",
+      "handle": "olympics-wall-art"
+    },
+    {
+      "title": "Peter Brock Wall Art",
+      "handle": "peter-brock-wall-art"
+    },
+    {
+      "title": "Popular",
+      "handle": "popular"
+    },
+    {
+      "title": "Rivalries Wall Art",
+      "handle": "greatest-sport-rivalries-wall-art"
+    },
+    {
+      "title": "Rugby League Wall Art",
+      "handle": "rugby-league-collection"
+    },
+    {
+      "title": "Stephen Curry Wall Art",
+      "handle": "stephen-curry-wall-art"
+    },
+    {
+      "title": "Tennis Wall Art",
+      "handle": "tennis-wall-art"
+    },
+    {
+      "title": "THE GIFT EDIT",
+      "handle": "gift-editions"
+    },
+    {
+      "title": "THE GIFT EDIT",
+      "handle": "gift-editions-au"
+    },
+    {
+      "title": "THE GIFT EDIT",
+      "handle": "gift-editions-usa"
+    },
+    {
+      "title": "THE GIFT EDIT",
+      "handle": "gift-editions-uk"
+    },
+    {
+      "title": "V8 Supercars Wall Art",
+      "handle": "v8-supercars-wall-art"
+    },
+    {
+      "title": "WWE Wrestling Wall Art",
+      "handle": "wwe-wall-art"
+    }
+  ]
+}

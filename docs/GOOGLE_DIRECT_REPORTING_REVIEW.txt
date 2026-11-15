@@ -1,0 +1,209 @@
+﻿SPORTS CAVE OS: DIRECT GOOGLE REPORTING — LOCAL REVIEW
+12 October 2026, Australia/Sydney
+
+Status
+Local implementation and focused offline verification complete. Not deployed,
+not committed, and not approved for production cleanup. Live Google parity,
+end-to-end preview and backup restore verification remain outstanding.
+
+Isolation
+Started in RELEASE task 20261011-369a5c73 and found eight unrelated unfinished
+Studio changes. None was edited. Studio allocated INTEGRATIONS task
+20261011-7256b48d, owner codex/google-direct-20261012-session1, branch
+codex/task/integrations-direct-google-apis-and-supabase-reporting--20261011-7256b48d.
+Approved base: 578f459473a211f86a071443bbe4c932815220bb. New task began clean.
+
+Implementation
+The Analytics UI now reads the existing GA4 exact-report contracts directly.
+SEO overview, keyword rankings, opportunities, landing pages, query intelligence
+and measurement readers use direct GSC aggregates. Existing OAuth, property
+selection, metrics, date/comparison controls, brand/country/device filters,
+query normalization, opportunity scoring and owned decisions are reused.
+Shopify ledger reads remain separate; Shopify data and integration code are not
+mutated. Historical confirmed-revenue dependencies remain retained.
+
+GA4 memory TTL: 20 minutes. GSC memory TTL: 8 hours. Manual Refresh data clears
+report caches and changes SEO pagination generation. Cache identity includes
+connection revision and selected properties. Cache holds at most 128 entries
+and a 32 MiB serialized-payload budget; Python object overhead is additional.
+Cold requests are serialized per process to avoid request stampedes. Reporting
+HTTP requests do not automatically retry; timeouts, 429 Retry-After and low GA4
+property quota establish cooldowns. Explicit refresh cannot reset cooldowns.
+There is a per-process limit of 120 outbound reporting requests per minute per
+connection scope. Multiple deployed processes still share Google's quota; this
+is not a distributed rate limiter. OAuth refresh reuses the existing auth flow.
+GSC pagination is capped at eight 25,000-row pages. GA4 contracts retain their
+own row limits and have a ten-page guard. Incomplete results are not cached or
+presented as complete. GSC top-row/anonymisation limitations are disclosed.
+Realtime requests omit unsupported offset/keepEmptyRows/dateRanges fields.
+No direct reporting request occurs at module import or normal server startup.
+
+Retired locally (takes effect only after separately approved deployment)
+- Google GSC/GA4 historical imports, daily source imports and import retries.
+- GA4 saved-contract prewarming, report queue processing and snapshot writes.
+- Fresh-GSC persistence and canonical backfill/repair entry points.
+- Initial startup property-total and reporting-repair enqueues.
+- Reporting snapshot builders and queued reporting repair processing.
+- Google transaction import processing/queueing, while independent Shopify
+  phase-4 jobs and owned mapping/measurement workflows are retained.
+- Explicit repair_gsc_canonical_pipeline command now returns disabled.
+The existing Render primary/supporting service identities are untouched.
+The old worker can remain running and idle once this code is deployed; this task
+does not stop, delete, rename or reconfigure any production Render service.
+
+Verification
+72 focused offline tests passed:
+python -B -m unittest tests.test_google_direct_reporting
+  tests.test_google_reporting_cleanup tests.test_analytics_contracts
+  tests.test_seo_metrics_v2 tests.test_analytics_fragment_reads
+  tests.test_seo_overview_lazy_admin tests.test_seo_blog_workflow
+  tests.test_google_seo_worker_runtime
+(command is one line when executed)
+Coverage: existing OAuth projection, cache expiry/single-flight/copy safety,
+quota cooldowns, no partial caching, GSC pagination, weighted totals vs known
+queries, property switching, filters, deterministic UI cursors, owned dismissals,
+mapped-query visibility, supporting GA4 failure, realtime payload, retired
+writers, no startup repair/API calls, cleanup exclusions and existing blog/UI
+contracts. Tests use mocks; no production credentials/customer fixtures.
+Studio Verify passed syntax, changed-file secret scan, infrastructure tests and
+git diff checks. Render topology validation passed.
+
+Synthetic performance evidence
+python -B scripts/benchmark_google_direct_reporting.py
+5,000-row fixture, 396,669 serialized bytes:
+  cold cache insertion: 11.390 ms
+  mean warm defensive copy: 5.717 ms
+  21 reads: one fixture fetch
+These are local cache overheads, not Google latency or a live dashboard SLA.
+A cold SEO overview normally needs one watermark request, two daily-total
+requests and two query requests before pagination; warm identical API reads
+reuse memory. Real latency/quota consumption requires live verification.
+
+Read-only storage audit
+Project identity was established from repository release evidence and the
+connector project list: ceyzbfpuwuuxaiqwiltz. Only that project's reporting
+metadata and aggregate counts were queried in READ ONLY transactions. The
+separate project was not queried or changed. Full evidence is in
+GOOGLE_REPORTING_STORAGE_AUDIT.json. Static readers/writers, including retired
+methods and diagnostic scripts, are listed in GOOGLE_REPORTING_DEPENDENCIES.json.
+No noninternal triggers or dependent views were found for the audited reporting
+tables. No pg_cron job table is installed. Metadata inspection is not proof that
+all external clients have stopped using a table; recheck after live rollout.
+
+At inspection, reporting_snapshot_failed appeared in 102,019 snapshot runs and
+337 repair jobs. The old production workers were still active, so counts/sizes
+changed during the audit. Those operational/audit histories are preserved.
+
+Exact proposed first cleanup list (NOT approved)
+Workspace scope: sports-cave only. All GSC candidates additionally require
+source_date >= 2025-06-12, a frozen conservative cutoff. No schema/index drops.
+  analytics_ga4_report_snapshots              502,538,240 bytes
+  seo_gsc_property_totals_v2                    1,638,400 bytes
+  seo_gsc_query_daily_v2                      115,539,968 bytes
+  seo_gsc_query_page_daily_v2                 116,924,416 bytes
+  seo_gsc_page_daily_v2                        88,514,560 bytes
+  seo_gsc_search_appearance_daily_v2              180,224 bytes
+  seo_reporting_daily_metrics                    24,576 bytes
+  seo_reporting_query_daily                      32,768 bytes
+  seo_reporting_landing_page_daily               32,768 bytes
+  seo_reporting_page_daily                       24,576 bytes
+Total relation allocation: 825,450,496 bytes = 787.21 MiB, including
+208.16 MiB of indexes. This is an UPPER BOUND: older retained rows, other scopes,
+page overhead and ongoing production growth prevent treating it as exact savings.
+DELETE makes space reusable after vacuum; it does not promise a smaller database
+file or bill. Actual reclaimed space now: zero. No VACUUM FULL, table rewrite,
+TRUNCATE, CASCADE, DROP or production DELETE was executed or scheduled.
+
+Index candidates after all consumers are retired
+The primary-key indexes on each listed fact table and their report/range indexes
+are tied to these obsolete stored-report access paths. Specifically:
+  idx_analytics_ga4_contract_range
+  idx_seo_gsc_totals_v2_canonical_range
+  idx_seo_gsc_query_v2_filters
+  idx_seo_gsc_query_v2_canonical_range
+  idx_seo_gsc_query_page_v2
+  idx_seo_gsc_query_page_v2_canonical_range
+  idx_seo_gsc_page_v2_filters
+  idx_seo_gsc_page_v2_canonical_range
+Do not drop them independently yet: legacy diagnostics/classes still exist and
+schema migrations still define these tables. The cleanup artifact preserves
+schema/indexes and only proposes scoped fact-row deletion after approval.
+
+Explicitly retained / excluded
+- seo_gsc_daily_details (254,345,216 bytes): owned URL-mapping reader dependency
+  and irrecoverable older history. Not safe for this first cleanup.
+- seo_gsc_daily_totals and seo_ga4_daily_landing_pages: existing mapping/health
+  dependencies and historical records; retained pending a separate retirement.
+- seo_gsc_canonical_date_status: historical import/status evidence.
+- seo_reporting_snapshot_runs, seo_reporting_repair_jobs, seo_sync_runs/errors,
+  analytics_ga4_sync_failures, queues and other operational/audit records.
+- seo_reporting_opportunities: owned status/decisions and an actual foreign key
+  from seo_growth_recommendations. Never delete as raw Google data.
+- seo_ga4_transactions, seo_revenue_reconciliations and revenue reporting tables:
+  linked to protected order facts/confirmed revenue. Excluded.
+- Google connection credentials/settings, URL mappings, canonical page metadata,
+  SEO tasks/notes/recommendations/decisions/blog briefs/measurement records.
+- All Shopify, Edition Ops, orders, certificates, CRM, email, consent, Meta Ads,
+  audit records and the separate Supabase project.
+
+History and backups
+The database audit used database CURRENT_DATE 2026-10-11 (UTC); user-facing date
+is 12 October in Sydney. Older-than-16-month counts were relative to 2025-06-11:
+  seo_gsc_daily_details: 21,522 records, history begins 2025-04-01.
+  seo_gsc_daily_totals: 75 records, history begins 2025-03-31.
+  seo_gsc_property_totals_v2: 264 records, history begins 2025-03-31.
+Those old GSC records cannot be recovered from the normal Search Console API.
+The cleanup cutoff 2025-06-12 retains at least all those rows.
+GA4 landing history begins 2023-02-27 (12,157 records). GA4's historical-report
+availability is not governed by GSC's 16-month rule. Do not assume a refetch will
+reproduce past attribution, thresholds, realtime windows or changed definitions.
+GA4 saved-contract ranges begin 2026-02-20; historical realtime results in those
+snapshots are not reproducible by today's realtime endpoint.
+
+Backup availability and an isolated restore HAVE NOT been verified. No scoped
+export/restore evidence was present locally, and the installed connector exposes
+no backup listing/restore-verification endpoint. Supabase's documented automatic
+backups alone do not prove this project's recoverability. Before cleanup, obtain
+project-specific backup timestamp/coverage plus scoped export checksums and a
+successful isolated restore with row counts, especially the historical rows.
+Never restore over production or use production credentials in a dev preview.
+
+Cleanup artifact
+scripts/google_reporting_cleanup.py only generates a local SQL review artifact;
+it has no connection or execute mode. GOOGLE_REPORTING_CLEANUP_DRAFT.sql runs
+read-only candidate counts and ROLLBACK. Proposed DELETE statements are comments.
+Before enabling any deletion: separately authorize and verify the direct release
+live, stop old writer revisions, rerun sizes/counts/dependencies, verify backups
+and restore, and approve the exact tables, workspace and date cutoff. No approval
+is requested now because live validation and backup evidence are not complete.
+
+Remaining release blockers / limitations
+- Live GA4/GSC parity, error/quota responses and actual latency not verified.
+- Full browser preview not run: the allocated Studio task reports preview
+  disabled pending Phase 2 integration isolation. Offline UI contracts passed.
+- Backup/export restore evidence unavailable; deletion remains blocked.
+- Historical confirmed-revenue and URL-mapping consumers retain legacy data.
+  These are deliberately excluded from cleanup; they are not certified obsolete.
+- Old retained readers still support explicit diagnostics/injected legacy tests.
+  Do not remove the legacy schema based only on switching default page readers.
+- No production fix is claimed until a separately approved deployment is verified.
+
+Files changed
+Runtime: analytics_page.py, analytics_reporting.py, google_direct_reporting.py,
+google_seo_import.py, google_seo_phase4.py, seo_growth_intelligence.py,
+seo_live_analytics.py, seo_page.py, seo_reporting_runtime.py, sports_cave_server.py.
+Tools: scripts/repair_gsc_canonical_pipeline.py,
+scripts/google_reporting_cleanup.py, scripts/benchmark_google_direct_reporting.py.
+Tests: tests/test_google_direct_reporting.py, tests/test_google_reporting_cleanup.py,
+tests/test_analytics_contracts.py, tests/test_google_seo_worker_runtime.py,
+tests/test_seo_overview_lazy_admin.py.
+Review evidence: this file, GOOGLE_REPORTING_CLEANUP_DRAFT.sql,
+GOOGLE_REPORTING_DEPENDENCIES.json, GOOGLE_REPORTING_STORAGE_AUDIT.json.
+
+API references checked
+https://developers.google.com/analytics/devguides/reporting/data/v1/quotas
+https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runRealtimeReport
+https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+https://developers.google.com/webmaster-tools/v1/how-tos/all-your-data
+https://supabase.com/docs/guides/platform/backups
+https://supabase.com/changelog

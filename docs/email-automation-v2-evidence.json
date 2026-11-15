@@ -1,0 +1,1113 @@
+{
+  "before": [
+    {
+      "kind": "abandoned",
+      "coldMs": 338,
+      "warmMs": 244,
+      "coldReadyMs": 230,
+      "warmReadyMs": 158,
+      "selectFeedbackMs": 61,
+      "samples": [
+        {
+          "fixtureReadyMs": 454,
+          "coldMs": 338,
+          "warmMs": 240,
+          "coldReadyMs": 230,
+          "warmReadyMs": 158,
+          "selectFeedbackMs": 61,
+          "component": [
+            4.9000000059604645,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.7], \"fragment_ms\": [30.22, 7.11, 7.14], \"state\": {\"auto-checkouts-fixture-abandoned-search\": \"\", \"auto-checkouts-fixture-abandoned-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 417,
+          "coldMs": 233,
+          "warmMs": 253,
+          "coldReadyMs": 209,
+          "warmReadyMs": 141,
+          "selectFeedbackMs": 59,
+          "component": [
+            5,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.7], \"fragment_ms\": [28.77, 6.93, 5.81], \"state\": {\"auto-checkouts-fixture-abandoned-search\": \"\", \"auto-checkouts-fixture-abandoned-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 417,
+          "coldMs": 350,
+          "warmMs": 244,
+          "coldReadyMs": 249,
+          "warmReadyMs": 160,
+          "selectFeedbackMs": 64,
+          "component": [
+            5.200000002980232,
+            0.3999999985098839
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.33], \"fragment_ms\": [30.46, 7.56, 6.39], \"state\": {\"auto-checkouts-fixture-abandoned-search\": \"\", \"auto-checkouts-fixture-abandoned-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "welcome",
+      "coldMs": 249,
+      "warmMs": 248,
+      "coldReadyMs": 221,
+      "warmReadyMs": 161,
+      "selectFeedbackMs": 56,
+      "samples": [
+        {
+          "fixtureReadyMs": 299,
+          "coldMs": 374,
+          "warmMs": 250,
+          "coldReadyMs": 221,
+          "warmReadyMs": 161,
+          "selectFeedbackMs": 65,
+          "component": [
+            10.200000002980232,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.65], \"fragment_ms\": [30.2, 7.03, 5.6], \"state\": {\"lifecycle-fixture-welcome-search\": \"\", \"lifecycle-fixture-welcome-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 267,
+          "coldMs": 243,
+          "warmMs": 236,
+          "coldReadyMs": 216,
+          "warmReadyMs": 161,
+          "selectFeedbackMs": 55,
+          "component": [
+            10.100000001490116,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.1], \"fragment_ms\": [29.28, 7.13, 6.69], \"state\": {\"lifecycle-fixture-welcome-search\": \"\", \"lifecycle-fixture-welcome-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 313,
+          "coldMs": 249,
+          "warmMs": 248,
+          "coldReadyMs": 222,
+          "warmReadyMs": 152,
+          "selectFeedbackMs": 56,
+          "component": [
+            10.299999997019768,
+            0.3999999985098839
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.22], \"fragment_ms\": [28.81, 6.77, 6.19], \"state\": {\"lifecycle-fixture-welcome-search\": \"\", \"lifecycle-fixture-welcome-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "coldMs": 371,
+      "warmMs": 246,
+      "coldReadyMs": 244,
+      "warmReadyMs": 177,
+      "selectFeedbackMs": 56,
+      "samples": [
+        {
+          "fixtureReadyMs": 391,
+          "coldMs": 371,
+          "warmMs": 246,
+          "coldReadyMs": 244,
+          "warmReadyMs": 177,
+          "selectFeedbackMs": 56,
+          "component": [
+            13.100000001490116,
+            0.6000000014901161
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.13], \"fragment_ms\": [28.92, 8.01, 7.26], \"state\": {\"lifecycle-fixture-post_purchase-search\": \"\", \"lifecycle-fixture-post_purchase-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 416,
+          "coldMs": 259,
+          "warmMs": 264,
+          "coldReadyMs": 236,
+          "warmReadyMs": 154,
+          "selectFeedbackMs": 50,
+          "component": [
+            8.899999998509884,
+            0.30000000447034836
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.55], \"fragment_ms\": [30.07, 7.67, 7.32], \"state\": {\"lifecycle-fixture-post_purchase-search\": \"\", \"lifecycle-fixture-post_purchase-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 283,
+          "coldMs": 372,
+          "warmMs": 244,
+          "coldReadyMs": 248,
+          "warmReadyMs": 203,
+          "selectFeedbackMs": 58,
+          "component": [
+            10,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.78], \"fragment_ms\": [29.95, 7.65, 13.88], \"state\": {\"lifecycle-fixture-post_purchase-search\": \"\", \"lifecycle-fixture-post_purchase-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "win_back",
+      "coldMs": 358,
+      "warmMs": 240,
+      "coldReadyMs": 269,
+      "warmReadyMs": 162,
+      "selectFeedbackMs": 57,
+      "samples": [
+        {
+          "fixtureReadyMs": 308,
+          "coldMs": 365,
+          "warmMs": 230,
+          "coldReadyMs": 281,
+          "warmReadyMs": 173,
+          "selectFeedbackMs": 58,
+          "component": [
+            11.899999998509884,
+            0.7000000029802322
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.57], \"fragment_ms\": [32.02, 6.62, 5.92], \"state\": {\"lifecycle-fixture-win_back-search-retained\": \"\", \"lifecycle-fixture-win_back-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 286,
+          "coldMs": 358,
+          "warmMs": 240,
+          "coldReadyMs": 269,
+          "warmReadyMs": 143,
+          "selectFeedbackMs": 57,
+          "component": [
+            12.399999998509884,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.44], \"fragment_ms\": [59.46, 7.08, 6.42], \"state\": {\"lifecycle-fixture-win_back-search-retained\": \"\", \"lifecycle-fixture-win_back-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 300,
+          "coldMs": 259,
+          "warmMs": 259,
+          "coldReadyMs": 234,
+          "warmReadyMs": 162,
+          "selectFeedbackMs": 48,
+          "component": [
+            12.799999997019768,
+            0.6000000014901161
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.12], \"fragment_ms\": [46.06, 7.25, 7.4], \"state\": {\"lifecycle-fixture-win_back-search-retained\": \"\", \"lifecycle-fixture-win_back-search\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "coldMs": 377,
+      "warmMs": 230,
+      "coldReadyMs": 252,
+      "warmReadyMs": 146,
+      "selectFeedbackMs": 59,
+      "samples": [
+        {
+          "fixtureReadyMs": 267,
+          "coldMs": 246,
+          "warmMs": 230,
+          "coldReadyMs": 223,
+          "warmReadyMs": 146,
+          "selectFeedbackMs": 59,
+          "component": [
+            7.600000001490116,
+            0.20000000298023224
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.73], \"fragment_ms\": [27.21, 6.74, 5.73], \"state\": {\"lifecycle-fixture-fulfilled-search\": \"\", \"lifecycle-fixture-fulfilled-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 313,
+          "coldMs": 394,
+          "warmMs": 25,
+          "coldReadyMs": 260,
+          "warmReadyMs": 20,
+          "selectFeedbackMs": 60,
+          "component": [
+            20.899999998509884,
+            0.7999999970197678,
+            0.6000000014901161
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.47], \"fragment_ms\": [29.64, 6.36, 7.32], \"state\": {\"lifecycle-fixture-fulfilled-search\": \"\", \"lifecycle-fixture-fulfilled-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 283,
+          "coldMs": 377,
+          "warmMs": 235,
+          "coldReadyMs": 252,
+          "warmReadyMs": 178,
+          "selectFeedbackMs": 54,
+          "component": [
+            9.899999998509884,
+            0.3999999985098839
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.17], \"fragment_ms\": [29.33, 7.4, 10.46], \"state\": {\"lifecycle-fixture-fulfilled-search\": \"\", \"lifecycle-fixture-fulfilled-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "orders_sql",
+      "coldMs": 358,
+      "warmMs": 245,
+      "coldReadyMs": 270,
+      "warmReadyMs": 203,
+      "selectFeedbackMs": 52,
+      "samples": [
+        {
+          "fixtureReadyMs": 3119,
+          "coldMs": 373,
+          "warmMs": 265,
+          "coldReadyMs": 270,
+          "warmReadyMs": 237,
+          "selectFeedbackMs": 52,
+          "component": [
+            16.100000001490116,
+            0.6000000014901161
+          ],
+          "metrics": {
+            "reads": 1,
+            "elapsed_ms": [
+              18.84
+            ],
+            "fragment_ms": [
+              30.42,
+              8.59,
+              12.02
+            ]
+          }
+        },
+        {
+          "fixtureReadyMs": 3079,
+          "coldMs": 358,
+          "warmMs": 245,
+          "coldReadyMs": 271,
+          "warmReadyMs": 203,
+          "selectFeedbackMs": 52,
+          "component": [
+            13.100000001490116,
+            0.6000000014901161
+          ],
+          "metrics": {
+            "reads": 1,
+            "elapsed_ms": [
+              21.05
+            ],
+            "fragment_ms": [
+              32.96,
+              9.59,
+              11.06
+            ]
+          }
+        },
+        {
+          "fixtureReadyMs": 2023,
+          "coldMs": 240,
+          "warmMs": 244,
+          "coldReadyMs": 217,
+          "warmReadyMs": 177,
+          "selectFeedbackMs": 58,
+          "component": [
+            11.899999998509884,
+            0.3999999985098839
+          ],
+          "metrics": {
+            "reads": 1,
+            "elapsed_ms": [
+              16.35
+            ],
+            "fragment_ms": [
+              26.08,
+              9.44,
+              9.75
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "kind": "abandoned",
+      "coldMs": 351,
+      "warmMs": 247,
+      "coldReadyMs": 265,
+      "warmReadyMs": 146,
+      "selectFeedbackMs": 61,
+      "samples": [
+        {
+          "fixtureReadyMs": 504,
+          "coldMs": 384,
+          "warmMs": 266,
+          "coldReadyMs": 294,
+          "warmReadyMs": 164,
+          "selectFeedbackMs": 46,
+          "component": [
+            5,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.75], \"fragment_ms\": [28.56, 6.82, 6.59], \"state\": {\"auto-checkouts-fixture-abandoned-search-retained\": \"\", \"auto-checkouts-fixture-abandoned-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 299,
+          "coldMs": 264,
+          "warmMs": 219,
+          "coldReadyMs": 243,
+          "warmReadyMs": 146,
+          "selectFeedbackMs": 61,
+          "component": [
+            5,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.93], \"fragment_ms\": [29.81, 6.9, 6.67], \"state\": {\"auto-checkouts-fixture-abandoned-search-retained\": \"\", \"auto-checkouts-fixture-abandoned-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 298,
+          "coldMs": 351,
+          "warmMs": 247,
+          "coldReadyMs": 265,
+          "warmReadyMs": 143,
+          "selectFeedbackMs": 66,
+          "component": [
+            5.100000001490116,
+            0.30000000447034836
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.86], \"fragment_ms\": [32.05, 7.46, 6.72], \"state\": {\"auto-checkouts-fixture-abandoned-search-retained\": \"\", \"auto-checkouts-fixture-abandoned-search\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "welcome",
+      "coldMs": 342,
+      "warmMs": 236,
+      "coldReadyMs": 246,
+      "warmReadyMs": 183,
+      "selectFeedbackMs": 61,
+      "samples": [
+        {
+          "fixtureReadyMs": 397,
+          "coldMs": 342,
+          "warmMs": 235,
+          "coldReadyMs": 310,
+          "warmReadyMs": 187,
+          "selectFeedbackMs": 62,
+          "component": [
+            11.700000002980232,
+            0.8000000044703484
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.32], \"fragment_ms\": [30.36, 7.45, 7.28], \"state\": {\"lifecycle-fixture-welcome-search-retained\": \"\", \"lifecycle-fixture-welcome-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 285,
+          "coldMs": 377,
+          "warmMs": 236,
+          "coldReadyMs": 246,
+          "warmReadyMs": 183,
+          "selectFeedbackMs": 57,
+          "component": [
+            9.799999997019768,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.13], \"fragment_ms\": [32.43, 6.85, 7.38], \"state\": {\"lifecycle-fixture-welcome-search-retained\": \"\", \"lifecycle-fixture-welcome-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 303,
+          "coldMs": 243,
+          "warmMs": 249,
+          "coldReadyMs": 203,
+          "warmReadyMs": 173,
+          "selectFeedbackMs": 61,
+          "component": [
+            12.5,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.96], \"fragment_ms\": [28.97, 8.36, 6.56], \"state\": {\"lifecycle-fixture-welcome-search-retained\": \"\", \"lifecycle-fixture-welcome-search\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "coldMs": 260,
+      "warmMs": 240,
+      "coldReadyMs": 232,
+      "warmReadyMs": 180,
+      "selectFeedbackMs": 61,
+      "samples": [
+        {
+          "fixtureReadyMs": 425,
+          "coldMs": 260,
+          "warmMs": 240,
+          "coldReadyMs": 226,
+          "warmReadyMs": 180,
+          "selectFeedbackMs": 83,
+          "component": [
+            9.5,
+            0.3999999985098839
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.97], \"fragment_ms\": [30.19, 13.83, 8.71], \"state\": {\"lifecycle-fixture-post_purchase-search\": \"\", \"lifecycle-fixture-post_purchase-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 295,
+          "coldMs": 259,
+          "warmMs": 239,
+          "coldReadyMs": 232,
+          "warmReadyMs": 179,
+          "selectFeedbackMs": 61,
+          "component": [
+            9.100000001490116,
+            0.30000000447034836
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.92], \"fragment_ms\": [30.77, 8.92, 10.47], \"state\": {\"lifecycle-fixture-post_purchase-search\": \"\", \"lifecycle-fixture-post_purchase-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 415,
+          "coldMs": 372,
+          "warmMs": 243,
+          "coldReadyMs": 241,
+          "warmReadyMs": 186,
+          "selectFeedbackMs": 59,
+          "component": [
+            9.599999994039536,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.72], \"fragment_ms\": [29.85, 12.58, 8.86], \"state\": {\"lifecycle-fixture-post_purchase-search\": \"\", \"lifecycle-fixture-post_purchase-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "win_back",
+      "coldMs": 367,
+      "warmMs": 254,
+      "coldReadyMs": 241,
+      "warmReadyMs": 202,
+      "selectFeedbackMs": 60,
+      "samples": [
+        {
+          "fixtureReadyMs": 343,
+          "coldMs": 388,
+          "warmMs": 255,
+          "coldReadyMs": 241,
+          "warmReadyMs": 205,
+          "selectFeedbackMs": 63,
+          "component": [
+            12.800000004470348,
+            0.6999999955296516
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.06], \"fragment_ms\": [29.71, 8.64, 9.48], \"state\": {\"lifecycle-fixture-win_back-search\": \"\", \"lifecycle-fixture-win_back-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 282,
+          "coldMs": 367,
+          "warmMs": 252,
+          "coldReadyMs": 242,
+          "warmReadyMs": 166,
+          "selectFeedbackMs": 59,
+          "component": [
+            11.700000002980232,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.93], \"fragment_ms\": [30.24, 7.83, 6.88], \"state\": {\"lifecycle-fixture-win_back-search\": \"\", \"lifecycle-fixture-win_back-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 274,
+          "coldMs": 267,
+          "warmMs": 254,
+          "coldReadyMs": 226,
+          "warmReadyMs": 202,
+          "selectFeedbackMs": 60,
+          "component": [
+            12.299999997019768,
+            0.7000000029802322
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.93], \"fragment_ms\": [49.53, 8.19, 7.01], \"state\": {\"lifecycle-fixture-win_back-search\": \"\", \"lifecycle-fixture-win_back-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "coldMs": 333,
+      "warmMs": 236,
+      "coldReadyMs": 244,
+      "warmReadyMs": 167,
+      "selectFeedbackMs": 56,
+      "samples": [
+        {
+          "fixtureReadyMs": 268,
+          "coldMs": 333,
+          "warmMs": 234,
+          "coldReadyMs": 244,
+          "warmReadyMs": 167,
+          "selectFeedbackMs": 66,
+          "component": [
+            8,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.3], \"fragment_ms\": [29.96, 9.33, 7.28], \"state\": {\"lifecycle-fixture-fulfilled-search\": \"\", \"lifecycle-fixture-fulfilled-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 318,
+          "coldMs": 375,
+          "warmMs": 246,
+          "coldReadyMs": 280,
+          "warmReadyMs": 198,
+          "selectFeedbackMs": 54,
+          "component": [
+            8.100000001490116,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [21.01], \"fragment_ms\": [28.94, 7.95, 8.0], \"state\": {\"lifecycle-fixture-fulfilled-search\": \"\", \"lifecycle-fixture-fulfilled-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 304,
+          "coldMs": 229,
+          "warmMs": 236,
+          "coldReadyMs": 207,
+          "warmReadyMs": 155,
+          "selectFeedbackMs": 56,
+          "component": [
+            8.800000004470348,
+            0.5
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [20.98], \"fragment_ms\": [27.61, 6.56, 6.31], \"state\": {\"lifecycle-fixture-fulfilled-search\": \"\", \"lifecycle-fixture-fulfilled-search-retained\": \"\"}}"
+        }
+      ]
+    },
+    {
+      "kind": "orders_sql",
+      "coldMs": 352,
+      "warmMs": 248,
+      "coldReadyMs": 269,
+      "warmReadyMs": 190,
+      "selectFeedbackMs": 62,
+      "samples": [
+        {
+          "fixtureReadyMs": 2589,
+          "coldMs": 352,
+          "warmMs": 241,
+          "coldReadyMs": 269,
+          "warmReadyMs": 173,
+          "selectFeedbackMs": 62,
+          "component": [
+            11.299999997019768,
+            0.5
+          ],
+          "metrics": {
+            "reads": 1,
+            "elapsed_ms": [
+              40.6
+            ],
+            "fragment_ms": [
+              50.73,
+              9.62,
+              7.52
+            ]
+          }
+        },
+        {
+          "fixtureReadyMs": 3040,
+          "coldMs": 372,
+          "warmMs": 256,
+          "coldReadyMs": 272,
+          "warmReadyMs": 216,
+          "selectFeedbackMs": 122,
+          "component": [
+            12.5,
+            0.5
+          ],
+          "metrics": {
+            "reads": 1,
+            "elapsed_ms": [
+              16.89
+            ],
+            "fragment_ms": [
+              27.39,
+              11.5,
+              10.73
+            ]
+          }
+        },
+        {
+          "fixtureReadyMs": 3029,
+          "coldMs": 328,
+          "warmMs": 248,
+          "coldReadyMs": 264,
+          "warmReadyMs": 190,
+          "selectFeedbackMs": 59,
+          "component": [
+            13.399999998509884,
+            0.3999999985098839
+          ],
+          "metrics": {
+            "reads": 1,
+            "elapsed_ms": [
+              16.61
+            ],
+            "fragment_ms": [
+              25.94,
+              12.24,
+              10.39
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "checkout80msBefore": [
+    {
+      "kind": "abandoned",
+      "coldMs": 877,
+      "warmMs": 266,
+      "selectFeedbackMs": 60,
+      "samples": [
+        {
+          "fixtureReadyMs": 493,
+          "coldMs": 877,
+          "warmMs": 266,
+          "selectFeedbackMs": 60,
+          "component": [
+            4.700000002980232,
+            0.30000000447034836
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [104.41], \"fragment_ms\": [57.68, 7.79, 6.19, 7.03], \"state\": {\"auto-checkouts-fixture-abandoned-search\": \"\", \"auto-checkouts-fixture-abandoned-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 298,
+          "coldMs": 862,
+          "warmMs": 256,
+          "selectFeedbackMs": 62,
+          "component": [
+            5.4000000059604645,
+            0.6000000014901161
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [111.03], \"fragment_ms\": [54.37, 7.88, 6.25, 8.4], \"state\": {\"auto-checkouts-fixture-abandoned-search\": \"\", \"auto-checkouts-fixture-abandoned-search-retained\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 400,
+          "coldMs": 881,
+          "warmMs": 270,
+          "selectFeedbackMs": 60,
+          "component": [
+            9.399999998509884,
+            0.6999999955296516
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [112.91], \"fragment_ms\": [63.71, 6.69, 7.94, 6.78], \"state\": {\"auto-checkouts-fixture-abandoned-search\": \"\", \"auto-checkouts-fixture-abandoned-search-retained\": \"\"}}"
+        }
+      ]
+    }
+  ],
+  "checkout80msAfter": [
+    {
+      "kind": "abandoned",
+      "coldMs": 367,
+      "warmMs": 241,
+      "coldReadyMs": 320,
+      "warmReadyMs": 161,
+      "selectFeedbackMs": 68,
+      "samples": [
+        {
+          "fixtureReadyMs": 481,
+          "coldMs": 371,
+          "warmMs": 250,
+          "coldReadyMs": 324,
+          "warmReadyMs": 161,
+          "selectFeedbackMs": 74,
+          "component": [
+            5.300000004470348,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [81.14], \"fragment_ms\": [87.68, 10.66, 5.83], \"state\": {\"auto-checkouts-fixture-abandoned-search-retained\": \"\", \"auto-checkouts-fixture-abandoned-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 417,
+          "coldMs": 355,
+          "warmMs": 241,
+          "coldReadyMs": 251,
+          "warmReadyMs": 167,
+          "selectFeedbackMs": 56,
+          "component": [
+            5.100000001490116,
+            0.29999999701976776
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [80.51], \"fragment_ms\": [87.03, 6.1, 6.74], \"state\": {\"auto-checkouts-fixture-abandoned-search-retained\": \"\", \"auto-checkouts-fixture-abandoned-search\": \"\"}}"
+        },
+        {
+          "fixtureReadyMs": 406,
+          "coldMs": 367,
+          "warmMs": 19,
+          "coldReadyMs": 320,
+          "warmReadyMs": 13,
+          "selectFeedbackMs": 68,
+          "component": [
+            22.30000000447035,
+            0.3999999985098839,
+            0.7000000029802322
+          ],
+          "metrics": "FIXTURE_METRICS {\"reads\": 1, \"samples\": [81.32], \"fragment_ms\": [91.06, 7.22, 6.49], \"state\": {\"auto-checkouts-fixture-abandoned-search-retained\": \"\", \"auto-checkouts-fixture-abandoned-search\": \"\"}}"
+        }
+      ]
+    }
+  ],
+  "interactions": [
+    {
+      "kind": "abandoned",
+      "pageMs": 233,
+      "fragmentRuns": 1,
+      "detailsCloseAndEscape": true,
+      "desktopMobile": true
+    },
+    {
+      "kind": "welcome",
+      "pageMs": 231,
+      "fragmentRuns": 1,
+      "detailsCloseAndEscape": true,
+      "desktopMobile": true
+    },
+    {
+      "kind": "post_purchase",
+      "pageMs": 236,
+      "fragmentRuns": 1,
+      "detailsCloseAndEscape": true,
+      "desktopMobile": true
+    },
+    {
+      "kind": "win_back",
+      "pageMs": 224,
+      "fragmentRuns": 1,
+      "detailsCloseAndEscape": true,
+      "desktopMobile": true
+    },
+    {
+      "kind": "fulfilled",
+      "pageMs": 227,
+      "fragmentRuns": 1,
+      "detailsCloseAndEscape": true,
+      "desktopMobile": true
+    }
+  ],
+  "navigation": {
+    "flows": [
+      {
+        "kind": "abandoned",
+        "returnMs": 683,
+        "openClosedFilterRetained": true
+      },
+      {
+        "kind": "welcome",
+        "returnMs": 1089,
+        "openClosedFilterRetained": true
+      },
+      {
+        "kind": "post_purchase",
+        "returnMs": 687,
+        "openClosedFilterRetained": true
+      },
+      {
+        "kind": "win_back",
+        "returnMs": 1060,
+        "openClosedFilterRetained": true
+      },
+      {
+        "kind": "fulfilled",
+        "returnMs": 542,
+        "openClosedFilterRetained": true
+      }
+    ],
+    "draftRetained": true,
+    "mobile": true
+  },
+  "stability": [
+    {
+      "kind": "abandoned",
+      "width": 1440,
+      "coldMs": 235,
+      "warmMs": 254,
+      "readsDuringWindow": 5,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.81,
+        20.67,
+        21.3,
+        20.64,
+        20.84
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 1440,
+      "coldMs": 374,
+      "warmMs": 250,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21,
+        20.59,
+        20.97
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 1440,
+      "coldMs": 349,
+      "warmMs": 234,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.99,
+        20.8,
+        20.94
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 1440,
+      "coldMs": 354,
+      "warmMs": 257,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.11,
+        20.8,
+        20.94
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "width": 1440,
+      "coldMs": 383,
+      "warmMs": 256,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.21,
+        20.96,
+        20.67
+      ]
+    },
+    {
+      "kind": "abandoned",
+      "width": 390,
+      "coldMs": 265,
+      "warmMs": 270,
+      "readsDuringWindow": 5,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.94,
+        20.93,
+        20.87,
+        21.2,
+        21.27
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 390,
+      "coldMs": 346,
+      "warmMs": 260,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.97,
+        20.75,
+        21.12
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 390,
+      "coldMs": 374,
+      "warmMs": 239,
+      "readsDuringWindow": 2,
+      "windowSeconds": 65,
+      "readSamples": [
+        20.8,
+        20.61
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 390,
+      "coldMs": 257,
+      "warmMs": 266,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.05,
+        21,
+        21.04
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "width": 390,
+      "coldMs": 244,
+      "warmMs": 241,
+      "readsDuringWindow": 3,
+      "windowSeconds": 65,
+      "readSamples": [
+        21.15,
+        21.22,
+        21.05
+      ]
+    }
+  ],
+  "slowReads": [
+    {
+      "kind": "abandoned",
+      "width": 1440,
+      "coldMs": 1379,
+      "warmMs": 368,
+      "readsDuringWindow": 3,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.86,
+        250.74,
+        254.91
+      ]
+    },
+    {
+      "kind": "welcome",
+      "width": 1440,
+      "coldMs": 852,
+      "warmMs": 251,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        251,
+        302.02
+      ]
+    },
+    {
+      "kind": "post_purchase",
+      "width": 1440,
+      "coldMs": 861,
+      "warmMs": 234,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.78,
+        250.97
+      ]
+    },
+    {
+      "kind": "win_back",
+      "width": 1440,
+      "coldMs": 866,
+      "warmMs": 236,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        251,
+        293.72
+      ]
+    },
+    {
+      "kind": "fulfilled",
+      "width": 1440,
+      "coldMs": 865,
+      "warmMs": 242,
+      "readsDuringWindow": 2,
+      "windowSeconds": 35,
+      "readSamples": [
+        250.85,
+        250.65
+      ]
+    }
+  ],
+  "editor": [
+    {
+      "kind": "abandoned",
+      "editorMs": 672,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "welcome",
+      "editorMs": 728,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "post_purchase",
+      "editorMs": 808,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "win_back",
+      "editorMs": 874,
+      "saveReload": true,
+      "mobile": true
+    },
+    {
+      "kind": "fulfilled",
+      "editorMs": 598,
+      "saveReload": true,
+      "mobile": true
+    }
+  ],
+  "ordersPanel": [
+    {
+      "width": 1440,
+      "openingMs": 4316,
+      "warmMs": 243,
+      "selectionMs": 405,
+      "metrics": {
+        "reads": 8,
+        "elapsed_ms": [
+          15.78,
+          36.95,
+          35.01,
+          15.82,
+          35.14,
+          7.09,
+          12.67,
+          15.44
+        ],
+        "fragment_ms": []
+      }
+    },
+    {
+      "width": 390,
+      "openingMs": 2657,
+      "warmMs": 253,
+      "selectionMs": 407,
+      "metrics": {
+        "reads": 7,
+        "elapsed_ms": [
+          14.82,
+          13.77,
+          14.32,
+          16.75,
+          18.5,
+          6.38,
+          37.05
+        ],
+        "fragment_ms": []
+      }
+    }
+  ],
+  "method": "Three-sample medians, Chromium 1440px, actual Streamlit fixtures. Browser readiness is observed when a visible iframe contains 50 rows; harness timings include Playwright polling. Fresh sessions, running servers, 20ms synthetic reads. SQL fixture setup measured separately. No production credentials or delivery workers. Component timings use fixture-only instrumentation; fragment timings measure the real decorated body. Small differences are not statistically significant speedups.",
+  "baseline": "226f6d378bc0a470a8e4fbe63491287e2588c1a4",
+  "validation": {
+    "python": {
+      "passed": true,
+      "tests": 160,
+      "seconds": 55.669
+    },
+    "controlsErrorRecovery": [
+      "PASS warm scroll, retained controls, narrow layout: abandoned",
+      "PASS warm scroll, retained controls, narrow layout: welcome",
+      "PASS warm scroll, retained controls, narrow layout: post_purchase",
+      "PASS warm scroll, retained controls, narrow layout: win_back",
+      "PASS warm scroll, retained controls, narrow layout: fulfilled",
+      "PASS failed initial read and explicit recovery: abandoned",
+      "PASS failed initial read and explicit recovery: welcome",
+      "PASS failed initial read and explicit recovery: post_purchase",
+      "PASS failed initial read and explicit recovery: win_back",
+      "PASS failed initial read and explicit recovery: fulfilled"
+    ],
+    "sourceScopePassed": true,
+    "branchAuditPassed": false,
+    "noProductionActions": true
+  }
+}

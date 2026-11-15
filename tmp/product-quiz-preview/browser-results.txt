@@ -1,0 +1,1 @@
+PASS: static desktop/mobile preview; modal keyboard/focus; deterministic identity matching; lazy/repeated/multiple/section initialization; market price and availability; consent; deduplication; load fallback.

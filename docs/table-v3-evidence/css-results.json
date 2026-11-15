@@ -1,0 +1,88 @@
+{
+  "browsers": [
+    {
+      "channel": "chrome",
+      "version": "155.0.8059.39"
+    },
+    {
+      "channel": "msedge",
+      "version": "154.0.4258.62"
+    }
+  ],
+  "native": [],
+  "checkout": [],
+  "checks": [
+    {
+      "channel": "chrome",
+      "component": "daily_planner",
+      "phase": "before",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "daily_planner",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "files_window",
+      "phase": "before",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "files_window",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "files_chunk_uploader",
+      "phase": "before",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "files_chunk_uploader",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "daily_planner",
+      "phase": "before",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "daily_planner",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "files_window",
+      "phase": "before",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "files_window",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "files_chunk_uploader",
+      "phase": "before",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "files_chunk_uploader",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    }
+  ]
+}

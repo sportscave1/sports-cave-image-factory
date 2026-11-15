@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-14",
+  "task_id": "20261011-54d8ff88",
+  "owner": "me/email-flow-fix",
+  "authorization": "User explicitly requested production registration and diagnostics; no email publication or automation activation.",
+  "deployment": {
+    "service": "sports-cave-os",
+    "id": "srv-d8kl4on7f7vs73dvavv0",
+    "commit": "f3dfef5feec869dc5ad416197825a9d43840cdba",
+    "deploy": "dep-db7e66avcj2c73e0jod0",
+    "status": "live; existing repair already deployed; no deployment performed"
+  },
+  "registration": {
+    "execution": "Authenticated Render web shell on existing primary service; existing scripts/register_crm_webhooks.py --topic ORDERS_FULFILLED --apply",
+    "before": "orders/fulfilled: missing",
+    "result": "orders/fulfilled: created",
+    "persisted_readback": {
+      "id": "gid://shopify/WebhookSubscription/2086807339315",
+      "topic": "ORDERS_FULFILLED",
+      "callback": "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/crm",
+      "api_version": "2026-04",
+      "count": 1
+    },
+    "identity": "Existing registration script verified canonical Sports Cave app and read scopes before mutation",
+    "configuration": "Existing shopify_customer_account/shopify.app.toml specifies webhook API 2026-04 and no app-wide topic subscriptions; no scopes or Shopify version changed"
+  },
+  "diagnostics": {
+    "command": "python scripts/shopify_automation_diagnostics.py",
+    "persisted_checked_at": "2026-10-14T02:23:55.877352+00:00",
+    "app_identity": "VERIFIED",
+    "shopify_api": "VERIFIED",
+    "webhook_hmac": "CONFIGURED",
+    "callback_configuration": "VERIFIED",
+    "ORDERS_FULFILLED": "VERIFIED",
+    "duplicate": false,
+    "delivery_checkpoint": "2026-10-14T02:23:38.112972+00:00",
+    "publication_checkpoint": "2026-10-14T02:24:01.967979+00:00",
+    "worker": "HEALTHY; successful recent checkpoints; marketing/provider/sender configured"
+  },
+  "post_checkout": {
+    "id": "26b47e22-b962-4c0b-b964-392a6399caf4",
+    "published_version": 4,
+    "saved_enabled_flags": [true, false, false],
+    "verification": "Existing blockers() and preflight() evaluated a deep copy of the saved draft with all three enabled in memory only",
+    "preflight": "PASSED",
+    "blockers": [],
+    "required_topics": ["ORDERS_PAID", "ORDERS_FULFILLED"],
+    "readiness": "READY",
+    "remaining_action": "User enables Emails 2 and 3 and publishes the complete flow through existing UI"
+  },
+  "unchanged": ["Email publications", "Automation activation", "Other webhook subscriptions", "OAuth scopes", "Shopify app version", "Render services and workers", "HMAC verification", "Duplicate-event protection"],
+  "limitations": ["No synthetic fulfillment event submitted; actual event delivery not exercised", "Separate Welcome consent-update webhook remains missing and is not a Post Checkout dependency"]
+}

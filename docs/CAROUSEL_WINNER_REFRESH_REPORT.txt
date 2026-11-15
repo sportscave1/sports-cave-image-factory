@@ -1,0 +1,61 @@
+SPORTS CAVE — CAROUSEL WINNER REFRESH
+Local implementation report — 2026-10-07
+
+ROOT CAUSES
+The active generator unconditionally appended CANONICAL_PRODUCT, emitted a sixth attachment for five-card carousels, and required canonical inspection in execution notes. The form rendered Find product image for every Refresh format. Execution counts assumed an extra product reference. Product hydration existed, but category could be overwritten, current-source product/URL consistency was not enforced during generation, and new handoffs did not clear the prior generated result/image workflow. Product resolution considered historic Posting data before authored card destinations. Existing copy checks did not compare returned copy against the individual source-card/shared-primary pools; execution notes were optional at the save gate.
+
+ACTIVE PATH
+Meta Review package/queue/load_link -> meta_review_products.enrich/resolve -> meta_review_handoff.hydrate -> ads_page.render_page (Creative Refresh) -> build_ads_result_record/build_ads_prompt -> ads_refresh_generation.build_prompt -> Carousel-only build_carousel_refresh_prompt -> ads_refresh_plan.
+Existing build_carousel_copy_csv/parse_carousel_copy_csv, image slots, archives and ads_posting_handoff remain the production contracts. No fetching/normalization/hash association or Posting code was rewritten.
+
+PRODUCTION FILES CHANGED
+ads_page.py
+  Hide Find product image only for Carousel Refresh; retain other formats. Validate identity before Submit. Refresh the Carousel prompt contract. Provide execution-notes JSON review in the existing Carousel flow and validate new-contract plans/copy before Save. Show actionable errors for incomplete sources/invalid historic identity.
+ads_refresh_generation.py
+  Dedicated Carousel Refresh prompt and pure product identity guard. IE/Single branch retained.
+ads_refresh_plan.py
+  Ordered card-only references; invalidate old six-reference plans; collective authority and complete standalone briefs; source/new execution declarations and copy checks.
+meta_review_handoff.py
+  Preserve mapped category; replace old generated result/image workflow on a new Carousel handoff, alongside existing form hydration.
+meta_review_products.py
+  Confirmed mapping -> complete common authored-card product destination -> verified product record/handle -> existing exact source/Posting evidence; unresolved/ambiguous Carousel names require operator confirmation instead of fuzzy auto-selection.
+
+TEST FILES
+New: tests/test_ads_refresh_generation.py (25 tests).
+Updated contract expectations/fixtures: tests/test_ads_refresh_plan.py, tests/test_ads_refresh_reference.py, tests/test_meta_review_creative.py, tests/test_meta_carousel_detail.py, tests/test_carousel_winner_system.py, tests/test_carousel_detail_prompts.py.
+Old expectations requiring a sixth Carousel reference were replaced. Unrelated failing assertions/hash snapshots were retained.
+
+PRODUCT AND STATE
+Verified mapping hydrates product title, selector identity, canonical URL, category, country and Carousel type. URL synchronization continues through the existing catalogue resolver. Both generation and Submit reject a different product title/URL handle; accepted Sports Cave host aliases and tracking query strings remain valid. Ambiguous mappings require the existing operator product confirmation. New pending handoffs replace prior form state and generated workflow; ordinary rerenders consume no new handoff and retain manual URL edits. Existing format switching remains available.
+
+REFERENCE / PROMPT CONTRACT
+For a five-card source: Image 1 = Card 1 = WINNER_CARD_1 through Image 5 = Card 5 = WINNER_CARD_5. No CANONICAL_PRODUCT, sixth attachment or additional product upload. Four- and six-card sources keep their actual counts. Incomplete images/order fail closed with: Complete winning Carousel required. Reload the winner from Meta Review.
+All winning images jointly establish exact artwork, printed background, text, faces, logos, plaque, geometry and frame construction. Angled/obscured views are cross-checked against clearer winning cards. Conflicts/unreadable details must be resolved, not invented.
+Each card gets independent observed role, scene family, useful visual/copy principle, keep/change/upgrade, and a materially new environment. Bedroom -> new bedroom, man cave -> new man cave, office -> new office, lounge -> new lounge, detail role -> new detail execution. Concrete architecture/layout/wall/furniture/camera/lighting declarations reject generic claims or recolour/angle-only plans. Final pixel fidelity and aesthetic quality still require human inspection.
+Exactly N standalone image prompts are requested for N source cards. Every brief lists all collective product references, its individual creative reference, product lock and full existing shared photographic realism block. Glass, frame depth, bevel lighting, wall separation, contact shadows and ambient occlusion are retained. The detail-card exception remains supported.
+Source primary texts remain separate. Each card retains its own image/headline/description/order. New shared primary variations and card copy must substantively refresh the source; textual duplicate/reorder checks and verified fixed-fact exceptions apply. No invented performance or scarcity claims.
+
+UNCHANGED CSV SCHEMA
+schema_version,campaign_type,row_type,position,slot_id,image_filename,headline,description,primary_text,destination_url,cta,setup_notes
+Five shared Primary Text options, existing headline/description option rows, and N ordered card pairs remain intact. No added columns; execution notes are separate JSON. Existing imports, image slot IDs, saved package and Posting flow retained.
+
+VALIDATION
+117 focused tests passed across ads_refresh_generation, ads_refresh_plan, ads_refresh_workflow, ads_refresh_reference and meta_review_creative.
+Active Streamlit form test: correct mapped product URL handle, no Find product image for Carousel, mismatched URL blocks Submit without a result, IE switch restores Find product image.
+Full regression run: 329 tests; 11 assertion/subtest failures and one error remain. All reproduce with pre-task code:
+- sidebar Ads submenu source-string assertion (1)
+- legacy clipboard source-string assertion (1)
+- older unrelated prompt hash snapshots: carousel_winner_system (5) and carousel_detail_prompts IE (4)
+- ambiguous asset-label test indexes card zero even though fail-closed normalization returns no cards (1 error)
+These were not repaired or weakened.
+20 New Ads / IE Refresh / Single Image Refresh prompts compared with pre-task code: byte-for-byte identical.
+Existing N=4/5/6 source/count/CSV tests passed. Full synthetic five-card Save -> package -> Posting import regression passed using fake storage (no live posting).
+Python compilation passed for changed Python files.
+git diff --check passed (only line-ending conversion warnings).
+Relevant suites run: ads_refresh_generation, ads_refresh_plan, ads_refresh_workflow, ads_creative_refresh, ads_refresh_reference, ads_image_workflow, ads_posting_handoff, meta_review, meta_review_creative, meta_carousel_detail, carousel_winner_system, carousel_detail_prompts, ads_ie_refresh_realism_priority, ads_refresh_save_restore, meta_carousel_view, meta_review_tables, meta_review_modal (where present).
+
+ACTUAL PROMPT REVIEW
+Generated through build_ads_result_record and inspected docs/evidence/carousel-winner-refresh-prompt.txt, using synthetic five-card man-cave/bedroom/office/lounge/detail source data. Confirmed five ordered image mappings, five standalone contracts, per-card paired source copy, separate shared primaries, same-family/new-execution instructions, full realism and unchanged CSV header/order. Zero CANONICAL_PRODUCT references and zero sixth-image requirements. This is an assembled prompt inspection, not a claim that generated images or live Meta cards were visually verified.
+
+SAFETY / LIMITS
+New Ads unchanged. IE and Single Image reference behavior preserved. No extra Graph reads, no API authentication/metrics changes, and no Meta or Shopify mutations. No commit, push or deployment occurred. Changes remain local. Existing unrelated work/index contents were preserved.

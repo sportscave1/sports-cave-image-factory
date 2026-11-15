@@ -1,0 +1,222 @@
+{
+  "browsers": [
+    {
+      "channel": "chrome",
+      "version": "155.0.8059.39"
+    },
+    {
+      "channel": "msedge",
+      "version": "154.0.4258.62"
+    }
+  ],
+  "native": [
+    {
+      "phase": "after",
+      "channel": "chrome",
+      "count": 50,
+      "initial_ms": 2566.1139,
+      "python_render_ms": 2.4876999959815294,
+      "sort_roundtrip_median_ms": 36.40009999999984,
+      "filter_roundtrip_ms": 1859.8502000000003,
+      "scroll_roundtrip_ms": 73.19730000000072
+    },
+    {
+      "phase": "after",
+      "channel": "chrome",
+      "count": 250,
+      "initial_ms": 2566.1139,
+      "python_render_ms": 3.308900006231852,
+      "sort_roundtrip_median_ms": 33.48880000000099,
+      "filter_roundtrip_ms": 839.2052000000003,
+      "scroll_roundtrip_ms": 80.43870000000061
+    },
+    {
+      "phase": "after",
+      "channel": "chrome",
+      "count": 500,
+      "initial_ms": 2566.1139,
+      "python_render_ms": 3.1654000049456954,
+      "sort_roundtrip_median_ms": 33.17569999999978,
+      "filter_roundtrip_ms": 1852.4314999999988,
+      "scroll_roundtrip_ms": 81.52299999999923
+    },
+    {
+      "phase": "after",
+      "channel": "chrome",
+      "count": 1000,
+      "initial_ms": 2566.1139,
+      "python_render_ms": 5.422100002760999,
+      "sort_roundtrip_median_ms": 33.24449999999706,
+      "filter_roundtrip_ms": 1367.9277999999977,
+      "scroll_roundtrip_ms": 80.89429999999993
+    },
+    {
+      "phase": "after",
+      "channel": "msedge",
+      "count": 50,
+      "initial_ms": 2150.6122999999934,
+      "python_render_ms": 2.1013000077800825,
+      "sort_roundtrip_median_ms": 33.39310000000114,
+      "filter_roundtrip_ms": 1898.8989999999976,
+      "scroll_roundtrip_ms": 80.2844000000041
+    },
+    {
+      "phase": "after",
+      "channel": "msedge",
+      "count": 250,
+      "initial_ms": 2150.6122999999934,
+      "python_render_ms": 2.8218000079505146,
+      "sort_roundtrip_median_ms": 33.02859999999782,
+      "filter_roundtrip_ms": 1851.4523000000045,
+      "scroll_roundtrip_ms": 79.94199999999546
+    },
+    {
+      "phase": "after",
+      "channel": "msedge",
+      "count": 500,
+      "initial_ms": 2150.6122999999934,
+      "python_render_ms": 2.3520999966422096,
+      "sort_roundtrip_median_ms": 33.34909999999945,
+      "filter_roundtrip_ms": 1351.3885999999984,
+      "scroll_roundtrip_ms": 74.38570000000618
+    },
+    {
+      "phase": "after",
+      "channel": "msedge",
+      "count": 1000,
+      "initial_ms": 2150.6122999999934,
+      "python_render_ms": 4.210599989164621,
+      "sort_roundtrip_median_ms": 33.32800000000134,
+      "filter_roundtrip_ms": 1345.773000000001,
+      "scroll_roundtrip_ms": 81.64119999999821
+    }
+  ],
+  "checkout": [
+    {
+      "channel": "chrome",
+      "phase": "after",
+      "count": 50,
+      "median_render_ms": 0.10000000894069672,
+      "elements": 521,
+      "row_height": 34
+    },
+    {
+      "channel": "chrome",
+      "phase": "after",
+      "count": 250,
+      "median_render_ms": 0.10000000894069672,
+      "elements": 525,
+      "row_height": 34
+    },
+    {
+      "channel": "chrome",
+      "phase": "after",
+      "count": 500,
+      "median_render_ms": 0.10000000894069672,
+      "elements": 525,
+      "row_height": 34
+    },
+    {
+      "channel": "chrome",
+      "phase": "after",
+      "count": 1000,
+      "median_render_ms": 0.10000000894069672,
+      "elements": 525,
+      "row_height": 34
+    },
+    {
+      "channel": "msedge",
+      "phase": "after",
+      "count": 50,
+      "median_render_ms": 0.19999998807907104,
+      "elements": 521,
+      "row_height": 34
+    },
+    {
+      "channel": "msedge",
+      "phase": "after",
+      "count": 250,
+      "median_render_ms": 0.19999998807907104,
+      "elements": 525,
+      "row_height": 34
+    },
+    {
+      "channel": "msedge",
+      "phase": "after",
+      "count": 500,
+      "median_render_ms": 0.10000000894069672,
+      "elements": 525,
+      "row_height": 34
+    },
+    {
+      "channel": "msedge",
+      "phase": "after",
+      "count": 1000,
+      "median_render_ms": 0.10000000894069672,
+      "elements": 525,
+      "row_height": 34
+    }
+  ],
+  "checks": [
+    {
+      "channel": "chrome",
+      "phase": "after",
+      "selection_ms": 850.8074000000015,
+      "popup_ms": 864.821899999999,
+      "edit_and_save_ms": 926.935300000001,
+      "identity": "KEY-0001"
+    },
+    {
+      "channel": "chrome",
+      "orders": "selection, mocked certificate action, search, desktop/narrow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "daily_planner",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "files_window",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "chrome",
+      "component": "files_chunk_uploader",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "phase": "after",
+      "selection_ms": 1346.7185000000027,
+      "popup_ms": 834.9392000000007,
+      "edit_and_save_ms": 888.6719999999987,
+      "identity": "KEY-0001"
+    },
+    {
+      "channel": "msedge",
+      "orders": "selection, mocked certificate action, search, desktop/narrow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "daily_planner",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "files_window",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    },
+    {
+      "channel": "msedge",
+      "component": "files_chunk_uploader",
+      "phase": "after",
+      "css_fixture": "desktop and narrow overflow passed"
+    }
+  ]
+}

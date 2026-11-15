@@ -1,0 +1,278 @@
+SPORTS CAVE — UNIVERSAL PERSONALISED EMAIL TEMPLATES V1
+Local implementation and review report — 11 October 2026
+
+STATUS
+
+Implemented locally in the existing Templates library, HTML composer, campaign
+renderer and automation delivery engine. No separate builder or sender.
+No existing draft, schedule, trigger, flow status or published revision was
+written. The lifecycle DRAFT_ONLY lock remains. Win Back Email 4 remains disabled.
+No migration, commit, staging, push, deployment or actual email send was performed.
+OS Inbox files and all unrelated working-tree changes were left alone.
+
+User correction incorporated: Post Purchase Email 2 invites the customer to
+My Collection. It does not generate, attach or embed a certificate, and does not
+say a certificate is ready. Its copy says "Once your certificate is available".
+The destination is:
+https://account.sportscaveshop.com/pages/019ef355-648a-7996-8977-897320e5ffd7
+Existing Post Purchase timing, including its existing fulfilment fallback, is
+preserved per the correction. No new delivered or certificate-ready assertion
+is introduced. This implementation does not add a certificate-ready delivery
+mode or change the scheduler's existing delivery policy.
+
+WHAT WAS REUSED
+
+Existing campaign_blocks_v1 documents, middle HTML/Image sections, saved design
+versions, optimistic concurrency, shared composer and HTML sanitizer/renderer.
+Existing Shopify transport and its throttling/cache, catalogue search/collection
+picker, exact allocation reader, lifecycle customer/order history, eligibility,
+marketing consent, suppression, unsubscribe, tracking and send ledger.
+Subject/preheader personalisation remains crm_personalisation; checkout artwork,
+checkout lifestyle gallery and Abandoned Cart code paths are unchanged.
+
+FOUR REUSABLE TEMPLATES
+
+A. Collector Welcome: collector introduction, one featured artwork hero and
+   collection CTA. No assumption that the subscriber has purchased.
+B. Your Collected Artwork: actual purchased artwork (maximum two), exact order
+   title, selected variant and verified allocated number when available. Three
+   compact collector/account symbols, one View My Collection CTA, neutral order
+   progress and conditional account-certificate copy. Suitable as a reusable
+   starting point for Post Purchase 1 and 2; copy remains operator-editable.
+C. Build Your Collection: up to three matching artworks. Fewer items or just
+   the collection CTA when authority, relevance or availability is insufficient.
+D. Collector Re-engagement: a smaller previous-purchase image and larger relevant
+   recommendations. No automatic discounts, popularity or scarcity assertions.
+
+All bodies use charcoal, warm white and restrained gold; table layouts and
+height:auto preserve image proportions. No new logo header, signature, stock
+photography, review requests, licensing/autograph claims or fixed edition sizes.
+Global header/footer selectors and the compliance footer remain unchanged.
+
+HOW TO USE — EXPLICIT OPERATOR ACTIONS ONLY
+
+1. Open the existing Templates screen. Expand "Collector email templates · V1".
+   "Save reusable copy" creates a normal versioned library record only when
+   clicked. "Source .txt" downloads the reusable source for Notepad.
+2. Open a Welcome, Post Purchase or Win Back email in the existing composer.
+   The four built-ins appear in its Templates library without seeding the DB.
+3. Choose Use to insert the template. This follows the existing insertion path:
+   it replaces a sole empty body, otherwise adds a body section. Review/remove
+   unwanted old BODY sections explicitly; insertion does not overwrite a draft
+   automatically. Keep the existing header and footer.
+4. Open the compact "Personalise Image" popover. Select an existing image block
+   or Add image block. Select a source and product count, search and select
+   approved artwork, or load and select an approved collection. Manual static
+   images use a durable HTTPS JPEG/PNG URL (existing Shopify WebP conversion is
+   supported) and an image description. Click Apply image settings to author the
+   change. The existing composer save/autosave path then persists that edit.
+5. Use the existing desktop/mobile previews. Dynamic examples are clearly
+   labelled "Sample preview · fixture artwork". They use public Sports Cave
+   artwork, not a real recipient or evidence of stock, ownership or a certificate.
+6. Save/edit/copy through the existing library/composer. Product source settings
+   are stored inside the HTML section; no customer/order facts are persisted.
+   Existing template revision and conflict protection applies.
+
+No new arbitrary real-customer preview lookup was introduced. The existing
+authorised checkout preview remains unchanged. Lifecycle previews are fixtures;
+actual recipient imagery is freshly resolved only inside the guarded send path.
+Do not publish or send these drafts under this local-only authorization.
+
+RECOMMENDED APPLICATION / PERSONALISED FIELDS
+
+Email             Template/source           Recipient-specific fields
+Welcome 1         A / Featured Collection   Approved hero image, title, link;
+                                           known interest filtering if present.
+Welcome 2         A or C / Featured/Related Approved artwork image/title/link;
+                                           explicitly known sport classification.
+Welcome 3         C / Related               Up to three image/title/link cards.
+Post Purchase 1   B / Purchased             Exact order title, variant label,
+                                           variant/product image, allocation.
+Post Purchase 2   B / Purchased             Same fields; fixed secure My Collection
+                                           link and conditional certificate copy.
+Post Purchase 3   C / Related               Up to three non-owned image/title/link
+                                           cards, matched to known classifications.
+Win Back 1        D / Purchased + Related   Previous order artwork/title/variant/
+                                           allocation and non-owned recommendations.
+Win Back 2        C / Related or Verified   Matching image/title/link cards; optional
+                  New Releases             verified 30-day creation window.
+Win Back 3        C or D / Related          Matching non-owned image/title/link cards.
+                                           Existing configured discount system only.
+Win Back 4        Disabled                 No change or automatic application.
+
+Existing SUBJECT AND PREHEADER variables, unchanged:
+first_name, product_name, short_product_name, sport_category, edition_number,
+discount_code, discount_value. Existing validation/fallbacks still apply; purchase
+edition variables use allocated facts. Discount variables require an existing
+verified configured discount. No new unrestricted HTML text-variable language
+was added. The image cards render escaped, verified fields directly.
+
+IMAGE SOURCES AND SAFEGUARDS
+
+Actual Purchased Product: fresh exact-order/customer join; no last-order guess.
+Variant image is used only with a matching product identity, otherwise exact
+product main image. Missing images/edition facts are omitted. Refunded, partially
+refunded, cancelled or otherwise ineligible orders do not render owned artwork.
+At most two order lines appear. Multiple unit allocations remain omitted when
+the existing allocation reader cannot establish one unambiguous exact allocation.
+
+Related Products: complete verified ownership IDs exclude all previously owned
+items, including paginated order lines. Uses authoritative productType or explicit
+customer tags of the form interest:<product classification>; it never guesses
+interests from a person's name. Exact classification matching is deliberately
+conservative and may show fewer artworks.
+
+Featured Collection: the operator selects approved products or a collection.
+No approved fallback selection is guessed. With unknown preferences and no
+selection, delivery shows the neutral collection CTA without fixture artwork.
+
+Verified New Releases: Shopify createdAt must be within the preceding 30 days
+and not in the future. This is a creation-date rule, not an inferred campaign
+launch date. The template does not automatically label the item "new".
+
+Verified Bestsellers: requires an operator-selected collection; reads its current
+Shopify BEST_SELLING product order, then filters for ownership, relevance and
+availability. Does not assert a universal ranking or popularity count.
+
+Static Selected Image: operator-selected durable public image with alt text.
+No Image: omits the image block. Static and dynamic blocks coexist.
+
+Recommendations require ACTIVE product status, a valid public product URL,
+publishedInContext for the recipient's known country, and a sellable variant.
+Unknown recipient country omits recommendations rather than assumes Australia.
+Out-of-stock/unpublished/missing-image products are omitted. Product creation,
+market publication and inventory facts are fresh at delivery, not preview data.
+Edition numbers are only read for exact customer/order/product/line identity;
+edition limits are never interpreted as remaining stock.
+
+Recipient results carry their recipient ID and are checked again at rendering.
+No private certificate URLs or order URLs enter the email. Unresolved production
+image blocks are rejected. Optional Shopify capability outages omit artwork and
+retain neutral copy/CTA; identity mismatches fail the existing guarded send path.
+The existing deferred-send/idempotency ledger is retained; no duplicate queue,
+receipt or certificate-generation mechanism was added.
+
+MY COLLECTION INVESTIGATION AND LOCAL FIX
+
+The configured extension is MySportsCaveCollection.jsx (not the separate disabled
+redesign). It reads authenticated Customer Account order certificate metadata.
+A purchase alone does not produce a certificate: an absent/pending/unsynchronised
+certificate record still yields no certificate card. Permissions can also block
+reads. Production customer data was not inspected or modified, so the reported
+customer's exact cause has not been confirmed.
+
+Concrete code gap fixed: the extension previously read only the first 50 orders.
+It now follows authenticated pagination, up to 20 pages/1,000 orders, and rejects
+missing/changed customer identity, incomplete page authority, duplicate orders,
+repeated cursors and bound overflow. It never changes to an admin lookup or accepts
+an arbitrary customer ID. Existing exact order/customer certificate filtering and
+line-item artwork matching remain. Errors show the existing retry/error state,
+not a misleading successful empty collection. Missing certificate data is not
+fabricated, generated or backfilled. No unrelated storefront UI was changed.
+
+VALIDATION
+
+42 targeted Python tests PASS, zero skips: new image resolver/composer/privacy/
+saved-template tests plus existing Customer Certificate Vault source contracts.
+15 Node account tests PASS: six new pagination/privacy cases and nine existing
+certificate/line-artwork mapping cases.
+Eight final Chromium screenshots: all four templates at 600px and 375px; no
+horizontal overflow, both authentic public fixture images loaded. Mobile ownership
+and desktop re-engagement were visually inspected. Shared sanitizer checks and
+the 95KB delivery size limit are exercised. This is not an Outlook/Gmail device lab.
+
+Existing lifecycle/Abandoned Cart regression suite: 180/181 PASS, zero skips.
+Failure: tests.test_crm_flow_v4.FlowV4Tests.
+test_main_page_restores_operational_controls_and_admin_route_is_gated expects
+recipient_details() in crm_flow_page.py. That file was not changed by this work.
+
+Extended suite: 113/115 PASS, zero skips. The two failures are in unchanged code:
+1. CollectorVaultAuthenticationTests.
+   test_expired_wrong_audience_and_tampered_tokens_are_rejected: its time-dependent
+   last-character token mutation was accepted. A deterministic fixture check
+   confirms that changing this final base64 character can leave the decoded HMAC
+   bytes and customer identity identical. The mutation is not guaranteed to alter
+   the signature. This existing test needs a deterministic signature-byte mutation;
+   authentication code is unchanged. Evidence: token-fixture-diagnosis.txt.
+2. CollectorVaultImplementationTests.
+   test_render_declares_frame_product_variables_without_values expects two Render
+   declarations; the current render.yaml has one. Render configuration was untouched.
+
+All four new/modified GraphQL operations pass Shopify 2026-04 schema validation.
+Admin validation notes deprecated featuredImage/variant.image fields; these remain
+supported. Toolkit documentation search was unavailable from the shell; official
+Shopify documentation and the schema validator were used instead.
+
+PERFORMANCE
+
+Local rendering measured around 1–2 ms median per template (20 iterations), with
+example HTML below 5KB excluding remotely loaded image bytes. Exact metrics and
+image load/viewport results are in collector-email-v1/preview-metrics.json.
+Preview performs no Shopify requests. Opening the image popover performs no
+catalogue requests; Search/Choose collection are explicit lazy actions.
+Delivery adds at most 16 logical Shopify requests: two for purchased artwork,
+eight order-line continuation pages, one purchase-classification batch, four
+selection/ranking requests and one availability batch (up to 48 product IDs).
+Actual transport retries remain bounded by the existing Shopify client. Existing
+lifecycle order-history verification is additional and unchanged. More than four
+distinct selection sets is rejected; incomplete ownership suppresses recommendations.
+No production latency benchmark or live delivery was performed.
+
+FILES CHANGED BY THIS WORK
+
+New Python:
+crm_collector_images.py
+crm_collector_templates.py
+crm_collector_resolver.py
+crm_collector_image_ui.py
+crm_collector_library_ui.py
+
+Narrow existing Python hooks (preserve unrelated hunks in shared files):
+crm_campaign_content.py — validate settings, labelled fixture preview, delivery guard
+crm_campaign_library.py — lifecycle built-ins and their source lookup
+crm_section_ui.py — lifecycle-only Personalise Image control
+crm_settings_page.py — opt-in reusable templates in Templates
+crm_engine.py — resolve artwork inside existing eligible automation send path
+crm_automation_runtime.py — recipient-bound render-copy hydration
+
+Customer account:
+shopify_customer_account/extensions/customer-certificate-vault/src/MySportsCaveCollection.jsx
+shopify_customer_account/extensions/customer-certificate-vault/src/collection-order-pages.js
+shopify_customer_account/extensions/customer-certificate-vault/src/collection-order-pages.test.mjs
+
+Queries, tests and artifacts:
+docs/collector-email-facts.graphql
+docs/collector-email-order.graphql
+docs/collector-email-bestsellers.graphql
+docs/collector-account-orders.graphql
+templates/collector_preview_artwork.json
+tests/test_crm_collector_personalisation.py
+scripts/preview_collector_templates.py
+docs/collector-email-v1/ (four source .txt files, four preview .txt files,
+eight screenshots, metrics and test logs)
+docs/UNIVERSAL_PERSONALISED_EMAIL_TEMPLATES_V1.txt
+
+REMAINING LIMITATIONS / REVIEW BEFORE ANY SEPARATELY APPROVED RELEASE
+
+No existing email has been rewritten; templates require explicit selection,
+approved fallback artwork/collection choices and copy review for the chosen stage.
+No actual certificate readiness or delivery confirmation was fetched for Email 2;
+its invitation is conditional and makes neither claim. No real-recipient lifecycle
+preview workflow is added. The three wider regression failures remain documented.
+Verify production Shopify read scopes, current market publication and catalogue
+classification quality before activation. Verify the reported customer's generated
+certificate has actually synchronised to their authenticated account; pagination
+alone cannot repair absent certificate records. Account extension changes are local
+source only and have not been built/released to Shopify. No flow may be activated
+or email sent under this task's authorization.
+
+Release coordination: the user authorised messaging "Merge Sports Cave OS updates".
+That chat was told to exclude every collector file/hook and account pagination
+change from its release. The existing unrelated buyer-segment edits in the shared
+campaign validator were preserved. Do not stage whole shared files indiscriminately.
+
+REFERENCES
+https://shopify.dev/docs/api/admin-graphql/2026-04/objects/Product
+https://shopify.dev/docs/api/admin-graphql/2026-04/objects/ProductVariant
+https://shopify.dev/docs/api/customer/2026-04/objects/PageInfo
+Public fixture artwork sources are recorded in templates/collector_preview_artwork.json.

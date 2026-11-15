@@ -1,0 +1,36 @@
+{
+  "brand_templates": {
+    "seconds": 0.058015900081954896,
+    "calls": 2
+  },
+  "shopify": {
+    "seconds": 1.6195915999123827,
+    "calls": 20
+  },
+  "suppression": {
+    "seconds": 0.04616389999864623,
+    "calls": 1
+  },
+  "country": {
+    "seconds": 0.001514299598056823,
+    "calls": 3000
+  },
+  "eligibility_dedup": {
+    "seconds": 0.009829799993894994,
+    "calls": 4
+  },
+  "counts": {
+    "seconds": 1.6880120999994688,
+    "calls": 1
+  },
+  "preview": {
+    "seconds": 0.0012589000398293138,
+    "calls": 1
+  },
+  "draft_list": {
+    "seconds": 0.02842290000990033,
+    "calls": 1
+  },
+  "initial_render_seconds": 2.574007500021253,
+  "exceptions": []
+}

@@ -1,0 +1,51 @@
+{
+  "checks": [
+    "Real app sign-in and Worker",
+    "Exactly five SEO sidebar children; recorder retained in Developer",
+    "Real Google adapters to persisted Plan task",
+    "View switching reuses cached source reports",
+    "Bidirectional legacy status synchronization through full app",
+    "Existing health findings imported",
+    "Existing editor save and revision-bound internal review",
+    "Real combined history",
+    "Bounded Worker scan using loaded real-adapter evidence",
+    "View Channels",
+    "View Engagement",
+    "View Ecommerce",
+    "View Events",
+    "View Audience",
+    "View Realtime",
+    "View Overview details",
+    "View Store operations",
+    "View Mappings",
+    "Real Task Recorder page linked without starting recording or playback"
+  ],
+  "viewports": [
+    {
+      "width": 1440,
+      "zoom": 1,
+      "scroll": 1440,
+      "client": 1440
+    },
+    {
+      "width": 1920,
+      "zoom": 1,
+      "scroll": 1920,
+      "client": 1920
+    },
+    {
+      "width": 1280,
+      "zoom": 1.25,
+      "scroll": 1280,
+      "client": 1280
+    },
+    {
+      "physicalWidth": 1280,
+      "zoomEquivalent": 1.25,
+      "layoutWidth": 1024,
+      "deviceScale": 1.25,
+      "scroll": 1024,
+      "client": 1024
+    }
+  ]
+}

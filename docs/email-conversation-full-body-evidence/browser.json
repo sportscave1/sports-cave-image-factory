@@ -1,0 +1,57 @@
+{
+  "method": "Loopback-free synthetic DOM fixture, same 12 loaded messages before/after; 7 paints, 30 animation-frame scrolls. No production latency claims.",
+  "before": {
+    "paint": {
+      "n": 7,
+      "p50_ms": 8.2,
+      "max_ms": 34.6
+    },
+    "scrollFrame": {
+      "n": 30,
+      "p50_ms": 6.9,
+      "max_ms": 7.1
+    },
+    "geometry": {
+      "frameHeight": 275,
+      "bodyScroll": 275,
+      "overlappingLines": 44,
+      "contentBottom": 285,
+      "quotesVisible": 6,
+      "bodyControls": 18
+    },
+    "requests": [],
+    "errors": []
+  },
+  "after": {
+    "paint": {
+      "n": 7,
+      "p50_ms": 7.7,
+      "max_ms": 26.9
+    },
+    "scrollFrame": {
+      "n": 30,
+      "p50_ms": 6.9,
+      "max_ms": 7.1
+    },
+    "geometry": {
+      "frameHeight": 2596,
+      "bodyScroll": 2596,
+      "overlappingLines": 0,
+      "contentBottom": 2340,
+      "quotesVisible": 6,
+      "bodyControls": 0
+    },
+    "requests": [],
+    "errors": [],
+    "scroll_anchor_drift_px": 0,
+    "rapid_switches": 10,
+    "live_frame_preserved": true,
+    "late_image_grows_and_shrinks": true
+  },
+  "automatic_hydration": {
+    "messages": 100,
+    "body_requests": 99,
+    "duplicate_requests": 0,
+    "expand_clicks": 0
+  }
+}

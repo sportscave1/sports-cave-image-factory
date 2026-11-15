@@ -1,0 +1,394 @@
+{
+  "base": "ccb63e87e385164d6b62298889a26fc6d1ab2512",
+  "scope": "Coherent Inbox V2A-V2D with existing mailbox configuration and recovery retained; provider acceptance remains pending VIP-R2695883",
+  "files": [
+    {
+      "path": "app.py",
+      "sha256": "4cbb651d8d307da2e2c5cf10bff2296d03425d6a0425fd859393a8cc95209540"
+    },
+    {
+      "path": "components/support_email/draft_journal.js",
+      "sha256": "34f886d1dad7d02ab5f62f244101ecabddfb958dabce92fe22ae92d59d4627c0"
+    },
+    {
+      "path": "components/support_email/index.html",
+      "sha256": "ce483709949bdb4f7c65d9e74043371d3b2be111e04fe4fb9f8ee79652a1b44f"
+    },
+    {
+      "path": "components/support_email/mail.js",
+      "sha256": "63f00f42c2c99fde9a8887f9873db0513b28d4ccf80fe6edbd6c27963e812cc3"
+    },
+    {
+      "path": "components/support_email/mail_tools.js",
+      "sha256": "5ea787ffa50ac827b8bbd7cc12ff511760b5dc3da40b9bbc77ee2399c2cbe03b"
+    },
+    {
+      "path": "components/support_email/style.css",
+      "sha256": "bde24b0b6e5aeda20173c91124c91cc0e718300e24331c034f18cf04b28c861f"
+    },
+    {
+      "path": "sports_cave_server.py",
+      "sha256": "9588d94b8851689692fb9cd7cc2299a287eda924a4bbad3ca8f3220fe5d6ee07"
+    },
+    {
+      "path": "support_email_access.py",
+      "sha256": "2e0de94d0d24ec1508acde3ff2ea65476fb52775285714abf581ebd6818b7b63"
+    },
+    {
+      "path": "support_email_completion.py",
+      "sha256": "ad1e2eb2516286152514ff0108536396169b79c3462d65f12a3d9f12a08e2078"
+    },
+    {
+      "path": "support_email_compose.py",
+      "sha256": "fc7e968d80fa92d607841cbe0eac2c1dd88e028978209fd29ce7b73eeaff02b5"
+    },
+    {
+      "path": "support_email_durable.py",
+      "sha256": "763f0cd9caa892ac179a69b16de14d03ca028f5e966cc2fbc68ec642ae922644"
+    },
+    {
+      "path": "support_email_events.py",
+      "sha256": "219a5f761a17676cc05efd02a668722dee42d31466c23ca4d15aaa3c0fcca452"
+    },
+    {
+      "path": "support_email_logic.py",
+      "sha256": "2074e6f767c43bcc9e3dafc2e395ba5968f3811c9e757a6873d5eb8c45376a9a"
+    },
+    {
+      "path": "support_email_page.py",
+      "sha256": "cfd297386e3067e3fad3461d3eb119376a9a00fdb88497c89472cf8226fe59b2"
+    },
+    {
+      "path": "support_email_provider.py",
+      "sha256": "800f55fed99084e248f9d4a2a36df8d39d41e32e47782500a1730217d3887570"
+    },
+    {
+      "path": "support_email_reads.py",
+      "sha256": "fe62e86df475c73c57056edc7f9b6a212b7fae9ad0ef9a989490cfd96a172339"
+    },
+    {
+      "path": "support_email_render.py",
+      "sha256": "0eabd90281fe0ec5558d2bbf489b51643fec1db22e4b757ef737cfa8bd97c341"
+    },
+    {
+      "path": "support_email_snapshot.py",
+      "sha256": "93e3aab7fe6e98f7005a6450481db09f381ca9a40e368f06709a805f22d03222"
+    },
+    {
+      "path": "support_email_store.py",
+      "sha256": "f2fe2e817ab27754bde7174cec473e1a5546e0d06659b92610ec3844149ea12d"
+    },
+    {
+      "path": "support_email_tools.py",
+      "sha256": "22e8882cf353d365101de6c05362aa2bc32bd0979bc799ad04cc140bdf781ae1"
+    },
+    {
+      "path": "support_email_workspace.py",
+      "sha256": "cc6816daf1d3881d284e2f25399d3134d063c2be67d91bea8b9c19a8f350206e"
+    },
+    {
+      "path": "tests/email_v2_fixtures.py",
+      "sha256": "b978d010f1d88a05637a4fd04b2abe72948cf8692670be94ae3225ce65451fdb"
+    },
+    {
+      "path": "tests/email_v2a_browser.cjs",
+      "sha256": "f991d94985b1a22e525df4e2cfdf36832913f7a1b17c3cc9251bbda1fea74657"
+    },
+    {
+      "path": "tests/email_v2a_cached_browser.cjs",
+      "sha256": "a6b7910292147b71c4946dcab31742a2a1ab54098e46457f3aea0c7d73b826ad"
+    },
+    {
+      "path": "tests/email_v2a_recovery_browser.cjs",
+      "sha256": "199b34740002430a045b11c046b2127b961fbae2fcf28141bce92f2dbab65593"
+    },
+    {
+      "path": "tests/email_v2b_browser.cjs",
+      "sha256": "3b17c46ecc11f76915878a29763b20ad10dc4006f648b4c6f9b206af4e9339b3"
+    },
+    {
+      "path": "tests/email_v2b_csp_browser.cjs",
+      "sha256": "49a3b35147a67922eb6c886e7506d3e569f426cbe5d6e2a2fb6f48f08472a9ee"
+    },
+    {
+      "path": "tests/email_v2b_list_browser.cjs",
+      "sha256": "d82b084f47364c43b56fcc4aa82fafd5f28f8d306d64226477cf52ca1e654c7b"
+    },
+    {
+      "path": "tests/email_v2b_listener.py",
+      "sha256": "f5de82bc1112e626f41f3655bd7db32d8735274a1d0bd6be53ecf8940e8ce435"
+    },
+    {
+      "path": "tests/email_v2b_payloads.py",
+      "sha256": "af29e86d14db9762c2ad26342d840fdd0b3744a0ea9371bdf0f2f8300cae6047"
+    },
+    {
+      "path": "tests/email_v2b_screenshots.cjs",
+      "sha256": "735fecf992acd3ec8790af147ceacce0499cfabaa30121f76a7a253ef41f86ae"
+    },
+    {
+      "path": "tests/email_v2c_actions.cjs",
+      "sha256": "ec56a5778cf474ab6d4060e2d830a1ce515763ffb4c122c8e2b7e3cc0702efef"
+    },
+    {
+      "path": "tests/email_v2c_browser.cjs",
+      "sha256": "444efeacd7d460cd13bf0171c8434755cd018a668fea25fd6a7dec8e48e95d50"
+    },
+    {
+      "path": "tests/email_v2c_cold_browser.cjs",
+      "sha256": "47480286d74ee4802bdfdccd8a7bd658c9318744b822e1cb68160ffff5c29b7f"
+    },
+    {
+      "path": "tests/email_v2c_compose_browser.cjs",
+      "sha256": "1ea76fd10f00488c8b8164177542a64f3ec0eba668894e659778e1b3a445f78f"
+    },
+    {
+      "path": "tests/email_v2c_csp_browser.cjs",
+      "sha256": "a97980b5b2ea6f44adf74145b8595e1faf4754afcf8bc23d8f8fbc8407db695c"
+    },
+    {
+      "path": "tests/email_v2c_heavy_browser.cjs",
+      "sha256": "ba342fd514ab03ce420163f18fe745084b9669e9686b98953ccccd0c7f72f57f"
+    },
+    {
+      "path": "tests/email_v2c_list_browser.cjs",
+      "sha256": "7aefb40b5a50d9436ad5ee2f0d237075213c9e9bcf0e9d34cf085f179ca6a711"
+    },
+    {
+      "path": "tests/email_v2c_payloads.py",
+      "sha256": "14ecb09a296e355843703f9e6f53916eb42fc77255dad140dea4a6f98ecadcbd"
+    },
+    {
+      "path": "tests/email_v2c_responsiveness.cjs",
+      "sha256": "fe15b9d4ac1077f1cb9859ff846090d6584018ab0a14f869f160881f3ce03ea1"
+    },
+    {
+      "path": "tests/email_v2c_server.py",
+      "sha256": "46f926c6396d0cc47abdbf3c83f628e3a640440fcbcdcfb791b1cce5b672353e"
+    },
+    {
+      "path": "tests/email_v2c_warm_browser.cjs",
+      "sha256": "e0d347023dfd5cd6616f2f0dae6359ab160960c1dc8997b6d85de1528a4b03bc"
+    },
+    {
+      "path": "tests/email_v2d_actions.cjs",
+      "sha256": "bf4f020b0cb936e0cf05804e2b29e1dfa28850e94fcd5c427079e6d6bc49461d"
+    },
+    {
+      "path": "tests/email_v2d_browser.cjs",
+      "sha256": "fe750c856fa8092ca8bb6ba6d24908de43f885cd4554f807acd427257d137679"
+    },
+    {
+      "path": "tests/email_v2d_compose_browser.cjs",
+      "sha256": "bbc34e6d35e449ab8ccdb560b0355ba605ed5de07b4df56240462b5bda698547"
+    },
+    {
+      "path": "tests/email_v2d_csp_browser.cjs",
+      "sha256": "bc65798d2d67a34f8be796f5c67b662b672f0fb593d60da4b6148f4b2e9e9d06"
+    },
+    {
+      "path": "tests/email_v2d_features.cjs",
+      "sha256": "d8056c02786516655f77f748cdb5b520ad5400cf986382fd8ece39549319958b"
+    },
+    {
+      "path": "tests/email_v2d_heavy_browser.cjs",
+      "sha256": "149533901c323259d89dc6eeea61d324c9cc32dedd329aae5e3f958133bd3f5d"
+    },
+    {
+      "path": "tests/email_v2d_list_browser.cjs",
+      "sha256": "182127470a9a1e33456171989e91b78ea0aa5bdb2dfc0e07ce7d7335824e5022"
+    },
+    {
+      "path": "tests/email_v2d_payloads.py",
+      "sha256": "e0cfcddf0fe3ee0b82de27e345dfa640a2d8fb12db02ae46752f46a8ef0e0613"
+    },
+    {
+      "path": "tests/email_v2d_recovery_browser.cjs",
+      "sha256": "e8f932104503905cbb9caab977d3fb4f2fd9349b04c4e506a904b324a13097b8"
+    },
+    {
+      "path": "tests/email_v2d_release_packet.py",
+      "sha256": "d867d74627af826dee7f08bb82e1c8bb15d09037c67119b941ca4bbb750e7c38"
+    },
+    {
+      "path": "tests/email_v2d_responsiveness.cjs",
+      "sha256": "f6fb612c9e1a926305eaf6542be3d15f882a00f9c027b1a9a63f8c3ee43a112e"
+    },
+    {
+      "path": "tests/email_v2d_screenshots.cjs",
+      "sha256": "d84f38c450754e91cf8b406d4ce3abc346a89ac3bb623c58259ee04baffef399"
+    },
+    {
+      "path": "tests/email_v2d_server.py",
+      "sha256": "df18b694944157a6e7a6fdf27924e33ea6a1634dfb3e55d6e1165ce069cb34e6"
+    },
+    {
+      "path": "tests/email_v2d_triage.cjs",
+      "sha256": "71e204ada3137502a7f2037bd76b2cba09234faa49e474e6548cce520ccaa8cd"
+    },
+    {
+      "path": "tests/email_v2d_warm_browser.cjs",
+      "sha256": "ea8ed3b357eedab60ccb93f266a1e4b46592246be3f2b50d2834c5d927e07905"
+    },
+    {
+      "path": "tests/fixtures/email_threading_reference.py",
+      "sha256": "10e1e78300a5cb0574230b87dc88b555a2a4baa887d654aa0ab9d355f1b10611"
+    },
+    {
+      "path": "tests/fixtures/email_v2a_preview.py",
+      "sha256": "691eadcc9ac892f9e6d3e8e8c8fc460298719837239a404a5270ed8a2ebe3386"
+    },
+    {
+      "path": "tests/fixtures/email_v2b_preview.py",
+      "sha256": "c7390b1551bfdc4cf35b4dc2df7f7909b4a68272fd83d49acbc6446300b4c12b"
+    },
+    {
+      "path": "tests/fixtures/email_v2c_preview.py",
+      "sha256": "d8238eae9f99eb85e6b9d15668799720d04438a6a63dd9cc591b332ecd56ffa5"
+    },
+    {
+      "path": "tests/fixtures/email_v2d_preview.py",
+      "sha256": "9209900ea8c515decec620f6fe1adb1dcb2f7b52c26be0b7bcfd26ae39212723"
+    },
+    {
+      "path": "tests/profile_email_render.cjs",
+      "sha256": "d5050c56993315cbcaaa6e89b3f3555713fbbcfb33e29c93ddc5e2354afbe173"
+    },
+    {
+      "path": "tests/test_email_autosave_component.cjs",
+      "sha256": "bbb87de7ab313b7e108be70f3bb129e0d0e94cfcbd2092774f6ead1fb5c637ff"
+    },
+    {
+      "path": "tests/test_email_durable_delivery.py",
+      "sha256": "b069412e38273fe94a1c3c0f4a0c73c16c7249c044ad19cc6156659089be6392"
+    },
+    {
+      "path": "tests/test_email_idle_component.cjs",
+      "sha256": "879b44891a75cf662cbf56a2d65679a32ea5709ce5d8d79c4307fae2e72ba154"
+    },
+    {
+      "path": "tests/test_email_inbox_selection.py",
+      "sha256": "f2b763e2760570cbc299ca985bbaf930861e24a8991a4963223c36172e384afb"
+    },
+    {
+      "path": "tests/test_email_initial_load.py",
+      "sha256": "422f3beb80a0f5e14842e01735e8ad020f675a32d55b90ad4f2a53b5b52dff4d"
+    },
+    {
+      "path": "tests/test_email_live_component.cjs",
+      "sha256": "8b7130832502bace80a6e20a1995cccccd81b436202ef9ba150e2b067890b1e9"
+    },
+    {
+      "path": "tests/test_email_loading_performance.py",
+      "sha256": "b71964ef93b4bb1918da4f2cc982439df2799ddbaf4ca11aff5ea1ad5e92ca63"
+    },
+    {
+      "path": "tests/test_email_native_concurrency.py",
+      "sha256": "4db351e0099c5dd3d39c7d17f4fe4631b6e7667549bf5c1507cf5caf4044afd7"
+    },
+    {
+      "path": "tests/test_email_outlook_v2a.py",
+      "sha256": "d19fa7267a77cd71dcc10c2dee627b229c7e7ecb25cc222369668752cc4f2a2e"
+    },
+    {
+      "path": "tests/test_email_reader_component.cjs",
+      "sha256": "978b19b8eb2def8409c6e684a388f4acd1042d06c832fb7041a8511dfe8d6cdf"
+    },
+    {
+      "path": "tests/test_email_reconnect_lifecycle.py",
+      "sha256": "480bda04179aab4b37fd0b457f2ab8c09751aa43cb08ba934115ff7a29bee51d"
+    },
+    {
+      "path": "tests/test_email_reply_prompts.cjs",
+      "sha256": "5cd8eb9d19d51788f9f530d42d9656fa67aa8aa3fe1c988b3185830b851565fe"
+    },
+    {
+      "path": "tests/test_email_role_parity.py",
+      "sha256": "36c418330022cd31b1dc4846240a463bfb39862786ca4c3fd0062d5bf2c39ba2"
+    },
+    {
+      "path": "tests/test_email_send_status.cjs",
+      "sha256": "10271b91f771ea465fc3bc1becd6406a83c3416fce87252529ccddf8103b5cd2"
+    },
+    {
+      "path": "tests/test_email_session_postgres.py",
+      "sha256": "4198c3240f144763ea8b096927ff20427ed7f0f741cd93dcf2a01910066cde05"
+    },
+    {
+      "path": "tests/test_email_trash_component.cjs",
+      "sha256": "31c2ef2fdefceaddc1646d99beabe84445946bcbcc363460d4e7cbcaa24f7b65"
+    },
+    {
+      "path": "tests/test_email_v2a_auth_cleanup.cjs",
+      "sha256": "1b06eea9bd7b699acc98f21d9f94a3aa821a585ddd047a807b879ff3a0a76f1f"
+    },
+    {
+      "path": "tests/test_email_v2a_journal.cjs",
+      "sha256": "ab1881d7c68f1099491f39c472abdfb51a14dc5c95dab0877af65a87908954a2"
+    },
+    {
+      "path": "tests/test_email_v2a_storage.py",
+      "sha256": "14937d9d17cfbf18f90008d347f689a79c6e99ecd0ce9ae7b0adc185782d82c7"
+    },
+    {
+      "path": "tests/test_email_v2b_component.cjs",
+      "sha256": "704a487cb5d490bc9c14d0e28494721e36d4d64a44f1ec33b79b9be216b40f45"
+    },
+    {
+      "path": "tests/test_email_v2b_privacy.py",
+      "sha256": "e611a15424ff466dc277f1e1b35b9fcb06ef81b29c79bad662ed293f246dfbac"
+    },
+    {
+      "path": "tests/test_email_v2c_component.cjs",
+      "sha256": "1527ddc7d5c0e89241475b0a1bc9d39cec0346d31d945e2e22ddb8c095f7bd15"
+    },
+    {
+      "path": "tests/test_email_v2c_performance.py",
+      "sha256": "2ca78a51f60c8f1910d1d8d63ecc7b1cabc711957da8c06fbd83f3e54fb8466c"
+    },
+    {
+      "path": "tests/test_email_v2d.py",
+      "sha256": "48e0846a6ee80fe1e9cd427727b5517f768018de187dd2b2618a981864e568a5"
+    },
+    {
+      "path": "tests/test_email_v2d_component.cjs",
+      "sha256": "8d1b0eb8ca3c064c875208657bee656bf0250bfac955d009a9453971e17bbf2b"
+    },
+    {
+      "path": "tests/test_support_email.py",
+      "sha256": "ae58b33d55f41505557f7e0756e8133d9d71db2fcf68dfa527c84223ff91e8ab"
+    },
+    {
+      "path": "tests/test_support_email_idle.py",
+      "sha256": "3484fc6d2d6c7fb6b16dc2693728b093507da19f787a89888e6da163f44dcc96"
+    },
+    {
+      "path": "tests/test_support_email_live.py",
+      "sha256": "fe4b6929e17a6dbe43e0d79c99e3c037f383c07e7a1395b54c31734999f01236"
+    },
+    {
+      "path": "tests/test_support_email_notifications.py",
+      "sha256": "38e7e23c815e0683b1531a9b7fdd5ee73ebf9413777934f110a21ff079ce2ed5"
+    },
+    {
+      "path": "tests/test_support_email_performance.py",
+      "sha256": "7ac3d12b910866f0b191fe286aae39b17425d04f5e3fa85dc2bae871bf541472"
+    },
+    {
+      "path": "tests/test_support_email_render.py",
+      "sha256": "61143f8ee4bc00ba40743c43e22deb8e173946f66719b5d2e539db715803c79c"
+    },
+    {
+      "path": "tests/test_support_email_signatures.py",
+      "sha256": "e6e9050a05c9fb45152730ef65ab2c042d6babf574f06d096aff8f18ca4b2947"
+    },
+    {
+      "path": "tests/test_support_email_v2.py",
+      "sha256": "18944927bc21eb6f966ddcf5e73efef07d03343116047baf0d0aa8d4deb629d1"
+    },
+    {
+      "path": "top_bar_security.py",
+      "sha256": "05834a935aba09a34e2bc0463410827c7c5b460a7a666bf9f0d3ca1437242fc1"
+    }
+  ]
+}

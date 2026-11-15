@@ -1,0 +1,18 @@
+
+import streamlit as st
+from tests.test_crm_send_flow import CFG
+from tests.test_crm_simple_editor import document
+from tests.test_crm import ADMIN
+from tests.crm_db_fixture import connect
+from crm_automation_store import AutomationStore
+from crm_automation_toolbar import toolbar
+class FixtureStore(AutomationStore):
+    def render_settings(self,env=None):return CFG
+store=FixtureStore(connect)
+if 'fixture_flow' not in st.session_state:
+    row=store.create(ADMIN,'welcome',lifecycle=True)
+    flow=row['config']['draft']
+    for step in flow['emails']:step['document']=document()
+    row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
+    st.session_state['fixture_flow']=str(row['id'])
+toolbar(store,ADMIN,st.session_state['fixture_flow'])

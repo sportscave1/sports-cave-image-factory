@@ -1,0 +1,228 @@
+{
+  "baseline": "584931b157534985deb8482a4ea4aeba307070fd",
+  "checked_at": "2026-10-11 Australia/Sydney",
+  "targeted_regression": {
+    "initial_tests": 213,
+    "initial_passes": 212,
+    "initial_failure": "Native test adapter closed a reused psycopg connection; switched test Raw.transaction to the actual transaction context. Assertions unchanged.",
+    "followup_passes": 77,
+    "followup_skips": 12,
+    "skip_resolution": "12 concurrency tests rerun explicitly with CRM_TEST_REAL_POSTGRES=1; all passed",
+    "concurrency_passes": 12,
+    "production_network": "Requests denied; synthetic recipients and loopback PostgreSQL only"
+  },
+  "automations_responsive": [
+    {
+      "browser": "chrome",
+      "width": 1440,
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "main": 1196,
+        "mainClient": 1196,
+        "heading": 84,
+        "kpiHeight": 180.875
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "chrome",
+      "width": 820,
+      "geometry": {
+        "width": 820,
+        "scroll": 820,
+        "main": 576,
+        "mainClient": 576,
+        "heading": 76,
+        "kpiHeight": 359.84375
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "chrome",
+      "width": 390,
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "main": 390,
+        "mainClient": 390,
+        "heading": 120,
+        "kpiHeight": 386.5625
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "chrome",
+      "width": 320,
+      "geometry": {
+        "width": 320,
+        "scroll": 320,
+        "main": 320,
+        "mainClient": 320,
+        "heading": 120,
+        "kpiHeight": 455.0625
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "msedge",
+      "width": 1440,
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "main": 1196,
+        "mainClient": 1196,
+        "heading": 84,
+        "kpiHeight": 180.875
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "msedge",
+      "width": 820,
+      "geometry": {
+        "width": 820,
+        "scroll": 820,
+        "main": 576,
+        "mainClient": 576,
+        "heading": 76,
+        "kpiHeight": 359.84375
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "msedge",
+      "width": 390,
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "main": 390,
+        "mainClient": 390,
+        "heading": 120,
+        "kpiHeight": 386.5625
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    },
+    {
+      "browser": "msedge",
+      "width": 320,
+      "geometry": {
+        "width": 320,
+        "scroll": 320,
+        "main": 320,
+        "mainClient": 320,
+        "heading": 120,
+        "kpiHeight": 455.0625
+      },
+      "search_filter_tabs_create_flow_back": "PASS"
+    }
+  ],
+  "lifecycle_edge": [
+    {
+      "page": "after",
+      "load_ms": [
+        17206.19
+      ],
+      "editor_ms": 281.37,
+      "preview_ready_ms": 331.86,
+      "warm_return_ms": 266.87
+    },
+    {
+      "page": "welcome",
+      "load_ms": [
+        373.92
+      ],
+      "search_ms": 1391.1,
+      "editor_ms": 314.4,
+      "preview_ready_ms": 339.57,
+      "save_reload": "passed",
+      "narrow_editor_width": 390,
+      "warm_return_ms": 296.86
+    },
+    {
+      "page": "post_purchase",
+      "load_ms": [
+        505.64
+      ],
+      "search_ms": 1382.68,
+      "editor_ms": 309.62,
+      "preview_ready_ms": 413.31,
+      "save_reload": "passed",
+      "narrow_editor_width": 390,
+      "warm_return_ms": 308.17
+    },
+    {
+      "page": "win_back",
+      "load_ms": [
+        424.62
+      ],
+      "search_ms": 1380.87,
+      "editor_ms": 242.9,
+      "preview_ready_ms": 523.06,
+      "save_reload": "passed",
+      "narrow_editor_width": 390,
+      "warm_return_ms": 382.59
+    }
+  ],
+  "lifecycle_chrome": [
+    {
+      "page": "after",
+      "load_ms": [
+        534.19
+      ],
+      "editor_ms": 266.43,
+      "preview_ready_ms": 302.09,
+      "warm_return_ms": 257.7
+    },
+    {
+      "page": "welcome",
+      "load_ms": [
+        342.4
+      ],
+      "search_ms": 1360.61,
+      "editor_ms": 261.58,
+      "preview_ready_ms": 299.63,
+      "save_reload": "passed",
+      "narrow_editor_width": 390,
+      "warm_return_ms": 268.68
+    },
+    {
+      "page": "post_purchase",
+      "load_ms": [
+        480.54
+      ],
+      "search_ms": 1366.2,
+      "editor_ms": 254.97,
+      "preview_ready_ms": 295.19,
+      "save_reload": "passed",
+      "narrow_editor_width": 390,
+      "warm_return_ms": 238.62
+    },
+    {
+      "page": "win_back",
+      "load_ms": [
+        479.89
+      ],
+      "search_ms": 1370.45,
+      "editor_ms": 264.58,
+      "preview_ready_ms": 285.05,
+      "save_reload": "passed",
+      "narrow_editor_width": 390,
+      "warm_return_ms": 338.72
+    }
+  ],
+  "migration": {
+    "name": "crm_lifecycle_draft_expansion",
+    "supabase_version": "20261010215058",
+    "tables": 3,
+    "rls": true,
+    "anon_and_authenticated_access": false,
+    "existing_data_backfill": false
+  },
+  "source_preservation": "Original eligible files unchanged against audit SHA256 snapshot; five additional worktrees inspected read-only. Historical heads are main ancestors; older editor copies excluded.",
+  "reused_evidence": {
+    "campaigns": "335 regression, 12 concurrency, 16 browser viewport cases and repeated menus from 584931b1; affected shared backend paths retested here",
+    "automations_v6": "Prior 32 targeted checks, 8 viewport cases, 24 menu cycles; same analytics/cache/Home code. Merged routes and backend retested.",
+    "other_system": "Prior full-system release report and file inventory; source unchanged relative deployed main"
+  }
+}

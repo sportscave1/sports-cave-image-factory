@@ -1,0 +1,216 @@
+<!doctype html>
+<html data-sc-table-host="checkout"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}body{margin:0;font:13px 'Segoe UI',system-ui,sans-serif;color:#30332e;background:#fffefa}
+.wrap{width:100%;max-height:640px;overflow:auto;border:1px solid #e4e2da;border-radius:5px;position:relative}
+table{border-spacing:0;width:100%;white-space:nowrap}th{text-align:left;background:#f3f2ec;font-size:12px;color:#64665f;font-weight:600;position:sticky;top:0;z-index:3}
+td,th{padding:6px 10px;border-bottom:1px solid #eeece5;height:34px}td{background:#fffefa}tbody tr:hover td{background:#f7f5ef}
+td:first-child,th:first-child{width:32px;min-width:32px;padding:4px 6px;position:sticky;left:0;z-index:2}
+td:nth-child(2),th:nth-child(2){min-width:180px;max-width:280px;position:sticky;left:32px;z-index:2;box-shadow:1px 0 #e4e2da}
+th:first-child,th:nth-child(2){z-index:4}td:nth-child(3){width:80px;min-width:80px;color:#696a63}
+.email{min-width:120px;font-variant-numeric:tabular-nums}.green{color:#28633e}.red{color:#a13a32}.gold{color:#826222}.muted{color:#73756d}
+.email .stage-detail,.email .stage-timing{display:block;font-size:11px;line-height:14px;font-weight:400;color:#73756d}.email .stage-timing{max-width:230px;white-space:normal}
+input{accent-color:#92712f;cursor:pointer;width:16px;height:16px;margin:0;vertical-align:middle}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;text-align:left}
+.customer{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;display:block}button:hover{text-decoration:underline}
+button:focus-visible,input:focus-visible,.wrap:focus-visible{outline:2px solid #9a7937;outline-offset:2px}
+.enrollment-progress{font-size:11px;max-width:260px;white-space:normal;color:#73756d}.enrollment-progress button{text-decoration:underline;color:#a13a32}
+nav{display:flex;gap:16px;justify-content:flex-end;align-items:center;padding:6px}nav button:disabled{opacity:.4;cursor:default}
+.empty{padding:18px;text-align:center;color:#73756d}.table-status{display:flex;justify-content:space-between;gap:8px;min-height:20px;padding:2px 0;font-size:11px}.freshness{color:#826222}.selection-count{color:#64665f;white-space:nowrap;font-variant-numeric:tabular-nums}
+@media(max-width:600px){td,th{padding:6px 8px}td:nth-child(2),th:nth-child(2){min-width:155px;max-width:190px}.customer{max-width:170px}}
+</style><style id="sc-table-design-v3">
+/* Sports Cave OS tables V3. Explicit table scopes only. */
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stDataFrame"], [data-testid="stTable"],
+    html[data-sc-table-host] .table-wrap, html[data-sc-table-host="checkout"] .wrap,
+    html[data-sc-table-host] .view-details, html[data-sc-table-host] .view-list,
+    html[data-sc-table-host] .details-header, html[data-sc-table-host="uploads"] .uploads,
+    html[data-sc-table-host="planner"] .task-row, html[data-sc-table-host="planner"] .task-header,
+    html[data-sc-table-host="planner"] .tactic-row) {
+  --sc-table-paper: #fffefa;
+  --sc-table-head: #f3f2ec;
+  --sc-table-line: #eeece5;
+  --sc-table-border: #e4e2da;
+  --sc-table-hover: #f7f5ef;
+  --sc-table-selected: #eee7d7;
+  --sc-table-ink: #30332e;
+  --sc-table-muted: #64665f;
+  --sc-table-focus: #9a7937;
+  scrollbar-color: #c8c5bb transparent;
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    html[data-sc-table-host] .table-wrap, html[data-sc-table-host="checkout"] .wrap) {
+  max-width: 100%; overflow: auto; border: 1px solid var(--sc-table-border);
+  border-radius: 5px; background: var(--sc-table-paper);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-family: inherit; font-size: 13px; color: var(--sc-table-ink);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) :is(td, th) {
+  box-sizing: border-box; height: 34px; padding: 6px 10px;
+  border: 0; border-bottom: 1px solid var(--sc-table-line);
+  vertical-align: middle; line-height: 20px;
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) th {
+  background: var(--sc-table-head); color: var(--sc-table-muted);
+  font-size: 12px; font-weight: 600; text-transform: none;
+  text-align: left; border-bottom-color: var(--sc-table-border);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    html[data-sc-table-host] .table-wrap) th { position: sticky; top: 0; z-index: 1; }
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) td { background: var(--sc-table-paper); }
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) tbody tr:hover td { background: var(--sc-table-hover); }
+:is(.sc-table, html[data-sc-table-host="checkout"] .wrap) tr:has(input[type="checkbox"]:checked) td {
+  background: var(--sc-table-selected);
+}
+:is(.sc-table, .sc-activity-table-wrap, .prodigi-reference-scroll,
+    [data-testid="stTable"], html[data-sc-table-host] .table-wrap,
+    html[data-sc-table-host="checkout"] .wrap) :is(button, a, input, select):focus-visible {
+  outline: 2px solid var(--sc-table-focus); outline-offset: 2px;
+}
+.sc-table .sc-table-number { text-align: right; font-variant-numeric: tabular-nums; }
+.sc-table .sc-table-action { min-height: 28px; padding: 3px 8px; font: inherit; }
+.sc-table .sc-table-success { color: #28633e; }
+.sc-table .sc-table-pending { color: #826222; }
+.sc-table .sc-table-error { color: #a13a32; }
+.sc-table .sc-table-neutral { color: #64665f; }
+[data-testid="stDataFrame"] { border-radius: 5px; }
+[data-testid="stTable"] { max-width: 100%; overflow-x: auto; }
+/* Preserve checkout frozen-column geometry and its focus/scroll implementation. */
+html[data-sc-table-host="checkout"] .wrap :is(td, th):first-child { padding: 4px 6px; }
+@media (max-width: 600px) {
+  html[data-sc-table-host="checkout"] .wrap :is(td, th) { padding: 6px 8px; }
+  html[data-sc-table-host="checkout"] .wrap :is(td, th):first-child { padding: 4px 6px; }
+}
+/* Planner inputs/timers retain their natural multiline row height. */
+html[data-sc-table-host="planner"] .table-wrap table { min-width: max-content; }
+html[data-sc-table-host="planner"] .table-wrap td { font-size: 13px; }
+html[data-sc-table-host="planner"] :is(.task-row, .tactic-row) {
+  border: 0; border-bottom: 1px solid var(--sc-table-line); border-radius: 0;
+  margin-bottom: 0; background: var(--sc-table-paper);
+}
+html[data-sc-table-host="planner"] .task-header {
+  background: var(--sc-table-head); color: var(--sc-table-muted);
+  min-height: 34px; align-items: center; font-size: 12px; font-weight: 600; text-transform: none;
+}
+html[data-sc-table-host="planner"] :is(.task-row, .tactic-row):hover { background: var(--sc-table-hover); }
+/* File manager Details/List only; thumbnail/icon views are not data tables. */
+html[data-sc-table-host="files"] .details-header {
+  background: var(--sc-table-head); color: var(--sc-table-muted); border-color: var(--sc-table-border);
+  font-weight: 600;
+}
+html[data-sc-table-host="files"] .details-header > span { border-right: 0; }
+html[data-sc-table-host="files"] :is(.view-details, .view-list) .file-item {
+  background: var(--sc-table-paper); border-bottom: 1px solid var(--sc-table-line);
+  min-height: 38px; border-radius: 0;
+}
+html[data-sc-table-host="files"] .view-details .detail-modified { line-height: 38px; }
+html[data-sc-table-host="files"] :is(.view-details, .view-list) .file-item:hover { background: var(--sc-table-hover); }
+html[data-sc-table-host="files"] :is(.view-details, .view-list) .file-item.selected { background: var(--sc-table-selected); }
+html[data-sc-table-host="uploads"] .upload-row { background: var(--sc-table-paper); border-bottom-color: var(--sc-table-line); }
+html[data-sc-table-host="uploads"] .upload-row:hover { background: var(--sc-table-hover); }
+html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
+</style>
+
+<style>
+/* Opt-in compact audiences share the table without checkout frozen widths. */
+html[data-sc-table-host="checkout"] .wrap.compact-columns table{table-layout:fixed;white-space:normal}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th){min-width:0;max-width:none;padding:6px;overflow-wrap:anywhere}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th):first-child{width:30px;min-width:30px;padding:4px 6px}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th):nth-child(2){width:36%;position:static;box-shadow:none}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th):nth-child(3){width:22%;min-width:0}
+.compact-columns .email{min-width:0}
+.compact-columns .customer{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+</style>
+</head><body><div id="root"></div><script>
+'use strict';
+let args={},page=0,selected=new Set(),structure='',seq=0,timer=null,inView=true;
+let serverEpoch=0,clockAnchor=0,lastPoll=0,frameHeight=0;
+const nodes=new Map(),root=document.getElementById('root');
+const send=(type,data)=>parent.postMessage({isStreamlitMessage:true,type,...data},'*');
+function event(detail=null,retry=null,refresh=false,clear=false,close=false){send('streamlit:setComponentValue',{value:{selected:[...selected],detail,retry,refresh,sequence:Date.now()+':'+(++seq),context:args.selection_context,clear_selection:clear,close_detail:close},dataType:'json'});}
+function cell(tr,text,tag='td'){const el=document.createElement(tag);el.textContent=text;tr.append(el);return el;}
+function text(el,value){if(el.textContent!==value)el.textContent=value;}
+function height(){const h=Math.min(710,root.scrollHeight+5);if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h});}}
+function serverTime(){return serverEpoch+performance.now()-clockAnchor;}
+function remaining(due){const seconds=Math.max(0,Math.ceil((Date.parse(due)-serverTime())/1000));
+ if(!seconds)return 'Due';if(seconds<3600)return Math.floor(seconds/60)+'m '+seconds%60+'s';
+ if(seconds<86400)return Math.floor(seconds/3600)+'h '+Math.floor(seconds%3600/60)+'m';
+ return Math.floor(seconds/86400)+'d '+Math.floor(seconds%86400/3600)+'h';}
+function shownRows(){return (args.rows||[]).slice(page*50,page*50+50);}
+function selection(){const shown=shownRows(),all=root.querySelector('thead input');if(all){all.checked=shown.length>0&&shown.every(r=>selected.has(r.key));all.indeterminate=selected.size>0&&!all.checked;}
+ for(const r of shown){const n=nodes.get(r.key);if(n)n.check.checked=selected.has(r.key);}
+ const status=root.querySelector('.selection-count');if(status)text(status,shown.length+' shown · '+selected.size+' selected');}
+function requestProgress(el,r){const p=r.enrollment_progress||{};
+ // Delivery state belongs in its email cell; only actionable request feedback goes here.
+ const value=['SAVING','QUEUED','CHECKING','FAILED'].includes(p.state)||p.result==='Already in flow'?p.result||p.state:'';
+ const sig=JSON.stringify([p.state,value]);if(el.dataset.signature===sig)return;el.dataset.signature=sig;el.replaceChildren();
+ if(value){el.append(document.createTextNode(value));if(p.state==='FAILED'){const b=document.createElement('button');b.textContent='Retry';b.setAttribute('aria-label','Retry '+r.customer);b.onclick=()=>{b.disabled=true;event(null,r.key)};el.append(document.createTextNode(' · '),b);}}
+}
+function scrollKey(){return args.state_key?'sc-flow-scroll:'+args.state_key:null;}
+function savedScroll(){try{return JSON.parse(sessionStorage.getItem(scrollKey())||'{}')}catch{return {}}}
+function saveScroll(){const w=root.querySelector('.wrap');if(!w||!scrollKey())return;try{sessionStorage.setItem(scrollKey(),JSON.stringify({left:w.scrollLeft,top:w.scrollTop}))}catch{}}
+function render(){const rows=args.rows||[],cols=(args.columns||[]).map((col,index)=>({...col,index})).filter(col=>col.visible!==false),count=Math.ceil(rows.length/50);page=Math.min(page,Math.max(0,count-1));
+ const shown=shownRows(),next=JSON.stringify([page,shown.map(r=>r.key),cols,args.compact_columns]);
+ if(next!==structure){const active=document.activeElement,focused=active?.getAttribute('aria-label'),focusKey=active?.dataset.rowKey,focusTag=active?.tagName;const old=root.querySelector('.wrap'),left=old?.scrollLeft??savedScroll().left??0,top=old?.scrollTop??savedScroll().top??0;structure=next;nodes.clear();root.replaceChildren();
+  const wrap=document.createElement('div');wrap.className='wrap'+(args.compact_columns?' compact-columns':'');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',args.table_label||'Checkout email progress');root.append(wrap);
+  const table=document.createElement('table');table.setAttribute('aria-label',args.table_label||'Abandoned checkout email flow');wrap.append(table);
+  const head=table.createTHead().insertRow(),th=cell(head,'','th'),all=document.createElement('input');all.type='checkbox';all.setAttribute('aria-label',args.table_label?'Select visible records':'Select visible checkouts');
+  all.title='Select visible records; uncheck to deselect all records across pages';
+  all.onchange=()=>{const clear=!all.checked||!shownRows().length;if(clear)selected.clear();else shownRows().forEach(r=>all.checked?selected.add(r.key):selected.delete(r.key));selection();event(null,null,false,clear)};th.append(all);
+  cell(head,'Customer','th');cell(head,args.date_label||'Created','th');for(const col of cols){const h=cell(head,col.label,'th');h.title=col.name+(col.enabled?'':' · Disabled for new enrollments');h.scope='col';h.className='email';if(col.timing){const timing=document.createElement('small');timing.className='stage-timing';timing.textContent=col.timing;h.append(timing);}}
+  const body=table.createTBody();for(const r of shown){const tr=body.insertRow(),check=document.createElement('input');check.type='checkbox';check.dataset.rowKey=r.key;check.setAttribute('aria-label','Select '+r.customer);
+   check.onchange=()=>{check.checked?selected.add(r.key):selected.delete(r.key);selection();event()};cell(tr,'').append(check);
+   const customer=cell(tr,''),link=document.createElement('button');link.className='customer';link.dataset.rowKey=r.key;link.onclick=()=>event(args.detail_key===r.key?null:r.key,null,false,false,args.detail_key===r.key);link.setAttribute('aria-label','Details '+r.customer);customer.append(link);
+   const request=document.createElement('div');request.className='enrollment-progress';customer.append(request);
+   const created=cell(tr,''),cells=cols.map(()=>{const td=cell(tr,'');td.className='email';return td});nodes.set(r.key,{check,link,request,created,cells});
+  }
+  if(!rows.length){const e=document.createElement('div');e.className='empty';e.textContent=args.empty_label||'No matching abandoned checkouts';wrap.append(e)}
+  wrap.scrollLeft=left;wrap.scrollTop=top;wrap.addEventListener('scroll',saveScroll,{passive:true});
+  if(count>1){const nav=document.createElement('nav');for(const [label,delta] of [['Previous',-1],['Next',1]]){const b=document.createElement('button');b.textContent=label;b.disabled=delta<0?page===0:page>=count-1;b.onclick=()=>{page+=delta;render()};nav.append(b)}cell(nav,(page+1)+' / '+count,'span');root.append(nav)}
+  const status=document.createElement('div');status.className='table-status';root.append(status);
+  const summary=document.createElement('span');summary.className='selection-count';summary.setAttribute('role','status');summary.setAttribute('aria-live','polite');status.append(summary);
+  const freshness=document.createElement('span');freshness.className='freshness';freshness.setAttribute('role','status');status.append(freshness);
+  if(focused){const target=[...root.querySelectorAll('[aria-label]')].find(el=>focusKey!==undefined?el.dataset.rowKey===focusKey&&el.tagName===focusTag:el.getAttribute('aria-label')===focused);(target||wrap).focus({preventScroll:true});}
+ }
+ for(const r of shown){const n=nodes.get(r.key);text(n.link,r.customer);n.link.title=r.customer;n.link.setAttribute('aria-label','Details '+r.customer);n.link.setAttribute('aria-expanded',String(args.detail_key===r.key));
+  text(n.created,r.created);n.created.title=r.created_full;requestProgress(n.request,r);
+  n.cells.forEach((td,i)=>{const c=(r.cells||[])[cols[i].index]||{label:'—',tone:'muted'};td.className='email '+(['green','red','gold','muted'].includes(c.tone)?c.tone:'muted');td.title=c.reason||c.label;
+   const detailed=Boolean(c.detail);if(detailed!==Boolean(td.querySelector('.stage-value'))){td.replaceChildren();if(detailed){const value=document.createElement('span'),detail=document.createElement('small');value.className='stage-value';detail.className='stage-detail';td.append(value,detail);}}
+   const value=detailed?td.querySelector('.stage-value'):td;td.dataset.due='';value.dataset.due=c.due_at||'';value.dataset.prefix=c.countdown_label||'';text(value,c.due_at?(c.countdown_label||'')+remaining(c.due_at):c.label);if(detailed)text(td.querySelector('.stage-detail'),c.detail);});
+ }
+ selection();tick(false);height();
+}
+function tick(poll=true){if(document.hidden||!inView)return;
+ for(const n of nodes.values())for(const td of n.cells){const value=td.querySelector('.stage-value')||td;if(value.dataset.due)text(value,(value.dataset.prefix||'')+remaining(value.dataset.due));}
+ const fresh=root.querySelector('.freshness'),age=serverTime()-Date.parse(args.read_at||args.server_now);
+ if(fresh)text(fresh,args.phase==='ERROR'||args.phase==='TIMED_OUT'||(args.refresh_seconds!==0&&age>45000)?'Status update delayed — last verified records shown. Retry recipients if the update does not recover.':'');
+ if(poll&&args.refresh_seconds!==0&&args.server_now&&performance.now()-lastPoll>=Math.max(15,Number(args.refresh_seconds)||15)*1000){lastPoll=performance.now();event(null,null,true)}
+ height();
+}
+function start(){if(timer!==null||document.hidden||!inView)return;tick();timer=setInterval(tick,1000);}
+function stop(){if(timer!==null){clearInterval(timer);timer=null}}
+function visibility(){stop();if(!document.hidden)start();}
+function message(e){if(e.source!==parent||e.data.type!=='streamlit:render')return;
+ const first=!args.server_now,oldKeys=JSON.stringify((args.rows||[]).map(r=>r.key));args=e.data.args;
+ if(oldKeys!==JSON.stringify((args.rows||[]).map(r=>r.key)))page=0;
+ selected=new Set(args.selected||[]);
+ serverEpoch=Date.parse(args.server_now)||Date.now();clockAnchor=performance.now();if(first)lastPoll=performance.now();render();start();
+}
+const observer=new IntersectionObserver(entries=>{inView=entries.some(e=>e.isIntersecting);if(inView)start();else stop()});observer.observe(root);
+window.addEventListener('message',message);document.addEventListener('visibilitychange',visibility);
+function keyboard(e){if(e.key==='Escape'&&args.detail_key){e.preventDefault();event(null,null,false,false,true);}}
+document.addEventListener('keydown',keyboard);
+function cleanup(){saveScroll();stop();observer.disconnect();window.removeEventListener('message',message);document.removeEventListener('visibilitychange',visibility);document.removeEventListener('keydown',keyboard);window.removeEventListener('pagehide',cleanup)}
+window.addEventListener('pagehide',cleanup);send('streamlit:componentReady',{apiVersion:1});
+</script></body></html>

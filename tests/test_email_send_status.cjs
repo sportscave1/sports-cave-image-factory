@@ -1,0 +1,66 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const {sendStatus,sendFeedback,sentReceipt,deliveryHistory,locked}=require('../components/support_email/mail.js');
+for(const copy of ['pending','unknown','appended']) {
+  const model={draft:{id:'draft'},send_result:{status:'accepted'},sent_result:{status:copy}};
+  assert.equal(sendStatus(model),'');assert.equal(locked(model),true);
+}
+assert.equal(locked({draft:null,send_result:{status:'accepted'}}),false);
+assert.match(sendStatus({send_result:{status:'accepted'},send_stage:'SAVING_SENT_COPY'}),/confirming Sent copy/);
+assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'failed',retryable:true}}}),/Accepted by the mail server.*Retry saving Sent copy/);
+assert.doesNotMatch(sentReceipt({last_sent:{operation_id:'op',copy:{status:'appended'}}}),/pending|Retry|Check/);
+assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'unknown',retryable:false}}}),/Check Sent copy/);
+assert.doesNotMatch(sentReceipt({last_sent:{operation_id:'op',copy:{status:'unknown',retryable:false}}}),/Retry/);
+assert.match(sendStatus({send_result:{status:'unknown'}}),/Confirming original send/);
+assert.match(sendStatus({send_result:{status:'unknown'}}),/Do not resend/);
+assert.match(sendStatus({send_result:{status:'unknown'},uncertain_checks:6}),/Unable to confirm original send/);
+assert.match(sendStatus({send_result:{status:'rejected'}}),/Email not sent/);
+const processing=sendStatus({send_result:{status:'in_progress'},send_progress:{percent:100}});
+assert.doesNotMatch(processing,/✓ Sent|%|<progress/);assert.match(processing,/Submitting to mail server/);
+assert.match(sendStatus({send_result:{status:'in_progress'},send_stage:'SENDING'}),/Submitting to mail server/);
+const source=fs.readFileSync('components/support_email/mail.js','utf8');
+assert.doesNotMatch(source,/percent:5|sc:send-progress|progress\.percent/);
+const timers=[],ctx={model:{view:'mail',last_sent:{operation_id:'op',copy:{status:'pending'},checks:0}},busy:false,
+  clearTimeout(){},setTimeout(fn,ms){timers.push({fn,ms});},emit(action,data){assert.equal(action,'auto_check_sent');assert.equal(data.operation_id,'op');}};
+vm.createContext(ctx);
+vm.runInContext(source.slice(source.indexOf('let sentTimer='),source.indexOf("window.addEventListener('pagehide'",source.indexOf('let sentTimer=')))+';this.schedule=scheduleSentCheck;',ctx);
+for(let n=0;n<5;n++){ctx.model.last_sent.checks=n;ctx.schedule();}
+assert.deepEqual(timers.map(t=>t.ms),[6000,12000,24000]);timers[0].fn();
+ctx.model.last_sent.checks=0;ctx.model.last_sent.copy.status='unknown';ctx.schedule();assert.equal(timers.length,4);
+const stages=[],delays=[];
+let now=1000;
+const stageContext={model:{},busy:false,Date:{now:()=>now},clearTimeout(){},
+  setTimeout(fn,ms){stages.push(fn);delays.push(ms);},emit(action,data){assert.equal(action,'advance_send');assert.equal(data.operation_id,'confirmed');}};
+vm.createContext(stageContext);
+vm.runInContext(source.slice(source.indexOf('let sendTimer='),source.indexOf("window.addEventListener('pagehide'",source.indexOf('let sendTimer=')))+';this.schedule=scheduleSendStage;',stageContext);
+stageContext.schedule();assert.equal(stages.length,0); // Page load cannot send.
+stageContext.model={send_stage:'SENDING',send_result:{operation_id:'confirmed',status:'in_progress',retry_delay_ms:500}};
+stageContext.schedule();assert.equal(stages.length,1);stages[0]();
+stageContext.model.send_stage='SAVING_SENT_COPY';stageContext.schedule();assert.equal(stages.length,2);
+stageContext.model.send_stage='SENT';stageContext.schedule();assert.equal(stages.length,2);
+stageContext.model.send_stage='SENDING';stageContext.schedule();
+now+=1200;stageContext.schedule();
+stageContext.model.send_result.retry_delay_ms=5000;stageContext.schedule();
+assert.deepEqual(delays,[100,100,200,500,5000]);
+console.log('Send status semantics and bounded polling checks passed.');
+
+assert.match(sendFeedback({send_result:{status:'in_progress'}}),/<progress/);
+assert.equal(sendFeedback({send_stage:'SENT',send_result:{status:'accepted'}}),'');
+assert.match(sendFeedback({sent_view_pending:true}),/Opening sent email.*<progress/);
+
+assert.doesNotMatch(sendFeedback({send_stage:'CONFIRMING_SENT_COPY',send_result:{status:'accepted'},last_sent:{checks:3}}),/<progress/);
+
+assert.match(sendStatus({sent_view_pending:true,draft:{id:'new'},send_stage:'VALIDATING',send_result:{status:'in_progress'}}),/Sending email/);
+
+assert.match(sendFeedback({send_stage:'VALIDATING'}),/Sending email.*<progress/);
+const history=deliveryHistory({
+  last_sent:{operation_id:'current'},
+  unresolved_receipts:[
+    {operation_id:'current',status:'accepted'},
+    {operation_id:'old',status:'unknown',created_label:'07 Oct'}
+  ]
+});
+assert.match(history,/<details class="delivery-history" >.*Earlier send receipts \(1\)/);
+assert.match(history,/Outcome unverified.*07 Oct.*old/);
+assert.doesNotMatch(history,/current/);

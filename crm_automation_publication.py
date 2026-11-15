@@ -1,0 +1,344 @@
+"""Frozen, server-only publication jobs consumed by the existing CRM worker.
+
+Publication never enrolls a customer or submits an email. Delivery remains with
+the existing trigger/runtime. Expensive validation happens outside the row lock.
+"""
+from copy import deepcopy
+import json
+import logging
+import re
+import uuid
+from time import perf_counter
+from crm_logic import now,date
+from crm_navigation import require
+from crm_automation_definition import validate, native, status, production_document
+from crm_store import StoreUnavailable
+from crm_automation_publish_state import has_changes
+
+LOG=logging.getLogger(__name__)
+MAX_ATTEMPTS=3
+PUBLICATION_SECONDS=1200
+
+
+def run(store,owner,stop,*,interval=1.0):
+    """One bounded consumer in the existing worker, using the same durable claims.
+
+    Maintenance/Shopify calls cannot delay queue pickup. No UI-owned executor,
+    new service, independent scheduler, or delivery work is introduced. The
+    owner/attempt fence still protects against crashes and overlapping workers.
+    """
+    connection=None
+    if store.connect is None:
+        from supabase_backend import connect
+        from crm_publication_connection import Connection
+        from crm_automation_store import AutomationStore
+        connection=Connection(connect);store=AutomationStore(connection)
+    try:
+        heartbeat=0
+        while not stop.is_set():
+            try:
+                worked=tick(store,owner)
+                if perf_counter()-heartbeat>=30:
+                    store.set_state('automation_publication_health',{'checked_at':now().isoformat(),'status':'ok'})
+                    heartbeat=perf_counter()
+            except Exception as exc:
+                LOG.warning('automation_publication_poll_failed error_class=%s',type(exc).__name__)
+                stop.wait(5)
+                continue
+            # Avoid a hot loop, but drain queued work without another maintenance pass.
+            stop.wait(.05 if worked else interval)
+    finally:
+        if connection:connection.close()
+
+
+def progress(store,identity):
+    """Small persisted job read; never infer success from elapsed time."""
+    return store.q("""SELECT state,requested_at,started_at,available_at,attempts
+        FROM crm_automation_publish_jobs WHERE automation_id=%s
+        AND state IN ('QUEUED','RUNNING') ORDER BY requested_at DESC LIMIT 1""",(identity,),True)
+
+
+def progress_text(job):
+    if not job:return 'Reconciling publication status…'
+    age=max(0,int((now()-date(job['requested_at'])).total_seconds()))
+    operation='Validating and storing publication' if job['state']=='RUNNING' else 'Waiting for publication worker'
+    if job['state']=='QUEUED' and job.get('attempts',0):operation='Storage unavailable · waiting for bounded retry'
+    if age>=30:operation+=' · taking longer than expected; current live version retained'
+    return operation+' · '+str(age)+'s'
+
+
+def overdue(publication):
+    requested=date(publication.get('requested_at'))
+    return publication.get('state')=='PUBLISHING' and requested is not None and (now()-requested).total_seconds()>=PUBLICATION_SECONDS
+
+
+def expire(store,identity):
+    """Fence abandoned jobs even when the worker is offline; retain the draft/live version."""
+    with store.db() as conn:
+        conn.execute("SET LOCAL lock_timeout='2s'")
+        jobs=conn.execute("""SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s
+          AND state IN ('QUEUED','RUNNING') AND requested_at<=now()-interval '20 minutes'
+          FOR UPDATE SKIP LOCKED""",(identity,)).fetchall()
+        for job in jobs:fail(conn,job,'Publication timed out. Check the CRM worker and retry publishing.')
+
+
+def approved(flow):
+    result=deepcopy(flow)
+    for step in result['emails']:step['document']['copy_reviewed']=True
+    return result
+
+
+def preflight(row,revision,flow=None,*,step_id=None):
+    if not row or not native(row) or row['config'].get('deleted_at') or status(row)=='ARCHIVED':
+        raise ValueError('Automation is not publishable.')
+    if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
+    from crm_automation_timing import single_delay
+    flow=validate(single_delay(flow if flow is not None else row['config']['draft']))
+    if not any(s.get('enabled',True) for s in flow['emails']):raise ValueError('Enable at least one email before publishing.')
+    for step in flow['emails']:
+        if step_id is not None and step['step_id']!=step_id:continue
+        if not step.get('enabled',True):continue
+        subject=step['document']['content']['subject'].strip()
+        if not subject:raise ValueError('Add a subject before publishing.')
+        if re.match(r'\s*(re|fwd?)\s*:',subject,re.I):raise ValueError('Use a truthful subject without RE: or FWD:.')
+    return flow
+
+
+def request(store,user,identity,revision,step_id=None,*,enable_ids=()):
+    require(user,'crm_automations_manage')
+    with store.db() as conn:
+        conn.execute("SET LOCAL lock_timeout='2s'")
+        row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+        from crm_automation_publish_state import publication_flow
+        if not row:raise ValueError('Automation is not publishable.')
+        enable_ids=sorted(set(enable_ids))
+        flow=publication_flow(store,row,step_id,conn)
+        disabled={s['step_id'] for s in flow['emails'] if not s.get('enabled',True)}
+        if step_id is not None and enable_ids:raise ValueError('Explicit inclusion requires whole-flow publication.')
+        if not set(enable_ids)<=disabled:raise ValueError('Disabled email selection changed. Reopen publication confirmation.')
+        for step in flow['emails']:
+            if step['step_id'] in enable_ids:step['enabled']=True
+        # An accepted request can be retried after a lost response, even after
+        # its successful enable transition advanced the editable revision.
+        active=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND state IN ('QUEUED','RUNNING')",(identity,)).fetchone()
+        if active:
+            if active['revision']!=revision or active['snapshot'].get('step_id')!=step_id or (step_id is None and active['snapshot'].get('enable_ids',[])!=enable_ids):raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
+            return active
+        previous=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND revision=%s AND state='SUCCEEDED' AND snapshot->>'step_id' IS NOT DISTINCT FROM %s ORDER BY requested_at DESC LIMIT 1",(identity,revision,step_id)).fetchone()
+        if step_id and previous:
+            from crm_automation_publish_state import email_has_changes
+            if not email_has_changes(store,row,step_id,conn):return {**previous,'unchanged':True}
+        if step_id:
+            enable_ids=[step_id] if any(s['step_id']==step_id and not s.get('enabled',True) for s in row['config']['draft']['emails']) else []
+        flow=preflight(row,revision,flow,step_id=step_id)
+        if flow['trigger']!='abandoned':
+            from crm_automation_readiness import require_ready
+            require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},conn=conn)
+        if not enable_ids and not has_changes(store,row,flow,conn):
+            return {**(previous or {'id':None,'automation_id':row['id'],'revision':revision,'publication_version':row['config']['published_version'],'state':'SUCCEEDED'}),'unchanged':True}
+        config=deepcopy(row['config']);job_id=str(uuid.uuid4());version=config['published_version']+1
+        snapshot={'flow':approved(flow),'name':row['name'],'base_status':row['status'],
+                  'base_version':config['published_version'],'step_id':step_id,'enable_ids':enable_ids}
+        job=conn.execute("""INSERT INTO crm_automation_publish_jobs(id,automation_id,revision,publication_version,snapshot,requested_by)
+          VALUES(%s,%s,%s,%s,%s::jsonb,%s) RETURNING *""",
+          (job_id,identity,revision,version,json.dumps(snapshot),str(user.get('id') or 'operator'))).fetchone()
+        config['publication']={'job_id':job_id,'revision':revision,'version':version,'step_id':step_id,'enable_ids':enable_ids,'state':'PUBLISHING','requested_at':now().isoformat()}
+        if step_id:config.setdefault('email_publications',{})[step_id]=deepcopy(config['publication'])
+        conn.execute('UPDATE crm_automations SET config=%s::jsonb,updated_at=now() WHERE id=%s',(json.dumps(config),identity))
+        return job
+
+
+def prepare(store,identity,flow,version,name,env=None,*,step_id=None):
+    from crm_checkout_migration import migrate_flow
+    from crm_campaign_sections import with_email_defaults
+    from crm_campaign_send import production_checks,validate_tracking
+    from crm_email_size import validate_rendered_email
+    from crm_abandoned_checkout import publication_document
+    from crm_automation_capabilities import require as require_trigger
+    flow=validate(migrate_flow(flow));cfg=store.render_settings(env)
+    if flow['trigger']!='abandoned':
+        from crm_automation_readiness import require_ready
+        require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},env)
+    require_trigger(store,flow['trigger']);bundles=[];steps=[]
+    for index,step in enumerate(flow['emails']):
+        if step_id is not None and step['step_id']!=step_id:continue
+        if not step.get('enabled',True):continue
+        doc=with_email_defaults(production_document(step['document']),cfg)
+        validation_doc=publication_document(doc,flow['trigger'])
+        if flow['trigger']!='abandoned':
+            # Offline authoring validation only. Persist the untouched bindings;
+            # delivery resolves verified recipient artwork and checks final size.
+            from crm_collector_images import render as render_artwork,sample_facts
+            validation_doc=render_artwork(validation_doc,sample_facts(validation_doc))
+        template_id=str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))
+        email_size=validate_rendered_email(validate_tracking(validation_doc,cfg,template_id))
+        failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True,email_size=email_size).items() if not v]
+        if failures:raise ValueError('Email '+str(index+1)+' blocked: '+'; '.join(failures))
+        content={'format':'automation_delivery_v1','document':doc,'render_settings':cfg,
+                 'automation_id':str(identity),'automation_version':version,'step_id':step['step_id'],
+                 'trigger':flow['trigger'],'rules':flow['rules']}
+        if flow.get('lifecycle_version'):content['lifecycle_version']=1
+        if flow.get('review_request'):
+            from reviews_submission import MARKER
+            if MARKER not in json.dumps(doc):raise ValueError('Add the review request link before publishing.')
+            content['review_request']=deepcopy(flow['review_request'])
+        bundles.append((template_id,name+' · Email '+str(index+1),content))
+        steps.append({'type':'send','step_id':step['step_id'],'delay_seconds':step['delay_seconds'],
+                      'template_id':template_id,'template_version':version,'automation_version':version,
+                      'trigger':flow['trigger'],'rules':flow['rules'],'name':step.get('name') or 'Email '+str(index+1),
+                      'inactive_days':flow.get('inactive_days',180),'exit_on_purchase':flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back'))})
+        if flow.get('lifecycle_version'):
+            steps[-1].update(lifecycle_version=1,anchor=step['anchor'])
+    return flow,bundles,steps
+
+
+def commit(store,conn,row,flow,bundles,steps,version,publication=None):
+    config=deepcopy(row['config']);identity=row['id']
+    # Two statements for 1..N emails, with the same transaction and immutable
+    # version constraint. No per-email network round trips or partial commits.
+    payload=json.dumps([{'id':i,'name':n,'content':c} for i,n,c in bundles])
+    conn.execute("""INSERT INTO crm_templates(id,template_key,name,kind,version,content)
+      SELECT b.id,'automation-email:'||b.id::text,b.name,'Automation',%s,b.content
+      FROM jsonb_to_recordset(%s::jsonb) AS b(id uuid,name text,content jsonb)
+      ON CONFLICT(id) DO UPDATE SET version=excluded.version,
+      content=excluded.content,updated_at=now()""",(version,payload))
+    conn.execute("""INSERT INTO crm_template_versions(template_id,version,content)
+      SELECT b.id,%s,b.content FROM jsonb_to_recordset(%s::jsonb)
+      AS b(id uuid,name text,content jsonb)""",(version,payload))
+    config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
+    config['published']['timing_version']=flow.get('timing_version',1)
+    if flow.get('lifecycle_version'):
+        config['published'].update(lifecycle_version=1,fulfilment_fallback_days=flow.get('fulfilment_fallback_days'))
+    config['published'].update(inactive_days=flow.get('inactive_days',180),exit_on_purchase=flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back')))
+    config['published_flow']=deepcopy(flow)
+    documents={content['step_id']:content['document'] for _,_,content in bundles}
+    for step in config['published_flow']['emails']:
+        if step['step_id'] in documents:step['document']=deepcopy(documents[step['step_id']])
+    if flow.get('timing_version')!=2:config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
+    individual=bool(publication and publication.get('step_id'))
+    target=row['status'] if individual else ('PAUSED' if row['status']=='PAUSED' else 'ACTIVE')
+    if publication:config['publication']={**publication,'state':'LIVE','completed_at':now().isoformat()}
+    if individual:config.setdefault('email_publications',{})[publication['step_id']]=deepcopy(config['publication'])
+    # Explicit inclusion updates draft and publication together, only after validation.
+    # Its revision is fenced by the worker so concurrent administrator edits win.
+    if publication and publication.get('enable_ids'):
+        if config['draft'].get('lifecycle_version'):
+            conn.execute('''INSERT INTO crm_lifecycle_revisions(automation_id,revision,definition,actor)
+              VALUES(%s,%s,%s::jsonb,%s) ON CONFLICT DO NOTHING''',
+              (identity,config['revision'],json.dumps(config['draft']),'publication:'+publication['job_id']))
+        for step in config['draft']['emails']:
+            if step['step_id'] in publication['enable_ids']:step['enabled']=True
+        config['revision']+=1
+    # Preserve all other editable draft content.
+    activation='activated_at' if individual else 'COALESCE(activated_at,now())'
+    return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps=%s::jsonb,trigger_type=%s,status=%s,activated_at="+activation+",updated_at=now() WHERE id=%s RETURNING *",
+                        (json.dumps(config),json.dumps(steps),flow['trigger'],target,identity)).fetchone()
+
+
+def publish_direct(store,user,identity,revision,env=None):
+    require(user,'crm_automations_manage');row=store.flow(identity)
+    flow=approved(preflight(row,revision));version=row['config']['published_version']+1
+    if not has_changes(store,row,flow):return row
+    prepared=prepare(store,identity,flow,version,row['name'],env)
+    with store.db() as conn:
+        fresh=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+        preflight(fresh,revision)
+        if not has_changes(store,fresh,flow,conn):return fresh
+        if fresh['config'].get('publication',{}).get('state')=='PUBLISHING':raise ValueError('A publication is already in progress.')
+        if fresh['config']['published_version']!=version-1:raise ValueError('A newer publication exists.')
+        if flow['trigger']!='abandoned':
+            from crm_automation_readiness import require_ready
+            require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},env,conn=conn)
+        result=commit(store,conn,fresh,*prepared,version)
+    from crm_thumbnail_cache import prewarm
+    prewarm(prepared[1],version,store)
+    return result
+
+
+def safe_reason(exc):
+    # Persist only allowlisted operator messages; never raw provider/DB errors.
+    text=str(exc).lower()
+    if text.startswith('automation publication not ready:'):return str(exc)
+    if 'discount_not_selected:' in text:return 'Select a Shopify discount for every email using discount variables, or remove those variables, then publish again.'
+    if 'discount_variable_in_url:' in text:return 'Use discount variables in offer text, not links. The recovery button applies the selected code.'
+    if 'discount_' in text:return 'Review the selected Shopify discount and its offer text before publishing. The previous live version remains active.'
+    if 'subject' in text:return 'Add a truthful subject before publishing.'
+    if 'shopify' in text and 'trigger' in text:return 'Shopify trigger is currently unavailable. Retry after readiness is restored.'
+    if 'tracking' in text:return 'Email tracking validation failed. Review the email before publishing.'
+    if '95' in text or 'size' in text:return 'Email exceeds the size limit. Reduce its content before publishing.'
+    if any(k in text for k in ('html','checkout','styled','selector','css','unresolved')):return 'Email HTML or checkout styling needs attention before this flow can go live.'
+    if 'unsubscribe' in text or 'footer' in text:return 'Add the required unsubscribe footer before publishing.'
+    if 'newer' in text or 'changed' in text:return 'Automation changed during publication. Review the saved draft and retry.'
+    if isinstance(exc,StoreUnavailable):return 'Publication storage is temporarily unavailable. Retry publishing.'
+    return 'Publication validation failed. Review the email content and delivery settings before retrying.'
+
+
+def claim(store,owner):
+    with store.db() as conn:
+        job=conn.execute("""SELECT * FROM crm_automation_publish_jobs WHERE
+          (state='QUEUED' AND available_at<=now()) OR (state='RUNNING' AND lease_until<now())
+          ORDER BY requested_at FOR UPDATE SKIP LOCKED LIMIT 1""").fetchone()
+        if not job:return None
+        if (now()-date(job['requested_at'])).total_seconds()>=PUBLICATION_SECONDS:
+            fail(conn,job,'Publication timed out. Check the CRM worker and retry publishing.');return None
+        if job['attempts']>=MAX_ATTEMPTS:
+            fail(conn,job,'Publication was interrupted repeatedly. Retry publishing.');return None
+        return conn.execute("""UPDATE crm_automation_publish_jobs SET state='RUNNING',owner=%s,
+          attempts=attempts+1,lease_until=now()+interval '5 minutes',started_at=COALESCE(started_at,now()) WHERE id=%s RETURNING *""",(owner,job['id'])).fetchone()
+
+
+def fail(conn,job,reason):
+    conn.execute("UPDATE crm_automation_publish_jobs SET state='FAILED',error=%s,completed_at=now(),lease_until=NULL WHERE id=%s",(reason,job['id']))
+    row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(job['automation_id'],)).fetchone()
+    if row and row['config'].get('publication',{}).get('job_id')==str(job['id']):
+        config=deepcopy(row['config']);config['publication'].update(state='FAILED',error=reason,completed_at=now().isoformat())
+        if job['snapshot'].get('step_id'):
+            config.setdefault('email_publications',{})[job['snapshot']['step_id']]=deepcopy(config['publication'])
+        conn.execute('UPDATE crm_automations SET config=%s::jsonb,updated_at=now() WHERE id=%s',(json.dumps(config),row['id']))
+
+
+def tick(store,owner,env=None):
+    started=perf_counter()
+    job=claim(store,owner)
+    if not job:return False
+    try:
+        preparing=perf_counter()
+        frozen=job['snapshot'];selected=frozen.get('step_id')
+        prepared=prepare(store,job['automation_id'],frozen['flow'],job['publication_version'],frozen['name'],env,**({'step_id':selected} if selected else {}))
+        prepared_at=perf_counter()
+        with store.db() as conn:
+            locked=conn.execute('SELECT * FROM crm_automation_publish_jobs WHERE id=%s FOR UPDATE',(job['id'],)).fetchone()
+            if locked['state']!='RUNNING' or locked['owner']!=owner or locked['attempts']!=job['attempts']:return True
+            if (now()-date(locked['requested_at'])).total_seconds()>=PUBLICATION_SECONDS:
+                fail(conn,locked,'Publication timed out. Check the CRM worker and retry publishing.');return True
+            row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(job['automation_id'],)).fetchone()
+            if not row or status(row)=='ARCHIVED' or row['config'].get('deleted_at') or row['status']!=frozen['base_status']:
+                raise ValueError('Automation changed during publication.')
+            if row['config']['published_version']!=frozen['base_version'] or row['config'].get('publication',{}).get('job_id')!=str(job['id']):
+                raise ValueError('A newer publication exists.')
+            if frozen.get('enable_ids') and row['config']['revision']!=job['revision']:
+                raise ValueError('Automation changed during publication.')
+            if frozen['flow']['trigger']!='abandoned':
+                from crm_automation_readiness import require_ready
+                require_ready(store,{'trigger_type':frozen['flow']['trigger'],'config':{'draft':frozen['flow']}},env,conn=conn)
+            if selected:
+                # Retain other emails' exact immutable template references.
+                merged={s['step_id']:s for s in row['steps'] if s['step_id']!=selected}
+                merged.update({s['step_id']:s for s in prepared[2]})
+                prepared=(prepared[0],prepared[1],[merged[s['step_id']] for s in prepared[0]['emails'] if s['step_id'] in merged])
+            commit(store,conn,row,*prepared,job['publication_version'],row['config']['publication'])
+            conn.execute("UPDATE crm_automation_publish_jobs SET state='SUCCEEDED',completed_at=now(),lease_until=NULL,error=NULL WHERE id=%s",(job['id'],))
+        from crm_thumbnail_cache import prewarm
+        prewarm(prepared[1],job['publication_version'],store)
+        LOG.info('automation_publication job_id=%s revision=%s state=SUCCEEDED claim_ms=%.1f validate_ms=%.1f commit_ms=%.1f',
+                 job['id'],job['revision'],(preparing-started)*1000,(prepared_at-preparing)*1000,(perf_counter()-prepared_at)*1000)
+    except Exception as exc:
+        with store.db() as conn:
+            locked=conn.execute('SELECT * FROM crm_automation_publish_jobs WHERE id=%s FOR UPDATE',(job['id'],)).fetchone()
+            if locked['state']!='RUNNING' or locked['owner']!=owner or locked['attempts']!=job['attempts']:return True
+            retry=isinstance(exc,StoreUnavailable) and job['attempts']<MAX_ATTEMPTS
+            if retry:
+                conn.execute("UPDATE crm_automation_publish_jobs SET state='QUEUED',available_at=now()+interval '30 seconds',lease_until=NULL WHERE id=%s",(job['id'],))
+            else:fail(conn,job,safe_reason(exc))
+        LOG.warning('automation_publication job_id=%s revision=%s state=%s error_class=%s',job['id'],job['revision'],'QUEUED' if retry else 'FAILED',type(exc).__name__)
+    return True

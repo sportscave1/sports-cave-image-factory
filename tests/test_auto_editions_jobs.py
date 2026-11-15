@@ -1,0 +1,285 @@
+"""Real disposable PostgreSQL execution via PGlite; never production data."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import threading
+import http.client
+from contextvars import ContextVar
+from datetime import datetime
+
+import pytest
+import auto_editions as ae
+from auto_editions_jobs import Jobs
+
+
+@pytest.fixture
+def database():
+    module=os.environ.get('AUTO_EDITIONS_TEST_PGLITE')
+    if not module or not Path(module).is_file():
+        pytest.skip('Set AUTO_EDITIONS_TEST_PGLITE to the installed PGlite dist/index.js')
+    child=subprocess.Popen(['node',str(Path(__file__).with_name('auto_editions_postgres_server.mjs'))],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+    transport=None
+    try:
+        port=child.stdout.readline().strip()
+        assert port.isdigit(), child.stderr.read()
+        lock=threading.RLock()
+        transactions=threading.Condition()
+        scope=ContextVar('synthetic-pglite-transaction',default=None)
+        owner_state=dict(owner=None,depth=0,serial=0)
+        # Repeated isolated suites must not exhaust Windows ephemeral sockets.
+        transport=http.client.HTTPConnection('127.0.0.1',int(port),timeout=10)
+        class Cursor:
+            rows=[]
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def execute(self,sql,args=()):
+                parts=sql.split('%s')
+                sql=parts[0]+''.join('$'+str(i)+p for i,p in enumerate(parts[1:],1))
+                body=json.dumps(dict(sql=sql,args=args),default=lambda v:v.isoformat() if isinstance(v,datetime) else str(v)).encode()
+                with transactions:
+                    while owner_state['owner'] is not None and owner_state['owner'] is not scope.get():transactions.wait()
+                    with lock:
+                        transport.request('POST','/',body=body,headers={'Content-Type':'application/json'})
+                        response=transport.getresponse();result=json.loads(response.read())
+                        if response.status>=400:raise RuntimeError(result['error'])
+                        self.rows=result['rows']
+                        # Match psycopg's top-level timestamp values; JSONB stays JSON.
+                        dates={f['name'] for f in result.get('fields',[]) if f.get('dataTypeID') in (1114,1184)}
+                        for row in self.rows:
+                            for key in dates:
+                                if isinstance(row.get(key),str):row[key]=datetime.fromisoformat(row[key].replace('Z','+00:00'))
+            def fetchone(self):return self.rows[0] if self.rows else None
+            def fetchall(self):return self.rows
+        class Connection:
+            def __enter__(self):
+                # AnyIO propagates this context into its worker thread. Nested
+                # calls may borrow the single synthetic connection without
+                # deadlocking the async caller; unrelated transactions wait.
+                self.owner=scope.get() or object();self.scope_token=scope.set(self.owner)
+                with transactions:
+                    while owner_state['owner'] not in (None,self.owner):transactions.wait()
+                    self.nested=owner_state['depth']>0
+                    owner_state.update(owner=self.owner,depth=owner_state['depth']+1,serial=owner_state['serial']+1)
+                    self.savepoint='fixture_'+str(owner_state['serial'])
+                try:Cursor().execute('SAVEPOINT '+self.savepoint if self.nested else 'BEGIN')
+                except BaseException:self.release();raise
+                return self
+            def release(self):
+                with transactions:
+                    owner_state['depth']-=1
+                    if not owner_state['depth']:owner_state['owner']=None
+                    transactions.notify_all()
+                scope.reset(self.scope_token)
+            def __exit__(self,typ,*args):
+                try:
+                    if self.nested:
+                        if typ:Cursor().execute('ROLLBACK TO SAVEPOINT '+self.savepoint)
+                        Cursor().execute('RELEASE SAVEPOINT '+self.savepoint)
+                    else:Cursor().execute('ROLLBACK' if typ else 'COMMIT')
+                finally:self.release()
+            def cursor(self):return Cursor()
+        Connection.test_url='http://127.0.0.1:'+port
+        yield Jobs(Connection),Cursor()
+    finally:
+        if transport:transport.close()
+        child.terminate();child.communicate(timeout=10)
+
+
+def job():
+    identity=dict(allocation=42,number=5)
+    return dict(id=ae.fingerprint(identity),identity=identity)
+
+
+def test_failure_details_explains_size_error_and_retry_budget():
+    from auto_editions_jobs import failure_details
+    details=failure_details(dict(status='Blocked',error_code='output_too_large',attempts=1))
+    assert 'size limit' in details['error_message'] and details['retryable']
+    details=failure_details(dict(status='Blocked',error_code='output_too_large',attempts=3))
+    assert 'Retry limit reached' in details['error_message'] and not details['retryable']
+    assert failure_details(dict(status='Ready'))=={}
+
+
+def test_synthetic_connection_nested_async_worker_rollback_does_not_deadlock(database):
+    import asyncio
+    from starlette.concurrency import run_in_threadpool
+    jobs,sql=database;sql.execute('CREATE TABLE fixture_nested(id int)')
+    def nested():
+        with jobs.connect() as conn,conn.cursor() as cur:
+            cur.execute('INSERT INTO fixture_nested VALUES(2)')
+            raise ValueError('Nested rollback fixture')
+    async def check():
+        with jobs.connect() as conn,conn.cursor() as cur:
+            cur.execute('INSERT INTO fixture_nested VALUES(1)')
+            with pytest.raises(ValueError,match='Nested rollback'):await run_in_threadpool(nested)
+            cur.execute('SELECT sum(id) AS n FROM fixture_nested');assert cur.fetchone()['n']==1
+    asyncio.run(check());sql.execute('SELECT sum(id) AS n FROM fixture_nested');assert sql.fetchone()['n']==1
+
+
+def test_idempotent_queue_reclaims_expired_lease_and_rejects_old_worker(database):
+    jobs,sql=database;j=job()
+    jobs.enqueue(j,'admin');jobs.enqueue(j,'va')
+    sql.execute('SELECT count(*) AS n FROM auto_edition_jobs')
+    assert sql.fetchone()['n']==1
+    first=jobs.claim();assert first['attempts']==1 and jobs.claim() is None
+    sql.execute("UPDATE auto_edition_jobs SET lease_until=now()-interval '1 second'")
+    second=jobs.claim();assert second['attempts']==2
+    with pytest.raises(ValueError,match='lease'):jobs.finish(j['id'],first['lease_token'],result={'ok':True})
+    jobs.finish(j['id'],second['lease_token'],result={'ok':True})
+    assert jobs.read(j['id'])['status']=='Ready' and jobs.claim() is None
+
+
+def test_last_crashed_attempt_does_not_leave_permanent_spinner(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin')
+    for n in (1,2,3):
+        assert jobs.claim()['attempts']==n
+        sql.execute("UPDATE auto_edition_jobs SET lease_until=now()-interval '1 second'")
+    assert jobs.claim() is None
+    assert jobs.read(j['id'])['status']=='Blocked'
+    with pytest.raises(ValueError,match='cannot be retried'):jobs.retry(j['id'],'admin')
+    sql.execute("SELECT count(*) AS n FROM auto_edition_job_audit WHERE event='attempts_exhausted'")
+    assert sql.fetchone()['n']==1
+
+
+def test_retry_is_bounded_and_browser_roles_cannot_read_jobs(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin')
+    first=jobs.claim();jobs.finish(j['id'],first['lease_token'],error_code='worker_unavailable')
+    jobs.retry(j['id'],'va');assert jobs.claim()['attempts']==2
+    for role in ('anon','authenticated'):
+        sql.execute('SET ROLE '+role)
+        try:
+            with pytest.raises(RuntimeError,match='permission denied'):
+                sql.execute('SELECT * FROM auto_edition_jobs')
+        finally:sql.execute('RESET ROLE')
+
+
+@pytest.mark.parametrize('code',['source_changed','asset_invalid','preparation_blocked','output_too_large'])
+def test_explicit_retry_reuses_identity_preserves_budget_and_duplicate_clicks(database,code):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin')
+    for attempt in (1,2):
+        claim=jobs.claim();assert claim['attempts']==attempt
+        jobs.finish(j['id'],claim['lease_token'],error_code=code)
+        assert jobs.retry(j['id'],'admin')['status']=='Queued'
+        assert jobs.retry(j['id'],'admin')['status']=='Queued'
+    claim=jobs.claim();assert claim['attempts']==3
+    jobs.finish(j['id'],claim['lease_token'],error_code=code)
+    with pytest.raises(ValueError,match='Retry limit reached'):jobs.retry(j['id'],'admin')
+    assert jobs.read(j['id'])['payload']==j
+    sql.execute("SELECT count(*) AS n FROM auto_edition_job_audit WHERE event='retry'")
+    assert sql.fetchone()['n']==2
+
+
+def test_retry_ready_job_never_discards_or_regenerates_result(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin');claim=jobs.claim()
+    jobs.finish(j['id'],claim['lease_token'],result={'exact':'archived-output'})
+    assert jobs.retry(j['id'],'admin')['status']=='Ready'
+    assert jobs.read(j['id'])['result']=={'exact':'archived-output'}
+    assert jobs.claim() is None
+
+
+def test_expired_output_is_not_downloadable_and_regenerates_only_on_request(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin');claim=jobs.claim()
+    jobs.finish(j['id'],claim['lease_token'],result={'output':{'file_id':'id:generated'}})
+    sql.execute("UPDATE auto_edition_jobs SET updated_at=now()-interval '25 hours'")
+    assert len(jobs.expired())==1
+    assert jobs.read(j['id'])['status']=='Blocked' and jobs.claim() is None
+    assert jobs.enqueue(j,'va')['status']=='Blocked' # Must finish remote cleanup first.
+    jobs.forget_expired_output(j['id'])
+    assert jobs.enqueue(j,'va')['status']=='Queued'
+    assert jobs.claim()['attempts']==1
+
+
+def test_preparations_are_additive_and_approval_checks_expected_layout(database,tmp_path):
+    from auto_editions_store import Preparations
+    from test_auto_editions import package
+    jobs,sql=database;registry=Preparations(jobs.connect)
+    manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    eligibility_tables(sql,manifest)
+    unit=dict(shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
+    proofs=[dict(preparation_hash=digest,pixel_exact=True),dict(preparation_hash=digest,outside_number_exact=True)]
+    registry.save(manifest,proofs,{},'admin')
+    registry.approve(digest,unit,'admin')
+    assert registry.for_unit(unit)['manifest']==manifest
+    with pytest.raises(ValueError,match='changed'):registry.approve(digest,unit,'admin',expected='wrong')
+    assert registry.index()=={(unit['shopify_product_gid'],'v1'):None}
+
+
+def test_scoped_layout_does_not_enable_other_allocations(database,tmp_path):
+    from auto_editions_store import Preparations
+    from test_auto_editions import package
+    jobs,sql=database;registry=Preparations(jobs.connect)
+    manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    eligibility_tables(sql,manifest)
+    unit=dict(id=42,shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
+    registry.save(manifest,[dict(preparation_hash=digest,pixel_exact=True,outside_number_exact=True)],{},'admin')
+    registry.approve(digest,unit,'admin',allocation_ids=[42,43])
+    assert registry.for_unit(unit)['manifest']==manifest
+    assert registry.index()[(unit['shopify_product_gid'],'v1')]==[42,43]
+    with pytest.raises(ValueError,match='outside'):registry.for_unit({**unit,'id':44})
+
+
+
+def test_download_retention_prevents_expiry_and_keeps_exact_output(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin');claim=jobs.claim()
+    result={'output':{'file_id':'id:exact','sha256':'a'*64}}
+    jobs.finish(j['id'],claim['lease_token'],result=result)
+    jobs.retain(j['id'],'va')
+    sql.execute("UPDATE auto_edition_jobs SET updated_at=now()-interval '100 days'")
+    assert jobs.expired()==[]
+    assert jobs.read(j['id'])['result']['output']==result['output']
+    assert jobs.read(j['id'])['result']['retained'] is True
+
+
+def test_new_master_does_not_advertise_previous_output(database):
+    jobs,sql=database;j=job()
+    j['identity'].update(allocation_id=42,source={'product_gid':'gid://shopify/Product/123'},variant_id='v1')
+    j['preparation_hash']='a'*64;j['id']=ae.fingerprint(j['identity'])
+    jobs.enqueue(j,'admin');claimed=jobs.claim()
+    jobs.finish(j['id'],claimed['lease_token'],result={'output':{'file_id':'id:old'},'retained':True})
+    assert jobs.summaries(['42'])['42']['id']==j['id']
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES (%s,'{}','[]','{}','admin')",('b'*64,))
+    sql.execute("INSERT INTO auto_edition_layouts(product_gid,variant_id,preparation_hash,approval) VALUES (%s,'v1',%s,'{}')",('gid://shopify/Product/123','b'*64))
+    assert jobs.summaries(['42'])=={}
+    assert jobs.read(j['id'])['result']['output']['file_id']=='id:old'
+
+
+def test_product_test_layout_preserves_variant_override_and_history(database,tmp_path):
+    from auto_editions_store import Preparations
+    from test_auto_editions import package
+    jobs,sql=database;registry=Preparations(jobs.connect)
+    manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    eligibility_tables(sql,manifest)
+    unit=dict(id=42,shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
+    registry.save(manifest,[dict(preparation_hash=digest,pixel_exact=True,outside_number_exact=True)],{},'admin')
+    registry.approve(digest,{**unit,'shopify_variant_id':'*'},'admin')
+    assert registry.for_unit(unit)['variant_ids']==['v1']
+    registry.approve(digest,unit,'admin',allocation_ids=[42])
+    with pytest.raises(ValueError,match='outside'):registry.for_unit({**unit,'id':43})
+    assert registry.for_unit({**unit,'id':43,'shopify_variant_id':'v2'})['manifest']==manifest
+    j=job();j['identity'].update(allocation_id=43,source=manifest['source'],variant_id='v2');j['preparation_hash']=digest;j['id']=ae.fingerprint(j['identity'])
+    jobs.enqueue(j,'admin');claimed=jobs.claim();jobs.finish(j['id'],claimed['lease_token'],result={'output':{'file_id':'original'}})
+    assert jobs.summaries(['43'])['43']['id']==j['id']
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES (%s,'{}','[]','{}','admin')",('b'*64,))
+    sql.execute("UPDATE auto_edition_layouts SET preparation_hash=%s WHERE variant_id='*'",('b'*64,))
+    assert jobs.summaries(['43'])=={}
+    assert jobs.read(j['id'])['result']['output']['file_id']=='original'
+
+
+def test_bound_read_observes_current_allocation_without_mapping_queries(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin')
+    sql.execute('CREATE TABLE edition_orders (id bigint PRIMARY KEY, edition_number integer, allocation_valid boolean)')
+    sql.execute('INSERT INTO edition_orders VALUES (42,5,true),(99,6,true)')
+    saved,unit=jobs.read_bound(j['id'],42)
+    assert saved['id']==j['id'] and unit=={'id':42,'edition_number':5,'allocation_valid':True}
+    sql.execute('UPDATE edition_orders SET allocation_valid=false WHERE id=42')
+    assert jobs.read_bound(j['id'],42)[1]['allocation_valid'] is False
+    assert jobs.read_bound(j['id'],99)[1]['id']==99  # API must reject mismatched identity.
+    assert jobs.read_bound(j['id'],100)==(None,None)
+
+
+def eligibility_tables(sql,manifest):
+    sql.execute('CREATE TABLE product_psd_mappings(shopify_product_gid text PRIMARY KEY,dropbox_file_id text)')
+    sql.execute("CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text,reason text DEFAULT '',lease_until timestamptz,updated_at timestamptz)")
+    sql.execute('INSERT INTO product_psd_mappings VALUES(%s,%s)',(manifest['source']['product_gid'],manifest['source']['file_id']))

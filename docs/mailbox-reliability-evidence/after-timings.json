@@ -1,0 +1,55 @@
+{
+  "label": "after",
+  "method": "50 fabricated provider/controller iterations; no external network or browser timing; cold setup includes mocked settings and initial 50-row load",
+  "samples": {
+    "cold_mailbox": {
+      "n": 50,
+      "median_ms": 40.696,
+      "p95_ms": 42.427
+    },
+    "warm_mailbox": {
+      "n": 50,
+      "median_ms": 0.332,
+      "p95_ms": 0.355
+    },
+    "cold_conversation": {
+      "n": 50,
+      "median_ms": 0.601,
+      "p95_ms": 0.662
+    },
+    "warm_conversation": {
+      "n": 50,
+      "median_ms": 0.047,
+      "p95_ms": 0.055
+    },
+    "manual_refresh": {
+      "n": 50,
+      "median_ms": 1.995,
+      "p95_ms": 2.151
+    }
+  },
+  "provider_calls_per_iteration": {
+    "headers": 2,
+    "body": 1,
+    "attachment": 0
+  },
+  "call_counts_consistent": true,
+  "synthetic_send": {
+    "click_to_queued_ack": {
+      "n": 50,
+      "median_ms": 14.681,
+      "p95_ms": 43.111
+    },
+    "click_to_provider_acceptance": {
+      "n": 50,
+      "median_ms": 37.129,
+      "p95_ms": 104.433
+    },
+    "click_to_sent_visibility": {
+      "n": 50,
+      "median_ms": 76.508,
+      "p95_ms": 186.456
+    }
+  },
+  "send_method": "Disposable SQL and fake SMTP/IMAP with two fixed 2 ms delays; no real email or delivery test"
+}

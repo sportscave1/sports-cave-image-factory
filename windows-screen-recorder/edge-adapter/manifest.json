@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Sports Cave recorder accessibility adapter (local)",
+  "version": "0.3.5",
+  "permissions": [
+    "downloads",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "downloads.js"
+  },
+  "description": "Scoped Sports Cave browser identity and local download receipts. No field-content capture.",
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*",
+        "https://sports-cave-image-factory.onrender.com/*"
+      ],
+      "js": [
+        "accessibility.js",
+        "prepared-context.js",
+        "browser-identity.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["browser-identity.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

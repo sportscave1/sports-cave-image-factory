@@ -1,0 +1,234 @@
+{
+  "base_revision": "aa40acf66c7dcf7db7159fb1485f5bdc3265bbeb",
+  "integration_unit_results": [
+    {
+      "suite": "crm_sql",
+      "tests": 395,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "meta_review_all",
+      "tests": 235,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_ads_creative_refresh",
+      "tests": 61,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_ads_posting_handoff",
+      "tests": 15,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_analytics_contracts",
+      "tests": 8,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_crm_email_v5",
+      "tests": 2,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_crm_flow_settings_removed",
+      "tests": 3,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_crm_thumbnail_cache",
+      "tests": 11,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_design_tracking",
+      "tests": 21,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_edition_ops_allocation_integrity",
+      "tests": 6,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_edition_ops_catalogue",
+      "tests": 13,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_edition_ops_complete_recovery",
+      "tests": 12,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_edition_ops_new_product_pull",
+      "tests": 17,
+      "result": "FAILED (failures=1)",
+      "failures": [
+        "test_normal_page_load_makes_no_shopify_call_and_editor_has_complete_catalogue (tests.test_edition_ops_new_product_pull.EditionOpsNewProductPullTests.test_normal_page_load_makes_no_shopify_call_and_editor_has_complete_catalogue)"
+      ]
+    },
+    {
+      "suite": "test_edition_ops_stability",
+      "tests": 10,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_edition_ops_table_editing",
+      "tests": 12,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_meta_carousel_posting",
+      "tests": 26,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_meta_posting",
+      "tests": 131,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_meta_posting_jobs",
+      "tests": 7,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_meta_posting_progress",
+      "tests": 1,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_meta_posting_repair",
+      "tests": 14,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_orders_bounded_reader",
+      "tests": 7,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_orders_compact",
+      "tests": 3,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_orders_loading_ui",
+      "tests": 137,
+      "result": "FAILED (failures=7)",
+      "failures": [
+        "test_csv_import_action_is_clickable_and_readable (tests.test_orders_loading_ui.EditionOpsUiTests.test_csv_import_action_is_clickable_and_readable)",
+        "test_edition_ops_normal_view_shows_supabase_source_without_old_help_copy (tests.test_orders_loading_ui.EditionOpsUiTests.test_edition_ops_normal_view_shows_supabase_source_without_old_help_copy)",
+        "test_edition_ops_save_changes_updates_supabase_and_shopify_once (tests.test_orders_loading_ui.EditionOpsUiTests.test_edition_ops_save_changes_updates_supabase_and_shopify_once)",
+        "test_edition_ops_uses_one_editor_and_no_old_data_sources (tests.test_orders_loading_ui.EditionOpsUiTests.test_edition_ops_uses_one_editor_and_no_old_data_sources)",
+        "test_editor_key_remains_stable (tests.test_orders_loading_ui.EditionOpsUiTests.test_editor_key_remains_stable)",
+        "test_mockups_prompt_cards_use_compact_modal_prompt_actions (tests.test_orders_loading_ui.EditionOpsUiTests.test_mockups_prompt_cards_use_compact_modal_prompt_actions)",
+        "test_product_uploads_shows_only_selected_embedded_product_prompt (tests.test_orders_loading_ui.EditionOpsUiTests.test_product_uploads_shows_only_selected_embedded_product_prompt)"
+      ]
+    },
+    {
+      "suite": "test_orders_prodigi_loading_repair",
+      "tests": 7,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_orders_row_deduplication",
+      "tests": 11,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_posting_import_csv",
+      "tests": 46,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_reporting_page",
+      "tests": 6,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_social_media_page",
+      "tests": 7,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "test_table_design_v3",
+      "tests": 5,
+      "result": "OK",
+      "failures": []
+    },
+    {
+      "suite": "thumbnail_store_sql",
+      "tests": 4,
+      "result": "OK",
+      "failures": []
+    }
+  ],
+  "crm_baseline": {
+    "default_runtime": {
+      "tests": 2,
+      "failures": 2
+    },
+    "installed_chrome": {
+      "tests": 2,
+      "failures": 1
+    },
+    "existing_safety_fixture": {
+      "tests": 395,
+      "failures": 0
+    }
+  },
+  "contract": {
+    "native_calls": 148,
+    "modules": 28,
+    "full_logic_ast_equal_modules": 26,
+    "custom_component_js_unchanged": 4
+  },
+  "exact_package_verification": "Required separately: manifest must contain verified status and receipt before publishing.",
+  "baseline_evidence_revision": "3e3c6df8150bbb5648dc6eb94f123fa82d742f34",
+  "browser_integration": {
+    "table_chrome_edge": "passed",
+    "meta_chrome_edge": "passed",
+    "crm_checkout_operations_live": "passed",
+    "production_services_contacted": false
+  },
+  "navigation_current_main": {
+    "tests": 27,
+    "failures": 0
+  },
+  "current_main_creative_refresh": {
+    "tests": 61,
+    "failures": [
+      "test_ads_disclosure_uses_shared_toggle_and_submenu_layout_contract (tests.test_ads_creative_refresh.CreativeRefreshNavigationTests.test_ads_disclosure_uses_shared_toggle_and_submenu_layout_contract)"
+    ],
+    "baseline_and_exact_package_signature_equal": true
+  }
+}

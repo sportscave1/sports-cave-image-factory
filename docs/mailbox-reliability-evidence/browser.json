@@ -1,0 +1,11 @@
+{
+  "cached_mail_usable_during_failure": true,
+  "actionable_tcp_diagnosis": true,
+  "truthful_unknown_send": true,
+  "reply_source_preserved": true,
+  "lazy_body_reads": 2,
+  "automatic_body_reads": 1,
+  "attachment_reads": 0,
+  "remote_requests": [],
+  "errors": []
+}

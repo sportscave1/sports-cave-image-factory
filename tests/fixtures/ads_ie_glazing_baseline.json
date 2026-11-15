@@ -1,0 +1,146 @@
+[
+  {
+    "args": {
+      "product_name": "Jordan x Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "cd9e22941e9f0db65f460a9eddfc3da08620b184cfb268d23c854b0399650a31",
+    "expected_prompt_sha256": "65062fa3e3e25ed64f87a516a10135a41fcaf141a5847ee4b48a75d00f2f70ed",
+    "expected_standalone_sha256": [
+      "e1bee208a6b1d4ac3e70f7e10fbe49c72df0e95a7a3600bdc1e565041b3a8319",
+      "711c0aa1a5fb781a6d6401033f57d092230eeb5f0c85bcdf4b0181bba6fba4b4",
+      "96b600520266203970da64dbf1fcf54918c2cb0261e8fd51867cea543a048f5b"
+    ],
+    "unchanged_visuals_sha256": "68eb912b7d386902dfb658d11e22ec89285595e1fe931054e78b1c4891f3359d"
+  },
+  {
+    "args": {
+      "product_name": "Jordan x Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "88d006769b18a0bdf5df5980609137e9afd6c40b363c68c3507af75675cbdef8",
+    "expected_prompt_sha256": "88d006769b18a0bdf5df5980609137e9afd6c40b363c68c3507af75675cbdef8",
+    "expected_standalone_sha256": [],
+    "unchanged_visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "fa421fe51e19cc5b9e590d3d68d4b5b2e7aa76cfb9f7cfdff764f6d63bfc10ea",
+    "expected_prompt_sha256": "b76175e6f6a8ced9f1b36f407b10c884d4d0095483d0daaa48960c03b9a8496a",
+    "expected_standalone_sha256": [
+      "83a1062a7ae7ee54018e9008ed0915c0f0fb43c38c4e99c7d93a92b531a2ab6f",
+      "94012cb7ab1361ea3f4d63417fc8d54529f7b5ab4a8f1d2e77bb35cf8ecfbd53",
+      "4a56adb6f7a2426f6e79dc1e4266f52267242a3f279cdcb71bda0cc31abad5b9"
+    ],
+    "unchanged_visuals_sha256": "e2838adf2dca7efe258a44378a0c5dfd9c5ac0fe562bbf3a9fed32652f6cb3be"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "01c83fa6685c3ed314b4788814929d2203d9ac66f4eabf48453165cb0eb032d9",
+    "expected_prompt_sha256": "01c83fa6685c3ed314b4788814929d2203d9ac66f4eabf48453165cb0eb032d9",
+    "expected_standalone_sha256": [],
+    "unchanged_visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "c73e07d032e81beeecd5fb9e3bebd229f4cd30023839339e3ef66645c256c6e6",
+    "expected_prompt_sha256": "c73e07d032e81beeecd5fb9e3bebd229f4cd30023839339e3ef66645c256c6e6",
+    "expected_standalone_sha256": [
+      "b69756bf77eec6323315e8c667519b479f6f8d41372711fc45ae72be515012eb",
+      "780e1824802b37724ecd1a2e3acda0f8b9b529a212b061b3658f2ba7dff65b4f",
+      "6d3f1facd53478b85efd6a39af097c08102b310a8553b84833e39728785f8667"
+    ],
+    "unchanged_visuals_sha256": "dfd4bd21cd8cc24860607dda4898abb76145ace8ff82b1949fe24de26fc561eb"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "ae69c61cf664ee70198e7990f4a074f4187fde1ef5f0b1edd420ba3a806e14b5",
+    "expected_prompt_sha256": "ae69c61cf664ee70198e7990f4a074f4187fde1ef5f0b1edd420ba3a806e14b5",
+    "expected_standalone_sha256": [],
+    "unchanged_visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Instant Experience",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "96120d35c94ad5ce01b84b95483ac0f8cb0a4b11d5702ec397b5b59e5a4871c2",
+    "expected_prompt_sha256": "96120d35c94ad5ce01b84b95483ac0f8cb0a4b11d5702ec397b5b59e5a4871c2",
+    "expected_standalone_sha256": [
+      "6da116fa5296443dd152687745099c564f275ec543381c211bd9c9f539cd8be4",
+      "deccf073bcb78b5705828fae3861a89fc657361096fd78659994f00b5173a784",
+      "5af0583081ffed18bbcfdc91737594e61477e128978acb177d3f8729b2bda571"
+    ],
+    "unchanged_visuals_sha256": "76f233f115f9a2aa44394bda379ba6f47bfd198ff6be70ac1bc1772f9386175b"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Canada",
+      "campaign_type": "Carousel",
+      "variation_token": "footer-glass-audit",
+      "product_metadata": {
+        "edition_limit": 100
+      }
+    },
+    "original_prompt_sha256": "1c8ec9a3c0444117acf2ab6e2a1d002ad0953d5171ca836a42fb27b1ea011118",
+    "expected_prompt_sha256": "1c8ec9a3c0444117acf2ab6e2a1d002ad0953d5171ca836a42fb27b1ea011118",
+    "expected_standalone_sha256": [],
+    "unchanged_visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+]

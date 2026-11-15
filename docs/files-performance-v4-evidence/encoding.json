@@ -1,0 +1,31 @@
+{
+  "environment": "synthetic Pillow flat/noise images; no provider time",
+  "samples": [
+    {
+      "fixture": "flat",
+      "small_bytes": 170,
+      "screen_bytes": 3496,
+      "prepare_ms": 183.53879998903722
+    },
+    {
+      "fixture": "noise-12",
+      "small_bytes": 224,
+      "screen_bytes": 524266,
+      "prepare_ms": 424.1877000022214
+    },
+    {
+      "fixture": "noise-32",
+      "small_bytes": 2396,
+      "screen_bytes": 840062,
+      "prepare_ms": 425.9489999967627
+    },
+    {
+      "fixture": "noise-64",
+      "small_bytes": 8136,
+      "screen_bytes": 1071006,
+      "prepare_ms": 437.24050000309944
+    }
+  ],
+  "mean_small_bytes": 2731.5,
+  "mean_screen_bytes": 609707.5
+}

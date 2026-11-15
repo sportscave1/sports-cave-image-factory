@@ -1,0 +1,274 @@
+"""Synthetic loopback-only Automations visual fixture, never production data."""
+import os
+from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import Mock
+import streamlit as st
+import requests
+if os.getenv('EMAIL_PROFILE_AUTOMATION_BASELINE')=='1':
+    import subprocess,sys,types
+    if not getattr(sys,'_email_v4_baseline',False):
+        for name in ('crm_campaign_store','crm_automation_store','crm_automation_publication','crm_email_editor_context','crm_campaign_recovery','crm_section_ui','crm_automation_toolbar','crm_campaign_page','crm_automation_ui'):
+            source=subprocess.check_output(['git','show','736cd66:'+name+'.py'],text=True,encoding='utf8')
+            module=types.ModuleType(name);module.__file__=os.path.abspath(name+'.py');sys.modules[name]=module
+            exec(compile(source,module.__file__,'exec'),module.__dict__)
+        sys._email_v4_baseline=True
+from crm_automation_store import AutomationStore
+from crm_automation_definition import email_step
+from tests.crm_db_fixture import connect
+from tests.test_crm import ADMIN
+from tests.test_crm_send_flow import LIVE,CFG
+from tests.test_crm_simple_editor import document
+
+st.set_page_config(layout='wide',page_title='Local automation fixture')
+if st.query_params.get('fixture_inline'):
+    st.session_state['fixture_inline_runs']=st.session_state.get('fixture_inline_runs',0)+1
+if st.query_params.get('fixture_empty') or st.query_params.get('fixture_existing') or st.query_params.get('fixture_uninitialised'):
+    st.html('''<style>:root{--sc-topbar-height:64px}header[data-testid="stHeader"]{display:none}
+    .fixture-topbar{position:fixed;inset:0 0 auto;height:64px;background:#fcfbf8;border-bottom:1px solid #ddd;z-index:99;padding:20px;box-sizing:border-box}
+    </style><div class="fixture-topbar">SPORTS CAVE OS · Local fixture</div>''')
+    import streamlit.components.v1 as components
+    components.html('<script>/* inert OS navigation bridge */</script>',height=0,width=0)
+os.environ.update(LIVE)
+requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionError('External network forbidden'))
+AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
+# Synthetic worker failure for publication UI regression; never imported by the app.
+import crm_automation_publication as fixture_publication
+if not hasattr(fixture_publication,'_fixture_prepare'):
+    fixture_publication._fixture_prepare=fixture_publication.prepare
+    def fixture_prepare(store,identity,flow,*args,**kwargs):
+        if any(s['document']['content']['subject']=='Fixture worker rejection' for s in flow['emails']):
+            raise ValueError('Email tracking validation failed in local fixture')
+        return fixture_publication._fixture_prepare(store,identity,flow,*args,**kwargs)
+    fixture_publication.prepare=fixture_prepare
+
+from crm_local_preview import javascript
+javascript.cache_clear()  # Hot-reload current browser assets in this test app.
+
+# Deliberate persistence faults for the reactive editor browser contract.
+# This fixture uses loopback PostgreSQL and forbids external requests above.
+if not hasattr(AutomationStore,'_fixture_original_save'):
+    AutomationStore._fixture_original_save=AutomationStore.save
+def fixture_save(self,*args,**kwargs):
+    if st.query_params.get('fixture_local_faults'):
+        import time
+        time.sleep(float(st.query_params.get('fixture_save_delay','0')))
+        if 'First draft edit' in str(args[2]):
+            from crm_store import StoreUnavailable
+            raise StoreUnavailable('Synthetic temporary save failure')
+    return self._fixture_original_save(*args,**kwargs)
+AutomationStore.save=fixture_save
+
+if os.getenv('EMAIL_V4_BACKGROUND_PUBLICATION')=='1':
+    @st.cache_resource
+    def local_publisher():
+        from tests.fixtures.email_v4_publisher import start
+        return start()
+    local_publisher()
+
+@st.cache_resource
+def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False,email_publication=False,paused=False,click_edit=False,disabled=False):
+    store=AutomationStore(connect)
+    from crm_logic import now
+    from tests.crm_publication_fixture import ready
+    ready(store)
+    identities=[]
+    for kind,name,state in (('welcome','Welcome series · local fixture','ACTIVE'),('abandoned','Abandoned checkout · local fixture','DRAFT'),('post_purchase','Collector follow-up · local fixture','PAUSED')):
+        row=store.create(ADMIN,kind,name);flow=deepcopy(row['config']['draft'])
+        flow['emails']=[email_step(document(),0 if i==0 else 86400) for i in range(steps)]
+        if kind=='abandoned':
+            from crm_abandoned_checkout import apply_template
+            for email in flow['emails']:apply_template(email['document'])
+            if legacy_preview:
+                from tests.test_crm_checkout_preview_fallback import LEGACY
+                doc=flow['emails'][0]['document'];doc['middle_sections'].pop(1)
+                doc['middle_sections'][0]['html']=LEGACY;doc['custom_html']=LEGACY
+        if click_edit and kind=='abandoned':
+            from tests.test_crm_modular_catalogue import catalogue_doc
+            from crm_middle_sections import middle_sections,commit_middle
+            for email in flow['emails']:
+                commit_middle(email['document'],middle_sections(email['document'])+[catalogue_doc()['middle_sections'][-1]])
+        row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
+        if email_publication and kind=='post_purchase':
+            from crm_automation_publication import tick
+            store.request_publish(ADMIN,row['id'],row['config']['revision'],step_id=flow['emails'][0]['step_id'])
+            from time import monotonic,sleep
+            deadline=monotonic()+10
+            row=store.flow(row['id'])
+            while row['config']['publication']['state']=='PUBLISHING' and monotonic()<deadline:
+                tick(store,'local-seed-publication',env=LIVE)
+                sleep(.01);row=store.flow(row['id'])
+            if row['status']!='ACTIVE':raise RuntimeError('Local seed publication did not complete')
+            if disabled:
+                flow=deepcopy(row['config']['draft'])
+                for email in flow['emails'][1:]:email['enabled']=False
+                row=store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+        elif state!='DRAFT' or (kind=='abandoned' and checkout_live):row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
+        if state=='PAUSED' and (not email_publication or paused):store.lifecycle(ADMIN,row['id'],'pause')
+        identities.append(str(row['id']))
+    return identities
+
+identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')),bool(st.query_params.get('fixture_email_publication')),bool(st.query_params.get('fixture_paused')),bool(st.query_params.get('fixture_click_edit')),bool(st.query_params.get('fixture_disabled')))
+@st.cache_resource
+def empty_setup(kind,run,mode='empty'):
+    from tests.test_crm_lifecycle_expansion import DatabaseTests
+    DatabaseTests.setUpClass()
+    store=AutomationStore(connect)
+    if mode=='uninitialised':
+        import uuid
+        identity=str(uuid.uuid4())
+        store.q("INSERT INTO crm_automations(id,automation_key,name,trigger_type,config,steps) VALUES(%s,%s,'Unused draft',%s,'{}','[]')",(identity,identity,kind))
+        return identity
+    return str(store.create(ADMIN,kind,empty=mode=='empty',lifecycle=mode=='empty' and kind in ('welcome','post_purchase','win_back'))['id'])
+for mode in ('empty','existing','uninitialised'):
+    if st.query_params.get('fixture_'+mode) and not st.session_state.get('fixture_selected'):
+        st.session_state['automation_selected']=empty_setup(st.query_params['fixture_'+mode],str(st.query_params.get('fixture_run','')),mode)
+        st.session_state['fixture_selected']=True
+if st.query_params.get('fixture_toolbar_live') and not st.session_state.get('fixture_selected'):
+    st.session_state['automation_selected']=identities[0];st.session_state['fixture_selected']=True
+if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
+    st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
+if st.query_params.get('fixture_email_publication') and not st.session_state.get('fixture_selected'):
+    st.session_state['automation_selected']=identities[2];st.session_state['fixture_selected']=True
+from tests.test_crm_abandoned_checkout import checkout
+shop=st.session_state.get('fixture_shop')
+if shop is None:shop=Mock();st.session_state['fixture_shop']=shop
+fixture_checkout=checkout(identity=2 if st.session_state.get('fixture_new_customer') else 1,items=2)
+if st.query_params.get('fixture_wall_preview'):
+    fixture_checkout['lineItems']['nodes'][0]['variant']={'id':'gid://shopify/ProductVariant/123',
+        'product':{'id':'gid://shopify/Product/456','status':'ACTIVE',
+                   'onlineStoreUrl':'https://www.sportscaveshop.com/products/shohei-ohtani-wall-art'}}
+if st.session_state.get('fixture_new_customer'):
+    fixture_checkout['customer']['firstName']='New'
+    fixture_checkout['lineItems']['nodes'][0]['title']='New collector product'
+shop.abandoned_preview.return_value={'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}
+shop.query.return_value={'abandonedCheckouts':{'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}}
+if st.query_params.get('fixture_discount'):
+    from tests.test_crm_discounts import DiscountShop,SEARCH
+    if 'fixture_discount_shop' not in st.session_state:
+        st.session_state['fixture_discount_shop']=DiscountShop()
+    discount_shop=st.session_state['fixture_discount_shop']
+    shop.namespace=discount_shop.namespace
+    def discount_query(query,variables,*args,**kwargs):
+        if query==SEARCH:
+            from time import sleep
+            sleep(.6)
+        return discount_shop.query(query,variables,*args,**kwargs)
+    shop.query.side_effect=discount_query
+    st.caption('Fixture discount API calls: '+str(len(discount_shop.calls)))
+shop.checkout.return_value=fixture_checkout
+if st.query_params.get('fixture_lifestyle'):
+    shop.campaign_images.return_value={'nodes':[{'url':f'https://cdn.shopify.com/s/files/lifestyle-{i}.jpg'} for i in range(1,5)],'pageInfo':{'hasNextPage':False}}
+shop.customer_batch.return_value=[fixture_checkout['customer']]
+if st.query_params.get('fixture_analytics'):
+    from tests.fixtures.crm_checkout_analytics_data import configure
+    configure(AutomationStore(connect),shop,identities[1])
+if st.query_params.get('fixture_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic provider unavailable')
+elif st.query_params.get('fixture_delay'):
+    def delayed(**kwargs):
+        from time import sleep
+        sleep(2)
+        return {'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
+    shop.abandoned_preview.side_effect=delayed
+from crm_automation_ui import workspace
+if st.query_params.get('fixture_navigation_delay') or st.query_params.get('fixture_navigation_failure'):
+    # One failing/slow essential read, then a real retry. No provider requests.
+    from unittest.mock import patch
+    original_get=AutomationStore.get
+    def navigation_get(self,table,identity):
+        if table=='automations' and not st.session_state.get('fixture_navigation_read'):
+            st.session_state['fixture_navigation_read']=True
+            if st.query_params.get('fixture_navigation_delay'):
+                from time import sleep
+                sleep(2)
+            if st.query_params.get('fixture_navigation_failure'):
+                from crm_store import StoreUnavailable
+                raise StoreUnavailable('Synthetic editor read unavailable')
+        return original_get(self,table,identity)
+    # Restore after this script run; patching globally across sessions would
+    # mix their failure state. Registered context below owns its lifetime.
+else:navigation_get=None
+if st.query_params.get('fixture_rerun'):
+    import crm_checkout_preview as preview_module
+    if not hasattr(preview_module,'_fixture_document'):
+        preview_module._fixture_document=preview_module.document
+        def measured_document(*args,**kwargs):
+            st.session_state['fixture_hydrations']=st.session_state.get('fixture_hydrations',0)+1
+            return preview_module._fixture_document(*args,**kwargs)
+        preview_module.document=measured_document
+    if st.button('Synthetic global rerun'):
+        from time import sleep
+        sleep(2)
+    if st.button('Synthetic new checkout'):
+        st.session_state['fixture_new_customer']=True
+        fresh=checkout(identity=2,items=2)
+        fresh['customer']['firstName']='New'
+        fresh['lineItems']['nodes'][0]['title']='New collector product'
+        shop.abandoned_preview.return_value={'nodes':[fresh],'pageInfo':{'hasNextPage':False}}
+    if st.button('Synthetic lookup failure'):
+        st.session_state['fixture_lookup_failure']=True
+    if st.session_state.get('fixture_lookup_failure'):shop.abandoned_preview.side_effect=RuntimeError('Synthetic failure')
+if st.query_params.get('fixture_stability'):
+    import threading,ctypes,json,tracemalloc
+    @st.cache_resource
+    def instrumentation():
+        tracemalloc.start(5)
+        metrics={'queries':0,'read_calls':0}
+        original=AutomationStore.q
+        def counted(self,*args,**kwargs):
+            metrics['queries']+=1
+            return original(self,*args,**kwargs)
+        AutomationStore.q=counted
+        import crm_automation_home as home_module
+        old_read=home_module.read
+        def read_counted(*args,**kwargs):
+            metrics['read_calls']+=1
+            return old_read(*args,**kwargs)
+        home_module.read=read_counted
+        return metrics
+    measurements=instrumentation()
+    if st.button('Fixture leave Automations'):
+        from crm_navigation import navigation_allowed
+        navigation_allowed(st.session_state,'CRM Automations','Home')
+        st.session_state['fixture_away']=True
+    if st.session_state.get('fixture_away'):
+        st.title('Lightweight fixture page')
+        if st.button('Fixture return Automations'):
+            st.session_state['fixture_away']=False;st.rerun()
+        st.stop()
+    st.button('Fixture sample metrics')
+    def sampled():
+        class Counters(ctypes.Structure):
+            _fields_=[('cb',ctypes.c_ulong),('PageFaultCount',ctypes.c_ulong),('PeakWorkingSetSize',ctypes.c_size_t),('WorkingSetSize',ctypes.c_size_t),('QuotaPeakPagedPoolUsage',ctypes.c_size_t),('QuotaPagedPoolUsage',ctypes.c_size_t),('QuotaPeakNonPagedPoolUsage',ctypes.c_size_t),('QuotaNonPagedPoolUsage',ctypes.c_size_t),('PagefileUsage',ctypes.c_size_t),('PeakPagefileUsage',ctypes.c_size_t)]
+        counters=Counters();counters.cb=ctypes.sizeof(counters)
+        ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.c_void_p(-1),ctypes.byref(counters),counters.cb)
+        states=[st.session_state.get(k,{}) for k in ('automation_home_state','automation_analytics_reads')]
+        caches=[entry for state in states for entry in state.get('campaign_home_cache',{}).values()]
+        return {**measurements,'rss':counters.WorkingSetSize,'allocations':tracemalloc.get_traced_memory()[0],
+          'threads':threading.active_count(),'futures':len(caches),'pending':sum(not f.done() for _,f in caches),
+          'provider_calls':shop.abandoned_preview.call_count}
+if st.query_params.get('fixture_home_delay'):
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from time import sleep
+    import crm_automation_home as home_module
+    def slow(fn):
+        def work(*args,**kwargs):
+            sleep(3)
+            return fn(*args,**kwargs)
+        return work
+    with ExitStack() as stack:
+        for name in ('rows','summary','activity'):
+            stack.enter_context(patch.object(home_module,name,slow(getattr(home_module,name))))
+        workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+else:
+    from contextlib import nullcontext
+    with patch.object(AutomationStore,'get',navigation_get) if navigation_get else nullcontext():
+        workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+
+if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: '+str(shop.abandoned_preview.call_count))
+if st.query_params.get('fixture_rerun'):st.caption('Fixture hydrations: '+str(st.session_state.get('fixture_hydrations',0)))
+
+if st.query_params.get("fixture_stability"):st.html("<pre id=fixture-measurements>"+json.dumps(sampled())+"</pre>")
+if st.query_params.get('fixture_inline'):
+    st.html('<span hidden id="inline-full-runs" data-runs="'+str(st.session_state['fixture_inline_runs'])+'"></span>')

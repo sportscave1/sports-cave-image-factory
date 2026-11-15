@@ -1,0 +1,449 @@
+ADS_IE_COMBINED_EXECUTION_V1
+SPORTS CAVE INSTANT EXPERIENCE — THREE IMAGES AND COMPLETED CSV
+Read the entire prompt before generating. For each image, reproduce ONLY that ad’s exact resolved footer headline and CLAIM YOUR EDITION. Never add, omit, rewrite or substitute wording, or use Meta copy in the footer. Remove the supporting sentence and its empty space; apply the compact footer layout and unchanged headline/CTA typography, then check the generated footer against the supplied text.
+
+EXECUTION CHECKLIST
+- Read the entire brief and ORIGINAL product reference before starting.
+- Generate exactly three separate images, one per ad, in order.
+- Use the original product image for every call.
+- Preserve the product, plausible physical scale and assigned camera angles.
+- Follow the three resolved, visibly different home settings.
+- Apply the specified opaque footer, subtle collector typography and exact selected wording.
+- Keep CLAIM YOUR EDITION unchanged.
+- Complete matching copy, the populated CSV and supplied setup.
+- Review the outputs and report unresolved defects.
+GLAZING CHECK: Every confirmed glazed framed edition must show believable surface reflections clearly visible at thumbnail size.
+
+Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification.
+
+IE PREMIUM SCARCITY DISTINCT FAN ROOMS V5 FIVE APPROVED HEADLINES
+Product: Synthetic Collector Edition
+Sport: Cricket; selected market: Australia.
+Use the supplied title/metadata for identity and verified facts. Do not guess an unknown athlete, team, achievement or year from the market or a style image; never invent availability, certificates, shipping or provenance claims.
+
+MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as the straight-on architectural product wall with a small residential glimpse, and Ad 3 as the premium residential man cave setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
+Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness.
+
+AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
+EXECUTION PRIORITY — SPORTS CAVE CREATIVE SYSTEM
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
+When the supplied task requests image generation, begin the requested generation workflow immediately. A combined execution prompt is explicit authorisation for every requested image and downloadable CSV. Its requested output format and image count take precedence over generic carousel defaults. This includes any task containing ADS_IE_COMBINED_EXECUTION_V1, unless the user explicitly requests copy-only or prompt-only output.
+Do not stop at acknowledging the request, confirming attachment access, presenting a plan, or writing image prompts. Do not ask for “next”, “continue”, or additional approval between outputs.
+Read the supplied references and resolve copy internally, then generate each requested image in its own call using the original product reference. Complete the entire sequence and create the populated downloadable CSV using the existing schema when requested.
+For ADS_IE_COMBINED_EXECUTION_V1, make exactly three successful image-generation calls, one image per ad, in order, subject to the failure handling below. No variants, alternatives, correction or replacement generations. Inspect without generating again and report unresolved defects. Retry only a missing output when its call failed without producing an image AND the provider identifies a retryable technical failure; never repeat a successful call. Recover or redisplay an existing asset if display fails. Keep three distinct assets associated with their own ad labels, copy and CSV routes; present all three where supported, then create the completed CSV and provide the supplied setup. Do not promise unavailable downloads or persistence.
+If an attachment-access error occurs, try the available attachment location. Once access succeeds, automatically resume the original task. An access confirmation is not task completion.
+If generation fails, distinguish an explicit provider safety block from a technical failure using the actual returned error. If no cause is supplied, say the cause is unknown; do not infer one. Never bypass provider safeguards or repeatedly reword a blocked request. Do not retry a safety-blocked or unexplained failure. Preserve completed assets and all resolved copy; identify each missing ad and route, quote its actual error when available, and report the actual completed image count. If no error was supplied, say so. Continue other unattempted ads with their unchanged briefs where tools remain available, without restarting the set. Complete the requested CSV and setup from the resolved copy even when an image is missing, if file creation remains available. Never claim an image or CSV exists unless it was created.
+Preserve every product-fidelity, true-to-scale, room, camera, footer, typography, copy, CTA and CSV requirement supplied by the task. Generation authorisation does not authorise publishing.
+
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and no subheadlines in every set; preserve the assigned selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:
+{"premium_scarcity_right": [], "premium_scarcity_front": [], "premium_scarcity_left": []}
+2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
+3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
+4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
+5. Create and attach the completed downloadable ad_copy.csv from the final copy records.
+6. Display the three matching copy groups and provide the existing shared Instant Experience setup below. Then stop.
+No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
+For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
+OUTPUT REVIEW AND DELIVERY
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline wording, with no supporting sentence and maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
+If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
+If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
+If any image is missing, the three-cover delivery requirement is incomplete: apply the failure handling above and never label a two-image result as three completed covers; preserve completed outputs and all three final copy records, matching CSV rows and setup. State any inspection limitation. Return only actually created assets, final copy, setup and the specific failure report; do not print these instructions, internal plans or research notes.
+
+SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call
+IE COLLECTOR SCENES V2 ARTWORK FIRST
+1024 x 1024, 1:1, sRGB; upper photograph 80–82%. Near-black charcoal #101112/#121314 footer with subtle paper grain. Keep architectural verticals straight. Never place the long description or Meta headline inside the image.
+
+PACK COMPOSITION: each pair must differ in architectural structure AND visible depth arrangement, wall family AND treatment, lighting character/direction, and peripheral residential cue. Colour, angle or accessory changes alone are insufficient. Use three different home settings, colour families, lightness levels and compatible wall treatments; grey/graphite/charcoal with similar texture/light count as potential duplicates. Never solve variation by widening the camera or enlarging the product. Peripheral/deep furniture only; no excess empty wall, bright competing opening, clutter, loud patterns, glossy feature walls or themed sports-bar clutter. Material joins and aged timber details stay at the perimeter. Use supplied artwork colours, era, mood and actual frame contrast; sport informs atmosphere, never invented memorabilia, stereotypes or compulsory team colours. Ensure local tonal separation from the supplied frame through wall choice and physical light; never change its finish. Explicit saved overrides remain authoritative. Use the resolved choices as one coherent home per image; prompt differences are not proof of distinct pixels.
+
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+FIXED BLACK FOOTER — ABSOLUTE
+
+Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
+
+The panel must:
+- span the complete image width from the left edge to the right edge
+- occupy approximately the bottom 18–20% of the canvas
+- begin at one precise horizontal boundary
+- have a perfectly straight, hard top edge
+- be fully opaque
+- use solid premium near-black or matte black
+- completely conceal the room photograph behind it
+- include the existing thin restrained gold separator along its top boundary
+- retain the existing Sports Cave Instant Experience headline and CTA hierarchy
+
+The footer must never:
+- fade upward or blend into the room
+- use a black gradient, transparency, feathering, vignette or soft edge
+- reveal furniture, flooring, walls or any part of the room through the panel
+- become a floating text overlay
+- become a curved, angled or irregular shape
+- extend inconsistently behind only part of the wording
+
+A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
+
+COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
+
+Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
+
+Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area.
+
+SPORTS CAVE COMPACT TWO-ELEMENT FOOTER V1
+Apply to every Sports Cave black footer in every ad format and staff account.
+Keep existing layouts that have no black footer; do not add a footer to them.
+Render exactly two elements: the existing dynamically selected HEADLINE and CLAIM YOUR EDITION.
+Preserve the headline wording, font, size, colours, gold highlights, underline, alignment and styling exactly. Do not rewrite, shorten or standardise headline variations, or move the removed sentence into the headline.
+Remove the subheadline/supporting sentence entirely. Do not replace it with any text, blank row or spacer. Legacy reference-ad supporting text is not an instruction to render it.
+Keep CLAIM YOUR EDITION exactly unchanged, including its existing gold colour, typography, tracking and styling.
+Keep the full-width opaque matte-black panel flush to the bottom, with its existing thin gold separator along the top. No fade, gradient, transparency or floating overlay.
+For a square canvas, use approximately 18–20% footer height and 80–82% photograph. At 1024 px retain the existing 42–48 px headline and 26–28 px CTA, 64–72 px horizontal safe margins and at least 64 px bottom text clearance. Use about 22–30 px clear separation between headline and CTA; balance the pair within the compact panel. Scale existing format typography and safe areas proportionally for other output sizes, fitting only these two elements without excess black space.
+The framed edition remains the dominant visual. Preserve all artwork, frame, room, brand-colour, realism and generation-workflow instructions. Removing the supporting sentence must not add a scarcity claim or alter any product detail.
+Inspect the final image: exact headline and CTA, no secondary sentence, visibly shorter balanced footer, preserved separator and branding, dominant complete framed edition. Report unresolved defects honestly.
+
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
+
+These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
+
+HEADLINE
+- Assess rendered glyph width, not character or word count: all eligible approved headline options are recognised, including the longer options.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
+- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
+- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
+- Use only the exact selected approved headline and CTA; never add a product name or short product reference.
+- Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the two-element hierarchy.
+- Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
+- Check readability at 256 x 256. Validate the already resolved approved option before image calls; never substitute its wording for fit. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
+
+NO SUBHEADLINE
+- Do not render a supporting line, secondary sentence or replacement text.
+
+CTA
+- Use no more than four words and no more than 24 characters including spaces and punctuation.
+- Keep the CTA on exactly one line: CLAIM YOUR EDITION. This fixed CTA is exempt from repetition checks.
+- Do not use a longer explanatory CTA.
+
+Before resolution, the three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned.
+
+SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1
+INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
+
+- Every customer-facing Instant Experience creative CTA must be exactly one of: Claim Your Edition.
+- The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
+- Every displayed creative CTA and CSV CTA field uses Claim Your Edition. All three images and future packs intentionally repeat CLAIM YOUR EDITION; exclude the CTA from repetition checks.
+- The long description text does not have to end with the CTA field; it must end according to its description archetype.
+- Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
+- The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
+- Headlines remain route-specific and emotional; do not force CTA wording into every Headline.
+- Silently correct any CTA outside this contract before returning the response. Do not expose rejected wording or reasoning.
+
+PREMIUM SCARCITY ROOM CTA APPLICATION
+
+- All three images use the on-image CTA CLAIM YOUR EDITION.
+- Every route uses Claim Your Edition in copy/CSV and CLAIM YOUR EDITION on the image.
+- Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
+- Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim.
+
+SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
+INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
+
+- Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
+- Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
+- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline 42–48 px, refined editorial serif Regular/Medium; CTA 26–28 px, Montserrat Medium. Design targets, not measured-rendering claims.
+- These fixed targets are the sole typography specification for every image and pack; never reduce a previous generation again. Do not compound percentage reductions or rescale from a reference. Uppercase wording is casing only, never permission for oversized heavy block capitals or bold promotional-banner styling. Never enlarge text to fill empty panel space.
+- Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. CTA is a discreet collector inscription, medium weight with restrained 0.04–0.06 em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
+- Use a compact 18–20% opaque panel with existing safe margins and about 22–30 px clear vertical separation between headline and CTA. Centre and balance the two elements; remove the former supporting-line space rather than leaving an empty row. Never enlarge type to fill the panel. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
+- Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. CTA is muted antique gold.
+- Use the active image brief's exact HEADLINE and CTA fields only.
+- Keep the headline and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
+- Ensure all essential wording is clearly readable in a 256 x 256 preview.
+
+MEANINGFUL SPORTS CAVE GOLD UNDERLINE
+
+- If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
+- Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately 1 px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
+- Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
+- Always highlight all three digits of 100 in antique gold and underline their measured glyph bounds. This emphasis is mandatory for every approved headline, wherever 100 occurs in the line.
+- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; underline only the approved important scarcity word, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
+- No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text.
+
+ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and fixed CTA. Do not render the legacy supporting line or move its claim into the headline. If scarcity evidence is missing, stop before generation and report the missing verification; never fabricate a claim or replace selected copy with arbitrary wording. The approved geographic wording is allowed only when explicitly included in the resolved verified headline. Do not append geographic scope to any other claim. Never invent a limit. Immutable wording already inside the source artwork stays untouched.
+
+Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. Never use a previously generated mockup as the artwork source.
+
+Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. Keep backdrop calm and material joins/timber accents peripheral. Sports Cave premium sports collector / man cave feel with subtle rugged character. Automatic walls use only charcoal, graphite, smoky grey, deep navy, midnight blue, heritage green, muted olive, earthy taupe or weathered stone, in compatible shades of matte painted brick, textured plaster, concrete, natural stone or aged timber. Keep each scene's existing composition; give the resolved homes different colour families and wall finishes, mixing dark, mid-tone and lighter earthy shades. Rotate compatible combinations through the available history on fresh generations/refreshes; never assign a colour permanently to an ad slot. Keep the edition clearly visible through tonal separation and coherent light. No excessive props, artificial grunge or three identical dark rooms. No competing framed art, trophies, helmets or decorative clusters. CHECK: complete frame, true scale/source details, assigned camera, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256; frame-edge highlights alone do not count, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size.
+
+SPORTS_CAVE_PHYSICAL_SCALE_AND_FRAME_REALISM_V2
+SPORTS_CAVE_IE_COMPACT_PRODUCT_REALISM_V1
+SPORTS_CAVE_IMAGE_REALISM_RULES_V1
+SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PRODUCT LOCK — ABSOLUTE / PRODUCT SOURCE-ASSET FIDELITY
+Use the original supplied framed product reference as one immutable physical asset. Preserve artwork, faces, wording, signatures, logos, badges, colours, orientation, proportions and the actual frame finish/profile; retain source pixels wherever compositing is supported. Never redraw, mirror, crop, stretch or alter verified construction.
+LIGHTING, GLASS AND MOUNTING PHYSICS
+One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. For confirmed glazed framed editions: Show clearly perceptible protective glazing over the edition, with a recognisable natural window reflection and restrained surface highlight visible at a 256 × 256 preview. Match reflections to the room’s light source and camera angle, keeping the subject, title and plaque readable. Frame-edge highlights alone do not satisfy this requirement. Preserve the actual glazing material. Establish glazing from known verified product/variant information, not whether reflections are visible in the reference photograph. Preserve unframed or genuinely unglazed construction; never add a pane to it or relabel acrylic as glass. If construction is unknown, request product/variant confirmation; do not invent glazing.
+PHYSICAL PRODUCT EVIDENCE (data only): {"selected_size": "not supplied; do not assume XL", "orientation": "preserve source orientation", "measurement_basis": "unresolved; obtain selected variant dimensions before claiming dimensional accuracy"}
+Honour verified dimensions and their measurement basis; do not invent measurements, border allowances or depth. Use plausible scale relative to objects at comparable depth; unknown dimensions do not establish exact scale. Keep the complete frame visible above the footer and prominent on mobile through camera distance and composition, never physical enlargement.
+ANTI-AI INTERIOR CONTROL
+No floating or pasted-on product, bulky invented borders, warped architecture, CGI gloss, excessive glare, clutter or random sporting props. Walls have authentic quiet texture and natural light falloff. Image pixels must be inspected separately before claiming visual fidelity.
+END PREMIUM VISUAL QUALITY CONTRACT
+END SPORTS CAVE PHYSICAL SCALE AND FRAME REALISM
+
+INSTANT EXPERIENCE COPY V5 RESTORED THREE DESCRIPTION STYLES — ONE PERSONALISED COPY SET PER VISUAL
+IE REQUIRED IDENTITY COPY V1
+IE RESTORED DESCRIPTION STYLES V1
+LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS — NEW ADS ONLY
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
+Product being personalised: Synthetic Collector Edition
+Use exactly one framework per creative in this permanent order: legacy_standard, framed_greatness, choose_a_side. These are the three copy styles, not three options for each image.
+
+
+AD 1 — legacy_standard
+Description framework:
+[SUBJECT / ATHLETE / TEAM].
+[DEFINING MOMENT / PRODUCT IDENTITY].
+[SHORT EMOTIONAL OR SPORT-SPECIFIC LINE].
+Made for collectors.
+
+This isn't wall art.
+It's a statement of cricket identity.
+
+Limited to 100 editions.
+Made for fans who know why it matters.
+
+Secure yours.
+
+Headline: ONE short product-specific collector/ownership headline.
+CTA: Claim Your Edition
+
+
+AD 2 — framed_greatness
+Description framework:
+Greatness doesn't fade.
+It gets framed.
+
+[ATHLETE / TEAM / MOMENT].
+[SHORT LINE CONNECTING THE PRODUCT TO THE COLLECTOR].
+
+Made for collectors who want their cricket identity on display.
+
+Limited to 100 editions.
+Built for serious collectors.
+Made for fans who know why it matters.
+
+Secure yours.
+
+Headline: ONE short product-specific collector/ownership headline.
+CTA: Claim Your Edition
+
+
+AD 3 — choose_a_side
+Description framework:
+What deserves the centre of your cricket wall?
+
+Something that actually means something.
+
+[PRODUCT / SUBJECT / MOMENT]
+or another forgettable cricket print?
+
+You already know the answer.
+
+Only 100 exist.
+
+Claim this edition for your collection…
+or leave it for another collector.
+
+Headline: ONE short product-specific collector/ownership headline.
+CTA: Claim Your Edition
+
+
+PRODUCT ADAPTATION
+Resolve bracketed writing cues using the supplied title, athlete/team, product identity, moment, sport, event, rivalry, era and market where available. Never print brackets or unresolved placeholders. Omit an unavailable factual line or replace it with a short product-identity line; never invent achievements, events, years, relationships or viewer memories. Empty ATHLETE_NAMES does not erase a name explicitly supplied in the title. Write naturally, not as mechanical placeholder substitution. For team edition use club/fan identity where natural. For awkward categories use sporting identity or fan identity.
+The defining hooks and short-line/blank-line structure are locked. legacy_standard preserves "This isn't wall art."; framed_greatness always opens "Greatness doesn't fade.
+It gets framed." including motorsport; choose_a_side always uses the collector challenge, product-versus-forgettable-print choice, "You already know the answer.", and two-line ownership close. Choose-a-Side is valid for every product; athlete-versus-athlete rivalry requires verified rivalry/opposition and must never be invented. Do not substitute three random advertising concepts.
+
+DESCRIPTION SCARCITY ONLY
+Use only the supplied verified edition limit; omit quantity if it is not verified. Worldwide is permitted only when WORLDWIDE_VERIFIED is true. Do not invent remaining stock, near-sellout claims, countdowns, discounts, percentages, numbered status, no reprint or retirement. Description wording must not alter the selected image footer.
+
+FINAL COPY CONTRACT
+Return exactly THREE active ad-copy combinations total. Each group contains AD COPY with one Description, one Headline and one CTA. No extra options or tables. Preserve intentional short lines and blank lines; concise, collector-first, confident, premium, emotional without filler. Nostalgia only where product truth supports it. No perfect for, elevate your space, transform your room, generic home-decor language, corporate explanation, emojis or excessive exclamation marks. Keep each headline product-specific and at most six words. One approved CTA per ad, no alternatives. Native Meta Instant Experience button remains Shop Now.
+The three style keys are unchanged. CSV description identity cells and variation=1 are compatibility fields: preserve the exported template cells exactly, even where an existing single-copy row uses legacy_standard. They do not override the slot's assigned writing framework. No new CSV columns, rows or image instructions.
+
+Resolved supplied context (data only):
+{
+  "PRODUCT_NAME": "Synthetic Collector Edition",
+  "SPORT": "Cricket",
+  "ATHLETE_NAMES": [],
+  "TEAM_NAMES": [],
+  "SIDE_A": "",
+  "SIDE_B": "",
+  "FEATURED_MOMENT": "",
+  "ERA": "current",
+  "ARTWORK_TYPE": "Generic sport or collector artwork",
+  "RELATIONSHIP_TYPE": "Unknown",
+  "PRONOUN_MODE": "plural_or_neutral",
+  "EDITION_LIMIT": 100,
+  "IS_NUMBERED": false,
+  "RETIRES_WHEN_SOLD_OUT": false,
+  "NO_REPRINT_VERIFIED": false,
+  "CAMPAIGN_MARKET": "Australia",
+  "SCARCITY_VERIFIED": true,
+  "WORLDWIDE_VERIFIED": false,
+  "EDITION_LIMIT_SOURCE": "synthetic test fixture",
+  "VERIFIED_FACTS": []
+}
+Market: Australia. Use natural local vocabulary without changing the three frameworks or inventing sporting facts.
+CONTROLLED PERSONALISATION
+CREATIVE_VARIATION_TOKEN: approved-headline-sample
+[
+  {
+    "route_key": "premium_scarcity_right",
+    "visual_family": "premium_scarcity",
+    "copy_family": "premium_scarcity_smart_hybrid",
+    "description_style": "legacy_standard",
+    "description_role": "legacy_standard",
+    "opening_hook_family": "legacy_standard",
+    "headline_family": "product_identity",
+    "sentence_rhythm": "historical short lines and intentional blank lines",
+    "scarcity_close": "Secure yours.",
+    "copy_product_key": "synthetic collector edition",
+    "market_lens": "product-specific vocabulary within locked framework",
+    "market": "Australia",
+    "sport": "Cricket"
+  },
+  {
+    "route_key": "premium_scarcity_front",
+    "visual_family": "premium_scarcity",
+    "copy_family": "private_gallery",
+    "description_style": "framed_greatness",
+    "description_role": "framed_greatness",
+    "opening_hook_family": "framed_greatness",
+    "headline_family": "collector_identity",
+    "sentence_rhythm": "historical short lines and intentional blank lines",
+    "scarcity_close": "Secure yours.",
+    "copy_product_key": "synthetic collector edition",
+    "market_lens": "product-specific vocabulary within locked framework",
+    "market": "Australia",
+    "sport": "Cricket"
+  },
+  {
+    "route_key": "premium_scarcity_left",
+    "visual_family": "premium_scarcity",
+    "copy_family": "the_cave",
+    "description_style": "choose_a_side",
+    "description_role": "choose_a_side",
+    "opening_hook_family": "choose_a_side",
+    "headline_family": "ownership",
+    "sentence_rhythm": "historical short lines and intentional blank lines",
+    "scarcity_close": "two-line collector ownership challenge",
+    "copy_product_key": "synthetic collector edition",
+    "market_lens": "product-specific vocabulary within locked framework",
+    "market": "Australia",
+    "sport": "Cricket"
+  }
+]
+Freshness applies only to product-specific supporting lines and headlines. Keep the three hook families, mandatory lines and ownership closes even when recent history contains them. Do not rotate styles or invent new concepts to avoid repetition.
+Resolve each Description and Meta headline once; reuse the same final records verbatim in displayed AD COPY and CSV primary_text/headline. The description is stored once as primary_text, not a new field. Every displayed/CSV CTA remains Claim Your Edition; on-image CTA remains CLAIM YOUR EDITION.
+Preserve exact URL parameters, catalogue, product template and offer safeguards. These are text-only rules; retain all existing image-generation prompts and on-image text unchanged.
+
+Exact Promotion or Offer entered: None supplied. Preserve a supported supplied offer in ad copy only; never invent one or replace edition scarcity.
+Country localisation should adjust wording, spelling and audience language only. It must not decide whether output exists.
+
+
+GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES
+The following are resolved call specifications; execute all three automatically in order. Group labels and copy fields are preserved.
+
+GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE
+
+IMAGE GENERATION PROMPT
+Image 1; Route key: premium_scarcity_right; camera role: RIGHT.
+Output label: Ad 1 — Collector Hallway
+Camera: RIGHT: camera physically to the right of the artwork, looking left towards it.
+SCENE: Room 1 — HOME: low contemporary courtyard house collector hallway (Contemporary courtyard home); spatial structure: circulation axis. WALL: light earthy taupe (earthy taupe, light); textured plaster. DEPTH: broad low passage receding toward a courtyard opening, positioned far left background. PERIPHERAL CUE: dark timber console with a leather catchall resting on it; small and peripheral at the outer edge or distant passage. LIGHT: broad diffused overcast daylight from the courtyard window on the right; gentle warm picture-light fill balanced with daylight; source position right-side distant reveal. GLAZING: Preserve glazing established from verified product/variant information; confirm if unknown. Apply the shared thumbnail-visible glazing requirement using the actual courtyard window on the right: recognisable broad upper-right peripheral window reflection, consistent with camera/light even straight-on. Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unglazed products or call acrylic glass. Premium collector hallway: close edition-led photography, premium textured wall, believable passage depth, natural directional light and realistic glazing reflections. Supplied hallway references guide atmosphere only; never copy their product, footer wording or typography. Use only the resolved collector-home detail or small coherent arrangement, replacing the previous peripheral cue, never adding to it. Keep it small, secondary and partially visible at the perimeter or softly in the background; Image 2 confines it to the existing tiny residential glimpse. Never widen the shot, shrink the edition or clutter the room to fit it; the edition remains the clear focal point at realistic physical scale. Use believable construction and placement on a real supporting surface where applicable, realistic proportions, materials, perspective, lighting and contact shadows. No decorative plants, flowers or vases; incidental natural outdoor greenery through a window is allowed. No warped, floating, duplicated or fake-looking objects, invented memorabilia, prominent alcohol branding, neon signs or competing wall displays.
+Framing: close product view with a subtle receding passage; target width 79-86%; slightly left-of-centre.
+Resolved on-image copy — use exactly:
+HEADLINE: 100 Edition Collector Run
+CTA: CLAIM YOUR EDITION
+
+AD COPY
+
+Description:
+[one final personalised legacy_standard collector description]
+
+Headline:
+[one final product-specific headline]
+
+CTA:
+Claim Your Edition
+
+GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON
+
+IMAGE GENERATION PROMPT
+Image 2; Route key: premium_scarcity_front; camera role: FRONT.
+Output label: Ad 2 — minimal mid-century split-level home product wall
+Camera: FRONT: camera centred, directly facing the artwork.
+SCENE: Room 2 — HOME: minimal mid-century split-level home product wall (Split-level lounge); spatial structure: split-level plane. WALL: charcoal (graphite and charcoal, dark); matte painted brick. DEPTH: one lowered floor-plane glimpse beyond a low residential ledge at the far right with a softly lit residential glimpse, positioned far right edge. PERIPHERAL CUE: recessed sports-book shelf; only inside the existing tiny residential glimpse. LIGHT: soft directional morning daylight from the high side window on the left; source position left side outside the composition. GLAZING: Preserve glazing established from verified product/variant information; confirm if unknown. Apply the shared thumbnail-visible glazing requirement using the actual high side window on the left: recognisable upper-left peripheral window reflection, consistent with camera/light even straight-on. Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unglazed products or call acrylic glass. Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence. Use only the resolved collector-home detail or small coherent arrangement, replacing the previous peripheral cue, never adding to it. Keep it small, secondary and partially visible at the perimeter or softly in the background; Image 2 confines it to the existing tiny residential glimpse. Never widen the shot, shrink the edition or clutter the room to fit it; the edition remains the clear focal point at realistic physical scale. Use believable construction and placement on a real supporting surface where applicable, realistic proportions, materials, perspective, lighting and contact shadows. No decorative plants, flowers or vases; incidental natural outdoor greenery through a window is allowed. No warped, floating, duplicated or fake-looking objects, invented memorabilia, prominent alcohol branding, neon signs or competing wall displays.
+Framing: close straight-on product wall with one resolved architectural glimpse; target width 84-87%; central hero.
+Resolved on-image copy — use exactly:
+HEADLINE: Limited to 100 Worldwide
+CTA: CLAIM YOUR EDITION
+
+AD COPY
+
+Description:
+[one final personalised framed_greatness collector description]
+
+Headline:
+[one final product-specific headline]
+
+CTA:
+Claim Your Edition
+
+GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE
+
+IMAGE GENERATION PROMPT
+Image 3; Route key: premium_scarcity_left; camera role: LEFT.
+Output label: Ad 3 — heritage library retreat residential man cave
+Camera: LEFT: camera physically to the left of the artwork, looking right towards it.
+SCENE: Room 3 — HOME: heritage library retreat residential man cave (Quiet home study); spatial structure: intersecting-wall corner. WALL: muted olive (muted olive, mid); aged timber. DEPTH: two perpendicular walls meeting around a shallow alcove, with lateral window light; no doorway, positioned rear intersecting-wall corner. PERIPHERAL CUE: peripheral cue rack secured to a background wall; only a subtle peripheral or background portion. LIGHT: soft raking late-afternoon daylight from the garden window on the left; source position rear-left at a grazing angle. GLAZING: Preserve glazing established from verified product/variant information; confirm if unknown. Apply the shared thumbnail-visible glazing requirement using the actual garden window on the left: recognisable lower-left peripheral window reflection, consistent with camera/light even straight-on. Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unglazed products or call acrylic glass. Premium residential man cave: show only the resolved collector-home detail glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s architectural product wall; retain close edition prominence. Use only the resolved collector-home detail or small coherent arrangement, replacing the previous peripheral cue, never adding to it. Keep it small, secondary and partially visible at the perimeter or softly in the background; Image 2 confines it to the existing tiny residential glimpse. Never widen the shot, shrink the edition or clutter the room to fit it; the edition remains the clear focal point at realistic physical scale. Use believable construction and placement on a real supporting surface where applicable, realistic proportions, materials, perspective, lighting and contact shadows. No decorative plants, flowers or vases; incidental natural outdoor greenery through a window is allowed. No warped, floating, duplicated or fake-looking objects, invented memorabilia, prominent alcohol branding, neon signs or competing wall displays.
+Framing: close product view with the resolved residential depth arrangement; target width 77-84%; slightly right-of-centre.
+Resolved on-image copy — use exactly:
+HEADLINE: Limited to 100 Editions
+CTA: CLAIM YOUR EDITION
+
+AD COPY
+
+Description:
+[one final personalised choose_a_side collector description]
+
+Headline:
+[one final product-specific headline]
+
+CTA:
+Claim Your Edition
+
+COMPLETED DOWNLOADABLE CSV — ad_copy.csv
+After all three images, use the available file-creation/code tool to create and attach a real ad_copy.csv.
+Exact column order:
+schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta
+Exactly three rows in Image 1/2/3 order. Copy these compatibility cells exactly (they are parser identities, not writing frameworks):
+[{"schema_version":"2","campaign_type":"instant_experience","output_mode":"three_visual_copy_v2","route_key":"premium_scarcity_right","route_label":"PREMIUM SCARCITY — RIGHT ANGLE — Product-aware scarcity hero","variation":"1","description_key":"legacy_standard","description_label":"Description 1 — Legacy Standard"},{"schema_version":"2","campaign_type":"instant_experience","output_mode":"three_visual_copy_v2","route_key":"premium_scarcity_front","route_label":"PREMIUM SCARCITY — STRAIGHT ON — For the room that remembers","variation":"1","description_key":"legacy_standard","description_label":"Description 1 — Legacy Standard"},{"schema_version":"2","campaign_type":"instant_experience","output_mode":"three_visual_copy_v2","route_key":"premium_scarcity_left","route_label":"PREMIUM SCARCITY — LEFT ANGLE — Premium fan sanctuary","variation":"1","description_key":"legacy_standard","description_label":"Description 1 — Legacy Standard"}]
+Populate primary_text, headline and cta from the same final copy records resolved in step 1; reuse them verbatim in displayed AD COPY and CSV. All fields must be populated; variation stays 1. Do not generate copy again during export.
+Use the existing compatible encoding: UTF-8 with BOM (utf-8-sig), CRLF row terminators, csv.DictWriter-compatible quoting. Preserve paragraph breaks and Unicode; quote fields containing commas/newlines/quotes and double embedded quotes. Validate header order, three route IDs, identities and populated copy by reading the file back before attaching it.
+Attach the actual file with a usable download link. A blank template, Markdown table or code sample is not completion. If file creation is genuinely unavailable, say so and provide the completed CSV text, without claiming an attachment exists.
+The OS can import the downloaded CSV and uploaded images through its existing workflow; do not assume it can fetch conversation files automatically.
+
+INSTANT EXPERIENCE SETUP
+- Use the Meta Instant Experience Product template.
+- Upload the three completed covers using the existing workflow.
+- Featured product headline uses the exact product name: Synthetic Collector Edition
+- Catalogue product headline field uses: product.name
+- Product descriptor/subtitle uses: Limited Edition when approved.
+- Keep the connected category catalogue attached.
+- Exact product-set guidance: the connected Cricket product set
+- Fixed button label remains: Shop Now.
+- Fixed button destination uses the exact supplied product-page URL: [exact supplied product-page URL]
+- URL parameters use exactly: utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}
+- Maintain the current product-page-plus-catalogue sales path.
+- Do not introduce collection-page routing in this workflow.

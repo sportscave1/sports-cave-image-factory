@@ -1,0 +1,56 @@
+const {chromium}=require(process.env.SEO_PHASE1_PLAYWRIGHT_MODULE || '../.local/browser-tools/node_modules/playwright');
+const fs=require('fs');const {execFileSync}=require('child_process');
+let debugPage;
+const sql=q=>execFileSync('docker',['exec','sports-cave-seo-phase1-pg-57995487','psql','-U','postgres','-d','seo_phase1','-Atc',q],{encoding:'utf8'}).trim();
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.LOCALAPPDATA+'/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe'});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});debugPage=page;page.setDefaultTimeout(15000);
+ const evidence={checks:[],viewports:[]};
+ if(sql('select label from seo_phase1_dev_marker where id=1')!=='Synthetic SEO Phase 1 only')throw Error('Not the isolated SEO database');
+ const check=async label=>{if(await page.locator('[data-testid="stException"]').count())throw Error(label+': '+await page.locator('[data-testid="stException"]').innerText());evidence.checks.push(label);};
+ const nav=async name=>{await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();};
+ const combo=label=>page.getByTestId('stSelectbox').filter({has:page.getByText(label,{exact:true})}).getByRole('combobox');
+ const select=async(label,name)=>{await combo(label).click();await page.getByRole('option',{name,exact:true}).click();};
+ await page.goto('http://127.0.0.1:18977/?page=seo');
+ await page.getByPlaceholder('Username or email',{exact:true}).fill('seo-preview@example.invalid');await page.getByPlaceholder('Password',{exact:true}).fill('SeoPreview-Only-2026');await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.getByRole('heading',{name:'Worker',exact:true}).waitFor();await check('Real app sign-in and Worker');
+ const children=page.locator('.st-key-sidebar-seo-children');await children.getByRole('button',{name:'History',exact:true}).waitFor();const labels=await children.getByRole('button').allTextContents();
+ if(labels.map(x=>x.trim()).join('|')!=='Worker|Analytics|Plan|Review|History')throw Error('Unexpected SEO menu '+labels);
+ evidence.checks.push('Exactly five SEO sidebar children; recorder retained in Developer');
+ await nav('Analytics');await combo('View').waitFor();
+ await select('View','Queries');await page.getByText('One row per query and page.',{exact:false}).waitFor();
+ await page.getByText('Details and Plan task',{exact:true}).click();
+ await page.getByRole('button',{name:'Create Plan task',exact:true}).click();await page.getByText(/Task saved to Plan|This open task already exists/).waitFor();await check('Real Google adapters to persisted Plan task');
+ await select('View','Pages');await page.getByText('Landing-page conversion context (GA4)',{exact:true}).waitFor();
+ await select('View','Queries');await page.getByText('One row per query and page.',{exact:false}).waitFor();
+ const before=sql('select count(*) from seo_phase1_dev_google_calls');
+ await select('View','Pages');await page.getByText('Landing-page conversion context (GA4)',{exact:true}).waitFor();
+ await select('View','Queries');await page.getByText('One row per query and page.',{exact:false}).waitFor();
+ const after=sql('select count(*) from seo_phase1_dev_google_calls');if(before!==after)throw Error('Avoidable report requests '+before+' -> '+after);
+ evidence.checks.push('View switching reuses cached source reports');
+ await nav('Plan');await select('Task','Existing task');await select('Task status','Deferred');await page.getByRole('button',{name:'Save task',exact:true}).click();
+ await combo('Task status').waitFor();
+ if(sql("select status from seo_growth_tasks where id='dev-legacy-task'")!=='deferred')throw Error('Legacy status not synchronized');
+ sql("update seo_growth_tasks set status='in_progress',updated_at=now() where id='dev-legacy-task'");await nav('History');await nav('Plan');await select('Task','Existing task');
+ if(!((await combo('Task status').getAttribute('aria-label')).includes('In progress')))throw Error('Source status not reflected');
+ evidence.checks.push('Bidirectional legacy status synchronization through full app');
+ await page.getByRole('button',{name:'Import saved health findings',exact:true}).click();await page.getByText(/technical tasks added/).waitFor();await check('Existing health findings imported');
+ await select('Task','Review search performance: sports art');await page.getByRole('button',{name:'Prepare linked content draft',exact:true}).click();await page.getByRole('heading',{name:'Review',exact:true}).waitFor();await combo('Blog record').waitFor();if(!(await combo('Blog record').getAttribute('aria-label')).includes('Review search performance: sports art'))throw Error('Linked draft not focused');await page.getByText('2 Article',{exact:true}).click();
+ await page.getByRole('textbox',{name:'Article draft',exact:true}).fill('Synthetic revised article for full app acceptance. Existing draft ID and media references are preserved.');
+ await page.getByRole('button',{name:'Save article draft',exact:true}).click();await page.getByRole('button',{name:'Save review decision',exact:true}).click();await check('Existing editor save and revision-bound internal review');
+ await nav('History');await page.getByText(/Review decision/).first().waitFor();await check('Real combined history');
+ await nav('Worker');await page.getByRole('button',{name:'Evaluate loaded search opportunities',exact:true}).click();await page.getByText(/Scan completed/).waitFor();await check('Bounded Worker scan using loaded real-adapter evidence');
+ await nav('Analytics');await combo('View').waitFor();
+ for(const [width,zoom] of [[1440,1],[1920,1],[1280,1.25]]){
+  await page.setViewportSize({width,height:1000});await page.evaluate(z=>document.body.style.zoom=String(z),zoom);
+  const sizes=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));if(sizes.scroll>sizes.client)throw Error('Horizontal overflow');
+  evidence.viewports.push({width,zoom,...sizes});await page.screenshot({path:`.local/seo-full-${width}-${zoom}.png`,fullPage:true});
+ }
+ await page.evaluate(()=>document.body.style.zoom='1');await page.setViewportSize({width:1440,height:1000});
+ const zoomContext=await browser.newContext({viewport:{width:1024,height:800},deviceScaleFactor:1.25,storageState:await page.context().storageState()});
+ const zoomPage=await zoomContext.newPage();await zoomPage.goto('http://127.0.0.1:18977/?page=seo_analytics_workspace');await zoomPage.getByText('Google organic clicks',{exact:true}).waitFor();
+ evidence.viewports.push({physicalWidth:1280,zoomEquivalent:1.25,...await zoomPage.evaluate(()=>({layoutWidth:innerWidth,deviceScale:devicePixelRatio,scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}))});await zoomPage.screenshot({path:'.local/seo-full-1280-125-effective.png',fullPage:true});await zoomContext.close();
+ for(const view of ['Channels','Engagement','Ecommerce','Events','Audience','Realtime','Overview details','Store operations','Mappings']){await select('View',view);await check('View '+view);}
+ await nav('Worker');await page.getByRole('button',{name:'Open Task Recorder',exact:true}).click();await page.getByRole('heading',{name:'Task Recorder',exact:true}).waitFor();await page.locator('iframe[src="/task-recorder/panel"]').waitFor();await check('Real Task Recorder page linked without starting recording or playback');
+ fs.writeFileSync('.local/seo-full-acceptance.json',JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence));await browser.close();
+})().catch(async e=>{console.error(e);if(debugPage){console.log((await debugPage.locator('body').innerText()).slice(-8000));console.log(await debugPage.getByRole('combobox').evaluateAll(xs=>xs.map(x=>({html:x.outerHTML,label:x.getAttribute('aria-label')}))));await debugPage.screenshot({path:'.local/seo-full-error.png',fullPage:true});}process.exit(1)});

@@ -1,0 +1,191 @@
+"""Opt-in policy for freshly resolved USA IE packs; no storage or backend."""
+import hashlib
+import re
+import random
+
+VERSION = 'USA IE PRODUCT FIRST V1'
+HEADLINE = 'Limited to 100 Worldwide'
+FINALITY = 'Once it sells out, it’s done.'
+FALLBACK = 'A limited run of 100 editions.'
+SUPPORT_LINES = (
+    'Once this edition sells out, there is no second run.',
+    'Once it sells out, it’s done.',
+    'Once they’re claimed, this edition retires forever.',
+    'Once it sells out, it’s gone.',
+    'When they’re gone, they’re gone.',
+    'One release. Never repeated.',
+)
+GLAZING = ('For every framed edition: Show believable premium glass reflections while preserving immediate recognition of faces, action and defining edition text. '
+           'Keep strong reflections away from those areas. At thumbnail size, product recognition takes priority over reflection visibility. '
+           'Preserve premium glass, never an acrylic appearance or pasted-on product. Keep realistic frame-edge highlights and mounting shadows; '
+           'no bright window grids across important details. Preserve unframed products without adding a frame or pane.')
+COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the collector hallway, straight-on architectural product wall and residential man cave, '
+               'with their resolved cameras: a subtle randomly selected left/right viewpoint for the hallway and man cave, and a mostly straight-on architectural wall. Resolve once and preserve saved camera assignments; legacy route IDs and copy labels never determine the camera. Use three recognisably different residential compositions, different room styles, '
+               'clearly different wall-colour families, different wall finishes and different lighting setups. Priority: product fidelity and real scale; subject and defining-detail recognition; desirable '
+               'residential presentation; meaningful composition variety; then environmental novelty. Moderate perspective, no extreme foreshortening. '
+               'Move the camera closer when needed, never enlarge the product. Keep the full frame, breathing room and footer clearance. '
+               'A wider residential view is valid when the edition remains recognisable and the setting contributes. At approximately 256 × 256, '
+               'recognise the subject and defining action; read main lettering where the source permits. Never invent, enlarge or redesign small source text. '
+               'Keep furniture, bright windows and patterns subordinate. Coherent natural or warm directional light must not darken faces or key details. '
+               'Use the supplied edition colours, contrast and mood; never recolour the product or add compulsory team colours, flags, neon or invented memorabilia. '
+               'Recent history prevents accidental near-duplicates, not reuse of effective neutral settings across products. Inspect actual images before claiming visual quality.')
+WALL_RULES = ('USA automatic walls randomly select from eligible colours without prioritising warm neutrals. Warm greige, stone beige, sand and taupe count as one colour family; never repeat that family within a fresh pack. Soft warm off-white is a separate family; '
+              'charcoal or smoky grey require clear frame separation. Deep navy, heritage green and muted olive are eligible when supplied '
+              'edition colours support them. Vary eligible calm matte paint, fine plaster and restrained stone/concrete across the pack. Resolve room, colour, finish and lighting choices once before export; preserve assigned choices on reopen and export. Keep pronounced masonry, timber joins '
+              'and strong material details peripheral. No fixed colour per slot or stereotyped American sports-bar styling.')
+COPY_RULES = ('USA SUPPORTING WORDING: Keep legacy_standard, framed_greatness and choose_a_side in their existing order, line/blank-line positions, '
+              'approximate length and distinct approaches. Preserve signature hooks, approved scarcity, ownership closes and CTA. '
+              'Generic supporting sentences are editable in their existing positions: “It’s a statement of {identity} identity.”, '
+              '“Made for fans who know why it matters.” and “Made for collectors who want their {sport} identity on display.” '
+              'may express this exact edition’s meaning instead. Retain “This isn’t wall art.”, “Greatness doesn’t fade. / It gets framed.” '
+              'and the Choose a Side question/response, “You already know the answer.” and ownership close. '
+              'No shared storytelling formula, biographies, invented rivalries, quotes, adversity, achievements or viewer memories. '
+              'Use natural American spelling in flexible copy; preserve protected names and source-edition text.')
+WALLS = (
+    ('warm greige', 'greige', 'mid', 'neutral', 'matte painted wall'),
+    ('stone beige', 'beige', 'light', 'neutral', 'fine plaster'),
+    ('sand', 'sand', 'light', 'neutral', 'restrained stone'),
+    ('medium earthy taupe', 'taupe', 'mid', 'neutral', 'fine plaster'),
+    ('soft warm off-white', 'off-white', 'light', 'neutral', 'matte painted wall'),
+    ('smoky grey', 'grey', 'mid', 'grey', 'restrained concrete'),
+    ('charcoal', 'charcoal', 'dark', 'grey', 'matte painted wall'),
+    ('deep navy', 'navy', 'dark', 'blue', 'matte painted wall'),
+    ('heritage green', 'green', 'mid', 'green', 'fine plaster'),
+    ('muted olive', 'olive', 'mid', 'olive', 'fine plaster'),
+)
+
+
+def enabled(normalized_country, metadata):
+    if normalized_country != 'USA':
+        return False
+    metadata = metadata or {}
+    saved = list(metadata.get('instant_experience_scene_selections') or ())
+    footers = metadata.get('instant_experience_footer_selections') or ()
+    # Old or explicitly supplied specifications are authoritative, not a request to regenerate.
+    return (not saved and not footers) or (len(saved) == 3 and all(isinstance(s, dict) and s.get('scene_selection_version') == VERSION for s in saved))
+
+
+def resolve_footer(visuals, context, headline_is_valid, pair_is_valid, selections=()):
+    from ads_ie_visual_systems import eligible_headlines, select_distinct_headlines
+    if len(visuals) != 3:
+        raise ValueError('USA IE requires exactly three visuals.')
+    if selections:
+        pairs = [(s.get('headline_text'), s.get('supporting_line')) for s in selections]
+        if len(pairs) != 3 or any(h not in eligible_headlines(context) or s not in (*SUPPORT_LINES, FALLBACK) for h, s in pairs):
+            raise ValueError('Preserve the supplied USA footer; inconsistent saved selections require explicit regeneration.')
+        supports = [s for h, s in pairs]  # Preserve old identical assignments as well as new distinct draws.
+    else:
+        supports = random.Random(str(visuals[0]['resolved_seed']) + '|usa-six-supports').sample(SUPPORT_LINES, 3)
+    headlines = select_distinct_headlines(context, str(visuals[0]['resolved_seed']) + '|approved-five-headlines',
+        [s.get('headline_text') for s in selections])
+    if any(not headline_is_valid(h) for h in headlines) or (pair_is_valid and any(not pair_is_valid(h, s) for h, s in zip(headlines, supports))):
+        raise ValueError('USA footer must pass existing copy-fit limits.')
+    for v, headline, support in zip(visuals, headlines, supports):
+        v.update(headline_text=headline, supporting_line=support, fomo_line=support, cta_text='CLAIM YOUR EDITION',
+                 footer_emphasis='scarcity', footer_pair_signature=hashlib.sha256(f'{headline}|{support}'.encode()).hexdigest()[:20],
+                 eligible_headline_alternatives=[], headline_fit_fallback=headline)
+
+
+def distinct(a, b):
+    return a['home_setting'] != b['home_setting'] and (
+        a['spatial_family'] != b['spatial_family'] or a['depth_position'] != b['depth_position'])
+
+
+def resolve_camera(visual, index, seed, saved):
+    from ads_ie_visual_systems import CAMERAS
+    # Separate draw leaves the established scene and footer seeds untouched.
+    sides = random.Random(str(seed) + '|scene-camera-sides').sample((0, 2), 2)
+    camera = saved.get('assigned_camera_angle') or CAMERAS[1 if index == 1 else sides[index // 2]]
+    visual.update(camera_side=camera, assigned_camera_angle=camera,
+                  camera_role=camera.split(':', 1)[0],
+                  camera_instruction=camera + '. Keep the existing subtle perspective, straight verticals and rigid complete frame. Never mirror artwork.')
+    names = ('COLLECTOR HALLWAY', 'ARCHITECTURAL WALL', 'MAN CAVE')
+    visual['group_heading'] = f'GROUP {index + 1} — {names[index]}'
+
+
+def colour_family(scene):
+    colour = scene['wall_colour'].casefold()
+    if any(word in colour for word in ('beige', 'sand', 'taupe', 'greige')):
+        return 'warm neutral'
+    if scene['wall_visual_group'] == 'grey':
+        return 'grey'
+    return scene['wall_colour_family']
+
+
+def fresh_distinct(a, b):
+    # Saved packs retain their existing composition contract; fresh draws add
+    # visible colour, finish and lighting separation before being persisted.
+    return (distinct(a, b) and a['room_type'] != b['room_type']
+            and colour_family(a) != colour_family(b)
+            and a['wall_finish'] != b['wall_finish']
+            and a['light_family'] != b['light_family'])
+
+
+def select_scenes(seed, context, recent=(), selections=()):
+    from ads_ie_scenes import SCENES, signature, _rank, HISTORY_LIMIT
+    metadata = context.get('product_metadata') or {}
+    palette = ' '.join(str(metadata.get(k, '')) for k in ('artwork_colours', 'artwork_colors', 'dominant_colours', 'dominant_colors', 'colour_palette')).lower()
+    history = [r for r in list(recent)[:HISTORY_LIMIT] if isinstance(r, dict)]
+    pools = []
+    for slot in SCENES:
+        pool = []
+        for original in slot:
+            # Retain curated homes, roles, architecture and lights; change only eligible wall treatments.
+            for wi, wall in enumerate(WALLS):
+                if wi >= 7 and wall[1] not in palette:
+                    continue
+                s = dict(original)
+                colour, family, lightness, group, finish = wall
+                s.update(scene_selection_version=VERSION, scene_id=original['scene_id']+'|usa:'+str(wi),
+                         wall_colour=colour, wall_colour_family=family, wall_lightness=lightness,
+                         wall_visual_group=group, wall_finish=finish, wall_material=finish)
+                s['scene_signature'] = signature(s)
+                s['scene_near_signature'] = signature(s, near=True)
+                pool.append(s)
+        # Seeded random ordering across all eligible rooms, walls and light rigs.
+        # Deduplicate equivalent compositions without a warm-neutral preference.
+        pools.append(sorted({s['scene_signature']:s for s in pool}.values(),
+                            key=lambda s: _rank(seed, s['scene_signature'])))
+    for keep in range(len(history), -1, -1):
+        filtered = [[s for s in pool if not any(
+            old.get('scene_signature') == s['scene_signature'] or old.get('scene_near_signature') == s['scene_near_signature']
+            for old in history[:keep])] for pool in pools]
+        for a in filtered[0]:
+            for b in filtered[1]:
+                if not fresh_distinct(a,b): continue
+                c = next((c for c in filtered[2] if fresh_distinct(a,c) and fresh_distinct(b,c)),None)
+                if c:
+                    return [dict(s, history_exclusions_relaxed=len(history)-keep) for s in (a,b,c)]
+    raise ValueError('USA IE needs three distinct residential compositions.')
+
+
+def adapt_prompt(prompt):
+    """Replace only the conflicting shared directives, before returning a newly resolved USA prompt."""
+    from ads_ie_visual_systems import GLAZING_REQUIREMENT, SCENE_VISIBILITY_RULES
+    from ads_ie_scenes import ROOM_STYLE
+    prompt = prompt.replace(GLAZING_REQUIREMENT, GLAZING).replace(SCENE_VISIBILITY_RULES.strip(), COMPOSITION+' '+WALL_RULES)
+    prompt = prompt.replace(ROOM_STYLE, WALL_RULES)
+    prompt = re.sub(r'PACK COMPOSITION:.*?(?=\n\n)', COMPOSITION+' '+WALL_RULES, prompt, flags=re.S)
+    prompt = re.sub(r'MANDATORY CREATIVE VARIETY AND TYPOGRAPHY:.*?(?=\n)', COMPOSITION+' Preserve the existing restrained typography; resolve choices before exactly one image per ad.', prompt)
+    replacements = {
+        'Generate Image 1 (RIGHT angle)': 'Generate Image 1 (collector hallway; use its resolved camera)',
+        'generate Image 3 (LEFT angle)': 'generate Image 3 (man cave; use its resolved camera)',
+        'each uses its assigned right / centre / left camera': 'each uses its resolved camera; old route names do not assign angles',
+        'RIGHT-angle Room 1 hallway / gallery': 'Room 1 collector hallway with its resolved camera',
+        'LEFT-angle Room 3 distinctive restrained collector interior': 'Room 3 minimal premium residential man cave with its resolved camera',
+        'Premium collector hallway: close edition-led photography': 'Premium collector hallway: edition-led photography',
+        'retain close edition prominence.': 'retain recognisable edition prominence.',
+        'GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.': 'GLAZING CHECK: Product recognition takes priority over reflection visibility at thumbnail size.',
+        'Confirm three different approved footer headlines and distinct supporting lines in every set; preserve the assigned selections verbatim.': 'Confirm three different approved footer headlines and each image’s exact resolved supporting line; preserve all assignments verbatim. Fresh packs draw three distinct approved sentences once without replacement; never reroll saved assignments.',
+        'three visibly different homes/walls/light': 'three recognisably different residential compositions',
+        'flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count)': 'check premium glazing without obscuring faces, action or defining edition text; thumbnail recognition takes priority',
+        'approved selected headline and supporting-line wording, with maximum eligible variety': 'the three distinct exact approved footer headlines and each image’s assigned approved supporting sentence',
+        'Select three different approved headlines for a fresh pack; no within-pack repeats.': 'Select three different approved headlines without replacement; use each image’s exact resolved supporting sentence. Fresh packs use three distinct sentences from the approved six-line bank, selected once before generation; never invent, paraphrase, combine or reroll sentences.',
+        'Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared.': 'Never repeat an approved headline within this three-image set; repeat the fixed CTA; preserve each image’s resolved supporting sentence through individual calls, retries and exports. Repetition across future packages is allowed.',
+        'Keep all signature and fixed template lines verbatim, including': 'Keep signature hooks, scarcity and ownership closes verbatim; generic supporting lines are editable in place. Preserve',
+        'Keep the three hook families, mandatory lines and ownership closes even when recent history contains them.': 'Keep the three signature hook families, approved scarcity and ownership closes even when history contains them; personalise generic supporting lines in their existing positions.',
+        '- Wall colour and cues differ from the other routes.': '- Room styles, wall-colour families, finishes and lighting must visibly differ across the three resolved scenes.',
+        '- Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.': '- Use recognisably distinct residential compositions with different room styles, wall-colour families, finishes and lighting; preserve the resolved assignments.',
+    }
+    for old,new in replacements.items(): prompt = prompt.replace(old,new)
+    return prompt

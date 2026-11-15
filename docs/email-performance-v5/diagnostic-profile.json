@@ -1,0 +1,44 @@
+{
+  "before": {
+    "scope": "Diagnostic intermediate lazy-preflight implementation, not final timing comparison",
+    "first_warm": [
+      {
+        "file": "crm_email_size.py",
+        "line": 40,
+        "function": "analyze_rendered_email",
+        "calls": 3,
+        "own_ms": 0.046400000000000004,
+        "total_ms": 70.7536
+      },
+      {
+        "file": "crm_campaign_html.py",
+        "line": 126,
+        "function": "import_html",
+        "calls": 18,
+        "own_ms": 0.15460000000000002,
+        "total_ms": 40.3502
+      }
+    ]
+  },
+  "after": {
+    "scope": "Diagnostic intermediate lazy-preflight implementation, not final timing comparison",
+    "first_warm": [
+      {
+        "file": "crm_email_size.py",
+        "line": 40,
+        "function": "analyze_rendered_email",
+        "calls": 1,
+        "own_ms": 0.027000000000000003,
+        "total_ms": 23.3369
+      },
+      {
+        "file": "crm_campaign_html.py",
+        "line": 126,
+        "function": "import_html",
+        "calls": 5,
+        "own_ms": 0.0422,
+        "total_ms": 15.766100000000002
+      }
+    ]
+  }
+}

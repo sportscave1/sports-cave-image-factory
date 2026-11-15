@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-14",
+  "task": "20261011-54d8ff88",
+  "status": "Implemented and tested locally; uncommitted",
+  "production_files": {
+    "crm_smart_candidates.py": "Exact audited Shopify collection membership, paginated merchandising order, batched existing checkout/click signals, balanced sales ranking.",
+    "crm_smart_catalogue.py": "Recipient-specific hydration, all locally recorded purchase exclusions, strict purchased sports, behaviour tiers, verified bestseller fallback, market eligibility, quantity and caches.",
+    "crm_catalogue.py": "Edition Ops and canonical/legacy Shopify metafield consistency, unknown remaining quantities, safe missing-product resolution and bounded GraphQL batches.",
+    "crm_campaign_send.py": "Reuse full histories, customer signals and product facts per existing recipient batch.",
+    "crm_shopify.py": "Read numberOfOrders in existing customer batch to prevent known buyers receiving generic fallback when their order details are unavailable.",
+    "crm_middle_sections.py": "Validate and persist optional smart_count; default new sections to four; preserve legacy documents.",
+    "components/crm_sections/composer.js": "Compact same-row 1-12 selector; manual picker unchanged.",
+    "components/crm_sections/preview.js": "Smart quantity and edition display parity with server-rendered emails."
+  },
+  "validation_files": [
+    "tests/test_crm_smart_matching.py",
+    "tests/test_crm_smart_catalogue.py",
+    "tests/test_crm_modular_catalogue.py",
+    "tests/test_crm_smart_catalogue_ui.cjs",
+    "tests/test_crm_smart_preview.cjs",
+    "tests/fixtures/crm_smart_catalogue_ui.py",
+    "docs/SMART_CATALOGUE_SHOPIFY_AUDIT_20261014.json"
+  ],
+  "results": [
+    "Final focused Python suite: 60 passed, no skips, using disposable local PostgreSQL-compatible fixture. Log: .tmp-preview-performance/smart-final-focused-python.log.",
+    "Broader regression suite: 203 passed on a fresh disposable database. Log: .tmp-preview-performance/smart-final-clean-python.log. Subsequent edition edge guards were covered by the final 60-test run.",
+    "Synthetic editor browser checks passed at 1440px and 390px: quantities 1/4/8/12, saved reopen, recipient switching, same-row control, manual picker, size budget and API failure hiding.",
+    "Standalone browser renderer passed: unknown remaining hidden, exhausted next edition hidden, custom CTA retained, legacy quantity four and quantities 1/4/8/12.",
+    "Admin and Storefront GraphQL queries validated against Shopify schemas; existing deprecated customer email fields remain compatible.",
+    "JavaScript syntax checks and git diff --check passed."
+  ],
+  "coverage": [
+    "V8 Supercars, NASCAR, MotoGP and Formula 1 remain separate; NBA, NFL and Ice Hockey match audited memberships.",
+    "Multiple purchased collections alternate reasonably; generic and promotional collections never create purchase eligibility.",
+    "All recorded earlier purchases excluded; no duplicates or unrelated fillers; empty eligible sections hidden.",
+    "Verified view facts, signed checkout facts, confirmed product-link clicks and no-signal bestseller selection tested with synthetic recipients.",
+    "Campaign preparation and five existing automation rendering paths, customer previews, test/live rendering paths and market availability covered without real sends.",
+    "Sold-out, closed, exhausted, unpublished, unavailable-market and conflicting edition records excluded; next edition never used as a sold-count estimate."
+  ],
+  "limitations": [
+    "Existing anonymous pixel/page-view data cannot be safely linked to individual customers. The verified-view input is supported and tested, but no current identity-linked view integration supplies it. Current runtime uses existing signed checkout and confirmed email-click facts, then verified bestsellers when no individual signal exists. No tracking added.",
+    "Historical exclusions depend on the existing synchronized order ledger. A known buyer with no recoverable purchased sport membership receives no recommendations.",
+    "Conflicting authoritative edition records are suppressed until their source data is reconciled; no production edition data was changed. Unknown remaining quantity is hidden.",
+    "New sport collection handles require inclusion in the existing audited taxonomy before purchase matching will use them.",
+    "Provider delivery and production throughput were not exercised. All email tests used synthetic local fixtures.",
+    "Unrelated pre-existing work and branch-wide Studio Verify findings were preserved. Task status is Tested, not clean committed Ready for Review."
+  ],
+  "safety": "No commits, pushes, deployments, campaign publishing, flow activation, real email sends, new tracking or production mutations. Shopify audit was read-only."
+}

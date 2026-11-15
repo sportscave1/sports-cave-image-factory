@@ -1,0 +1,169 @@
+C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+crm_campaign_action_failed type=RuntimeError
+...........resend_test_send failed category=resend_unavailable http_status=0
+......2026-10-09 17:05:52.059 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:52.059 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:53.336 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:53.346 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:53.522 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:05:53.527 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:53.527 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:53.667 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:53.679 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:53.887 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:53.891 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:54.162 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:05:54.167 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:54.167 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:54.357 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:54.659 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:05:55.235 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:55.235 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:55.545 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:55.553 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:55.702 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:55.706 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:55.856 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:05:55.861 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:55.861 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:56.055 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:56.327 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:05:56.334 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:56.554 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+..2026-10-09 17:05:56.560 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:56.564 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:56.571 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:56.576 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..........automation_publication_poll_failed error_class=RuntimeError
+.......2026-10-09 17:05:56.653 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:56.761 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:05:56.878 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.....2026-10-09 17:05:57.326 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...2026-10-09 17:05:57.350 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...............2026-10-09 17:06:11.459 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:11.459 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:11.459 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:11.459 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:11.459 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.....2026-10-09 17:06:33.049 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:06:33.071 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:33.081 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+....................automation_publication job_id=9743d86e-1baa-4181-bb9e-3e5742dcc829 revision=3 state=FAILED error_class=ValueError
+..automation_publication job_id=ce432097-fbaa-4a63-934d-05209c1861fd revision=2 state=FAILED error_class=ValueError
+..AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=8 rows=0
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=0
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=17 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=17 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=19 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+.........automation_publication job_id=9045ac28-af8e-45ad-9c75-a571c701b3e2 revision=2 state=FAILED error_class=ValueError
+....automation_publication job_id=5764c660-1306-4949-9268-88a4dd540d1f revision=2 state=FAILED error_class=ValueError
+automation_publication job_id=5764c660-1306-4949-9268-88a4dd540d1f revision=2 state=FAILED error_class=ValueError
+.automation_publication job_id=42f286b8-11f5-42d0-9e65-b1d21688a826 revision=2 state=QUEUED error_class=StoreUnavailable
+.......resend_test_send failed category=resend_unavailable http_status=0
+.........internal_checkout_contact_failed type=RuntimeError
+..crm_segment_count_refresh_failed type=RuntimeError
+......2026-10-09 17:06:39.915 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:39.916 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:40.110 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:40.318 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:40.548 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:40.935 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:40.939 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:41.383 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:41.387 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:41.549 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:41.575 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:41.878 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:41.882 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:42.209 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:42.213 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:42.389 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:42.603 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.......2026-10-09 17:06:42.712 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:42.718 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:42.729 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...................crm_send_held phase=submission type=EmailDeliveryError
+.crm_send_held phase=submission type=EmailDeliveryError
+......crm_send_held phase=submission type=TimeoutError
+.2026-10-09 17:07:30,613 WARNING wall_preview_archive_config_missing keys=DROPBOX_REFRESH_TOKEN,DROPBOX_ACCESS_TOKEN refresh_token_or_access_token_required=true
+2026-10-09 17:07:30,614 INFO checkout_requests_reconciled completed=0 expired=0
+2026-10-09 17:07:30,827 WARNING wall_preview_archive_cycle_failed type=SupabaseNotConfigured
+2026-10-09 17:07:30,833 WARNING wall_preview_worker_cycle_failed type=SupabaseNotConfigured
+2026-10-09 17:07:30,834 WARNING wall_preview_customer_cycle_failed type=SupabaseNotConfigured
+2026-10-09 17:07:30,839 WARNING review_worker_cycle_failed type=TypeError
+.2026-10-09 17:07:30,843 INFO crm_worker_run_start
+2026-10-09 17:07:30,844 WARNING automation_capability_check_unavailable
+2026-10-09 17:07:30,844 WARNING crm_control_store_unavailable type=TypeError
+2026-10-09 17:07:30,845 WARNING automation_publication_cycle_failed error_class=StoreUnavailable
+2026-10-09 17:07:30,845 WARNING checkout_cache_sync_failed type=TypeError
+2026-10-09 17:07:30,845 INFO crm_worker_run_end completed=True duration_ms=2.1
+.........
+----------------------------------------------------------------------
+Ran 178 tests in 101.010s
+
+OK
+LOCAL SQL recipients=1093 simulated_graph_latency=5ms cold_prepare_ms=423.4 warm_review_ms=31.9 warm_review_graph_calls=0 queue_before_ms=11895.3 queue_after_ms=323.4 queue_sql_before=2197 queue_sql_after=13 queue_graph_calls=22 transport_calls=0 durable_jobs=1093
+LOCAL AppTest prepared_modal_open_ms=9.7 provider_reads_on_open=0
+SYNTHETIC recipients=50 latency=5ms old_prepare_ms=32.6 old_total_calls=5 cold_prepare_ms=26.5 cold_total_calls=5 warm_ms=0.201 warm_calls=0
+SYNTHETIC recipients=1000 latency=5ms old_prepare_ms=466.9 old_total_calls=65 cold_prepare_ms=346.5 cold_total_calls=65 warm_ms=3.428 warm_calls=0
+SYNTHETIC recipients=1093 latency=5ms old_prepare_ms=540.5 old_total_calls=72 cold_prepare_ms=418.8 cold_total_calls=72 warm_ms=4.806 warm_calls=0
+SYNTHETIC recipients=5000 latency=5ms old_prepare_ms=3245.1 old_total_calls=321 cold_prepare_ms=2503.7 cold_total_calls=321 warm_ms=23.966 warm_calls=0
+SYNTHETIC recipients=10000 latency=5ms old_prepare_ms=7399.7 old_total_calls=641 cold_prepare_ms=5303.0 cold_total_calls=641 warm_ms=40.640 warm_calls=0
+Synthetic NZ/4 in 1000 profiles: before scanned=1000 pages=4 ms=30.8; after profiles=4 batches=1 conflict_groups=1 scan_pages=0 ms=1.2
+Local durable publish acceptance: 7.5 ms
+PERF controlled 12-row old path: 2.866s, SQL calls=468, commits=132, fresh lookups=24; new ack=0.040s, completed=6.608s; same fresh checks, Shopify concurrency capped at 2
+PERF 12 selected: durable acknowledgement=0.025s; independent completion while slow lookup blocked; max_inflight=4

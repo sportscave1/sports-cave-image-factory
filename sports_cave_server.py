@@ -1,0 +1,165 @@
+import logging
+import os
+
+from starlette.routing import Route
+from streamlit.web.server.starlette import App
+
+import app_branding
+import collector_vault
+from collector_vault_api import COLLECTOR_VAULT_ROUTES
+from daily_planner import DAILY_PLANNER_ROUTE_HANDLERS
+from files_upload_api import FILES_UPLOAD_ROUTES
+import google_seo
+from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
+import run_migrations
+from top_bar_api import TOP_BAR_ROUTE_HANDLERS
+from support_email_events import EVENTS_PATH, email_events
+from support_email_completion import PATH as EMAIL_READY_PATH, read_ready
+from support_email_idle import IdleLifecycle
+from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
+from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
+from wall_preview_analytics_api import ROUTES as WALL_PREVIEW_ANALYTICS_ROUTES
+from wall_preview_inbox_api import ROUTES as WALL_PREVIEW_INBOX_ROUTES
+from storefront_protection_api import ROUTES as STOREFRONT_PROTECTION_ROUTES
+from auth_cookie_cleanup import ROUTES as AUTH_COOKIE_CLEANUP_ROUTES
+from static_asset_compression import StaticAssetCompression
+from auto_editions_api import ROUTES as AUTO_EDITIONS_ROUTES
+from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
+from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
+from auto_editions_status import ROUTES as AUTO_EDITIONS_STATUS_ROUTES
+from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
+from website_recommendation_analytics import ROUTES as WEBSITE_RECOMMENDATION_ROUTES
+from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
+from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
+from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
+from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
+
+
+
+routes = [
+    Route(path, endpoint, methods=list(methods))
+    for path, endpoint, methods in (
+        *FILES_UPLOAD_ROUTES,
+        *AUTO_EDITIONS_ROUTES,
+        *AUTO_EDITIONS_SETUP_ROUTES,
+        *AUTO_EDITIONS_ONBOARDING_ROUTES,
+        *AUTO_EDITIONS_STATUS_ROUTES,
+        *PRODUCT_QUIZ_ROUTES,
+        *WEBSITE_RECOMMENDATION_ROUTES,
+        *AUTO_EDITIONS_BULK_ROUTES,
+        *WORKER_HEALTH_ROUTES,
+        *PRODUCT_UPLOAD_ROUTES,
+        *TASK_RECORDER_ROUTES,
+
+        *COLLECTOR_VAULT_ROUTES,
+        *DAILY_PLANNER_ROUTE_HANDLERS,
+        *TOP_BAR_ROUTE_HANDLERS,
+        *GOOGLE_SEO_ROUTE_HANDLERS,
+        *WALL_PREVIEW_ROUTES,
+        *WALL_PREVIEW_ANALYTICS_ROUTES,
+        *WALL_PREVIEW_INBOX_ROUTES,
+        *WALL_PREVIEW_CRM_ROUTES,
+        *STOREFRONT_PROTECTION_ROUTES,
+        *AUTH_COOKIE_CLEANUP_ROUTES,
+    )
+]
+routes.extend(app_branding.public_branding_routes())
+routes.append(Route(EVENTS_PATH, email_events, methods=['GET']))
+routes.append(Route(EMAIL_READY_PATH, read_ready, methods=['GET']))
+
+
+MAIN_HEALTH_PATHS = frozenset({"/_stcore/health", "/healthz"})
+
+
+class ConstantTimeHealthMiddleware:
+    """Answer Render liveness checks without consulting Streamlit or storage.
+
+    Render currently checks Streamlit's ``/_stcore/health`` path.  Keep that
+    public contract, but make liveness independent of Streamlit runtime state,
+    sessions, database locks, and external services.  ``/healthz`` is exposed
+    as the explicit equivalent for local verification and any future Render
+    configuration change.
+    """
+
+    def __init__(self, application):
+        self.application = application
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") in MAIN_HEALTH_PATHS:
+            method = str(scope.get("method") or "GET").upper()
+            status = 204 if method == "OPTIONS" else 200
+            body = b"" if method in {"HEAD", "OPTIONS"} else b"ok\n"
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status,
+                    "headers": [
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                        (b"cache-control", b"no-store"),
+                        (b"content-length", str(len(body)).encode("ascii")),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.application(scope, receive, send)
+
+
+class _GoogleOAuthAccessLogFilter(logging.Filter):
+    def filter(self, record):
+        return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
+
+
+class _WallPreviewAccessLogFilter(logging.Filter):
+    def filter(self, record):
+        # The established binary-body contract carries customer identity in the
+        # query. Keep it out of HTTP access logs; ingest logs use safe record IDs.
+        message=record.getMessage()
+        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message
+
+
+logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
+from auto_editions_bulk_runtime import ReviewLifecycle
+streamlit_app = ReviewLifecycle(App("app.py", routes=routes))
+app = ConstantTimeHealthMiddleware(
+    IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app)))
+)
+
+
+def prepare_google_seo_storage():
+    database_url, _source = run_migrations.get_database_url()
+    if not database_url:
+        return False
+    for filename in google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS:
+        run_migrations.run_migrations(only=filename)
+    # Direct Google reports are requested only by report pages. No repair enqueue.
+    return True
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Run once per process, before listening. An incompatible deployment must fail
+    # rather than advertising a healthy application with disabled persistence.
+    if os.getenv("RENDER") or run_migrations.get_database_url()[0]:
+        run_migrations.run_deployment_migrations()
+    prepare_google_seo_storage()
+    # Readiness logging is diagnostic only. Never delay port binding on a
+    # Shopify Admin API call during a process restart.
+    collector_vault.log_collector_vault_readiness(check_shopify=False)
+    from product_quiz_worker import start_app_reconciler
+    start_app_reconciler()
+    if os.getenv('RENDER'):
+        from crm_thumbnail_cache import warm_renderer
+        warm_renderer()
+        from auto_editions_runtime import start_worker
+        start_worker()
+        from database_read_pool import warm_application_reads
+        warm_application_reads()
+    uvicorn.run(
+        app,
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8501")),
+    )

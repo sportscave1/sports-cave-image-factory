@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict');
+const {receivedBody,safeReaderView,patchImagePermission}=require('../components/support_email/mail.js');
+const row={key:'message',reader_identity:'exact',reader_document:'blocked',blocked_images:1,images_allowed:true,approved_reader_document:'allowed'};
+assert.match(receivedBody({...row,images_allowed:false}),/Show Images/);
+assert.match(receivedBody(row),/Images shown for this message/);
+assert.doesNotMatch(receivedBody(row),/allow-scripts|allow-forms/);
+const [cached]=safeReaderView([row]);
+assert.equal(cached.images_allowed,false);assert.equal(cached.approved_reader_document,'');
+assert.equal(cached.reader_document,'blocked');assert.equal(row.images_allowed,true);
+let wholePaneWrites=0,frame={srcdoc:'blocked'},control={textContent:''};
+const wrap={dataset:{readerId:'exact'},querySelector:s=>s==='.email-document'?frame:control};
+const pane={querySelectorAll:()=>[wrap],set innerHTML(v){wholePaneWrites++;}};
+patchImagePermission(pane,[{...row,reader_identity:'wrong'}]);assert.equal(frame.srcdoc,'blocked');
+patchImagePermission(pane,[row]);assert.equal(frame.srcdoc,'allowed');
+assert.equal(wholePaneWrites,0);assert.equal(control.textContent,'Images shown for this message');
+console.log('Per-message iframe patch, sandbox and blocked-only cache checks passed.');

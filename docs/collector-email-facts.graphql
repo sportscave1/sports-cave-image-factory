@@ -1,0 +1,18 @@
+query CollectorEmailProducts($ids: [ID!]!, $country: CountryCode!) {
+  nodes(ids: $ids) {
+    ... on Product {
+      id
+      title
+      status
+      onlineStoreUrl
+      createdAt
+      productType
+      tags
+      publishedInContext(context: {country: $country})
+      featuredImage { url(transform: {maxWidth: 1000, preferredContentType: JPG}) }
+      variants(first: 20) {
+        nodes { inventoryPolicy sellableOnlineQuantity inventoryItem { tracked } }
+      }
+    }
+  }
+}
