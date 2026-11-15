@@ -13,6 +13,10 @@ def preparation_code_hash():
                      'scripts/photoshop/inspect_psd_editions.jsx','scripts/photoshop_dispatch.py')).encode()).hexdigest()
 
 
+class NonOpaqueArtwork(ValueError):
+    pass
+
+
 def opaque(path):
     with Image.open(path) as image:
         if image.format != 'PNG' or image.mode not in ('RGB', 'RGBA'):
@@ -20,7 +24,7 @@ def opaque(path):
         if image.mode == 'RGBA':
             low, high = image.getchannel('A').getextrema()
             if low != 255:
-                raise ValueError(f'{Path(path).name}: non-opaque alpha ({low}-{high}). '
+                raise NonOpaqueArtwork(f'{Path(path).name}: non-opaque alpha ({low}-{high}). '
                     'The visible artwork must cover the complete canvas; preserve the approved background in the PSD.')
         return image.size
 
@@ -40,7 +44,14 @@ def validate(root, report, source, total, number_layer, plaque_layer, scale):
     candidate = report.get('resize_background')
     if scale == 1 or not candidate:
         return None
-    if opaque(root/'preflight-artwork.png') != size:
+    try:
+        candidate_size = opaque(root/'preflight-artwork.png')
+    except NonOpaqueArtwork:
+        # The full composite already passed. Leave the layered document intact:
+        # promoting a partial layer could fill transparent pixels or change art.
+        # The ordinary preparation pixel proofs still validate the resized output.
+        return None
+    if candidate_size != size:
         raise ValueError('Resize background must cover the native canvas exactly.')
     return candidate
 

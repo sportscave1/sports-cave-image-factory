@@ -103,12 +103,19 @@ def test_opaque_artwork_keeps_the_exact_pinned_background(tmp_path):
     assert check(tmp_path,report)==report['resize_background']
 
 
-@pytest.mark.parametrize('fault',['source_alpha','artwork_alpha','duplicate','nested','font','wrong_total'])
+def test_opaque_composite_resizes_without_promoting_partial_layer(tmp_path):
+    report=native(tmp_path)
+    candidate=Image.new('RGBA',(2835,2004),(31,72,111,255))
+    candidate.putpixel((0,0),(0,0,0,0))
+    candidate.save(tmp_path/'preflight-artwork.png')
+    assert check(tmp_path,report) is None
+
+
+@pytest.mark.parametrize('fault',['source_alpha','duplicate','nested','font','wrong_total'])
 def test_preflight_rejects_incompatible_template_before_number_exports(tmp_path,fault):
     report=native(tmp_path)
     if fault.endswith('_alpha'):
-        name='preflight-original.png' if fault=='source_alpha' else 'preflight-artwork.png'
-        Image.new('RGBA',(2835,2004),(31,72,111,222)).save(tmp_path/name)
+        Image.new('RGBA',(2835,2004),(31,72,111,222)).save(tmp_path/'preflight-original.png')
     elif fault=='duplicate':report['inspection']['layers'].append(deepcopy(report['inspection']['layers'][0]))
     elif fault=='nested':report['inspection']['layers'][0]['path'].append({'name':'nested'})
     elif fault=='font':report['inspection']['layers'][0]['fonts'][0]['installed']=False

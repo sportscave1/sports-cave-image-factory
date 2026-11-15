@@ -139,7 +139,8 @@ def classify(row, config, *, runtime=None):
     lower = reason.lower()
     transient=(code in TRANSIENT or 'transfer failed: timeouterror' in lower
         or reason=='Preparation failed: HTTPError. Existing PSD and mapping are preserved.')
-    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED'
+    isolated_alpha = code=='ARTWORK_ALPHA' and 'preflight-artwork.png: non-opaque alpha' in lower
+    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED' or isolated_alpha
                 else ACTIVATION if code=='PHOTOSHOP_ACTIVATION' or reason==LEGACY_INSPECTION_OSERROR
                 else 'Photoshop busy' if code=='PHOTOSHOP_BUSY'
                 else 'Native inspection' if 'cannot open the file because the open options are incorrect' in lower or reason=='Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.'
@@ -173,7 +174,8 @@ def classify(row, config, *, runtime=None):
         return {**result, 'reason':reason+' Waiting for an idle Companion with the Photoshop activation fix.'}
     if category=='Resize background' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
-                'reason':'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.'}
+                'reason':('The isolated resize candidate was transparent. A fixed idle Companion can preserve the full layered composition and verify its output.' if isolated_alpha else
+                          'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.')}
     if category=='Photoshop busy' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
                 'reason':'Photoshop was busy before the script started. Waiting for an idle Companion to retry.'}

@@ -19,6 +19,7 @@ def resize_runtime():
 
 
 @pytest.mark.parametrize('reason',[
+    'Preparation failed: preflight-artwork.png: non-opaque alpha (0-255). The visible artwork must cover the complete canvas; preserve the approved background in the PSD. Existing PSD and mapping are preserved.',
     'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
     'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
     'Photoshop inspection failed: OSError',
