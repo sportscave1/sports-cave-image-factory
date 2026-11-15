@@ -154,7 +154,7 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     assert "Create Design" in markup and "Create Ad" in markup
     assert "Sports Cave event: Fixture release" in markup
     assert "Show the photos in this chat first" in markup
-    assert "Choose the strongest usable photo as the hero" in markup
+    assert "Hero photo selection" in markup
     assert "designs-canvas.psd" in markup
     assert "Step 3. Define the composition" in markup
     assert "MANDATORY CONTINUATION AND RECOVERY" in markup
