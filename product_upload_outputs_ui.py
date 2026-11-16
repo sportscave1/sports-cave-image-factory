@@ -33,13 +33,16 @@ def core_preview_items(app,result,source):
 
 
 @st.fragment(run_every=.25)
-def save_progress(app,key,actor):
+def save_progress(app,key,actor,*,core=False):
     from product_upload_jobs import JOBS
     if st.session_state.get('_product_upload_active')!=key:return
     job=JOBS.snapshot(key,actor,'save')
     if not job:return
     if job['state'] in ('Queued','Running'):
-        if job['total']:st.progress(min(1.,job['completed']/job['total']),text=job['stage'])
+        if core:
+            fraction=min(1.,job['completed']/job['total']) if job['total'] else 0.
+            st.progress(.5+.49*fraction,text='Saving generated mockups to Dropbox · '+job['stage'])
+        elif job['total']:st.progress(min(1.,job['completed']/job['total']),text=job['stage'])
         else:st.caption('Saving… · '+job['stage'])
     elif job['state']=='Failed':
         st.caption('Save failed · '+job['error'])
@@ -47,10 +50,16 @@ def save_progress(app,key,actor):
         if st.session_state.get(marker)!=job['token']:
             st.session_state[marker]=job['token'];st.rerun()
     elif job['state']=='Ready':
-        if st.session_state.get('product-upload-save-applied-'+key)==job['token']:return
         receipt=JOBS.result(key,actor,'save',job['token'])
         result=app._mockups_result()
         if not receipt or not result or result.get('_product_upload_intake')!=key:return
+        if st.session_state.get('product-upload-save-applied-'+key)==job['token']:
+            if core and result.get('product_upload_core_receipt')==receipt:
+                if receipt.get('cancelled') or receipt.get('failures'):
+                    st.caption('Mockups generated · Dropbox save needs attention below.')
+                else:
+                    st.progress(1.,text='Mockups generated and saved to Dropbox')
+            return
         from product_upload_api import connect
         from product_upload_intake import Intakes
         current=Intakes(connect).read(key,actor)
@@ -74,6 +83,7 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
     key=str(row['id']);actor=user['id'];api=app.dropbox_integration
     job=JOBS.snapshot(key,actor,'save')
     running=bool(job and job['state'] in ('Queued','Running'))
+    core_job=bool(job and job.get('token') and job['token']==st.session_state.get('product-upload-core-save-job-'+key))
     choice=selected(key)
     try:folder=product_folder(api,name)
     except ValueError:folder=''
@@ -118,10 +128,9 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
     with st.container(horizontal=True,vertical_alignment='center',gap='small'):
         save_requested=st.button('Save all',type='primary',disabled=disabled,
                      key='product-upload-save-all-'+key)
-        if running:st.caption('Saving…')
+        if running and not core_job:st.caption('Saving…')
         elif saved:st.markdown(':green[✓ Saved]')
-        elif core_saved:st.markdown(':green[✓ Five core WebPs saved]')
-        elif job and job['state']=='Failed':st.caption('Save failed · retry Save all')
+        elif job and job['state']=='Failed' and not core_job:st.caption('Save failed · retry Save all')
     if receipt.get('cancelled') and not running:
         st.warning('That product folder already exists. Save in a numbered folder or change Product name. Nothing was overwritten.')
         if st.button('Save in a numbered folder',disabled=disabled,key='product-upload-save-numbered-retry-'+key):
@@ -185,17 +194,19 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
                 from product_upload_source import invalidate
                 invalidate(current)
                 scoped['_product_upload_save_token']=current['data']['mockup_save_token']
-            JOBS.submit(key,actor,'save',fingerprint,
+            queued=JOBS.submit(key,actor,'save',fingerprint,
                 lambda progress:dict(transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,
                                          **options),package_stamp=stamp,core_only=core_requested,
                                          generation_receipt=generation_receipt if core_requested else None))
+            if core_requested:
+                st.session_state['product-upload-core-save-job-'+key]=queued['token']
             st.session_state[state_key(key)+'-saving-destination']=resolved['name']+' / '+folder
             scoped.pop('product_upload_core_receipt' if core_requested else 'product_upload_save_receipt',None)
             app._set_mockups_result(scoped)
             st.rerun()
         except Exception as error:
             st.error(str(error) if isinstance(error,ValueError) else 'Save could not start. Your sport selection and images are retained; retry Save all.')
-    if job:save_progress(app,key,actor)
+    if job and not core_job:save_progress(app,key,actor)
     receipt=result.get('product_upload_save_receipt') or {}
     if receipt and not running:
         if receipt.get('failures'):

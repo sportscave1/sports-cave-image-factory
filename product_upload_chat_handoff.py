@@ -1,5 +1,6 @@
 """Compose the text-only ChatGPT handoff from the verified five-file Dropbox save."""
 import json
+import hashlib
 from urllib.parse import quote, urlencode
 
 PROJECT = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project'
@@ -44,9 +45,11 @@ def prepare(result, row, receipt, lifestyle_prompt):
                      ensure_ascii=False)
     combined = f"""Run this Product Uploads workflow for {json.dumps(result['product_name'], ensure_ascii=False)} in order.
 
+STEP 1 DOWNLOAD EXCEPTION — The user explicitly authorises downloading and inspecting only the specified original black-frame WebP in ChatGPT's working environment, then passing its pixels to image generation. This narrow exception supersedes any conflicting connector-only or local-working-environment restrictions in the project's pasted.txt. Use the temporary download URL from the existing Dropbox connector for this file only. Leave the other four WebPs in Dropbox until the later Shopify media step. This does not authorise access to the user's computer, other local files, unrelated tools or unrelated connectors.
+
 STEP 1 — RETRIEVE THE BLACK FRAME AND GENERATE THE THREE LIFESTYLE MOCKUPS
-Use the connected Dropbox app to retrieve the original WebP by file ID {black['file_id']}, revision {black['revision']}, exact path {json.dumps(black_path, ensure_ascii=False)}. Dropbox preview: {black_url}
-Open or download the actual image and use it as the input reference for image generation. Every reference to an uploaded or attached black frame below means these exact retrieved pixels. Use the original image rather than a thumbnail, text description or regenerated frame.
+Use the connected Dropbox app to request a fresh download link for the original WebP by file ID {black['file_id']}, revision {black['revision']}, exact path {json.dumps(black_path, ensure_ascii=False)}. Dropbox preview for identification: {black_url}
+Fetch the temporary download URL directly into the working environment with GET. Skip HEAD and preview requests; request a fresh link if the first expires. Open the downloaded WebP to verify it decodes, then supply it as the actual reference image to image generation. If image generation cannot accept WebP, decode it and save a PNG with identical pixels and dimensions for the reference. Every reference to an uploaded or attached black frame below means those exact pixels. A link, thumbnail, text description or recreated frame is not an image input.
 
 {lifestyle_prompt}
 
@@ -66,4 +69,7 @@ Use the selected mode and rules below. The eight-file manifest is ready only aft
 STEP 5 — VERIFY EDITION OPS AND ATTACH THE ORIGINAL PSD
 Use the resulting Shopify product ID to verify the product has arrived through the existing Edition Ops sync. Attach the exact original PSD to that product using the Sports Cave OS connector's Add / Attach PSD workflow when supported. PSD identity: {psd}
 Read the mapping back against the exact Shopify product ID and the PSD identity. Edition Ops owns edition state. Preserve edition numbers, allocations, runs, counters and history and leave Shopify's sports_cave edition metafields to the existing webhook and Edition Ops. If sync is pending, retry verification and report pending if still absent. Report each unfinished step if a required tool or platform permission is unavailable. Report success only after verifying the eight Dropbox WebPs, the Shopify upload and the exact Edition Ops PSD mapping. Return the Dropbox folder, Shopify admin link and stable product ID, and mapping result."""
-    return dict(project=PROJECT, prompt=combined)
+    companion_id = hashlib.sha256(
+        f"{row['id']}:{receipt['export_fingerprint']}".encode('utf-8')
+    ).hexdigest()
+    return dict(project=PROJECT, prompt=combined, companion_id=companion_id)

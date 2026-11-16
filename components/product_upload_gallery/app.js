@@ -45,6 +45,45 @@
   }
   const project='https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
   const previewEvent='sc-product-uploads-previews-ready';
+  const companionChannel='sports-cave-upload-companion-v1';
+  function companionRequest(action, payload={}, timeout=1000){
+    if(!globalThis.crypto?.randomUUID)return Promise.resolve(null);
+    const id=crypto.randomUUID();
+    return new Promise(resolve=>{
+      const timer=setTimeout(()=>finish(null),timeout);
+      function finish(result){
+        clearTimeout(timer);
+        window.removeEventListener('message',reply);
+        resolve(result);
+      }
+      function reply(event){
+        const message=event.data;
+        if(event.source===window && event.origin===location.origin && message?.channel===companionChannel &&
+           message.direction==='response' && message.id===id)finish(message.result);
+      }
+      window.addEventListener('message',reply);
+      window.postMessage({channel:companionChannel,direction:'request',action,id,...payload},location.origin);
+    });
+  }
+  function companionHealth(){
+    const status=document.createElement('div');
+    status.setAttribute('role','status');
+    status.textContent='Checking this Edge profile…';
+    root.append(status);
+    const states={ready:'Connected · ready',opening:'Opening the ChatGPT project',sending:'Sending the prompt',
+      submitted:'Submitted · ChatGPT accepted the prompt',failed:'Stopped before submission',uncertain:'Submission could not be verified'};
+    const signal=controller.signal;
+    async function refresh(){
+      const report=await companionRequest('health');
+      if(signal.aborted)return;
+      const label=states[report?.state] || 'Upload Companion is not connected in this Edge profile.';
+      const time=report?.time ? ' · '+new Date(report.time).toLocaleString() : '';
+      status.textContent=label+time+(report?.reason ? ' · '+report.reason : '');
+      resize();
+      setTimeout(()=>{if(!signal.aborted)void refresh();},5000);
+    }
+    void refresh();
+  }
   function uploadAction(row,status,handoff){
     if(!handoff)return;
     const upload=button('Upload','uploadToChat');
@@ -69,7 +108,25 @@
       resize();
       try{
         const clipboard=automatic ? parent.navigator.clipboard : navigator.clipboard;
-        await clipboard.writeText(handoff.prompt);
+        let copied=false;
+        if(handoff.companion_id){
+          if(!automatic || parent.document.hasFocus()){
+            try{await clipboard.writeText(handoff.prompt);copied=true;}catch{}
+          }
+          active(version);
+          const result=await companionRequest('start',{receipt:handoff.companion_id,prompt:handoff.prompt},2200);
+          active(version);
+          if(result?.accepted){
+            status.textContent=result.busy ? 'An upload is already opening. Click Upload again when it finishes.' : '';
+            return;
+          }
+        }
+        if(automatic && !parent.document.hasFocus()){
+          if(autoKey)sessionStorage.removeItem(autoKey);
+          status.textContent='';
+          return;
+        }
+        if(!copied)await clipboard.writeText(handoff.prompt);
         active(version);
         // Keep the opener isolated and preserve a manual link if the browser blocks the launch.
         const popup=window.open('about:blank','_blank');
@@ -99,7 +156,7 @@
     };
     if(!autoKey)return;
     function afterPreviews(){
-      if(signal.aborted || !parent.document.hasFocus())return;
+      if(signal.aborted || upload.disabled || (!handoff.companion_id && !parent.document.hasFocus()))return;
       if(!parent.document.querySelector('iframe[data-sc-upload-previews="'+receipt+'"]'))return;
       try{
         if(sessionStorage.getItem(autoKey))return;
@@ -162,6 +219,7 @@
     signature=next;epoch++;controller.abort();clearAllFeedback();controller=new AbortController();root.replaceChildren();
     if(window.frameElement)delete window.frameElement.dataset.scUploadPreviews;
     if(args.mode==='actions')actions(args);
+    else if(args.mode==='companion-health')companionHealth();
     else{const container=document.createElement('div');container.className=args.mode==='gallery'?'gallery':'single-preview';container.setAttribute('aria-label',args.mode==='gallery'?'Generated mockup previews':'Lifestyle mockup preview');
       for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);
       if(args.mode==='gallery' && args.preview_receipt && window.frameElement){

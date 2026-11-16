@@ -133,10 +133,9 @@ def poll_generation(app,key,actor,name,sport,source_hash):
     if not job:return
     if job['state'] in ('Queued','Running'):
         if job['total']:
-            st.progress(job['completed']/job['total'],text=f"Generating mockups · {job['completed']} of {job['total']}")
+            st.progress(.5*job['completed']/job['total'],text=f"Generating mockups · {job['completed']} of {job['total']}")
         else:
-            st.caption('Generating mockups · '+job['stage'])
-            st.html('<progress aria-label="Mockup generation progress" style="width:100%;height:7px;accent-color:#b08b40"></progress>')
+            st.progress(0.,text='Generating mockups · '+job['stage'])
         if job['previews']:
             # Existing tiny preview bytes, cached once; no repeated PIL resize
             # or full-resolution artwork delivery on every progress tick.
@@ -274,6 +273,13 @@ def render_design(app,row,user):
     with st.container(key='product-upload-generation'):
         if pending and not result:poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'])
         if result:
+            if saving and saving.get('token') and saving['token']==st.session_state.get('product-upload-core-save-job-'+key):
+                from product_upload_outputs_ui import save_progress
+                save_progress(app,key,user['id'],core=True)
+            elif (pending and pending['state']=='Ready' and choice and not saving
+                  and app.os_accounts.can_access_page(user,'Files')
+                  and not result.get('product_upload_core_receipt') and not result.get('product_upload_save_receipt')):
+                st.progress(.5,text='Mockups generated · preparing Dropbox save')
             result['_product_upload_actor_id']=str(user['id'])
             from product_upload_outputs_ui import render_outputs
             render_outputs(app,result,row,user,name)

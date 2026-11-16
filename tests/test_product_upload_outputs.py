@@ -109,6 +109,9 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
     assert 'Exact original lifestyle prompt.' in prompt and 'lossless WebP, method 1' in prompt
     assert 'Create as DRAFT' in prompt and 'Add / Attach PSD' in prompt
     assert 'https://www.dropbox.com/home/' in prompt
+    assert 'STEP 1 DOWNLOAD EXCEPTION' in prompt
+    assert "pasted.txt" in prompt and 'Leave the other four WebPs in Dropbox' in prompt
+    assert 'Fetch the temporary download URL directly' in prompt
 
     full = save(manifest, conflict='cancel', extend_core=receipt['export_fingerprint'])
     assert len(full['successes']) == 8
@@ -171,6 +174,33 @@ def test_product_renderer_has_no_zip_controls_and_standalone_unchanged():
     assert 'render_final_zip_download' not in text and 'Load Full Resolution' not in text
     assert 'ensure_primary_download_zip' not in inspect.getsource(shell)
     assert 'Copy each prompt' not in text
+
+
+def test_automatic_save_uses_second_half_and_waits_for_confirmed_receipt(monkeypatch):
+    import product_upload_outputs_ui as ui
+    from product_upload_jobs import JOBS
+
+    key = 'upload'
+    token = 'save'
+    state = {'_product_upload_active': key}
+    receipt = {'core_only': True, 'successes': [{}] * 5}
+    result = {'_product_upload_intake': key, 'product_upload_core_receipt': receipt}
+    app = SimpleNamespace(_mockups_result=lambda: result)
+    job = dict(state='Running', total=5, completed=0, stage='Saving WebPs', token=token)
+    observed = []
+    monkeypatch.setattr(ui.st, 'session_state', state)
+    monkeypatch.setattr(ui.st, 'progress', lambda value, *, text: observed.append(value))
+    monkeypatch.setattr(JOBS, 'snapshot', lambda *args: job)
+    monkeypatch.setattr(JOBS, 'result', lambda *args: receipt)
+
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    job['completed'] = 5
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    assert observed == [.5, .99]
+    job['state'] = 'Ready'
+    state['product-upload-save-applied-' + key] = token
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    assert observed[-1] == 1.
 
 
 def test_retain_uploaded_original_without_export_resize(tmp_path):

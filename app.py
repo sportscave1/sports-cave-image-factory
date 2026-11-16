@@ -7220,6 +7220,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
     "Worker Health": ":material/monitor_heart:",
+    "Upload Companion": ":material/upload:",
     "Task Recorder": ":material/videocam:",
     "Accounts & Access": ":material/settings:"
 }
@@ -7266,7 +7267,7 @@ def _active_sidebar_group(route):
     import crm_navigation
     if route in (*analytics_nav.WEBSITE_ROUTES, *analytics_nav.ANALYTICS_ROUTES):
         return "website"
-    if route in {"Developer", "Worker Health", "Task Recorder", "Image Protection"}:
+    if route in {"Developer", "Worker Health", "Upload Companion", "Task Recorder", "Image Protection"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
@@ -7448,14 +7449,16 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if ('Worker Health' in allowed_routes or 'Task Recorder' in allowed_routes or 'Developer' in allowed_routes or 'Image Protection' in history_routes) and disclosure(
+    if ({'Worker Health', 'Upload Companion', 'Task Recorder', 'Developer'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
         'developer','Developer',':material/developer_mode:','Worker Health',
         can_open_overview='Worker Health' in allowed_routes,
     ):
         children=st.container(key="sidebar-developer-children")
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
         if 'Worker Health' in allowed_routes:
-            child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+            child_button(children,'Worker Health','Editions Companion',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Upload Companion' in allowed_routes:
+            child_button(children,'Upload Companion','Upload Companion',icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
         if 'Task Recorder' in allowed_routes:
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Image Protection' in history_routes:
@@ -13826,7 +13829,7 @@ def render_selected_page(current_page):
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
         "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access", "Accounting",
-        "Developer Studio", "Developer", "Worker Health", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Developer Studio", "Developer", "Worker Health", "Upload Companion", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -13861,6 +13864,9 @@ def render_selected_page(current_page):
         render_page(current_os_user())
     elif current_page == 'Worker Health':
         from worker_health_page import render_page
+        render_page(current_os_user())
+    elif current_page == 'Upload Companion':
+        from upload_companion_page import render_page
         render_page(current_os_user())
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
