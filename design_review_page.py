@@ -10,7 +10,8 @@ import logging
 import streamlit as st
 
 from design_review_metadata import (
-    handoff_paths, is_working_file, legacy_metadata, read_handoff, resolve_review_sport, review_key,
+    handoff_paths, is_working_file, legacy_metadata, read_gallery_handoff, read_handoff,
+    resolve_review_sport, review_key,
 )
 from product_upload_dropbox import REVIEW, approved, select, within
 from product_upload_intake import Intakes, action_mode, stored_mode
@@ -143,13 +144,15 @@ def _staged_replacement(user, source, key):
         stem = str(PurePosixPath(source['path_display']).with_suffix('')) + ' - EDIT-' + source['rev']
         trial = st.text_input('Trial PSD path', value=stem + ' - TRIAL.psd', key=key+'-trial')
         staged = st.text_input('Staged final PSD path', value=stem + ' - STAGING.psd', key=key+'-staged')
+        title = st.text_input('New design title (optional)', key=key+'-new-title', max_chars=400)
         number_checked = st.checkbox('I verified the live edition number updates in place and restored its value in the staged PSD.',
                                      key=key+'-number-checked')
         if st.button('Apply staged replacement', type='primary', disabled=not number_checked, key=key+'-replace'):
             from design_review_replace import apply
+            from design_review_title import unclaimed_artwork
             try:
                 with st.spinner('Checking both saved files and replacing the exact revision'):
-                    final, _, warnings = apply(Dropbox(), source, trial, staged)
+                    final, _, warnings = apply(Dropbox(), source, trial, staged, title=title, title_guard=unclaimed_artwork)
             except ValueError as error:
                 st.error(str(error))
             except Exception:
@@ -165,8 +168,7 @@ def _staged_replacement(user, source, key):
 def _handoff(actor_id, file_id, revision, path, sidecars):
     from product_upload_api import Dropbox
     candidates = (dict(id=id_, rev=rev, size=size, **{'.tag': 'file'}) for id_, rev, size in sidecars)
-    return read_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path),
-                        candidates=candidates, allow_stale_sport=True)
+    return read_gallery_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path), candidates)
 
 
 def _details(actor, source, sidecars):
@@ -180,6 +182,28 @@ def _details(actor, source, sidecars):
         return dict(legacy_metadata(source), review_status='needs_attention'), str(exc)
     except Exception:
         return dict(legacy_metadata(source), review_status='needs_attention'), 'Upload metadata could not be read for this PSD.'
+
+
+def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
+    details, reason = _details(actor, source, sidecars)
+    pending = details.get('title_sync_pending')
+    if pending:
+        details = {key: value for key, value in details.items() if key != 'title_sync_pending'}
+    title = details.get('design_name')
+    if sidecars and title and not reason and not has_edit_files:
+        from design_review_title import resume_review_title, sync_review_title, title_destination, unclaimed_artwork
+        try:
+            if pending:
+                source, reason = resume_review_title(provider, source, sidecars, guard=unclaimed_artwork)
+                details = read_handoff(provider, source) or details
+            elif title_destination(source, title) != source['path_display']:
+                source, reason = sync_review_title(provider, source, candidates=sidecars, guard=unclaimed_artwork)
+        except ValueError as error:
+            reason = str(error)
+        except Exception:
+            logging.getLogger(__name__).exception('Design Review title sync failed')
+            reason = 'Dropbox could not synchronise the design title. Refresh Design Studio to retry.'
+    return source, details, reason, editing
 
 
 def _card(app, user, source, details, reason, key, row, *, editing=False, eager=False, show_replacement=False):
@@ -202,9 +226,10 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         needs_sport = not (published or editing or resumable or chosen_sport or details.get('sport'))
         name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
+        label = 'Needs attention' if reason and current in ('In review', 'Ready to publish') else current
         name.html(f'<h3 class="sc-review-title" title="{escape(title, quote=True)}">{escape(title)}</h3>'
-                  + (f'<div class="sc-review-status" title="{escape(note, quote=True)}">{escape(current)}</div>'
-                     if current not in ('In review', 'Ready to publish') else ''))
+                  + (f'<div class="sc-review-status" title="{escape(note, quote=True)}">{escape(label)}</div>'
+                     if reason or current not in ('In review', 'Ready to publish') else ''))
         with edit_button:
             if resumable:
                 st.button('Edit', key=key+'-edit', disabled=True)
@@ -297,11 +322,17 @@ def _folder(actor_id):
     ordered = sorted(entries.values(), key=lambda item: str(item.get('server_modified', '')), reverse=True)
     sidecars_by_path = [tuple(sidecars[p.casefold()] for p in handoff_paths(entry['path_display'])
                               if p.casefold() in sidecars) for entry in ordered]
-    pending = {i: _HANDOFF_POOL.submit(_details, actor_id, entry, sidecar)
-               for i, (entry, sidecar) in enumerate(zip(ordered, sidecars_by_path)) if sidecar}
-    designs = [(entry, *(pending[i].result() if i in pending else _details(actor_id, entry, ())),
-                (PurePosixPath(entry['name']).stem, entry['rev']) in working)
-               for i, entry in enumerate(ordered)]
+    active_stems = {stem for stem, _ in working}
+    designs, pending = [], {}
+    for i, (entry, sidecars) in enumerate(zip(ordered, sidecars_by_path)):
+        stem = PurePosixPath(entry['name']).stem
+        editing = (stem, entry['rev']) in working
+        designs.append((entry, legacy_metadata(entry), '', editing) if not sidecars else None)
+        if sidecars:
+            pending[i] = _HANDOFF_POOL.submit(_synced_design, provider, actor_id, entry, sidecars,
+                                              editing, stem in active_stems)
+    for i, task in pending.items():
+        designs[i] = task.result()
     return designs, datetime.now(timezone.utc)
 
 

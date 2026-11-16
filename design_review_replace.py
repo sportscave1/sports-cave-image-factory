@@ -1,4 +1,5 @@
 """Revision-aware application of an inspected Design Studio staging file."""
+from contextlib import nullcontext
 import json
 import logging
 from pathlib import Path, PurePosixPath
@@ -66,8 +67,8 @@ def _inspect(original, trial, staged):
             raise ValueError(f'The staged PSD must contain one {name} layer or group with the required visibility.')
 
 
-def apply(provider, original, trial_path, staged_path):
-    """Keep the canonical ID/path. A late Dropbox revision conflict cannot overwrite it."""
+def apply(provider, original, trial_path, staged_path, *, title='', title_guard=nullcontext):
+    """Replace the exact verified revision and keep its ID even if the title changes."""
     if not approved(original) or not within(original['path_display'], REVIEW):
         raise ValueError('Only originals inside the Review folder can be replaced here.')
     trial = _staged(provider, original, trial_path, 'TRIAL')
@@ -81,6 +82,12 @@ def apply(provider, original, trial_path, staged_path):
     api, token, root = provider.api, provider.token, provider.context['root_path']
     path = original['path_display']
     record = read_handoff_record(provider, original)
+    title = title.strip()
+    if title:
+        from design_review_title import title_destination
+        title_destination(original, title)
+        if not record:
+            raise ValueError('A matching upload JSON is required to save a new design title.')
     backup_path = path[:-4] + f' - EDIT-{original["rev"]} - BACKUP.psd'
     from auto_editions import file_hash
     with TemporaryDirectory(prefix='sc-design-edit-') as directory:
@@ -125,14 +132,18 @@ def apply(provider, original, trial_path, staged_path):
                     logging.getLogger(__name__).warning('Design rollback metadata update failed')
             raise ValueError('Final verification failed. The original was restored and the trial and staged files were retained.') from error
         warnings = []
+        metadata_saved = False
         if record:
             data, sidecar = record
             data.update(dropbox_file_id=final['id'], dropbox_revision=final['rev'],
                         dropbox_path=final['path_display'])
+            if title:
+                data.update(design_title=title, product_name=title)
             handoff = Path(directory) / 'handoff.json'
             handoff.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
             try:
                 api.upload_revision(token, sidecar['path_display'], handoff, sidecar['rev'])
+                metadata_saved = True
             except Exception:
                 warnings.append('The canonical PSD is verified. Its upload metadata still needs a revision update.')
                 logging.getLogger(__name__).warning('Design replacement metadata update failed')
@@ -145,4 +156,15 @@ def apply(provider, original, trial_path, staged_path):
                                                 expected_revision=temporary['rev'])
                 except Exception:
                     warnings.append(f"Could not remove {PurePosixPath(temporary['path_display']).name}.")
+        if title and metadata_saved:
+            from design_review_title import sync_review_title
+            try:
+                final, warning = sync_review_title(provider, final, confirmed=True, guard=title_guard)
+                if warning:
+                    warnings.append(warning)
+            except ValueError as error:
+                warnings.append(str(error))
+            except Exception:
+                logging.getLogger(__name__).exception('Design replacement title sync failed')
+                warnings.append('The new title was saved in JSON. Refresh Design Studio to retry the Dropbox rename.')
     return final, backup, warnings

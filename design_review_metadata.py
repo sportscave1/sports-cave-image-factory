@@ -11,6 +11,7 @@ from sports_categories import (
 )
 
 MAX_HANDOFF_BYTES = 32 * 1024
+TITLE_RENAME = '_design_review_rename'
 
 
 class _StaleRevision(ValueError):
@@ -87,11 +88,12 @@ def _handoff_details(value, source):
                 **({'sport_selection_pending': True} if checks_passed and not sport else {}))
 
 
-def _read_sidecar(provider, metadata):
+def _read_sidecar(provider, metadata, *, historical=False):
     if (metadata.get('.tag') != 'file' or not metadata.get('id') or
             type(metadata.get('size')) is not int or not 0 < metadata['size'] <= MAX_HANDOFF_BYTES):
         raise ValueError('The artwork metadata file exceeds the supported size or is unavailable.')
-    actual, response = provider.api.get_file_response(provider.token, metadata['id'])
+    locator = 'rev:' + metadata['rev'] if historical else metadata['id']
+    actual, response = provider.api.get_file_response(provider.token, locator)
     try:
         if any(actual.get(key) != metadata.get(key) for key in ('id', 'rev', 'size')):
             raise ValueError('The artwork metadata changed. Reload the review gallery.')
@@ -113,9 +115,10 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
         return None
     if candidates is None:
         candidates = (provider.metadata_if_present(path) for path in paths)
-    first_error, stale_sport = None, ''
+    first_error, stale_sport, pending = None, '', (None, None)
     for metadata in candidates:
         if metadata:
+            value = actual = None
             try:
                 value, actual = _read_sidecar(provider, metadata)
                 return value, actual, _handoff_details(value, source)
@@ -126,7 +129,9 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
                     label = _text(value.get('sport'), 100)
                     # Match Product Uploads' separate Soccer destination.
                     stale_sport = 'Soccer' if label.casefold() == 'soccer' else normalize_sport_category(label)
-    if stale_sport:
+                if allow_stale_sport and value and isinstance(value.get(TITLE_RENAME), dict):
+                    pending = value, actual
+    if stale_sport or pending[0]:
         details = dict(
             design_name=PurePosixPath(source['path_display']).stem,
             sport=stale_sport, verified_collection_facts={'sport': stale_sport},
@@ -135,7 +140,7 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
             review_notes='The JSON describes an earlier PSD revision. Verify the current PSD and update '
                          'its review JSON before Shopify handoff.',
         )
-        return None, None, details
+        return pending[0], pending[1], details
     if first_error is not None:
         raise first_error
     return None
@@ -149,6 +154,14 @@ def read_handoff_record(provider, source, *, candidates=None):
 def read_handoff(provider, source, *, candidates=None, allow_stale_sport=False):
     record = _find_handoff(provider, source, candidates, allow_stale_sport=allow_stale_sport)
     return record[2] if record else None
+
+
+def read_gallery_handoff(provider, source, candidates):
+    record = _find_handoff(provider, source, candidates, allow_stale_sport=True)
+    if not record:
+        return None
+    data, _, details = record
+    return dict(details, title_sync_pending=True) if data and isinstance(data.get(TITLE_RENAME), dict) else details
 
 
 def review_key(source):

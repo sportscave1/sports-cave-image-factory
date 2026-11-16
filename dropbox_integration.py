@@ -520,6 +520,9 @@ def get_file_response(access_token, path):
     if clean_path.startswith('id:'):
         if not re.fullmatch(r'id:[A-Za-z0-9_-]+',clean_path):
             raise ValueError('Invalid Dropbox file or folder ID.')
+    elif clean_path.startswith('rev:'):
+        if not re.fullmatch(r'rev:[a-fA-F0-9]+', clean_path):
+            raise ValueError('Invalid Dropbox file revision.')
     else:
         clean_path = normalize_dropbox_path(path)
     try:
@@ -527,6 +530,18 @@ def get_file_response(access_token, path):
     except Exception as error:
         raise _dropbox_error(error, "Dropbox file preview is unavailable.") from error
     return _metadata_to_dict(metadata), response
+
+
+def recent_file_revisions(access_token, file_id):
+    """Return recent revisions for the same file across Dropbox renames."""
+    if not re.fullmatch(r'id:[A-Za-z0-9_-]+', file_id):
+        raise ValueError('Invalid Dropbox file ID.')
+    try:
+        result = team_space_client(access_token).files_list_revisions(
+            file_id, mode=_dropbox_sdk().files.ListRevisionsMode.id, limit=5)
+    except Exception as error:
+        raise _dropbox_error(error, 'Dropbox revision history is unavailable.') from error
+    return [_metadata_to_dict(entry) for entry in result.entries]
 
 
 def get_file_metadata(access_token, path):

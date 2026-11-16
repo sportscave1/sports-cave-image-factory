@@ -88,6 +88,9 @@ def select(connect, provider, key, actor, selected_mode, file_id, revision, *, r
     with connect() as conn, conn.cursor() as cur:
         if selected_mode == 'SMART':
             claimed = smart_claim(cur, meta)
+            current = provider.metadata_if_present(file_id)
+            if not current or any(current.get(field) != meta.get(field) for field in ('id', 'rev', 'path_display')):
+                raise ValueError('The selected PSD changed or moved. Refresh the picker and select its current revision.')
             if claimed:
                 if claimed['actor_id'] != str(actor):
                     raise ValueError('This PSD revision already has a Smart Upload assigned to another reviewer.')
