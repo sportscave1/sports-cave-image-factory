@@ -53,7 +53,7 @@ def _story_without_meta_ad(text):
 
 def _prompt(title, story, *, edit=None):
     context = _story_without_meta_ad(story)
-    if "tom banton" in f"{title}\n{context}".casefold():
+    if edit is None and "tom banton" in f"{title}\n{context}".casefold():
         context = re.sub(
             r"^[ \t]*(?:[-*] +)?\*{0,2}Decision\*{0,2}:\*{0,2} +"
             r"Monitor the decider before starting another cricket print\. *$",
@@ -290,7 +290,7 @@ def _prompt(title, story, *, edit=None):
         "for the original badge and editable number to be restored from the master.\n\n"
         "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
         "a strong focal point and clear visual hierarchy.\n\n"
-        f"{_CREATE_DESIGN_BORDER_RULES if edit is None else ''}"
+        f"{_CREATE_DESIGN_BORDER_RULES}"
         "Step 4. For each featured person, search both web and image results. Check at least "
         "three distinct credible sources when accessible before skipping a signature. Use a clear, "
         "verified example and place it on a separate layer where it fits naturally with the artwork "

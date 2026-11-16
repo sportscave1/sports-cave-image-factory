@@ -10,6 +10,7 @@ from design_review_metadata import is_working_file
 from design_review_replace import apply
 from home_morning_brief_actions import _prompt
 from product_upload_dropbox import REVIEW
+from psd_directory import REVIEW_METADATA_FOLDER
 
 
 ORIGINAL_PATH = REVIEW + '/Collector.psd'
@@ -25,7 +26,9 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     })
     assert edit.count('**MANDATORY EXECUTION ORDER**') == 1
     for start, end in (('**8A. Re-read and review**', '**8D. Prepare'),
-                       ('**MANDATORY — MOVE THE PLAQUE', '**8E.')):
+                       ('**MANDATORY — MOVE THE PLAQUE', '**8E.'),
+                       ('**Border and print safety', 'Step 4.'),
+                       ('**Recover from tool failures.**', 'Verified story')):
         assert edit[edit.index(start):edit.index(end)] == standard[standard.index(start):standard.index(end)]
     assert '12. **Final improvement.**' in edit and 'PASS, CHANGE or UNVERIFIED' in edit
     assert edit.index('Step 7.') < edit.index('Make a **new image-generation call**') < edit.index('Save a separate create-only file')
@@ -33,8 +36,18 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'gid://shopify/Product/123' in edit and ORIGINAL_PATH in edit
     assert '[Product Title] - TRIAL.psd' not in edit
     assert 'upload_intent (new_product)' not in edit
-    assert 'Before replacing the canonical file, test interactive text editing in Photoshop' in edit
-    assert 'Photoshop is optional' not in edit
+    assert 'Photoshop is optional' in edit
+    assert 'capable PSD parser plus a rendered preview' in edit
+    assert 'Photoshop live-number check pending' not in edit
+    assert 'at most two additional image-generation attempts total across both passes' in edit
+    assert 'skip it without prompting and use an authorised alternative' in edit
+    assert 'Target an even border inset of 2%' in edit
+    assert edit.index('Create a separate recoverable backup') < edit.index('Reopen the saved canonical PSD')
+    assert edit.index('Reopen the saved canonical PSD') < edit.index('**Update the matching Smart Upload JSON**')
+    assert REVIEW_METADATA_FOLDER in edit
+    assert 'Preserve the design’s confirmed sport, upload intent, Shopify product ID and collection linkage' in edit
+    assert 'this edit’s exact trial and staging files only' in edit
+    assert 'Always display the strongest inspected artwork' in edit
 
 
 @pytest.fixture
