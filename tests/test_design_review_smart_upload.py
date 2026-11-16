@@ -115,13 +115,11 @@ def test_handoff_prefers_matching_json_and_falls_back_to_matching_legacy(canonic
             with pytest.raises(ValueError, match='different Dropbox PSD revision'):
                 read_handoff(provider, SOURCE, allow_stale_sport=True)
 
-def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypatch):
+def test_review_gallery_approval_uses_the_exact_psd_and_seeds_the_intake(monkeypatch):
     from contextlib import contextmanager
-    from types import SimpleNamespace
 
     import design_review_page as gallery
     import product_upload_api as api
-    import product_upload_export as export
     import product_upload_jobs as jobs
 
     entry = dict(SOURCE, name='Adelaide.psd', **{'.tag': 'file'})
@@ -143,24 +141,15 @@ def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypat
     create = Mock(return_value=row)
     monkeypatch.setattr(gallery, 'select', create)
     monkeypatch.setattr(jobs.JOBS, 'snapshot', lambda *args: None)
-    generate = Mock()
-    monkeypatch.setattr(jobs, 'generate', generate)
-    monkeypatch.setattr(export, 'sport_categories', lambda *args: [{'sport': 'Cricket', 'id': 'id:Cricket'}])
-    app = SimpleNamespace(_files_access_token=lambda: 'fake', _files_team_root=lambda _: '/fake',
-                          dropbox_integration=object(), BASE_DIR='.', MOCKUPS_GENERATION_SEMAPHORE=object(),
-                          build_mockup_final_prompt_items=Mock())
-
     assert not gallery.final_psd(dict(entry, name='Adelaide - TRIAL.psd',
                                      path_display=REVIEW + '/Adelaide - TRIAL.psd'))
-    assert gallery._review(app, provider, {'id': actor}, entry, 'approved') == key
-    create.assert_called_once_with(api.connect, provider, key, actor, 'SMART', entry['id'], entry['rev'])
+    assert gallery._review(provider, {'id': actor}, entry, 'approved') == key
+    create.assert_called_once_with(api.connect, provider, key, actor, 'SMART', entry['id'], entry['rev'],
+                                   reviewed=(entry, details))
     assert row['data']['design_review']['decision'] == 'approved'
-    assert generate.call_args.args[:5] == (api.connect, row, actor, 'The Adelaide Century', 'Cricket')
-    assert generate.call_args.kwargs['prepare_first']
     provider.metadata_if_present.return_value = dict(entry, rev='changed')
     with pytest.raises(ValueError, match='PSD changed'):
-        gallery._review(app, provider, {'id': actor}, entry, 'approved')
-    assert generate.call_count == 1
+        gallery._review(provider, {'id': actor}, entry, 'approved')
 
 from tests.test_product_upload_intake import database, env  # noqa: E402,F401
 

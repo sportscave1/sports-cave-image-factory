@@ -122,39 +122,31 @@ def test_edit_endpoint_returns_full_prompt_for_exact_dropbox_source(monkeypatch)
     assert stale.status_code == 409
 
 
-def test_missing_sport_is_saved_for_the_exact_revision_and_passed_to_mockups(env, monkeypatch):
+def test_missing_sport_is_saved_for_the_exact_revision(env, monkeypatch):
     from tests.test_product_upload_dropbox import provider_fixture
     from tests.test_product_upload_intake import ADMIN
-    import product_upload_export as export
-    import product_upload_jobs as jobs
 
     store, _, provider = env
     record = provider_fixture(provider)(name='Unknown gallery fixture.psd')
     monkeypatch.setattr(api, 'connect', store.connect)
-    monkeypatch.setattr(export, 'sport_categories', lambda *args: [{'sport': 'NFL'}])
-    generate = Mock()
-    monkeypatch.setattr(jobs, 'generate', generate)
-    app = SimpleNamespace(_files_access_token=lambda: 'fake', _files_team_root=lambda _: '/fake',
-                          dropbox_integration=object(), BASE_DIR='.', MOCKUPS_GENERATION_SEMAPHORE=object(),
-                          build_mockup_final_prompt_items=Mock())
-
     with pytest.raises(ValueError, match='sport could not be resolved'):
-        gallery._review(app, provider, ADMIN, record, 'approved')
-    key = gallery._review(app, provider, ADMIN, record, 'approved', selected_sport='NFL')
+        gallery._review(provider, ADMIN, record, 'approved')
+    key = gallery._review(provider, ADMIN, record, 'approved', selected_sport='NFL')
     result = store.read(key, ADMIN['id'])['data']
     assert result['metadata']['sport'] == result['review_sport'] == 'NFL'
     assert result['metadata']['intended_collections'] == ['nfl-wall-art']
     assert result['source']['rev'] == record['rev']
-    assert generate.call_args.args[4] == 'NFL'
 
 
-def test_publish_click_prepares_exact_psd_and_preselects_sport_from_older_json(env, tmp_path, monkeypatch):
+def test_first_publish_click_prepares_exact_psd_and_automatically_generates_mockups(env, tmp_path, monkeypatch):
     from io import BytesIO
     from pathlib import Path
+    from threading import Semaphore
 
     import streamlit as st
+    from PIL import Image
     from streamlit.testing.v1 import AppTest
-    import product_upload_artwork as artwork
+    import image_factory
     import product_upload_jobs as jobs
     from auto_editions import file_hash
     from product_upload_dropbox import within
@@ -169,7 +161,13 @@ def test_publish_click_prepares_exact_psd_and_preselects_sport_from_older_json(e
     psd = real_psd(tmp_path / 'fixture.psd')
     record.update(content_hash=file_hash(psd, dropbox=True), size=psd.stat().st_size)
     provider.files[record['id']] = provider.files[record['path_display']] = record
-    provider.download = Mock(side_effect=lambda _, destination: Path(destination).write_bytes(psd.read_bytes()))
+    def download(metadata, destination, **kwargs):
+        assert metadata == record
+        if provider.download.call_count == 1:
+            raise TimeoutError('The first original download timed out')
+        Path(destination).write_bytes(psd.read_bytes())
+
+    provider.download = Mock(side_effect=download)
     monkeypatch.setenv('SPORTS_CAVE_TEMP_DIR', str(tmp_path / 'server'))
 
     folder = {'.tag': 'folder', 'name': 'JSON', 'path_display': REVIEW_METADATA_FOLDER}
@@ -193,26 +191,48 @@ def test_publish_click_prepares_exact_psd_and_preselects_sport_from_older_json(e
         if path == REVIEW_METADATA_FOLDER else [record, folder], has_more=False)
     monkeypatch.setattr(api, 'Dropbox', lambda: provider)
     monkeypatch.setattr(api, 'connect', store.connect)
-    monkeypatch.setattr(jobs.JOBS, 'snapshot', lambda *args: None)
-    # Keep the background job synchronous in the test, with real PSD decoding and persistence.
-    prepare = Mock(side_effect=lambda connect, key, actor, factory: artwork.prepare(connect, factory(), key, actor))
-    monkeypatch.setattr(jobs, 'prepare', prepare)
-    generate = Mock()
-    monkeypatch.setattr(jobs, 'generate', generate)
+    provider.api.get_psd_thumbnail_bytes.side_effect = TimeoutError('Preview unavailable')
+    scheduled = {}
+
+    def schedule(key, actor, operation, fingerprint, work):
+        assert not scheduled, 'The first click must enqueue just one combined job'
+        scheduled.update(key=key, actor=actor, operation=operation, fingerprint=fingerprint, work=work)
+        return dict(token='automatic-job', state='Queued', stage='Waiting to start', completed=0, total=None, previews=[])
+
+    submit = Mock(side_effect=schedule)
+    monkeypatch.setattr(jobs.JOBS, 'submit', submit)
+    monkeypatch.setattr(jobs.JOBS, 'snapshot', lambda key, actor, operation: (
+        dict(token='automatic-job', state='Queued', stage='Waiting to start', completed=0, total=None, previews=[])
+        if (key, actor, operation) == tuple(scheduled.get(field) for field in ('key', 'actor', 'operation')) and scheduled else None))
+    asset = tmp_path / 'mockup.webp'
+    Image.new('RGB', (10, 10)).save(asset)
+
+    def render(name, sport, ready_path, **kwargs):
+        assert name == 'Gallery fixture' and sport == 'Cricket'
+        with Image.open(ready_path) as image:
+            assert image.size == (640, 480)
+        return dict(product_name=name, sport_category=sport, run_dir=tmp_path,
+                    assets=[dict(review_path=asset, preview_path=asset, webp_path=asset) for _ in range(5)])
+
+    renderer = Mock(side_effect=render)
+    monkeypatch.setattr(image_factory, 'generate_product_images', renderer)
+    monkeypatch.setattr(image_factory, 'cleanup_stale_temp_runs', Mock())
     root = '/Fixture'
     category = {'.tag': 'folder', 'id': 'id:cricket', 'name': 'Cricket Wall Art',
                 'path_display': root + '/04_OUTPUT/product-images/Cricket Wall Art'}
     folder_api = SimpleNamespace(normalize_dropbox_path=lambda path: path, path_is_within_root=within,
                                  list_folder_page=lambda *a, **kw: dict(entries=[category]),
                                  get_metadata_if_exists=lambda _, id_: category if id_ == category['id'] else None)
-    component = Mock(side_effect=lambda **kwargs: dict(id=kwargs['id'], mode=kwargs['mode'], nonce='fixture'))
+    component = Mock(return_value=None)
     app = SimpleNamespace(
         BASE_DIR=Path(gallery.__file__).parent, current_os_user=lambda: ADMIN,
         set_current_page=lambda page, **_: st.session_state.update(fixture_page=page),
         get_components_module=lambda: SimpleNamespace(declare_component=lambda *a, **kw: component),
         os_accounts=SimpleNamespace(can_access_page=lambda *a: True),
         _files_access_token=lambda: 'fixture', _files_team_root=lambda _: root, dropbox_integration=folder_api,
-        _mockups_result=lambda: None, MOCKUPS_GENERATION_SEMAPHORE=object(), build_mockup_final_prompt_items=Mock(),
+        _mockups_result=lambda: None, MOCKUPS_GENERATION_SEMAPHORE=Semaphore(1),
+        build_mockup_final_prompt_items=lambda *args: [],
+        ensure_lifestyle_prompts=lambda result: result, rebuild_result_artifacts=lambda result: result,
     )
     monkeypatch.setattr(gallery, '_test_fixture', (app, ADMIN), raising=False)
     ui = AppTest.from_string("""
@@ -234,20 +254,31 @@ else:
     key = gallery.review_key(record)
     assert ui.session_state['_product_upload_active'] == key
     assert component.call_args.kwargs['id'] == key
+    assert next(box for box in ui.text_input if box.label == 'Product name').value == 'Gallery fixture'
+    assert not ui.warning
+    assert not ui.button(key='product-upload-generate-'+key).value
+    provider.api.get_psd_thumbnail_bytes.assert_not_called()
+    provider.download.assert_not_called()
+    ui.run()
+    submit.assert_called_once()
+    assert scheduled['operation'] == 'generate' and scheduled['fingerprint']['sport'] == 'Cricket'
+    progress = Mock()
+    result = scheduled['work'](progress)
+    assert result['_product_upload_intake'] == key and len(result['assets']) == 5
+    progress.assert_any_call('Retrying PSD preparation')
+    assert provider.download.call_count == 2
+    renderer.assert_called_once()
     saved = store.read(key, ADMIN['id'])
     assert saved['data']['source'] == record
     assert saved['data']['server_artwork']['state'] == 'Ready'
     assert saved['data']['metadata']['sport'] == 'Cricket'
     assert saved['data']['design_review']['decision'] == 'preparing'
     assert saved['mode'] == 'LIVE' and 'shopify_product_id' not in saved['data']['metadata']
-    assert any('earlier PSD revision' in warning.value for warning in ui.warning)
-    prepare.assert_called_once()
-    generate.assert_not_called()
     with pytest.raises(ValueError, match='pending artwork checks'):
         store.copied(key, ADMIN['id'], 'SMART')
 
     value.update(dropbox_revision=record['rev'], upload_intent='new_product', existing_shopify_product_id=None)
     install_json()
-    assert gallery._review(app, provider, ADMIN, record, 'approved') == key
+    assert gallery._review(provider, ADMIN, record, 'approved') == key
     assert store.read(key, ADMIN['id'])['data']['design_review']['decision'] == 'approved'
-    assert generate.call_args.args[4] == 'Cricket'
+    submit.assert_called_once()

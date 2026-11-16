@@ -38,10 +38,6 @@ def _folder_entries(provider, path):
         seen.add(cursor)
 
 
-def _thumbnail(provider, source):
-    return provider.api.get_psd_thumbnail_bytes(provider.token, source['id'], revision=source['rev'])
-
-
 def status(row, job, details):
     data = (row or {}).get('data') or {}
     if data.get('product_gid'):
@@ -62,10 +58,9 @@ def status(row, job, details):
     return 'Needs attention' if details.get('review_status') == 'needs_attention' else 'In review'
 
 
-def _review(app, provider, user, entry, command, *, selected_sport=None):
-    from product_upload_api import connect, Dropbox
-    from product_upload_jobs import JOBS, generate, prepare
-    from product_upload_export import folder_sport, sport_categories
+def _review(provider, user, entry, command, *, selected_sport=None):
+    from product_upload_api import connect
+    from product_upload_jobs import JOBS
     actor = user['id']
     key = review_key(entry)
     current = provider.metadata_if_present(entry['id'])
@@ -93,22 +88,16 @@ def _review(app, provider, user, entry, command, *, selected_sport=None):
             target = fetch_product_by_shopify_id(details['shopify_product_id'])
             if target.get('shopify_product_id') != details['shopify_product_id'] or target.get('status') not in ('ACTIVE', 'DRAFT'):
                 raise ValueError('The exact Shopify refresh target is unavailable.')
-        token = app._files_access_token()
-        root = app._files_team_root(token)
-        sport = folder_sport(details['sport'])
-        choices = [folder for folder in sport_categories(app.dropbox_integration, token, root)
-                   if folder['sport'].casefold() == sport.casefold()]
-        if len(choices) != 1:
-            raise ValueError('The sport does not resolve to a single Product Uploads destination.')
     if not existing:
+        reviewed = (current, original_details) if command == 'approved' else None
         existing = select(connect, provider, key, actor, 'SMART' if command == 'approved' else 'LIVE',
-                          entry['id'], entry['rev'])
+                          entry['id'], entry['rev'], reviewed=reviewed)
     key = str(existing['id'])
-    job = JOBS.snapshot(key, actor, 'generate')
     if command == 'approved' and action_mode(existing) != 'SMART':
         store.change_mode(key, actor, 'SMART', metadata=details)
     with store.locked(key, actor) as (row, _):
-        if row['data']['source']['rev'] != entry['rev']:
+        if any(row['data']['source'].get(field) != current.get(field)
+               for field in ('id', 'rev', 'path_display', 'content_hash', 'size')):
             raise ValueError('This intake belongs to another artwork revision.')
         if row['data'].get('product_gid'):
             return key
@@ -126,15 +115,6 @@ def _review(app, provider, user, entry, command, *, selected_sport=None):
                 data['review_sport'] = details['sport']
         decision = 'preparing' if preparing else command
         row['data']['design_review'] = dict(decision=decision, at=datetime.now(timezone.utc).isoformat())
-    if preparing:
-        if (row['data'].get('server_artwork') or {}).get('state') != 'Ready':
-            prepare(connect, key, actor, Dropbox)
-    elif command == 'approved' and not row['data'].get('mockups_exported') and (job or {}).get('state') != 'Ready':
-        def finalize(result):
-            return app.rebuild_result_artifacts(app.ensure_lifestyle_prompts(result))
-        generate(connect, row, actor, details['design_name'], choices[0]['sport'], Dropbox,
-                 app.BASE_DIR, app.MOCKUPS_GENERATION_SEMAPHORE, app.build_mockup_final_prompt_items,
-                 finalize=finalize, prepare_first=True)
     return key
 
 
@@ -217,6 +197,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         _artwork(source, title, eager=eager)
         published = bool(row and row['data'].get('product_gid'))
         resumable = current in ('Generating mockups', 'Mockups ready', 'Ready for Shopify handoff')
+        decision = ((row or {}).get('data', {}).get('design_review') or {}).get('decision')
         chosen_sport = (row or {}).get('data', {}).get('review_sport')
         needs_sport = not (published or editing or resumable or chosen_sport or details.get('sport'))
         name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
@@ -244,13 +225,8 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
         if clicked and (not needs_sport or chosen_sport):
             try:
-                if not resumable:
-                    provider = Dropbox()
-                    try:
-                        _thumbnail(provider, source)
-                    except Exception:
-                        raise ValueError('The preview is unavailable for this revision. Refresh the gallery before publishing.') from None
-                    key = _review(app, provider, user, source, 'approved', selected_sport=chosen_sport)
+                if not resumable or decision != 'approved':
+                    key = _review(Dropbox(), user, source, 'approved', selected_sport=chosen_sport)
             except ValueError as exc:
                 st.error(str(exc))
             except Exception:
@@ -258,6 +234,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 st.error('Smart Upload could not start. Your PSD is retained.')
             else:
                 app.set_current_page('Product Uploads', source='design_studio')
+                st.session_state['_design_review_upload'] = key
                 st.query_params['upload'] = key
                 st.rerun()
         if show_replacement and editing and not resumable:

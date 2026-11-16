@@ -89,22 +89,34 @@ class Jobs:
 JOBS=Jobs()
 
 
+def _prepare_artwork(connect, key, actor, provider_factory, progress, *, retry_transient=False):
+    from product_upload_artwork import prepare as process, PreparationBusyError, PreparationError
+    from time import sleep
+    deadline = monotonic() + 300
+    with JOBS.preparation:
+        while True:
+            try:
+                return process(connect, None, key, actor, provider_factory=provider_factory, progress=progress)
+            except PreparationBusyError:
+                progress('Waiting for source preparation')
+                if monotonic() >= deadline:
+                    raise ValueError('Source preparation is still active. Retry shortly; the selected PSD is retained.')
+                sleep(.5)
+            except PreparationError as error:
+                if not retry_transient or error.status_code not in (502, 503, 504):
+                    raise
+                retry_transient = False
+                progress('Retrying PSD preparation')
+
+
 def prepare(connect,key,actor,provider_factory):
     from product_upload_intake import Intakes
-    from product_upload_artwork import prepare as process,source,PreparationBusyError
+    from product_upload_artwork import source
     row=Intakes(connect).read(key,actor)
     if not row:raise ValueError('Select an exact Dropbox PSD first.')
     def work(progress):
-        with JOBS.preparation:
-            import time
-            deadline=monotonic()+300
-            while True:
-                progress('Checking prepared artwork')
-                try:return process(connect,None,key,actor,provider_factory=provider_factory,progress=progress)
-                except PreparationBusyError:
-                    progress('Waiting for source preparation')
-                    if monotonic()>deadline:raise ValueError('Source preparation is still active. Retry shortly; the selected PSD is retained.')
-                    time.sleep(.5)
+        progress('Checking prepared artwork')
+        return _prepare_artwork(connect, key, actor, provider_factory, progress)
     return JOBS.submit(key,actor,'prepare',source(row),work)
 
 
@@ -115,10 +127,8 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
     def work(progress):
         result=None;created_run=None
         if prepare_first:
-            from product_upload_artwork import prepare as prepare_artwork
-            progress('Preparing the approved PSD revision')
-            with JOBS.preparation:
-                prepare_artwork(connect,None,key,actor,provider_factory=provider_factory,progress=progress)
+            progress('Preparing the selected PSD revision')
+            _prepare_artwork(connect, key, actor, provider_factory, progress, retry_transient=True)
         progress('Waiting for renderer')
         with semaphore:
             try:

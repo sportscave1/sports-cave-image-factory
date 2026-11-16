@@ -59,21 +59,28 @@ def browse(provider, actor, root='review', path='', page='', search=''):
                 next_page=result.get('page_token', ''), has_more=result['has_more'])
 
 
-def select(connect, provider, key, actor, selected_mode, file_id, revision):
+def select(connect, provider, key, actor, selected_mode, file_id, revision, *, reviewed=None):
     import auto_editions as ae
-    mode(selected_mode); key = str(uuid.UUID(key)); verify_roots(provider)
-    meta = provider.metadata_if_present(file_id)
+    mode(selected_mode)
+    key = str(uuid.UUID(key))
+    if reviewed is None:
+        verify_roots(provider)
+        meta = provider.metadata_if_present(file_id)
+        metadata = {}
+    else:
+        # Design Studio already resolved this exact PSD and its sidecar from Review.
+        meta, metadata = reviewed
+        if selected_mode != 'SMART' or not within(meta['path_display'], REVIEW):
+            raise ValueError('Choose the exact Review PSD for Smart Upload.')
     if not meta or meta.get('id') != file_id or meta.get('rev') != revision or not approved(meta):
         raise ValueError('The selected PSD changed or moved. Refresh the picker and select its current revision.')
     ae.source_identity('gid://shopify/Product/1', meta)
     if type(meta.get('size')) is not int or not 40 <= meta['size'] <= MAX_BYTES:
         raise ValueError('Choose a layered PSD up to 1 GiB.')
-    metadata = {}
     if selected_mode == 'SMART':
         from design_review_metadata import is_working_file, legacy_metadata, read_handoff, review_key
-        metadata = read_handoff(provider, meta, allow_stale_sport=True) or {}
-        if not metadata:
-            metadata = legacy_metadata(meta)
+        if reviewed is None:
+            metadata = read_handoff(provider, meta, allow_stale_sport=True) or legacy_metadata(meta)
         if is_working_file(meta['name']):
             raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
         key = review_key(meta)
