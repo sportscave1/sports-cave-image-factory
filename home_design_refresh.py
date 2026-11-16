@@ -60,6 +60,26 @@ Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sess
    If Dropbox access, visual inspection, image generation, PSD export or upload is
    unavailable, explain exactly what is blocked and report only what actually completed.
    Never claim an unverified save or rename a PNG or JPEG to .psd.
+
+SMART UPLOAD HANDOFF METADATA
+
+After all changes to the verified refresh PSD are saved, record its categorisation and Dropbox
+identity in a UTF-8 JSON file named [Final PSD stem].upload.json beside it in Review.
+Use create-only mode and confirm that the sidecar describes the exact saved PSD revision.
+
+Include design_title, design_story, sport, league, teams and athletes (arrays),
+intended_collections (array of confirmed Shopify collection IDs or handles),
+upload_intent (existing_product_refresh), existing_shopify_product_id (the exact Shopify
+product ID above), dropbox_file_id, dropbox_revision, dropbox_path, and review_status.
+Record what improved in design_story. Use the verified original product's sport and existing
+collection mappings. Set review_status to ready_for_review only when the PSD is verified and
+the original product link and required metadata are confirmed. Otherwise use needs_attention
+and document missing fields or checks in review_notes. Use null or empty arrays for unknown
+values. Never substitute a similar product as the refresh target.
+
+This metadata prepares a later upload. Save it for review without publishing or changing
+Shopify. If the handoff cannot be saved or confirmed, preserve the artwork and report that
+the metadata is pending.
 """
 
 

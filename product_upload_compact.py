@@ -77,6 +77,16 @@ def context_from_row(row):
     task = op.get('sync_map') or {}
     if task.get('confirmed_limit') is not None:
         result['confirmed_limit'] = task['confirmed_limit']
+    if data.get('smart_upload'):
+        metadata = data.get('metadata') or {}
+        for key in ('upload_intent', 'review_status', 'intended_collections'):
+            if key in metadata:
+                result[key] = metadata[key]
+        if metadata.get('upload_intent') == 'existing_product_refresh':
+            target = metadata.get('shopify_product_id')
+            if not target or (pid and pid != target):
+                raise ValueError('The Smart Upload refresh target conflicts with this upload.')
+            result['shopify_product_id'] = target
     result['upload_id'] = str(row['id'])
     from product_upload_identity import tag
     result['operation_tag'] = tag(row['id'])

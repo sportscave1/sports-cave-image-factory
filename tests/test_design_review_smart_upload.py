@@ -1,0 +1,139 @@
+"""Check the Smart Upload decision boundary without touching cloud services."""
+import json
+from unittest.mock import Mock
+
+import pytest
+
+from design_review_metadata import parse_handoff, read_handoff, review_key
+from product_upload_dropbox import REVIEW
+from product_upload_intake import action_mode, stored_mode
+from product_upload_prompts import build
+
+
+SOURCE = dict(id='id:Art', rev='abcdef123', path_display=REVIEW + '/Adelaide.psd')
+TARGET = 'gid://shopify/Product/123'
+
+
+def handoff(**fields):
+    value = dict(dropbox_file_id=SOURCE['id'], dropbox_revision=SOURCE['rev'],
+                 dropbox_path=SOURCE['path_display'], design_title='The Adelaide Century',
+                 design_story='A collector edition for the winning century.', sport='Cricket',
+                 intended_collections=['cricket-wall-art'], review_status='ready_for_review',
+                 upload_intent='new_product', existing_shopify_product_id=None)
+    return json.dumps(dict(value, **fields)).encode()
+
+
+def prompt(selected, details=None):
+    return build(selected, 'Adelaide.psd', metadata=details, load=lambda _, default, **kw: default)
+
+
+def test_new_and_refresh_keep_the_existing_mode_rules():
+    new = parse_handoff(handoff(), SOURCE)
+    refresh = parse_handoff(handoff(upload_intent='existing_product_refresh',
+                                   existing_shopify_product_id='123'), SOURCE)
+    assert stored_mode('SMART', new) == 'LIVE'
+    assert stored_mode('SMART', refresh) == 'UPDATE'
+    assert action_mode(dict(mode='UPDATE', data={'smart_upload': True})) == 'SMART'
+    create = prompt('SMART', new)
+    update = prompt('SMART', refresh)
+    assert create.endswith(prompt('LIVE', new))
+    assert update.endswith(prompt('UPDATE', refresh))
+    assert 'cricket-wall-art' in create
+    assert TARGET in update
+    assert 'Set available quantity exactly 20' in create
+    assert 'Set available quantity exactly 20' not in update
+    assert 'Similarity alone never authorises replacement.' in update
+
+
+def test_stale_metadata_and_ambiguous_refresh_are_rejected():
+    with pytest.raises(ValueError, match='different Dropbox PSD revision'):
+        parse_handoff(handoff(dropbox_revision='other'), SOURCE)
+    with pytest.raises(ValueError, match='exact existing Shopify product ID'):
+        parse_handoff(handoff(upload_intent='existing_product_refresh'), SOURCE)
+    with pytest.raises(ValueError, match='pending artwork checks'):
+        prompt('SMART', parse_handoff(handoff(review_status='needs_attention'), SOURCE))
+    assert review_key(SOURCE) != review_key(dict(SOURCE, rev='updated'))
+
+
+def test_handoff_download_is_identity_checked_and_closed():
+    raw = handoff()
+    provider = Mock()
+    stored = dict(id='id:Sidecar', rev='current', size=len(raw), **{'.tag': 'file'})
+    provider.metadata_if_present.return_value = stored
+    response = Mock()
+    response.iter_content.return_value = iter([raw])
+    provider.api.get_file_response.return_value = (stored, response)
+    assert read_handoff(provider, SOURCE)['sport'] == 'Cricket'
+    provider.metadata_if_present.assert_called_once_with(REVIEW + '/Adelaide.upload.json')
+    response.close.assert_called_once()
+    provider.api.get_file_response.return_value = (dict(stored, rev='changed'), response)
+    with pytest.raises(ValueError, match='metadata changed'):
+        read_handoff(provider, SOURCE)
+
+def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import design_review_page as gallery
+    import product_upload_api as api
+    import product_upload_export as export
+    import product_upload_jobs as jobs
+
+    entry = dict(SOURCE, name='Adelaide.psd', **{'.tag': 'file'})
+    details = parse_handoff(handoff(), entry)
+    key = review_key(entry)
+    row = dict(id=key, mode='LIVE', data=dict(source=entry, smart_upload=True, metadata=details))
+    provider = Mock()
+    provider.metadata_if_present.return_value = entry
+    actor = 'reviewer'
+
+    @contextmanager
+    def locked(upload_id, owner):
+        assert (upload_id, owner) == (key, actor)
+        yield row, None
+
+    store = Mock(read_review=Mock(return_value=None), locked=locked)
+    monkeypatch.setattr(gallery, 'Intakes', lambda _: store)
+    monkeypatch.setattr(gallery, 'read_handoff', lambda _, source: details)
+    create = Mock(return_value=row)
+    monkeypatch.setattr(gallery, 'select', create)
+    monkeypatch.setattr(jobs.JOBS, 'snapshot', lambda *args: None)
+    generate = Mock()
+    monkeypatch.setattr(jobs, 'generate', generate)
+    monkeypatch.setattr(export, 'sport_categories', lambda *args: [{'sport': 'Cricket', 'id': 'id:Cricket'}])
+    app = SimpleNamespace(_files_access_token=lambda: 'fake', _files_team_root=lambda _: '/fake',
+                          dropbox_integration=object(), BASE_DIR='.', MOCKUPS_GENERATION_SEMAPHORE=object(),
+                          build_mockup_final_prompt_items=Mock())
+
+    assert not gallery.final_psd(dict(entry, name='Adelaide - TRIAL.psd',
+                                     path_display=REVIEW + '/Adelaide - TRIAL.psd'))
+    assert gallery._review(app, provider, {'id': actor}, entry, 'approved') == key
+    create.assert_called_once_with(api.connect, provider, key, actor, 'SMART', entry['id'], entry['rev'])
+    assert row['data']['design_review']['decision'] == 'approved'
+    assert generate.call_args.args[:5] == (api.connect, row, actor, 'The Adelaide Century', 'Cricket')
+    assert generate.call_args.kwargs['prepare_first']
+    provider.metadata_if_present.return_value = dict(entry, rev='changed')
+    with pytest.raises(ValueError, match='PSD changed'):
+        gallery._review(app, provider, {'id': actor}, entry, 'approved')
+    assert generate.call_count == 1
+
+from tests.test_product_upload_intake import database, env  # noqa: E402,F401
+
+
+def test_smart_revision_has_one_durable_intake_across_selection_and_mode_switch(env):
+    import uuid
+    from product_upload_dropbox import select
+    from product_upload_intake import public
+    from tests.test_product_upload_dropbox import provider_fixture
+    from tests.test_product_upload_intake import ADMIN
+
+    store, _, provider = env
+    source = provider_fixture(provider)(name='Cricket Adelaide.psd')
+    original = select(store.connect, provider, str(uuid.uuid4()), ADMIN['id'], 'LIVE', source['id'], source['rev'])
+    smart = store.change_mode(str(original['id']), ADMIN['id'], 'SMART', metadata={'sport': 'Cricket'})
+    assert smart['mode'] == 'LIVE' and public(smart)['mode'] == 'SMART'
+    chosen = select(store.connect, provider, str(uuid.uuid4()), ADMIN['id'], 'SMART', source['id'], source['rev'])
+    assert chosen['id'] == original['id']
+    assert store.read_review(review_key(source), ADMIN['id'], source)['id'] == original['id']
+    with pytest.raises(ValueError, match='another reviewer'):
+        select(store.connect, provider, str(uuid.uuid4()), 'different-reviewer', 'SMART', source['id'], source['rev'])

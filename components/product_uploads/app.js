@@ -1,7 +1,7 @@
 /* Exact Dropbox selection; PSD bytes never pass through this component. */
 (() => {
   'use strict';
-  const $=id=>document.getElementById(id),labels={DRAFT:'Upload to Draft',LIVE:'Upload to Live',UPDATE:'Update Existing'};
+  const $=id=>document.getElementById(id),labels={DRAFT:'Upload to Draft',LIVE:'Upload to Live',UPDATE:'Update Existing',SMART:'Smart Upload'};
   let row=null,manual=false,enabled=true,busy=false,timer=null,previewTimer=null,previewAttempts=0,previewKey='',previewBlob='',promptText='',copyMode='',copyID='',stopped=false,epoch=0,section='full',isolatedCopy=false,component=false,activeID='',refreshKey='',controller=new AbortController();
   let lastHeight=0,selectedAt=0;const timedReady=new Set();
   const copyFeedbackTimers=new Map(),copyLabels=new Map(['copy'].map(id=>[id,$(id).innerHTML]));

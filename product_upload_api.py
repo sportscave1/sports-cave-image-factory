@@ -162,7 +162,22 @@ async def action(request):
             record.validate = lambda: __import__('product_upload_package').package(store.read(key, uid), body.get('version'))
             return JSONResponse(dict(transfer=dict(base_url=str(request.base_url).rstrip('/'), ticket=record.ticket, secret=record.secret)), headers=HEADERS)
         elif op == 'mode':
-            row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
+            selected = body.get('mode')
+            metadata = None
+            if selected == 'SMART':
+                from design_review_metadata import is_trial, read_handoff
+                current = await run_in_threadpool(store.read, key, uid)
+                if not current or current['data'].get('workflow_version') != 3:
+                    raise ValueError('Choose a Dropbox PSD for Smart Upload.')
+                source = current['data']['source']
+                if is_trial(source['name']):
+                    raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
+                provider = await run_in_threadpool(Dropbox)
+                metadata = await run_in_threadpool(read_handoff, provider, source)
+                if metadata is None:
+                    from sports_categories import detect_sport_in_text
+                    metadata = dict(sport=detect_sport_in_text(source['path_display']))
+            row = await run_in_threadpool(store.change_mode, key, uid, selected, metadata=metadata)
         elif op == 'copied':
             row = await run_in_threadpool(store.copied, key, uid, body.get('mode'), body.get('source_version', ''))
         elif op == 'prompt':

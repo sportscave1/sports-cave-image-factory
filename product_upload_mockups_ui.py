@@ -5,6 +5,7 @@ import base64
 from functools import lru_cache
 from pathlib import Path
 import streamlit as st
+from product_upload_intake import action_mode
 
 
 def render_page(app):
@@ -35,7 +36,7 @@ def render_page(app):
     # Never fall back to the most recent upload for the account.
     if not resume and st.session_state.get('_product_upload_active'):
         resume=Intakes(connect).read(st.session_state['_product_upload_active'],user['id'])
-    event=component(section='upload',**(dict(id=str(resume['id']),mode=resume['mode']) if resume else {}),
+    event=component(section='upload',**(dict(id=str(resume['id']),mode=action_mode(resume)) if resume else {}),
                     refresh=st.session_state.get('_product_upload_linked',''),key='product-upload-input-'+visit,default=None)
     if event and event.get('nonce')!=st.session_state.get('_product_upload_event'):
         previous=st.session_state.get('_product_upload_active')
@@ -54,9 +55,12 @@ def render_page(app):
             from product_upload_gallery import revoke
             revoke(previous,user['id'])
             from product_upload_jobs import JOBS
-            JOBS.cancel(previous,user['id'])
-            from product_upload_mockups import release_transient
-            release_transient(st.session_state.get('_product_upload_mockups_result'))
+            previous_row = Intakes(connect).read(previous, user['id']) if previous else None
+            if not previous_row or (previous_row['data'].get('design_review') or {}).get('decision') != 'approved':
+                JOBS.cancel(previous,user['id'])
+                from product_upload_mockups import release_transient
+                release_transient(st.session_state.get('_product_upload_mockups_result'))
+            st.session_state.pop('product-upload-job-applied-'+str(previous), None)
             st.session_state.pop('_product_upload_mockups_result',None)
     key=st.session_state.get('_product_upload_active')
     manual=st.session_state.get('_product_upload_manual',False)
@@ -90,7 +94,7 @@ def render_page(app):
     if not state.get('saved_source_version'):return
     from product_upload_prompt_copy import render_copy
     render_copy(app, row, user, state['saved_source_version'])
-    linked=component(section='handoff',isolated_copy=True,id=key,mode=row['mode'],source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
+    linked=component(section='handoff',isolated_copy=True,id=key,mode=action_mode(row),source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
     if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
         st.session_state['_product_upload_linked']=linked['nonce']
         st.rerun()
@@ -166,10 +170,11 @@ def render_design(app,row,user):
     busy=any(job and job['state'] in ('Queued','Running') for job in active_jobs)
     with st.container(key='product-upload-details'):
         with st.container(key='product-upload-detail-name'):
-            saved_name=(row['data'].get('mockups_context') or {}).get('design_name')
+            saved_name=(row['data'].get('mockups_context') or {}).get('design_name') or (row['data'].get('metadata') or {}).get('design_name')
             name=st.text_input('Product name',value=saved_name or Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
         with st.container(key='product-upload-detail-sport'):
-            choice=render_selector(app,key,user,disabled=busy)
+            choice=render_selector(app,key,user,disabled=busy,
+                suggested_sport=(row['data'].get('metadata') or {}).get('sport', '') if row['data'].get('smart_upload') else '')
     sport=choice['sport'] if choice else ''
     from product_upload_recorder import publish
     publish(row, name, choice)
@@ -242,7 +247,7 @@ def render_design(app,row,user):
         elif spec.get('state')=='Failed':st.error(spec.get('reason') or 'Artwork preparation failed. Retry preparation; the original and workflow are retained.')
         else:st.info('Downloading/preparing the original PSD. Generate mockups will be enabled when artwork is ready.')
         if st.button('Retry artwork preparation' if spec.get('state')=='Failed' else 'Prepare artwork',key='product-upload-artwork-retry-'+key,
-                     disabled=bool(preparing and preparing['state'] in ('Queued','Running'))):
+                     disabled=running or bool(preparing and preparing['state'] in ('Queued','Running'))):
             try:prepare(connect,key,user['id'],Dropbox)
             except Exception as error:st.error(str(error));return
             st.rerun(scope='fragment')

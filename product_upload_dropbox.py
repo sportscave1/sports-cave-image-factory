@@ -8,7 +8,7 @@ import json
 import uuid
 from pathlib import Path, PurePosixPath
 from datetime import datetime, timezone
-from product_upload_intake import Intakes, mode, MAX_BYTES
+from product_upload_intake import Intakes, mode, action_mode, stored_mode, smart_claim, MAX_BYTES
 import psd_directory
 
 REVIEW = psd_directory.ROOT + '/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE'
@@ -68,22 +68,42 @@ def select(connect, provider, key, actor, selected_mode, file_id, revision):
     ae.source_identity('gid://shopify/Product/1', meta)
     if type(meta.get('size')) is not int or not 40 <= meta['size'] <= MAX_BYTES:
         raise ValueError('Choose a layered PSD up to 1 GiB.')
+    metadata = {}
+    if selected_mode == 'SMART':
+        from design_review_metadata import is_trial, read_handoff, review_key
+        metadata = read_handoff(provider, meta) or {}
+        if not metadata:
+            from sports_categories import detect_sport_in_text
+            metadata = dict(sport=detect_sport_in_text(meta['path_display']))
+        if is_trial(meta['name']):
+            raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
+        key = review_key(meta)
     store = Intakes(connect)
     with connect() as conn, conn.cursor() as cur:
+        if selected_mode == 'SMART':
+            claimed = smart_claim(cur, meta)
+            if claimed:
+                if claimed['actor_id'] != str(actor):
+                    raise ValueError('This PSD revision already has a Smart Upload assigned to another reviewer.')
+                if claimed['data'].get('source') != meta:
+                    raise ValueError('The selected PSD changed. Refresh and choose the current revision.')
+                return dict(claimed)
         cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', ('product-upload:' + key,))
         cur.execute('SELECT * FROM product_upload_intakes WHERE id=%s', (key,))
         old = cur.fetchone()
         if old:
-            if old['actor_id'] != str(actor) or old['data'].get('source') != meta or old['mode'] != selected_mode:
+            if old['actor_id'] != str(actor) or old['data'].get('source') != meta or action_mode(old) != selected_mode:
                 raise ValueError('This selection belongs to a different workflow. Choose the PSD again.')
         else:
             data = dict(workflow_version=3, source=meta, name=meta['name'], size=meta['size'], offset=meta['size'],
                         content_hash=meta['content_hash'], basic_validated=True, copied=False,
                         selected_at=datetime.now(timezone.utc).isoformat(), state='Selected', server_artwork=dict(state='Selected'))
+            if selected_mode == 'SMART':
+                data.update(smart_upload=True, metadata=metadata)
             from product_upload_identity import operation
             operation(dict(id=key,data=data))['correlation_expected'] = True
             cur.execute('INSERT INTO product_upload_intakes(id,actor_id,mode,data) VALUES(%s,%s,%s,%s::jsonb)',
-                        (key, str(actor), selected_mode, json.dumps(data)))
+                        (key, str(actor), stored_mode(selected_mode, metadata), json.dumps(data)))
     return store.read(key, actor)
 
 

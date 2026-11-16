@@ -443,7 +443,12 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "retain the trial and continue" in result[final_save:cleanup]
     assert "recoverable delete" in result[cleanup:display]
     assert "report it as pending" in result[cleanup:display]
-    assert "overwrite" not in result.lower()
+    metadata_start = result.index("**SMART UPLOAD HANDOFF METADATA**", final_save)
+    metadata_end = result.index("**8F.", metadata_start)
+    metadata = result[metadata_start:metadata_end]
+    assert "Never write a handoff for the trial or overwrite an existing file." in metadata
+    assert "intended_collections" in metadata and "dropbox_revision" in metadata
+    assert "overwrite" not in (result[:metadata_start] + result[metadata_end:]).lower()
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)

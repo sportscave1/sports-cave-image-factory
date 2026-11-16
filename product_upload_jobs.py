@@ -108,12 +108,17 @@ def prepare(connect,key,actor,provider_factory):
     return JOBS.submit(key,actor,'prepare',source(row),work)
 
 
-def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,prompts,*,reset_exports=False,finalize=None):
+def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,prompts,*,reset_exports=False,finalize=None,prepare_first=False):
     from product_upload_artwork import source,prepared,current
     import image_factory as factory
     key=str(row['id']);identity=source(row)
     def work(progress):
         result=None;created_run=None
+        if prepare_first:
+            from product_upload_artwork import prepare as prepare_artwork
+            progress('Preparing the approved PSD revision')
+            with JOBS.preparation:
+                prepare_artwork(connect,None,key,actor,provider_factory=provider_factory,progress=progress)
         progress('Waiting for renderer')
         with semaphore:
             try:

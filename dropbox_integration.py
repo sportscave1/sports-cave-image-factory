@@ -1343,16 +1343,20 @@ def get_psd_file_response(access_token, file_id, revision):
         raise _dropbox_error(error,'Dropbox original is unavailable.') from error
 
 
-def get_psd_thumbnail_bytes(access_token, file_id):
+def get_psd_thumbnail_bytes(access_token, file_id, *, revision=None):
     """Dropbox-generated small flattened preview; never fetch or parse the master."""
     if not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')):
         raise ValueError('Invalid PSD identity.')
     dropbox = _dropbox_sdk()
     try:
-        _, response = team_space_client(access_token).files_get_thumbnail(
+        metadata, response = team_space_client(access_token).files_get_thumbnail(
             file_id,format=dropbox.files.ThumbnailFormat('jpeg'),
             size=dropbox.files.ThumbnailSize('w1024h768'),mode=dropbox.files.ThumbnailMode('bestfit'))
         try:
+            if revision:
+                actual = _metadata_to_dict(metadata)
+                if actual.get('id') != file_id or actual.get('rev') != revision:
+                    raise DropboxSourceChangedError('Artwork changed. Reload the review gallery.')
             content = bytearray()
             for chunk in response.iter_content(chunk_size=64*1024):
                 if len(content)+len(chunk)>2*1024*1024:

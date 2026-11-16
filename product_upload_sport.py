@@ -17,7 +17,7 @@ def selected(key):
     return st.session_state.get(state_key(key)+'-resolved')
 
 
-def render_selector(app,key,user,*,disabled=False):
+def render_selector(app,key,user,*,disabled=False,suggested_sport=''):
     state=state_key(key);api=app.dropbox_integration
     error=st.session_state.pop(state+'-error','')
     choice=None
@@ -32,6 +32,12 @@ def render_selector(app,key,user,*,disabled=False):
         options={x['id']:x for x in cache['items'] if x.get('id')}
         # Resolve retained ID before rendering: renames update labels and paths;
         # removals stay unselected, never fall back to the first available sport.
+        if suggested_sport and state+'-id' not in st.session_state:
+            from product_upload_export import folder_sport
+            candidates = [value['id'] for value in options.values()
+                          if value['sport'].casefold() == folder_sport(suggested_sport).casefold()]
+            if len(candidates) == 1:
+                st.session_state[state+'-id'] = candidates[0]
         retained=st.session_state.get(state+'-id')
         if retained:
             try:

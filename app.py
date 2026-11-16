@@ -13906,10 +13906,9 @@ def render_selected_page(current_page):
             ),
         )
     elif current_page == "Design Studio":
-        get_design_studio_page().render_design_studio_page(
-            can_edit_prompts=prompt_editing_allowed(),
-            user=current_os_user(),
-        )
+        from design_review_page import render
+        from types import SimpleNamespace
+        render(SimpleNamespace(**globals()), current_os_user())
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
