@@ -104,7 +104,11 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
     assert len(receipt['successes']) == 5
     assert {total for _, _, total in progress} == {5}
     assert not store.read(row['id'], ADMIN['id'])['data']['mockups_exported']
-    prompt = prepare(result, row, receipt, 'Exact original lifestyle prompt.')['prompt']
+    manual = prepare(result, row, receipt, 'Exact original lifestyle prompt.')
+    assert not manual['automatic']
+    handoff = prepare(result, row, dict(receipt, generation_receipt='a' * 32), 'Exact original lifestyle prompt.')
+    assert handoff['automatic'] and handoff['companion_id'] == manual['companion_id']
+    prompt = handoff['prompt']
     black = next(item['metadata'] for item in receipt['successes']
                  if item['relative_path'] == core[0]['archive_name'])
     assert black['id'] in prompt and black['path_display'] in prompt

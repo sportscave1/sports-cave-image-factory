@@ -44,8 +44,8 @@
     }finally{bitmap.close();}
   }
   const project='https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
-  const previewEvent='sc-product-uploads-previews-ready';
   const companionChannel='sports-cave-upload-companion-v1';
+  const automaticAttempts=new Set();
   function companionRequest(action, payload={}, timeout=1000){
     if(!globalThis.crypto?.randomUUID)return Promise.resolve(null);
     const id=crypto.randomUUID();
@@ -93,6 +93,11 @@
     if(upload.disabled)return;
     const version=epoch;
     const signal=controller.signal;
+    const autoKey=handoff.automatic && /^[a-f0-9]{64}$/.test(handoff.companion_id||'')
+      ? 'sc-product-upload-saved:'+handoff.companion_id : '';
+    function markDispatched(){
+      if(autoKey){try{sessionStorage.setItem(autoKey,'dispatched');}catch{}}
+    }
     function projectLink(){
       const anchor=document.createElement('a');
       anchor.href=project;
@@ -101,43 +106,41 @@
       anchor.textContent='Open SC Mockups/Uploads';
       return anchor;
     }
+    async function copyUploadPrompt(automatic){
+      try{
+        if(automatic && !parent.document.hasFocus())return false;
+        const clipboard=automatic ? parent.navigator.clipboard : navigator.clipboard;
+        await clipboard.writeText(handoff.prompt);
+        return true;
+      }catch{return false;}
+    }
     async function start(automatic){
       if(upload.disabled || signal.aborted || !upload.isConnected)return;
       upload.disabled=true;
-      status.textContent='Copying upload prompt…';
+      status.textContent='Opening the ChatGPT project…';
       resize();
       try{
-        const clipboard=automatic ? parent.navigator.clipboard : navigator.clipboard;
-        let copied=false;
+        const copying=copyUploadPrompt(automatic);
         if(handoff.companion_id){
-          if(!automatic || parent.document.hasFocus()){
-            try{await clipboard.writeText(handoff.prompt);copied=true;}catch{}
-          }
-          active(version);
           const result=await companionRequest('start',{receipt:handoff.companion_id,prompt:handoff.prompt},2200);
+          if(result?.accepted && !result.busy)markDispatched();
           active(version);
           if(result?.accepted){
-            status.textContent=result.busy ? 'An upload is already opening. Click Upload again when it finishes.' : '';
+            status.textContent=result.busy ? 'An upload is already opening. Click Upload again when it finishes.' : 'Upload sent to the Edge companion.';
             return;
           }
         }
-        if(automatic && !parent.document.hasFocus()){
-          if(autoKey)sessionStorage.removeItem(autoKey);
-          status.textContent='';
-          return;
-        }
-        if(!copied)await clipboard.writeText(handoff.prompt);
-        active(version);
-        // Keep the opener isolated and preserve a manual link if the browser blocks the launch.
-        const popup=window.open('about:blank','_blank');
+        const popup=(!automatic || parent.document.hasFocus()) && window.open('about:blank','_blank');
         if(popup){
           popup.opener=null;
           popup.location.replace(project);
-          status.textContent='Upload prompt copied. Paste it into the new project chat.';
-        }else{
-          status.textContent='Upload prompt copied. ';
-          status.append(projectLink());
+          markDispatched();
         }
+        const copied=await copying;
+        active(version);
+        status.textContent=copied ? 'Upload prompt copied. ' : 'Click Upload to copy the prompt. ';
+        if(popup && copied)status.textContent+='Paste it into the new project chat.';
+        if(!popup)status.append(projectLink());
       }catch{
         if(signal.aborted)return;
         status.textContent=automatic ? 'Click Upload to copy the prompt and open ChatGPT.' :
@@ -146,29 +149,14 @@
         if(!signal.aborted){upload.disabled=false;resize();}
       }
     }
-    const {receipt}=handoff;
-    const autoKey=/^[a-f0-9]{32}$/.test(receipt||'') ? 'sc-product-upload-handoff:'+receipt : '';
-    upload.onclick=()=>{
-      if(autoKey){
-        try{sessionStorage.setItem(autoKey,'attempted');}catch{}
-      }
-      return start(false);
-    };
+    upload.onclick=()=>start(false);
     if(!autoKey)return;
-    function afterPreviews(){
-      if(signal.aborted || upload.disabled || (!handoff.companion_id && !parent.document.hasFocus()))return;
-      if(!handoff.companion_id &&
-         !parent.document.querySelector('iframe[data-sc-upload-previews="'+receipt+'"]'))return;
-      try{
-        if(sessionStorage.getItem(autoKey))return;
-        sessionStorage.setItem(autoKey,'attempted');
-      }catch{return;}
+    queueMicrotask(()=>{
+      if(signal.aborted || upload.disabled || automaticAttempts.has(autoKey))return;
+      try{if(sessionStorage.getItem(autoKey))return;}catch{}
+      automaticAttempts.add(autoKey);
       void start(true);
-    }
-    parent.addEventListener(previewEvent,afterPreviews,{signal});
-    parent.addEventListener('focus',afterPreviews,{signal});
-    window.addEventListener('focus',afterPreviews,{signal});
-    requestAnimationFrame(afterPreviews);
+    });
   }
   function actions(args){
     // Stable frame identity for the recorder across Streamlit reruns.
@@ -218,21 +206,10 @@
     if(theme.font)document.body.style.setProperty('--font',theme.font);
     const next=JSON.stringify(args);if(signature===next){resize();return;}
     signature=next;epoch++;controller.abort();clearAllFeedback();controller=new AbortController();root.replaceChildren();
-    if(window.frameElement)delete window.frameElement.dataset.scUploadPreviews;
     if(args.mode==='actions')actions(args);
     else if(args.mode==='companion-health')companionHealth();
     else{const container=document.createElement('div');container.className=args.mode==='gallery'?'gallery':'single-preview';container.setAttribute('aria-label',args.mode==='gallery'?'Generated mockup previews':'Lifestyle mockup preview');
       for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);
-      if(args.mode==='gallery' && args.preview_receipt && window.frameElement){
-        const previews=Array.from(container.querySelectorAll('img'));
-        if(previews.length!==5){resize();return;}
-        const signal=controller.signal;
-        Promise.all(previews.map(img=>img.decode())).then(()=>{
-          if(signal.aborted)return;
-          window.frameElement.dataset.scUploadPreviews=args.preview_receipt;
-          parent.dispatchEvent(new Event(previewEvent));
-        }).catch(()=>{}); // A broken preview should never trigger automatic handoff.
-      }
     }
     resize();
   });

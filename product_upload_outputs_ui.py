@@ -249,8 +249,7 @@ def render_outputs(app,result,row,user,name):
     st.success('Mockups ready')
     st.subheader('Generated Previews')
     with st.container(key='product-upload-preview-row'):
-        render(key='product-upload-previews-'+key,mode='gallery',items=core_preview_items(app,result,source),
-               preview_receipt=preview_receipt)
+        render(key='product-upload-previews-'+key,mode='gallery',items=core_preview_items(app,result,source))
     # Read existing Developer overrides, including legacy IDs, without migrating or
     # writing any shared prompt. Editing belongs exclusively in Developer Studio.
     specs=[dict(prompt_key=PROMPT_ID,default_text=INSTRUCTIONS)]
@@ -276,9 +275,6 @@ def render_outputs(app,result,row,user,name):
             manifest=[entry for entry in manifest if entry.get('product_slot_id') in CORE]
             if core_receipt.get('package_stamp')==package_stamp(source,choice['id'],name,manifest):
                 handoff=prepare(result,row,core_receipt,prompt)
-                if (core_receipt.get('generation_receipt')==preview_receipt
-                        or (row['data'].get('design_review') or {}).get('decision')=='approved'):
-                    handoff['receipt']=preview_receipt
         except ValueError as error:
             handoff={'error': str(error)}
         except Exception:

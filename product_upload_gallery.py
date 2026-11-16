@@ -100,12 +100,11 @@ def preview_item(path, original, label):
     return item
 
 
-def render(*, key, items=(), original='', prompt=None, mode='image', handoff=None, preview_receipt=None):
+def render(*, key, items=(), original='', prompt=None, mode='image', handoff=None):
     import streamlit.components.v1 as components
     # Keyed render handshake instead of unkeyed script-generated srcdoc cards.
     # Arguments contain preview bytes and original URLs, never original bytes.
     component=components.declare_component('product_upload_gallery',path=str(Path(__file__).parent/'components/product_upload_gallery'))
     optional = {}
     if handoff: optional['handoff'] = handoff
-    if preview_receipt: optional['preview_receipt'] = preview_receipt
     return component(mode=mode,items=list(items),original=original,prompt=prompt,key=key,default=None,**optional)

@@ -72,4 +72,5 @@ Read the mapping back against the exact Shopify product ID and the PSD identity.
     companion_id = hashlib.sha256(
         f"{row['id']}:{receipt['export_fingerprint']}".encode('utf-8')
     ).hexdigest()
-    return dict(project=PROJECT, prompt=combined, companion_id=companion_id)
+    return dict(project=PROJECT, prompt=combined, companion_id=companion_id,
+                automatic=bool(receipt.get('generation_receipt')))
