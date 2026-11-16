@@ -427,6 +427,12 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Never invent or replace the master badge or editable edition-number layer." in result
     assert "Dropbox must have confirmed the trial save" not in result
     assert "After Dropbox confirms the trial save and before the second generation" not in result
+    assert "skip it without prompting and use an authorised alternative" in result
+    assert "at most two additional image-generation attempts total across both passes" in result
+    assert "up to the three strongest accessible references per featured person" in result
+    assert "search beyond the first three sources" not in result
+    assert "After each pass, use source-photo compositing" in result
+    assert "attempt the second pass independently" in result[second_pass:second_generation]
     assert "If any PSD save, verification or cleanup step is pending, display the inspected final artwork" in result
     assert "as a review draft" in result[first_save:second_pass]
     assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[first_save:second_pass]
@@ -444,6 +450,11 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "continue directly to the final PSD" in result[second_generation:final_save]
     assert "After completing your own inspection and corrections, save the final PSD" in result[final_save:cleanup]
     assert "retain the trial and continue" in result[final_save:cleanup]
+    assert "Photoshop is optional" in result[final_save:cleanup]
+    assert "parser plus a rendered preview" in result[final_save:cleanup]
+    assert "trial cleanup may proceed" in result[final_save:cleanup]
+    assert "report the specific unverified property" in result[final_save:cleanup]
+    assert "Photoshop live-number check pending" not in result
     assert "recoverable delete" in result[cleanup:display]
     assert "report it as pending" in result[cleanup:display]
     metadata_start = result.index("**SMART UPLOAD HANDOFF METADATA**", final_save)

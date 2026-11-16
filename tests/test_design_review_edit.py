@@ -33,6 +33,8 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'gid://shopify/Product/123' in edit and ORIGINAL_PATH in edit
     assert '[Product Title] - TRIAL.psd' not in edit
     assert 'upload_intent (new_product)' not in edit
+    assert 'Before replacing the canonical file, test interactive text editing in Photoshop' in edit
+    assert 'Photoshop is optional' not in edit
 
 
 @pytest.fixture

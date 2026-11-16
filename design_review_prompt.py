@@ -26,7 +26,7 @@ def build_edit_prompt(workflow, source, details):
         'checkpoint is a confirmed trial save before the second full generation. If genuinely '
         'blocked, use the canonical recovery exception and retain the first pass and notes.\n'
     ))
-    replace_section('**8E. Save and verify the final PSD**', 'Verify that SC_EDITION_NUMBER', (
+    replace_section('**8E. Save and verify the final PSD**', '**SMART UPLOAD HANDOFF METADATA**', (
         '**8E. Save and verify the staged final PSD**\n\n'
         f'Save a separate create-only file at {staged}. If occupied, choose a unique staging '
         'suffix for this run and report the exact path. Preserve the pre-edit artwork in '
@@ -34,7 +34,13 @@ def build_edit_prompt(workflow, source, details):
         'new pass in FINAL POLISHED ARTWORK. Keep the two reference groups hidden. Retry any '
         'pending trial before staging when access allows. Reopen or download the staged copy and '
         'check all three artwork versions, signatures, dimensions, colour profile, badge, editable '
-        'number and alignment. Keep the original untouched on any failure.\n'
+        'number and alignment. Keep the original untouched on any failure.\n\n'
+        'Verify that SC_EDITION_NUMBER remains the original editable text layer, retains its exact '
+        'name, and stays correctly aligned inside SC_EDITION_PLAQUE. Check the saved text data, '
+        'transform, position and rendered preview. Never rasterise or duplicate the number. '
+        'Before replacing the canonical file, test interactive text editing in Photoshop on the '
+        'staged copy. If that test is unavailable, record “Photoshop live-number check pending” '
+        'and keep the original, trial and staging files. Continue independent work.'
     ))
     replace_section('**SMART UPLOAD HANDOFF METADATA**', '**Completion requires:**', (
         '**8F. Replace the original and return it to review**\n\n'
