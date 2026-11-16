@@ -210,14 +210,14 @@
     if(model.recovery?.state)return;
     if(typeof version!=='string'||!version||version.length>128||version===seenSignal)return;
     pendingSignal=version;
-    if(busy||menu||model.delete_confirmation||document.hidden||!model.configured)return;
+    if(busy||menu||model.delete_confirmation||document.getElementById?.('move-to-trash-confirmation')||document.hidden||!model.configured)return;
     seenSignal=version;pendingSignal='';signalAttempts=0;
     emit('live_check',{signal_version:version});
   }
   function liveTick(){
     if(model.recovery?.state)return; // Dedicated bounded recovery owns outage attempts.
     if(pendingSignal){signalTick(pendingSignal);return;}
-    if(busy||menu||model.delete_confirmation||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
+    if(busy||menu||model.delete_confirmation||document.getElementById?.('move-to-trash-confirmation')||document.hidden||!model.configured||Date.now()-lastLiveCheck<55000)return;
     lastLiveCheck=Date.now();emit('live_check');
   }
   // Only standalone fixtures/embeds need a timer; the OS supplies its existing heartbeat.
@@ -730,7 +730,7 @@
     reader.onload=()=>{if(model.draft?.id!==draft||model.reader_scope!==scope||model.view!=='compose'){return;}emit('attach',{filename:f.name,base64:reader.result.split(',')[1]});if($('notice'))$('notice').textContent='Saving attachment…';};
     reader.readAsDataURL(f);
   }
-  const inboxTools=window.EmailInboxTools?.create({root,model:()=>model,emit,busy:()=>busy,upload:uploadFile});
+  const inboxTools=window.EmailInboxTools?.create({root,model:()=>model,emit,busy:()=>busy,upload:uploadFile,confirmMoveToTrash});
   function wire(){
     const searchInput=$('search');
     if(searchText!==null&&searchFolder===model.folder){
@@ -780,8 +780,9 @@
       if(action==='send'){send();return;}
       if(action==='choose_file'){$('attachment').click();return;}
       if(action==='discard_draft'&&!confirm(model.draft?.saved?'Move the saved draft to Trash?':'Discard this unsaved draft?'))return;
-      if(['trash','junk'].includes(action)&&!confirm(`Move this message to ${action==='trash'?'Trash':'Junk'}?`))return;
       let data={message_key:b.dataset.key||model.active_message};
+      if(action==='trash'){confirmMoveToTrash('trash',data);return;}
+      if(action==='junk'&&!confirm('Move this message to Junk?'))return;
       if(action==='open_thread'){data.thread_key=b.dataset.key;mobileReading=true;}
       if(action==='settings'||action==='resume_composer')mobileReading=true;
       if(action==='folder')data.folder=b.dataset.folder;
@@ -820,6 +821,23 @@
     const message=model.messages.find(m=>m.key===(key||model.active_message));
     return message?{kind:'message',message_key:message.key,unread:message.unread,starred:message.starred,folder:message.folder}:null;
   }
+  function confirmMoveToTrash(action,values){
+    const count=action==='bulk_action'?values.items.length:Number(Boolean(values.message_key));
+    if(!count||$('move-to-trash-confirmation')||model.delete_confirmation)return;
+    const {reader_scope,folder}=model;
+    const dialog=document.createElement('dialog');
+    dialog.id='move-to-trash-confirmation';dialog.className='trash-delete-dialog inbox-dialog';
+    dialog.setAttribute('aria-labelledby','move-to-trash-title');
+    dialog.innerHTML=`<h3 id="move-to-trash-title">Move ${count===1?'message':count+' messages'} to Trash?</h3><p>You can restore mail from Trash.</p><div class="row"><button type="button" value="cancel" autofocus>Cancel</button><button type="button" value="trash" data-delete="confirm">Move to Trash</button></div>`;
+    dialog.onclick=e=>{const button=e.target.closest('button');if(button&&dialog.open)dialog.close(button.value);};
+    dialog.onclose=()=>{
+      const confirmed=dialog.returnValue==='trash';
+      dialog.remove();
+      if(confirmed&&model.reader_scope===reader_scope&&model.folder===folder)emit(action,values);
+      if(pendingSignal)setTimeout(()=>signalTick(pendingSignal),0);
+    };
+    document.body.append(dialog);dialog.showModal();
+  }
   function renderDeleteConfirmation(){
     const pending=model.delete_confirmation,existing=$('trash-delete-confirmation');
     if(existing?.dataset.token===pending?.token&&existing)return;
@@ -857,7 +875,8 @@
       if(action==='open'){emit(target.thread_key?'open_thread':'open_message',target);return;}
       if(action==='search_folder'){focusSearch=true;emit(action,{folder:target.folder});return;}
       if(action==='refresh_folder'||action==='mark_folder_read'){emit(action,{folder:target.folder,confirmed:action==='mark_folder_read'});return;}
-      if(['trash','junk'].includes(action)&&!confirm(`Move this message to ${action==='trash'?'Trash':'Junk'}?`))return;
+      if(action==='trash'){confirmMoveToTrash('trash',{message_key:target.message_key});return;}
+      if(action==='junk'&&!confirm('Move this message to Junk?'))return;
       emit(action.replace('_to',''),{message_key:target.message_key,destination:button.dataset.destination});
     };
     menu.querySelector('button:not(:disabled)')?.focus();

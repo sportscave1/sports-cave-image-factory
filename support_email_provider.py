@@ -998,13 +998,31 @@ class ImapProvider:
             raise MailboxError("Message is already in this folder.")
         if not re.fullmatch(r"[1-9]\d*", str(header["uid"])):
             raise MailboxError("Invalid message identifier.")
+        uid, target = str(header["uid"]), folder_argument(destination)
         with self._connection(header["folder"], header["uidvalidity"], write=True) as (conn, _, __):
-            if "MOVE" in self._capabilities(conn):
-                self._ok(conn.uid("MOVE", header["uid"], folder_argument(destination)))
+            capabilities = self._capabilities(conn)
+            if "MOVE" in capabilities or "IMAP4REV2" in capabilities:
+                self._ok(conn.uid("MOVE", uid, target))
                 return {"status": "moved"}
-            # COPY-only fallback preserves the original. No broad EXPUNGE or destructive emulation.
-            self._ok(conn.uid("COPY", header["uid"], folder_argument(destination)))
-            return {"status": "copied", "notice": "Server MOVE is unavailable. Copied to the destination; original retained."}
+            if "UIDPLUS" not in capabilities:
+                self._ok(conn.uid("COPY", uid, target))
+                return {"status": "copied", "notice": "Server MOVE is unavailable. Copied to the destination; original retained."}
+            if uid not in self._search(conn, f"UID {uid} UNDELETED"):
+                raise MailboxError("The source message is no longer available. Refresh before trying again.")
+            # Copy first, then remove exactly this source UID. Never use mailbox-wide EXPUNGE.
+            self._ok(conn.uid("COPY", uid, target))
+            try:
+                self._ok(conn.uid("STORE", uid, "+FLAGS.SILENT", "(\\Deleted)"))
+                self._ok(conn.uid("EXPUNGE", uid))
+                if uid in self._search(conn, f"UID {uid}"):
+                    raise MailboxError("The source message is still present.")
+            except Exception:
+                try:
+                    self._ok(conn.uid("STORE", uid, "-FLAGS.SILENT", "(\\Deleted)"))
+                except Exception:
+                    pass
+                return {"status": "copied", "notice": "Copied to the destination, but could not confirm removal from the source. Refresh both folders before trying again."}
+            return {"status": "moved"}
 
     def delete_trash_messages(self, headers, *, trash_folder, folder_mapping=None):
         """Explicit, bounded UID deletion. Never fall back to mailbox-wide EXPUNGE."""

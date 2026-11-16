@@ -345,6 +345,33 @@ class FolderTests(unittest.TestCase):
         self.assertIn(("uid", "COPY", "1", '"Trash"'), wire.calls)
         self.assertFalse(any(c[1] == "STORE" for c in wire.calls if c[0] == "uid"))
 
+    def test_uidplus_move_copies_then_removes_only_the_source_uid(self):
+        for outcome in ("success", "copy_failed", "expunge_failed"):
+            with self.subTest(outcome=outcome):
+                p, wire = self.adapter()
+                wire.capabilities = (b"IMAP4REV1", b"UIDPLUS")
+                def send(command, *args):
+                    wire.calls.append((command, *args))
+                    if command == "SEARCH":
+                        return "OK", [b"1"] if args[-1] == b"UID 1 UNDELETED" else [b""]
+                    if (command, outcome) in {("COPY", "copy_failed"), ("EXPUNGE", "expunge_failed")}:
+                        return "NO", [b"rejected"]
+                    return "OK", [b"ok"]
+                wire.uid = send
+                if outcome == "copy_failed":
+                    with self.assertRaises(provider.MailboxError):
+                        p.move_message(header(), "Trash")
+                    self.assertFalse(any(call[0] in {"STORE", "EXPUNGE"} for call in wire.calls))
+                    continue
+                result = p.move_message(header(), "Trash")
+                copy = ("COPY", "1", '"Trash"')
+                flag = ("STORE", "1", "+FLAGS.SILENT", "(\\Deleted)")
+                self.assertLess(wire.calls.index(copy), wire.calls.index(flag))
+                self.assertEqual([call for call in wire.calls if call[0] == "EXPUNGE"], [("EXPUNGE", "1")])
+                self.assertEqual(result["status"], "moved" if outcome == "success" else "copied")
+                if outcome == "expunge_failed":
+                    self.assertIn(("STORE", "1", "-FLAGS.SILENT", "(\\Deleted)"), wire.calls)
+
     def test_uidvalidity_change_prevents_writes(self):
         p, wire = self.adapter(); wire.validity = b"501"
         with self.assertRaises(provider.MailboxError): p.move_message(header(), "Trash")
