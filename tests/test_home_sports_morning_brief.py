@@ -421,6 +421,9 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert signature < first_generation < first_review < first_save < second_pass
     assert pending_trial < second_generation < final_save < cleanup < display
     assert "If master PSD retrieval or a Dropbox save fails after reasonable recovery attempts" in result
+    assert "verified signature extraction and placement, photographic corrections, final inspection" in result
+    assert "only after exhausting authorised recovery methods and finishing all independent work" in result
+    assert "Continue to the final display and status in Step 8F." in result[second_generation:final_save]
     assert "Never invent or replace the master badge or editable edition-number layer." in result
     assert "Dropbox must have confirmed the trial save" not in result
     assert "After Dropbox confirms the trial save and before the second generation" not in result
