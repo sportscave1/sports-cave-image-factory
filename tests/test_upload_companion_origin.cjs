@@ -33,6 +33,37 @@ async function main() {
   assert.ok(longPrompt.length > 131072);
   assert.equal((await start(longPrompt)).accepted, true);
   assert.equal((await start(longPrompt + 'x'.repeat(1048576))).accepted, false);
+
+  const records = new Map(), opened = [], sent = [];
+  const tabId = 12;
+  const bridge = {url: page + '?streamlitUrl=' + encodeURIComponent(origin + '/'), frameId: 1, tab: {id: 4}};
+  const invoke = (message, sender) => new Promise(resolve => onMessage(message, sender, resolve));
+  let finish;
+  const submitted = new Promise(resolve => { finish = resolve; });
+  chrome.storage.local = {
+    get: async key => ({[key]: records.get(key)}),
+    set: async values => {
+      for (const [key, record] of Object.entries(values)) records.set(key, record);
+      if (values.uploadCompanionLast?.state === 'submitted') finish();
+    },
+  };
+  chrome.tabs = {
+    create: async ({url}) => { opened.push(url); return {id: tabId}; },
+    sendMessage: async (_tab, message) => {
+      if (message.type === 'project:ready') return {ready: true};
+      const approved = await invoke({type:'project:permit',id:message.id}, {url:opened[0],frameId:0,tab:{id:tabId}});
+      assert.equal(approved.ok,true);
+      sent.push(message.prompt);
+      return {sent:true};
+    },
+  };
+  const request = {type:'os:start',receipt:'b'.repeat(64),prompt:longPrompt};
+  assert.equal((await invoke(request,bridge)).accepted,true);
+  assert.equal((await invoke(request,bridge)).accepted,true);
+  await submitted;
+  assert.equal((await invoke(request,bridge)).accepted,true);
+  assert.deepEqual(opened,['https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project']);
+  assert.deepEqual(sent,[longPrompt]);
   console.log('Upload Companion accepts the live Streamlit iframe URL and rejects other origins, paths and top-level frames.');
 }
 main().catch(error => {

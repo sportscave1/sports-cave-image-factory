@@ -40,7 +40,7 @@ def render_save_progress(app,key,actor,*,core=False):
     if job['state'] in ('Queued','Running'):
         if core:
             fraction=min(1.,job['completed']/job['total']) if job['total'] else 0.
-            st.progress(.5+.49*fraction,text='Saving generated mockups to Dropbox · '+job['stage'])
+            st.progress(.5+.35*fraction,text='Saving generated mockups to Dropbox · '+job['stage'])
         elif job['total']:st.progress(min(1.,job['completed']/job['total']),text=job['stage'])
         else:st.caption('Saving… · '+job['stage'])
     elif job['state']=='Failed':
@@ -56,7 +56,7 @@ def render_save_progress(app,key,actor,*,core=False):
             if core and result.get('product_upload_core_receipt')==receipt:
                 if receipt.get('cancelled') or receipt.get('failures'):
                     st.caption('Mockups generated · Dropbox save needs attention below.')
-                elif len(receipt.get('successes',()))==5:
+                elif len(receipt.get('successes',()))==5 and not receipt.get('generation_receipt'):
                     st.progress(1.,text='Mockups generated and saved to Dropbox')
             return
         from product_upload_api import connect
@@ -246,10 +246,6 @@ def render_outputs(app,result,row,user,name):
                              st.session_state.get('product-upload-job-applied-'+key),
                              result,key,name,choice['sport'],source['content_hash'])
         if state=='ready':preview_receipt=receipt
-    st.success('Mockups ready')
-    st.subheader('Generated Previews')
-    with st.container(key='product-upload-preview-row'):
-        render(key='product-upload-previews-'+key,mode='gallery',items=core_preview_items(app,result,source))
     # Read existing Developer overrides, including legacy IDs, without migrating or
     # writing any shared prompt. Editing belongs exclusively in Developer Studio.
     specs=[dict(prompt_key=PROMPT_ID,default_text=INSTRUCTIONS)]
@@ -268,19 +264,33 @@ def render_outputs(app,result,row,user,name):
     url=register(result,black,source,path) if path else ''
     handoff={'pending': True}
     core_receipt=result.get('product_upload_core_receipt') or {}
-    if choice and core_receipt and not saving and not warnings:
+    core_saved = (len(core_receipt.get('successes', ())) == 5
+                  and not core_receipt.get('cancelled') and not core_receipt.get('failures'))
+    if core_saved and not saving:
         try:
             from product_upload_chat_handoff import CORE,prepare
             manifest=app._mockup_dropbox_manifest(result,(app.ASSET_CATEGORY_CORE,))
             manifest=[entry for entry in manifest if entry.get('product_slot_id') in CORE]
-            if core_receipt.get('package_stamp')==package_stamp(source,choice['id'],name,manifest):
-                handoff=prepare(result,row,core_receipt,prompt)
+            if not choice or core_receipt.get('package_stamp')!=package_stamp(source,choice['id'],name,manifest):
+                raise ValueError('The confirmed Dropbox save belongs to earlier product details.')
+            if warnings:
+                raise ValueError('Saved prompt storage is unavailable. Refresh Product Uploads to retry the handoff.')
+            handoff=prepare(result,row,core_receipt,prompt)
         except ValueError as error:
             handoff={'error': str(error)}
         except Exception:
             handoff={'error': 'Upload needs all five WebPs confirmed in Dropbox.'}
-    if handoff.get('error') and core_receipt and not core_receipt.get('cancelled') and not core_receipt.get('failures'):
-        st.warning(handoff['error'])
+    automatic_handoff = bool(handoff.get('automatic') and handoff.get('prompt'))
+    if core_saved and not saving and core_receipt.get('generation_receipt'):
+        if handoff.get('error'):
+            st.progress(.85,text='Mockups saved to Dropbox · ChatGPT handoff needs attention')
+            st.warning(handoff['error'])
+        elif automatic_handoff:
+            render(key='product-upload-copy-actions-'+key,original=url,prompt=prompt,mode='handoff',handoff=handoff)
+    st.success('Mockups ready')
+    st.subheader('Generated Previews')
+    with st.container(key='product-upload-preview-row'):
+        render(key='product-upload-previews-'+key,mode='gallery',items=core_preview_items(app,result,source))
     with st.container(key='product-upload-lifestyle-actions'):
         st.html('''<style>
         .st-key-product-upload-lifestyle-actions {gap:10px!important;}
@@ -290,7 +300,8 @@ def render_outputs(app,result,row,user,name):
         <h3>Product Page Lifestyle Mockups</h3>
         <p>Paste the black frame and master prompt into ChatGPT. Create each mockup separately, then upload it to the matching card.</p>
         </div>''')
-        render(key='product-upload-copy-actions-'+key,original=url,prompt=prompt,mode='actions',handoff=handoff)
+        if not automatic_handoff:
+            render(key='product-upload-copy-actions-'+key,original=url,prompt=prompt,mode='actions',handoff=handoff)
     with st.container(key='mockups-lifestyle-grid'):
         for filename,label in zip(FILENAMES,LABELS):
             prompt_path=next((Path(p) for p in result['prompt_paths'] if Path(p).name==filename),None)

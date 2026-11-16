@@ -24,7 +24,7 @@ function harness(crypto,textItem=true,options={}){
   open(){return options.blockPopups ? null : {location:{replace:project=>popups.push(project)}};}};
  if(crypto){ctx.crypto=crypto;ctx.TextEncoder=TextEncoder;}
  vm.runInNewContext(fs.readFileSync('components/product_upload_gallery/app.js','utf8'),ctx);
- const render=(prompt,handoff)=>events.message({source:parent,data:{type:'streamlit:render',args:{mode:'actions',prompt,original:'/original.png',handoff}}});
+ const render=(prompt,handoff,mode='actions')=>events.message({source:parent,data:{type:'streamlit:render',args:{mode,prompt,original:'/original.png',handoff}}});
  const tick=ms=>{now+=ms;for(const [id,t] of timers)if(t.at<=now){timers.delete(id);t.fn();}};
  return {elements,events,timers,writes,requests,popups,render,tick,fail:v=>failure=v,pending:v=>pending=v};
 }
@@ -67,11 +67,12 @@ function harness(crypto,textItem=true,options={}){
  const flush=()=>new Promise(resolve=>setImmediate(resolve));
  edge.render('manual copy', {pending:true});await flush();assert.equal(edge.requests.length,0);
  edge.pending(new Promise(()=>{}));
- edge.render('manual copy',workflow);await flush();
+ edge.render('manual copy',workflow,'handoff');await flush();
  assert.equal(edge.requests.length,1);assert.equal(edge.requests[0].prompt,full);
  assert.match(edge.elements.get('status').textContent,/sent to the Edge companion/);
+ assert.equal(edge.elements.get('root').children[0].value,100);
  assert.equal(edge.writes[0],full);assert.deepEqual(edge.popups,[]);
- edge.render('manual copy after rerender',workflow);await flush();assert.equal(edge.requests.length,1);
+ edge.render('manual copy after rerender',workflow,'handoff');await flush();assert.equal(edge.requests.length,1);
  const background=harness(require('node:crypto').webcrypto,true,{companion:{accepted:true},focused:false});
  background.render('manual copy',workflow);await flush();assert.equal(background.requests.length,1);assert.equal(background.writes.length,0);
  const rejected=harness(require('node:crypto').webcrypto,true,{companion:{accepted:false},blockPopups:true});

@@ -84,7 +84,7 @@
     }
     void refresh();
   }
-  function uploadAction(row,status,handoff){
+  function uploadAction(row,status,handoff,progress=null){
     if(!handoff)return;
     const upload=button('Upload','uploadToChat');
     upload.title=handoff.error || (handoff.prompt ? 'Copy the upload workflow and open ChatGPT' : 'Available once the five WebPs are saved in Dropbox');
@@ -95,6 +95,11 @@
     const signal=controller.signal;
     const autoKey=handoff.automatic && /^[a-f0-9]{64}$/.test(handoff.companion_id||'')
       ? 'sc-product-upload-saved:'+handoff.companion_id : '';
+    function stage(value,label){
+      if(progress)progress.value=value;
+      status.textContent=label;
+      resize();
+    }
     function markDispatched(){
       if(autoKey){try{sessionStorage.setItem(autoKey,'dispatched');}catch{}}
     }
@@ -115,18 +120,25 @@
       }catch{return false;}
     }
     async function start(automatic){
-      if(upload.disabled || signal.aborted || !upload.isConnected)return;
+      if(upload.disabled || signal.aborted || !root.isConnected)return;
       upload.disabled=true;
-      status.textContent='Opening the ChatGPT project…';
-      resize();
+      stage(90,'Mockups saved to Dropbox · Copying the prompt and opening ChatGPT…');
       try{
         const copying=copyUploadPrompt(automatic);
         if(handoff.companion_id){
-          const result=await companionRequest('start',{receipt:handoff.companion_id,prompt:handoff.prompt},2200);
+          const payload={receipt:handoff.companion_id,prompt:handoff.prompt};
+          let result=await companionRequest('start',payload,2200);
+          if(automatic && !signal.aborted && !result)result=await companionRequest('start',payload,2200);
           if(result?.accepted && !result.busy)markDispatched();
           active(version);
           if(result?.accepted){
-            status.textContent=result.busy ? 'An upload is already opening. Click Upload again when it finishes.' : 'Upload sent to the Edge companion.';
+            if(result.busy)stage(95,'Edge Companion is busy. Use Upload when it finishes.');
+            else{
+              stage(100,'Upload sent to the Edge companion. Opening SC Mockups/Uploads.');
+              void copying.then(copied=>{
+                if(copied && !signal.aborted)stage(100,'Full upload prompt copied. Edge Companion is opening SC Mockups/Uploads.');
+              });
+            }
             return;
           }
         }
@@ -138,9 +150,15 @@
         }
         const copied=await copying;
         active(version);
-        status.textContent=copied ? 'Upload prompt copied. ' : 'Click Upload to copy the prompt. ';
+        stage(popup ? 100 : 95,copied ? 'Upload prompt copied. ' : 'Use Upload to copy the prompt. ');
         if(popup && copied)status.textContent+='Paste it into the new project chat.';
-        if(!popup)status.append(projectLink());
+        if(!popup){
+          if(automatic)status.textContent+=handoff.prompt.length>131072
+            ? 'Automatic opening requires Upload Companion 1.0.2 or later. Reload it in Personal Edge. '
+            : 'Edge did not open the project automatically. Check Developer → Upload Companion. ';
+          status.append(projectLink());
+          resize();
+        }
       }catch{
         if(signal.aborted)return;
         status.textContent=automatic ? 'Click Upload to copy the prompt and open ChatGPT.' :
@@ -153,7 +171,12 @@
     if(!autoKey)return;
     queueMicrotask(()=>{
       if(signal.aborted || upload.disabled || automaticAttempts.has(autoKey))return;
-      try{if(sessionStorage.getItem(autoKey))return;}catch{}
+      try{
+        if(sessionStorage.getItem(autoKey)){
+          if(progress)stage(100,'Mockups saved to Dropbox · ChatGPT handoff already started.');
+          return;
+        }
+      }catch{}
       automaticAttempts.add(autoKey);
       void start(true);
     });
@@ -161,6 +184,12 @@
   function actions(args){
     // Stable frame identity for the recorder across Streamlit reruns.
     if(window.frameElement)window.frameElement.id='sc-product-upload-copy';
+    const progress=args.mode==='handoff' ? document.createElement('progress') : null;
+    if(progress){
+      progress.className='handoff-progress';progress.max=100;progress.value=85;
+      progress.setAttribute('aria-label','Product upload progress');
+      root.append(progress);
+    }
     const row=document.createElement('div');row.className='actions';
     const copyImage=button('Copy black frame','copyImage'),copyPrompt=button('Copy prompt','copyPrompt');
     copyPrompt.setAttribute('aria-label','Copy Black Frame Prompt');
@@ -180,7 +209,7 @@
       }).catch(()=>{}); // Manual Copy remains available; recorder refuses missing proof.
     }
     const status=document.createElement('div');status.id='status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(status);
-    uploadAction(row,status,args.handoff);
+    uploadAction(row,status,args.handoff,progress);
     copyPrompt.onclick=async()=>{
       if(copyPrompt.disabled)return;
       const version=epoch;copyPrompt.dataset.scCopyStatus='copying';promptFeedback.begin();status.textContent='';resize();
@@ -206,7 +235,7 @@
     if(theme.font)document.body.style.setProperty('--font',theme.font);
     const next=JSON.stringify(args);if(signature===next){resize();return;}
     signature=next;epoch++;controller.abort();clearAllFeedback();controller=new AbortController();root.replaceChildren();
-    if(args.mode==='actions')actions(args);
+    if(args.mode==='actions' || args.mode==='handoff')actions(args);
     else if(args.mode==='companion-health')companionHealth();
     else{const container=document.createElement('div');container.className=args.mode==='gallery'?'gallery':'single-preview';container.setAttribute('aria-label',args.mode==='gallery'?'Generated mockup previews':'Lifestyle mockup preview');
       for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);

@@ -216,11 +216,15 @@ def test_automatic_save_uses_second_half_and_waits_for_confirmed_receipt(monkeyp
     ui.save_progress.__wrapped__(app, key, 'actor', core=True)
     job['completed'] = 5
     ui.save_progress.__wrapped__(app, key, 'actor', core=True)
-    assert observed == [.5, .99]
+    assert observed == [.5, .85]
     job['state'] = 'Ready'
     state['product-upload-save-applied-' + key] = token
     ui.save_progress.__wrapped__(app, key, 'actor', core=True)
     assert observed[-1] == 1.
+    receipt['generation_receipt'] = 'a' * 32
+    observed.clear()
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    assert observed == []  # The browser now owns the last handoff stages.
 
 
 def test_retain_uploaded_original_without_export_resize(tmp_path):
