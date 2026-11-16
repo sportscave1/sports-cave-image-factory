@@ -468,6 +468,10 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Never generate, redraw, or reconstruct" in result[signature:first_generation]
     assert "at 100% magnification to this first generation" in result[first_review:first_save]
     assert "Restore visible discrepancies with original photograph pixels and a precise mask" in result[second_generation:final_save]
+    assert "smallest coherent source region" in result[second_generation:final_save]
+    assert "Use contact shadows only at actual points of contact." in result[second_pass:second_generation]
+    assert "subject visibly separated from the ground" in result[second_generation:final_save]
+    assert "Complete the digital integration review before selecting the final artwork." in result[second_generation:final_save]
     assert "REVIEW DRAFT, keep the trial" not in result
     assert "continue directly to the final PSD" in result[second_generation:final_save]
     assert "After completing your own inspection and corrections, save the final PSD" in result[final_save:cleanup]

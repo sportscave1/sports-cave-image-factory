@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlencode
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
-from design_subject_authenticity import AUTHENTICITY_CHECK
+from design_subject_authenticity import AUTHENTICITY_CHECK, CREATE_DESIGN_AUTHENTICITY_CHECK
 from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, product_handle
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
 
@@ -127,14 +127,17 @@ def _prompt(title, story, *, edit=None):
             "Carry forward the collector background treatment from Step 5. Refine it only where the "
             "artwork benefits. Use the same guidance if the first pass was unavailable.\n\n"
         )
-        background_effects = "and keep supporting effects within the collector background guidance above. "
+        background_effects = (
+            "Use contact shadows only at actual points of contact. Keep supporting effects within "
+            "the collector background guidance above. "
+        )
     else:
         background_guide = second_background = ""
         first_background = (
             "Build a cohesive vintage background with subtle textures and details from the sport "
             "or venue and restrained team colours. "
         )
-        background_effects = "and keep glow, sparks, smoke and haze restrained. "
+        background_effects = "Use natural contact shadows and keep glow, sparks, smoke and haze restrained. "
     workflow = (
         f"Sports Cave event: {title}\n\n"
         "**EXECUTION AUTHORITY — START NOW**\n"
@@ -471,7 +474,7 @@ def _prompt(title, story, *, edit=None):
         "Use deep black, charcoal and warm white as the foundation, with restrained gold for "
         "titles, fine borders and small dividers. Preserve meaningful colours in uniforms, flags, "
         "vehicle liveries and equipment. Match the background to the subject's lighting and "
-        "perspective. Use natural contact shadows "
+        "perspective. "
         f"{background_effects}"
         "Choose backgrounds that convey setting, era or emotion. Keep working gold lines, colour accents "
         "and other effects when they serve this composition. Add them only when they improve the artwork.\n"
@@ -527,7 +530,7 @@ def _prompt(title, story, *, edit=None):
         "weaker result. If the first artwork still wins, use it. Record unresolved defects in REVIEW "
         "NOTES and continue to the final PSD without claiming unverified print readiness.\n"
         "\n"
-        f"{AUTHENTICITY_CHECK}"
+        f"{CREATE_DESIGN_AUTHENTICITY_CHECK if edit is None else AUTHENTICITY_CHECK}"
         "If the strongest candidate still has visible subject defects or a disconnect between "
         "the subject and title, make one focused correction within the existing allowance. "
         "Use the strongest inspected result and continue directly to the final PSD.\n\n"

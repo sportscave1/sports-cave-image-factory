@@ -9,7 +9,7 @@ from auto_editions import file_hash
 from design_collector_assets import COLLECTOR_ASSET_HEADING, COLLECTOR_ASSET_PLACEMENT
 from design_review_metadata import is_working_file
 from design_review_replace import apply, keep_original
-from design_subject_authenticity import AUTHENTICITY_CHECK, AUTHENTICITY_HEADING
+from design_subject_authenticity import AUTHENTICITY_CHECK, AUTHENTICITY_HEADING, CREATE_DESIGN_AUTHENTICITY_CHECK
 from home_morning_brief_actions import _prompt
 from product_upload_dropbox import REVIEW
 from psd_directory import REVIEW_METADATA_FOLDER
@@ -75,8 +75,11 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
         assert COLLECTOR_ASSET_PLACEMENT in prompt
         assert 'reserve quiet space along the bottom' not in prompt
         assert 'reserved bottom space' not in prompt
-        assert AUTHENTICITY_CHECK in prompt and prompt.count(AUTHENTICITY_HEADING) == 1
+        assert prompt.count(AUTHENTICITY_HEADING) == 1
         assert 'MANDATORY SUBJECT AUTHENTICITY CHECK' not in prompt
+    assert CREATE_DESIGN_AUTHENTICITY_CHECK in standard
+    assert AUTHENTICITY_CHECK in edit
+    assert 'TARGETED AUTHENTICITY RESTORATION' not in edit
 
 
 def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():

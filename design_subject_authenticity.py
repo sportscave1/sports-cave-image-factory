@@ -1,7 +1,7 @@
 """Source-photo verification and restoration for full artwork passes."""
 
 AUTHENTICITY_HEADING = "**MANDATORY PHOTOGRAPHIC AUTHENTICITY AND INTEGRATION CHECK**"
-AUTHENTICITY_CHECK = (
+_SOURCE_COMPARISON = (
     f"{AUTHENTICITY_HEADING}\n\n"
     "Apply this check after each full-artwork generation, after any subject restoration, and "
     "on the assembled PSD. Use the verified original photograph as the authority. Work within "
@@ -14,6 +14,9 @@ AUTHENTICITY_CHECK = (
     "excessive smoothing and artificial sharpening on the face, neck, arms and hands. Judge "
     "realism by fidelity to the source. Compare visible sponsors, logos, lettering and equipment "
     "directly with the source for AI warping, redrawing or lost details.\n\n"
+)
+
+_SOURCE_RESTORATION = (
     "Restore visible discrepancies with original photograph pixels and a precise mask. Preserve "
     "the source proportions and perspective. Match exposure, colour, sharpness and edges to "
     "integrate the restored area naturally. Where needed use a connected region such as the face, "
@@ -23,16 +26,25 @@ AUTHENTICITY_CHECK = (
     "halos, seams, ghosting, mismatched softness and cutout edges. If the generated body has "
     "artificial detail, reduce it around the restoration. Keep the source face free of repainting "
     "and artificial sharpening.\n\n"
+)
+
+_RESTORATION_RECOVERY = (
     "If faithful restoration is difficult, use the remaining correction allowance to improve "
     "the source mask, find a clearer verified original, or compose around authenticated visible "
     "details. Preserve the strongest composition and authentic expression. Avoid repeated "
     "facial regeneration and approximate likenesses.\n\n"
+)
+
+_FALLBACK_FINISH = (
     "**FALLBACK COLLECTOR FINISH**\n\n"
     "After source-based correction, apply a subtle unifying tonal treatment if a texture "
     "mismatch remains. Keep grunge, distressing and abstract texture on the background and "
     "decorative elements. On the subject, use only restrained colour, contrast and sharpness "
     "matching that preserves natural skin and facial detail. Keep scratches, heavy grain and "
     "dark overlays off the subject and inspect the result again.\n\n"
+)
+
+_UNRESOLVED_REVIEW = (
     "If authenticity still cannot be verified within the existing limits, retain the strongest "
     "faithful version and record the specific discrepancy in REVIEW NOTES. Continue the existing "
     "saves, verification and delivery steps for the available work. Mark the unresolved candidate "
@@ -40,4 +52,46 @@ AUTHENTICITY_CHECK = (
     "to replace. Report what the photo comparison verified and what remains uncertain. Never "
     "claim an AI detector passed, the subject is unchanged or the artwork is print-ready without "
     "supporting verification.\n\n"
+)
+
+AUTHENTICITY_CHECK = (
+    _SOURCE_COMPARISON + _SOURCE_RESTORATION + _RESTORATION_RECOVERY + _FALLBACK_FINISH + _UNRESOLVED_REVIEW
+)
+
+CREATE_DESIGN_AUTHENTICITY_CHECK = (
+    f"{_SOURCE_COMPARISON}"
+    "**TARGETED AUTHENTICITY RESTORATION — PRESERVE PREMIUM SCENE INTEGRATION**\n\n"
+    "Keep the strongest complete generated artwork as the visual foundation. Restore visible "
+    "discrepancies with original photograph pixels and a precise mask. Use the smallest "
+    "coherent source region that resolves the defect. Expand to the head, helmet or neck only "
+    "when needed for seamless integration. Keep successful pose, uniform detail, composition "
+    "and body integration unless a visible error warrants a change. Avoid a full-athlete "
+    "source cutout as the default fix and keep rectangular photo overlays out of the artwork.\n\n"
+    "Match exposure, colour, contrast, shadow, texture and sharpness with restrained photographic "
+    "grading. Preserve facial features, natural skin, genuine marks and the source perspective. "
+    "Match texture through photographic detail and consistent tones. Keep decorative grunge, "
+    "scratches and abstract patterns off skin. Reduce artificial detail around a restored face "
+    "instead of repainting or sharpening it to match.\n\n"
+    "Build depth through consistent light direction, softness and colour. Preserve natural form "
+    "shadows on the body and clothing and use environmental or cast shadows where supported by "
+    "the scene. Add contact shadows only at actual points of contact. In airborne action, keep "
+    "the subject visibly separated from the ground and place any ground shadow consistently with "
+    "the athlete’s height and scene lighting. Avoid generic drop shadows, dark outlines, "
+    "artificial rim glows and exaggerated reflections. Keep the athlete dominant through "
+    "controlled foreground, subject and background contrast, compatible focus and natural edge "
+    "transitions. Preserve working depth and lighting, changing them only where the artwork benefits.\n\n"
+    "After every restoration, inspect the full subject outline and corrected regions at 100% and "
+    "normal viewing size. Correct remnants of the source background, coloured fringes, halos, "
+    "jagged edges, doubled contours, abrupt texture changes and lighting mismatches. Match edge "
+    "sharpness to the source photograph and scene. Address defects directly. Avoid using "
+    "darkness, blur, smoke or heavy grain to conceal them. Keep a correction only when "
+    "it improves the intended defect without weakening authenticity, integration or composition. "
+    "If a more faithful face introduces a worse cutout or disconnected body, revert it and use "
+    "a smaller repair or another targeted correction within the existing allowance.\n\n"
+    f"{_RESTORATION_RECOVERY}{_FALLBACK_FINISH}"
+    "Complete the digital integration review before selecting the final artwork. Address visible "
+    "cutout defects within the existing correction allowance. If an integration defect remains "
+    "at the retry limit, follow the needs_attention and continuation guidance below. Physical "
+    "print proofing is separate from digital artwork inspection.\n\n"
+    f"{_UNRESOLVED_REVIEW}"
 )
