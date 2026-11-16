@@ -6,9 +6,15 @@ from pathlib import PurePosixPath
 
 from product_upload_dropbox import REVIEW, within
 from psd_directory import REVIEW_METADATA_FOLDER
-from sports_categories import detect_sport_in_text, infer_sport_category, sport_collection_handles
+from sports_categories import (
+    detect_sport_in_text, infer_sport_category, normalize_sport_category, sport_collection_handles,
+)
 
 MAX_HANDOFF_BYTES = 32 * 1024
+
+
+class _StaleRevision(ValueError):
+    pass
 
 
 def handoff_paths(psd_path):
@@ -28,16 +34,29 @@ def _strings(value):
     return [item.strip()[:200] for item in value[:40] if isinstance(item, str) and item.strip()] if isinstance(value, list) else []
 
 
-def parse_handoff(raw, source):
+def _json_object(raw):
     try:
         value = json.loads(raw)
         if not isinstance(value, dict):
             raise ValueError()
     except (ValueError, UnicodeError) as error:
         raise ValueError('The artwork metadata is not valid JSON.') from error
+    return value
+
+
+def parse_handoff(raw, source):
+    return _handoff_details(_json_object(raw), source)
+
+
+def _handoff_details(value, source):
+    mismatch = 'The artwork metadata describes a different Dropbox PSD revision.'
     if any(value.get(field) != source.get(key) for field, key in
-           (('dropbox_file_id', 'id'), ('dropbox_revision', 'rev'), ('dropbox_path', 'path_display'))):
-        raise ValueError('The artwork metadata describes a different Dropbox PSD revision.')
+           (('dropbox_file_id', 'id'), ('dropbox_path', 'path_display'))):
+        raise ValueError(mismatch)
+    if value.get('dropbox_revision') != source.get('rev'):
+        if all(source.get(key) for key in ('id', 'rev', 'path_display')) and _text(value.get('dropbox_revision')):
+            raise _StaleRevision(mismatch)
+        raise ValueError(mismatch)
     intent = value.get('upload_intent')
     target = _text(value.get('existing_shopify_product_id'))
     if intent == 'existing_product_refresh':
@@ -61,13 +80,14 @@ def parse_handoff(raw, source):
                                                teams=_strings(value.get('teams'))),
                 intended_collections=collections, upload_intent=intent,
                 shopify_product_id=target, review_status='ready_for_review' if ready else 'needs_attention',
-                review_notes=_text(value.get('review_notes'), 1000),
+                review_notes=_text(value.get('review_notes'), 1000) or
+                             ' '.join(_strings(value.get('review_notes')))[:1000],
                 source_photographs=_strings(value.get('source_photographs')),
                 signature_assets=_strings(value.get('signature_assets')),
                 **({'sport_selection_pending': True} if checks_passed and not sport else {}))
 
 
-def _read_sidecar(provider, source, metadata):
+def _read_sidecar(provider, metadata):
     if (metadata.get('.tag') != 'file' or not metadata.get('id') or
             type(metadata.get('size')) is not int or not 0 < metadata['size'] <= MAX_HANDOFF_BYTES):
         raise ValueError('The artwork metadata file exceeds the supported size or is unavailable.')
@@ -82,34 +102,53 @@ def _read_sidecar(provider, source, metadata):
                 raise ValueError('The artwork metadata file exceeds the supported size.')
         if len(raw) != metadata['size']:
             raise ValueError('The artwork metadata download was incomplete.')
-        parse_handoff(raw, source)
-        return json.loads(raw), actual
+        return _json_object(raw), actual
     finally:
         response.close()
 
 
-def read_handoff_record(provider, source, *, candidates=None):
+def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
     paths = handoff_paths(source.get('path_display') or '')
     if not paths:
         return None
     if candidates is None:
         candidates = (provider.metadata_if_present(path) for path in paths)
-    first_error = None
+    first_error, stale_sport = None, ''
     for metadata in candidates:
         if metadata:
             try:
-                return _read_sidecar(provider, source, metadata)
+                value, actual = _read_sidecar(provider, metadata)
+                return value, actual, _handoff_details(value, source)
             except ValueError as error:
                 if first_error is None:
                     first_error = error
+                if allow_stale_sport and not stale_sport and isinstance(error, _StaleRevision):
+                    label = _text(value.get('sport'), 100)
+                    # Match Product Uploads' separate Soccer destination.
+                    stale_sport = 'Soccer' if label.casefold() == 'soccer' else normalize_sport_category(label)
+    if stale_sport:
+        details = dict(
+            design_name=PurePosixPath(source['path_display']).stem,
+            sport=stale_sport, verified_collection_facts={'sport': stale_sport},
+            intended_collections=list(sport_collection_handles(stale_sport)),
+            review_status='needs_attention',
+            review_notes='The JSON describes an earlier PSD revision. Verify the current PSD and update '
+                         'its review JSON before Shopify handoff.',
+        )
+        return None, None, details
     if first_error is not None:
         raise first_error
     return None
 
 
-def read_handoff(provider, source, *, candidates=None):
-    record = read_handoff_record(provider, source, candidates=candidates)
-    return parse_handoff(json.dumps(record[0]), source) if record else None
+def read_handoff_record(provider, source, *, candidates=None):
+    record = _find_handoff(provider, source, candidates)
+    return record[:2] if record else None
+
+
+def read_handoff(provider, source, *, candidates=None, allow_stale_sport=False):
+    record = _find_handoff(provider, source, candidates, allow_stale_sport=allow_stale_sport)
+    return record[2] if record else None
 
 
 def review_key(source):

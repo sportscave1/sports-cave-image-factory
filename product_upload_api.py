@@ -173,7 +173,7 @@ async def action(request):
                 if is_working_file(source['name']):
                     raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
                 provider = await run_in_threadpool(Dropbox)
-                metadata = await run_in_threadpool(read_handoff, provider, source)
+                metadata = await run_in_threadpool(read_handoff, provider, source, allow_stale_sport=True)
                 if metadata is None:
                     metadata = legacy_metadata(source)
             row = await run_in_threadpool(store.change_mode, key, uid, selected, metadata=metadata)

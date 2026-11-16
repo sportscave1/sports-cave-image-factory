@@ -13,7 +13,7 @@ from design_review_metadata import (
     handoff_paths, is_working_file, legacy_metadata, read_handoff, resolve_review_sport, review_key,
 )
 from product_upload_dropbox import REVIEW, approved, select, within
-from product_upload_intake import Intakes, action_mode
+from product_upload_intake import Intakes, action_mode, stored_mode
 from psd_directory import REVIEW_METADATA_FOLDER
 
 _HANDOFF_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='review-handoff')
@@ -64,7 +64,7 @@ def status(row, job, details):
 
 def _review(app, provider, user, entry, command, *, selected_sport=None):
     from product_upload_api import connect, Dropbox
-    from product_upload_jobs import JOBS, generate
+    from product_upload_jobs import JOBS, generate, prepare
     from product_upload_export import folder_sport, sport_categories
     actor = user['id']
     key = review_key(entry)
@@ -78,17 +78,17 @@ def _review(app, provider, user, entry, command, *, selected_sport=None):
     if existing and existing['data'].get('product_gid'):
         return key
     job = JOBS.snapshot(key, actor, 'generate')
+    preparing = False
     if command != 'approved' and job and job['state'] in ('Queued', 'Running'):
         raise ValueError('The approved job is already generating mockups.')
     if command == 'approved':
-        original_details = read_handoff(provider, current) or legacy_metadata(current)
+        original_details = read_handoff(provider, current, allow_stale_sport=True) or legacy_metadata(current)
         saved_data = (existing or {}).get('data') or {}
         details = resolve_review_sport(original_details, saved_data.get('review_sport') or selected_sport)
-        if details['review_status'] == 'needs_attention':
-            raise ValueError(details.get('review_notes') or 'This saved revision has unresolved verification or metadata checks.')
+        preparing = details['review_status'] == 'needs_attention'
         if not details.get('sport'):
             raise ValueError('The sport could not be resolved from this PSD or its metadata.')
-        if details.get('shopify_product_id'):
+        if not preparing and details.get('shopify_product_id'):
             from shopify_sync import fetch_product_by_shopify_id
             target = fetch_product_by_shopify_id(details['shopify_product_id'])
             if target.get('shopify_product_id') != details['shopify_product_id'] or target.get('status') not in ('ACTIVE', 'DRAFT'):
@@ -114,14 +114,22 @@ def _review(app, provider, user, entry, command, *, selected_sport=None):
             return key
         if command == 'approved':
             data = row['data']
-            if details != original_details and data.get('metadata') == original_details:
+            prior_decision = (data.get('design_review') or {}).get('decision')
+            if prior_decision == 'preparing' and not data.get('copied'):
+                data['metadata'] = details
+                row['mode'] = stored_mode('SMART', details)
+            elif details != original_details and data.get('metadata') == original_details:
                 data['metadata'] = details
             if data.get('metadata') != details:
                 raise ValueError('The upload metadata changed. Review the exact PSD again.')
             if details != original_details:
                 data['review_sport'] = details['sport']
-        row['data']['design_review'] = dict(decision=command, at=datetime.now(timezone.utc).isoformat())
-    if command == 'approved' and not row['data'].get('mockups_exported') and (job or {}).get('state') != 'Ready':
+        decision = 'preparing' if preparing else command
+        row['data']['design_review'] = dict(decision=decision, at=datetime.now(timezone.utc).isoformat())
+    if preparing:
+        if (row['data'].get('server_artwork') or {}).get('state') != 'Ready':
+            prepare(connect, key, actor, Dropbox)
+    elif command == 'approved' and not row['data'].get('mockups_exported') and (job or {}).get('state') != 'Ready':
         def finalize(result):
             return app.rebuild_result_artifacts(app.ensure_lifestyle_prompts(result))
         generate(connect, row, actor, details['design_name'], choices[0]['sport'], Dropbox,
@@ -177,7 +185,8 @@ def _staged_replacement(user, source, key):
 def _handoff(actor_id, file_id, revision, path, sidecars):
     from product_upload_api import Dropbox
     candidates = (dict(id=id_, rev=rev, size=size, **{'.tag': 'file'}) for id_, rev, size in sidecars)
-    return read_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path), candidates=candidates)
+    return read_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path),
+                        candidates=candidates, allow_stale_sport=True)
 
 
 def _details(actor, source, sidecars):

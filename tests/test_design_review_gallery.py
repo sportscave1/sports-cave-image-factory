@@ -146,3 +146,108 @@ def test_missing_sport_is_saved_for_the_exact_revision_and_passed_to_mockups(env
     assert result['metadata']['intended_collections'] == ['nfl-wall-art']
     assert result['source']['rev'] == record['rev']
     assert generate.call_args.args[4] == 'NFL'
+
+
+def test_publish_click_prepares_exact_psd_and_preselects_sport_from_older_json(env, tmp_path, monkeypatch):
+    from io import BytesIO
+    from pathlib import Path
+
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+    import product_upload_artwork as artwork
+    import product_upload_jobs as jobs
+    from auto_editions import file_hash
+    from product_upload_dropbox import within
+    from tests.test_product_upload_dropbox import provider_fixture
+    from tests.test_product_upload_intake import ADMIN
+    from tests.test_product_upload_server_artwork import real_psd
+
+    # Importing app in another test can leave its bare-mode login form on Streamlit's root.
+    monkeypatch.setattr(st._main, '_form_data', None)
+    store, _, provider = env
+    record = provider_fixture(provider)(name='Gallery fixture.psd', rev='abc123')
+    psd = real_psd(tmp_path / 'fixture.psd')
+    record.update(content_hash=file_hash(psd, dropbox=True), size=psd.stat().st_size)
+    provider.files[record['id']] = provider.files[record['path_display']] = record
+    provider.download = Mock(side_effect=lambda _, destination: Path(destination).write_bytes(psd.read_bytes()))
+    monkeypatch.setenv('SPORTS_CAVE_TEMP_DIR', str(tmp_path / 'server'))
+
+    folder = {'.tag': 'folder', 'name': 'JSON', 'path_display': REVIEW_METADATA_FOLDER}
+    path = REVIEW_METADATA_FOLDER + '/Gallery fixture.upload.json'
+    value = dict(dropbox_file_id=record['id'], dropbox_path=record['path_display'], dropbox_revision='abc122',
+                 sport='Cricket', design_title='Gallery fixture', intended_collections=['cricket'],
+                 upload_intent='existing_product_refresh', existing_shopify_product_id='123',
+                 review_status='ready_for_review')
+
+    def install_json():
+        raw = json.dumps(value).encode()
+        sidecar = {'.tag': 'file', 'id': 'id:json', 'rev': value['dropbox_revision'], 'size': len(raw),
+                   'name': 'Gallery fixture.upload.json', 'path_display': path}
+        provider.files[path] = sidecar
+        provider.api.get_file_response.return_value = (
+            sidecar, Mock(iter_content=lambda **_: BytesIO(raw)))
+
+    install_json()
+    provider.api.list_folder_page.side_effect = lambda _, path, **kw: dict(
+        entries=[provider.files[REVIEW_METADATA_FOLDER + '/Gallery fixture.upload.json']]
+        if path == REVIEW_METADATA_FOLDER else [record, folder], has_more=False)
+    monkeypatch.setattr(api, 'Dropbox', lambda: provider)
+    monkeypatch.setattr(api, 'connect', store.connect)
+    monkeypatch.setattr(jobs.JOBS, 'snapshot', lambda *args: None)
+    # Keep the background job synchronous in the test, with real PSD decoding and persistence.
+    prepare = Mock(side_effect=lambda connect, key, actor, factory: artwork.prepare(connect, factory(), key, actor))
+    monkeypatch.setattr(jobs, 'prepare', prepare)
+    generate = Mock()
+    monkeypatch.setattr(jobs, 'generate', generate)
+    root = '/Fixture'
+    category = {'.tag': 'folder', 'id': 'id:cricket', 'name': 'Cricket Wall Art',
+                'path_display': root + '/04_OUTPUT/product-images/Cricket Wall Art'}
+    folder_api = SimpleNamespace(normalize_dropbox_path=lambda path: path, path_is_within_root=within,
+                                 list_folder_page=lambda *a, **kw: dict(entries=[category]),
+                                 get_metadata_if_exists=lambda _, id_: category if id_ == category['id'] else None)
+    component = Mock(side_effect=lambda **kwargs: dict(id=kwargs['id'], mode=kwargs['mode'], nonce='fixture'))
+    app = SimpleNamespace(
+        BASE_DIR=Path(gallery.__file__).parent, current_os_user=lambda: ADMIN,
+        set_current_page=lambda page, **_: st.session_state.update(fixture_page=page),
+        get_components_module=lambda: SimpleNamespace(declare_component=lambda *a, **kw: component),
+        os_accounts=SimpleNamespace(can_access_page=lambda *a: True),
+        _files_access_token=lambda: 'fixture', _files_team_root=lambda _: root, dropbox_integration=folder_api,
+        _mockups_result=lambda: None, MOCKUPS_GENERATION_SEMAPHORE=object(), build_mockup_final_prompt_items=Mock(),
+    )
+    monkeypatch.setattr(gallery, '_test_fixture', (app, ADMIN), raising=False)
+    ui = AppTest.from_string("""
+import streamlit as st
+import design_review_page as gallery
+from product_upload_mockups_ui import render_page
+
+app, user = gallery._test_fixture
+if st.session_state.get('fixture_page') == 'Product Uploads':
+    render_page(app)
+else:
+    gallery._gallery(app, user)
+""", default_timeout=25).run()
+    assert not ui.exception
+    next(button for button in ui.button if button.label == 'Publish now').click().run()
+    assert not ui.exception and not ui.error, [error.value for error in (*ui.exception, *ui.error)]
+    assert ui.session_state['fixture_page'] == 'Product Uploads'
+    assert next(box for box in ui.selectbox if box.label == 'Sport category').value == category['id']
+    key = gallery.review_key(record)
+    assert ui.session_state['_product_upload_active'] == key
+    assert component.call_args.kwargs['id'] == key
+    saved = store.read(key, ADMIN['id'])
+    assert saved['data']['source'] == record
+    assert saved['data']['server_artwork']['state'] == 'Ready'
+    assert saved['data']['metadata']['sport'] == 'Cricket'
+    assert saved['data']['design_review']['decision'] == 'preparing'
+    assert saved['mode'] == 'LIVE' and 'shopify_product_id' not in saved['data']['metadata']
+    assert any('earlier PSD revision' in warning.value for warning in ui.warning)
+    prepare.assert_called_once()
+    generate.assert_not_called()
+    with pytest.raises(ValueError, match='pending artwork checks'):
+        store.copied(key, ADMIN['id'], 'SMART')
+
+    value.update(dropbox_revision=record['rev'], upload_intent='new_product', existing_shopify_product_id=None)
+    install_json()
+    assert gallery._review(app, provider, ADMIN, record, 'approved') == key
+    assert store.read(key, ADMIN['id'])['data']['design_review']['decision'] == 'approved'
+    assert generate.call_args.args[4] == 'Cricket'

@@ -103,9 +103,17 @@ def test_handoff_prefers_matching_json_and_falls_back_to_matching_legacy(canonic
         del files[REVIEW + '/Adelaide.upload.json']
         if canonical == 'missing':
             assert read_handoff(provider, SOURCE) is None
-        else:
+        elif canonical == 'different revision':
             with pytest.raises(ValueError, match='different Dropbox PSD revision'):
                 read_handoff(provider, SOURCE)
+            details = read_handoff(provider, SOURCE, allow_stale_sport=True)
+            assert details['sport'] == 'Cricket'
+            assert details['review_status'] == 'needs_attention'
+            assert details['design_name'] == 'Adelaide'
+            assert 'upload_intent' not in details and 'shopify_product_id' not in details
+        else:
+            with pytest.raises(ValueError, match='different Dropbox PSD revision'):
+                read_handoff(provider, SOURCE, allow_stale_sport=True)
 
 def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypatch):
     from contextlib import contextmanager
@@ -131,7 +139,7 @@ def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypat
 
     store = Mock(read_review=Mock(return_value=None), locked=locked)
     monkeypatch.setattr(gallery, 'Intakes', lambda _: store)
-    monkeypatch.setattr(gallery, 'read_handoff', lambda _, source: details)
+    monkeypatch.setattr(gallery, 'read_handoff', lambda _, source, **kwargs: details)
     create = Mock(return_value=row)
     monkeypatch.setattr(gallery, 'select', create)
     monkeypatch.setattr(jobs.JOBS, 'snapshot', lambda *args: None)

@@ -277,6 +277,8 @@ class Intakes:
         with self.locked(key, actor) as (row, cur):
             if action_mode(row) != selected or not row['data'].get('basic_validated'):
                 raise ValueError('Upload or action changed. Copy the current prompt again.')
+            if selected == 'SMART' and (row['data'].get('metadata') or {}).get('review_status') == 'needs_attention':
+                raise ValueError('Resolve the pending artwork checks or metadata before copying Smart Upload.')
             if row['data'].get('workflow_version') in (2,3) and not row['data'].get('mockups_exported'):
                 raise ValueError('Save or download the completed image package before the Shopify handoff.')
             if source_version is not None:

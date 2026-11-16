@@ -16,6 +16,25 @@ TEMPLATE = Path(__file__).parent / "components" / "morning_brief_actions.html"
 META_AD_HEADING = re.compile(r"^(?:recommended|suggested)\b.*\bmeta\b.*\bad\b", re.I)
 META_AD_COPY = re.compile(r"^(?:headline|primary text|description|cta|call to action)\s*:", re.I)
 
+_CREATE_DESIGN_BORDER_RULES = (
+    "**Border and print safety for both artwork passes and the final layout**\n\n"
+    "Target an even border inset of 2% of the canvas’s shorter dimension. Calculate it once "
+    "and use the same pixel distance on all four sides. Keep the margin modest so the subject "
+    "stays large and impactful. Extend the background fully to the canvas edges. Keep the "
+    "decorative border and all important subject details, text, signatures and the official "
+    "badge inside the framing-safe area. Use only expendable background in the outer margin.\n\n"
+    "Choose a border that suits the artwork. Restrained antique gold, fine double lines or "
+    "subtle heritage corners can work where they add to the design. A simple, elegant border "
+    "is equally suitable. Avoid heavy ornament and vary the treatment across designs. "
+    "Preserve the existing composition and subject scale wherever possible. Make only the "
+    "minimum adjustments needed for safe spacing.\n\n"
+    "Treat the inset as a framing safety margin. Determine print bleed separately. Follow "
+    "the printer’s actual bleed, trim and frame-overlap requirements when available. Those "
+    "requirements override the default inset. If they cannot be checked, use the default, "
+    "record print safety as unverified in REVIEW NOTES and continue the workflow. Claim "
+    "verified print safety only after checking the artwork against those requirements.\n\n"
+)
+
 
 def _story_without_meta_ad(text):
     lines = []
@@ -271,6 +290,7 @@ def _prompt(title, story, *, edit=None):
         "for the original badge and editable number to be restored from the master.\n\n"
         "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
         "a strong focal point and clear visual hierarchy.\n\n"
+        f"{_CREATE_DESIGN_BORDER_RULES if edit is None else ''}"
         "Step 4. For each featured person, search both web and image results. Check at least "
         "three distinct credible sources when accessible before skipping a signature. Use a clear, "
         "verified example and place it on a separate layer where it fits naturally with the artwork "

@@ -86,6 +86,8 @@ def render_page(app):
     # runs those effects and competed with PSD preparation in the last release.
     row=Intakes(connect).read(key,user['id'])
     if not row or not row['data'].get('mockups_exported'):return
+    if row['data'].get('smart_upload') and (row['data'].get('metadata') or {}).get('review_status') == 'needs_attention':
+        return
     from product_upload_jobs import JOBS
     if any((JOBS.snapshot(key,user['id'],operation) or {}).get('state') in ('Queued','Running')
            for operation in ('prepare','generate','save')):return
@@ -165,6 +167,11 @@ def render_design(app,row,user):
     if result and result.get('_product_upload_intake')!=key:
         app._set_mockups_result(None);result=None
     st.subheader('Prepare product images')
+    if row['data'].get('smart_upload'):
+        metadata = row['data'].get('metadata') or {}
+        if metadata.get('review_status') == 'needs_attention':
+            st.warning(metadata.get('review_notes') or
+                       'Resolve the pending artwork checks or metadata before copying Smart Upload.')
     from product_upload_sport import render_selector,selected,rebind_result
     active_jobs=[JOBS.snapshot(key,user['id'],operation) for operation in ('generate','save')]
     busy=any(job and job['state'] in ('Queued','Running') for job in active_jobs)

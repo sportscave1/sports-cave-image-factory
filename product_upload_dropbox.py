@@ -71,7 +71,7 @@ def select(connect, provider, key, actor, selected_mode, file_id, revision):
     metadata = {}
     if selected_mode == 'SMART':
         from design_review_metadata import is_working_file, legacy_metadata, read_handoff, review_key
-        metadata = read_handoff(provider, meta) or {}
+        metadata = read_handoff(provider, meta, allow_stale_sport=True) or {}
         if not metadata:
             metadata = legacy_metadata(meta)
         if is_working_file(meta['name']):
