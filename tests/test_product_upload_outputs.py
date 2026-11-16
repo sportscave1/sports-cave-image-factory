@@ -80,7 +80,7 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
     parent = api.base + '/Baseball'
     category = api.files[parent]['id']
     find = api.get_metadata_if_exists
-    monkeypatch.setattr(api, 'get_metadata_if_exists', lambda token, key: find(token, key) or
+    monkeypatch.setattr(api, 'get_metadata_if_exists', lambda token, key, **kwargs: find(token, key) or
                         next((dict(value) for value in api.files.values() if value.get('id') == key), None))
     monkeypatch.setattr('prompt_store.get_prompt', lambda _key, default, **kwargs: default)
     progress = []
@@ -260,6 +260,78 @@ def test_category_id_rename_retries_same_owned_product_folder(env,tmp_path):
     second=transfer(provider,result,manifest,api.root,new_parent,'Product',store.connect,ADMIN['id'],lambda *a:None,category_id='id:category')
     assert not second['failures'] and second['destination']==new_parent+'/Product'
     assert len([c for c in api.calls if c[0]=='folder'])==1
+
+
+@pytest.mark.parametrize('reservation', ['deleted', 'replaced', 'path-only', 'id-without-path', 'moved'])
+def test_approved_core_save_recovers_stale_folder_reservation(env, tmp_path, monkeypatch, reservation):
+    from product_upload_chat_handoff import CORE, prepare
+
+    store, _, _ = env
+    row, result, manifest = make_result(env, tmp_path)
+    core = [item for item in manifest if item['product_slot_id'] in CORE]
+    api = Outputs()
+    provider = SimpleNamespace(api=api, token='fixture')
+    parent = api.base + '/Baseball'
+    category_id = api.files[parent]['id']
+    lookup_overrides = {}
+
+    def metadata(token, key, *, missing_only=False):
+        if key in lookup_overrides:
+            return deepcopy(lookup_overrides[key])
+        return deepcopy(api.files.get(key) or next((item for item in api.files.values()
+                                                   if item['id'] == key), None))
+
+    monkeypatch.setattr(api, 'get_metadata_if_exists', metadata)
+    monkeypatch.setattr('prompt_store.get_prompt', lambda _key, default, **kwargs: default)
+
+    def save():
+        return transfer(provider, result, core, api.root, parent, 'Product', store.connect,
+                        ADMIN['id'], lambda *args: None, category_id=category_id,
+                        core_only=True, conflict='cancel', number_on_conflict=True)
+
+    first = save()
+    original = prepare(result, row, first, 'Lifestyle instructions')
+    old_target = first['destination']
+    if reservation == 'path-only':
+        lookup_overrides[first['product_folder_id']] = None
+    elif reservation == 'id-without-path':
+        lookup_overrides[first['product_folder_id']] = {'.tag': 'folder', 'id': first['product_folder_id']}
+    else:
+        for path in tuple(api.files):
+            if path == old_target or path.startswith(old_target + '/'):
+                item = api.files.pop(path)
+                if reservation == 'moved':
+                    new_path = path.replace(old_target, api.base + '/Cricket/Product', 1)
+                    api.files[new_path] = dict(item, path_display=new_path)
+    if reservation == 'replaced':
+        replacement = api.create_folder('fixture', parent, 'Product')
+
+    previous_calls = len(api.calls)
+    if reservation == 'moved':
+        with pytest.raises(ValueError, match='Restore it to the selected sport folder'):
+            save()
+        assert len(api.calls) == previous_calls
+        return
+
+    recovered = save()
+    assert len(recovered['successes']) == 5 and not recovered['failures']
+    assert recovered['export_fingerprint'] == first['export_fingerprint']
+    handoff = prepare(result, row, recovered, 'Lifestyle instructions')
+    assert handoff['companion_id'] == original['companion_id']
+    if reservation in ('path-only', 'id-without-path'):
+        assert recovered['product_folder_id'] == first['product_folder_id']
+        assert len(api.calls) == previous_calls
+    else:
+        assert recovered['product_folder_id'] != first['product_folder_id']
+        assert {x['metadata']['id'] for x in recovered['successes']}.isdisjoint(
+            x['metadata']['id'] for x in first['successes'])
+        assert len(api.calls) == previous_calls + 6
+    expected_target = old_target + ' (2)' if reservation == 'replaced' else old_target
+    assert recovered['destination'] == expected_target
+    assert expected_target + '/WEBP' in handoff['prompt']
+    if reservation == 'replaced':
+        assert api.files[old_target] == replacement
+        assert not any(path.startswith(old_target + '/') for path in api.files)
 
 
 def test_category_move_during_transfer_stops_before_more_uploads(env,tmp_path):

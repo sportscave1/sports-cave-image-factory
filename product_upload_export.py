@@ -138,7 +138,8 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
 
     if conflict not in ('cancel','numbered'):raise ValueError('Choose a safe output-folder conflict option.')
     options = dict(checkpointed=True, parent_identity=category_id)
-    if core_only: options['recheck_complete'] = True
+    if core_only:
+        options.update(recheck_complete=True, recover_missing_folder=number_on_conflict)
     if extend_core: options['extend_core'] = extend_core
     receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,**options)
     if core_only:

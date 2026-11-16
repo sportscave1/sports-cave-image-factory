@@ -52,12 +52,12 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
 
 
 def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False,
-         parent_identity=None, extend_core=None, recheck_complete=False):
+         parent_identity=None, extend_core=None, recheck_complete=False, recover_missing_folder=False):
     """Reserve a destination once, including the existing numbered-folder rule.
 
     The provider call never occurs under a long DB transaction. Failed/unknown
-    transfers retry the exact destination and bytes, rather than drawing a new
-    numbered folder. Existing standalone Mockups behaviour is unaffected.
+    transfers retry the exact destination and bytes. An approved core save
+    can reserve a fresh destination if its original folder no longer exists.
     """
     import auto_editions as ae
     entries=[dict(name=x['archive_name'],hash=ae.file_hash(x['path'])) for x in manifest]
@@ -86,15 +86,10 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
                 raise ValueError('The earlier core save no longer matches this package. Use a new destination.')
             old = dict(target=target, folder_id=core['folder_id'], confirmed=core.get('confirmed', []),
                        state='Failed')
-        if old and parent_identity and old.get('folder_id'):
-            owned=api.get_metadata_if_exists(provider.token,old['folder_id'])
-            target=api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
-            if not owned or owned.get('id')!=old['folder_id'] or target.rsplit('/',1)[0].casefold()!=parent.casefold():
-                raise ValueError('The reserved product folder moved or is unavailable. No new folder was created; restore it before retrying.')
-            old['target']=target
-            if old.get('receipt'):old['receipt']=dict(old['receipt'],destination=target)
         if old and old['state']=='Saving' and time.time()-old['started_at']<600:
             raise ValueError('This exact save is already running. Wait for its receipt before retrying.')
+        if old and parent_identity and old.get('folder_id'):
+            old = resolve_reserved_folder(api, provider.token, parent, folder_name, old, recover_missing_folder)
         if not token:
             from product_upload_source import invalidate
             token=invalidate(row)
@@ -136,3 +131,31 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
                {x.get('relative_path') for x in receipt.get('successes', [])} != {x['name'] for x in entries}
                else 'Complete',receipt=receipt)
     return receipt
+
+
+def resolve_reserved_folder(api, token, parent, folder_name, saved, recover_missing):
+    """Reuse an owned folder or reserve an empty path for an approved core retry."""
+    folder_id = saved['folder_id']
+    lookup_options = {'missing_only': True} if recover_missing else {}
+    owned = api.get_metadata_if_exists(token, folder_id, **lookup_options)
+    if not owned or not (owned.get('path_display') or owned.get('path_lower')):
+        # The sport may have been renamed. Use its currently verified path.
+        candidate = api.join_upload_path(parent, saved['target'].rsplit('/', 1)[-1])
+        at_path = api.get_metadata_if_exists(token, candidate, **lookup_options)
+        if at_path and at_path.get('id') == folder_id:
+            owned = at_path
+        elif not owned and recover_missing:
+            target = candidate
+            if at_path:
+                proposed = api.join_upload_path(parent, folder_name)
+                target = api.numbered_path(token, proposed)
+            # Keep the save fingerprint but discard every receipt for the old folder.
+            return dict(state='Failed', target=target)
+    target = api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
+    if (not owned or owned.get('id') != folder_id or owned.get('.tag') != 'folder'
+            or target.rsplit('/', 1)[0].casefold() != parent.casefold()):
+        raise ValueError('The reserved product folder moved or is unavailable. Restore it to the selected sport folder before retrying.')
+    updated = dict(saved, target=target)
+    if saved.get('receipt'):
+        updated['receipt'] = dict(saved['receipt'], destination=target)
+    return updated

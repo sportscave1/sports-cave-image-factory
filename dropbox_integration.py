@@ -807,11 +807,15 @@ def join_upload_path(current_folder, relative_path):
     return destination
 
 
-def get_metadata_if_exists(access_token, path):
+def get_metadata_if_exists(access_token, path, *, missing_only=False):
     try:
         return get_file_metadata(access_token, path)
     except DropboxApiError as error:
-        if _is_missing_path_error(error):
+        if missing_only:
+            lookup = getattr(error.__cause__, 'error', None)
+            if getattr(lookup, 'is_path', lambda: False)() and lookup.get_path().is_not_found():
+                return None
+        elif _is_missing_path_error(error):
             return None
         raise
 
