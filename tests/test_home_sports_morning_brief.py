@@ -388,6 +388,23 @@ def test_calendar_still_renders_when_brief_storage_is_unavailable(monkeypatch):
 
 
 
+def test_create_design_uses_recent_performance_as_context_for_a_timeless_title():
+    from home_morning_brief_actions import _prompt
+
+    result = _prompt("Tom Banton — The Adelaide Century",
+                     "Decision: Monitor the decider before starting another cricket print.")
+    assert 'Execution decision: Create “Tom Banton — The Adelaide Century” now.' not in result
+    assert 'does not override this instruction to create the artwork now' in result
+    research = result.index('use the authorised Shopify connection in read-only mode')
+    title = result.index('Consider a few short, cinematic headline options')
+    assert research < title < result.index('Use web image search')
+    assert 'closest comparable sport or collector collection' in result
+    assert 'Treat unranked products as style references only' in result
+    assert 'If in doubt, use the athlete’s or team’s name and omit match statistics and dates' in result
+    assert 'completed landmark series such as the Ashes' in result
+    assert 'Use a single concise verified statistic or accolade only if it tells that lasting story' in result
+
+
 def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     from home_morning_brief_actions import _prompt
 

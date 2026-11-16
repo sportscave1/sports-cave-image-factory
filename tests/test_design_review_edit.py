@@ -56,6 +56,10 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'Display the winner and the three-design scorecard' in edit
     assert 'eyes and gaze, nose, mouth and teeth' in edit
     assert 'background, border, headline wording and hierarchy, typography, layout' in edit
+    assert '8. **Title and placement.**' in edit
+    assert 'headline longevity and placement' in edit.replace('\n', ' ')
+    assert 'design_title while retaining the canonical PSD filename' in edit
+    assert edit.index('use the authorised Shopify connection in read-only mode') < edit.index('Consider a few short, cinematic headline options')
     assert 'three-design scorecard' not in standard
 
 
