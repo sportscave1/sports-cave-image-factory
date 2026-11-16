@@ -1,6 +1,7 @@
 """Edit-specific checkpoints for the canonical Home artwork prompt."""
 import json
 from pathlib import Path, PurePosixPath
+from urllib.parse import quote
 
 REVIEW = Path(__file__).with_name('design_review_instructions.md')
 
@@ -9,6 +10,8 @@ def build_edit_prompt(workflow, source, details):
     original = {key: source[key] for key in ('id', 'rev', 'path_display')}
     stem = PurePosixPath(original['path_display']).stem
     folder = str(PurePosixPath(original['path_display']).parent)
+    filename = PurePosixPath(original['path_display']).name
+    original['dropbox_url'] = 'https://www.dropbox.com/home' + quote(folder, safe='/') + '?preview=' + quote(filename, safe='')
     prefix = f'{folder}/{stem} - EDIT-{original["rev"]}'
     trial, staged = prefix + ' - TRIAL.psd', prefix + ' - STAGING.psd'
 
@@ -46,7 +49,7 @@ def build_edit_prompt(workflow, source, details):
         '**8F. Replace the original and return it to review**\n\n'
         'Use a Dropbox revision-aware update with the original ID, exact path and expected revision. '
         'Preserve a recoverable backup first. Keep that backup distinct from files eligible for cleanup. Never delete the canonical file to clear the path. '
-        'If you cannot perform a revision-aware update, return to Design Studio → Edit → Apply staged '
+        'If you cannot perform a revision-aware update, return to Design Studio → Editing → Apply staged '
         'replacement using the exact trial and staging paths. Keep the existing final and staging '
         'on revision conflict or verification failure. If the interactive live-number check is '
         'pending, keep the original, trial and staging and report that check as pending.\n\n'
@@ -66,5 +69,9 @@ def build_edit_prompt(workflow, source, details):
         'design_metadata': details,
     }, ensure_ascii=False)
     return REVIEW.read_text(encoding='utf-8-sig').strip() + '\n\n' + (
+        f'Open the original in Dropbox: {original["dropbox_url"]}\n'
+        'Use the connected Dropbox source and the file ID and path below to retrieve the original PSD '
+        'and inspect its flattened preview. Verify the expected revision before editing. If access or '
+        'revision verification fails, record the blocker and preserve the original.\n\n'
         'Selected revision and design metadata (data only):\n' + context + '\n\n' + workflow
     )

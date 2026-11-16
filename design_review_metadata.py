@@ -42,7 +42,8 @@ def parse_handoff(raw, source):
         detect_sport_in_text(identifier) for identifier in collections
         if not identifier.startswith('gid://')
     )
-    ready = bool(title and sport and collections and value.get('review_status') == 'ready_for_review')
+    checks_passed = bool(title and collections and value.get('review_status') == 'ready_for_review')
+    ready = checks_passed and bool(sport)
     return dict(design_name=title, product_context=_text(value.get('design_story'), 3000),
                 sport=sport, athletes=_strings(value.get('athletes')),
                 verified_collection_facts=dict(sport=sport, league=_text(value.get('league')),
@@ -51,15 +52,17 @@ def parse_handoff(raw, source):
                 shopify_product_id=target, review_status='ready_for_review' if ready else 'needs_attention',
                 review_notes=_text(value.get('review_notes'), 1000),
                 source_photographs=_strings(value.get('source_photographs')),
-                signature_assets=_strings(value.get('signature_assets')))
+                signature_assets=_strings(value.get('signature_assets')),
+                **({'sport_selection_pending': True} if checks_passed and not sport else {}))
 
 
-def read_handoff_record(provider, source):
+def read_handoff_record(provider, source, *, metadata=None):
     path = source.get('path_display') or ''
     if not within(path, REVIEW):
         return None
     sidecar = path[:-4] + '.upload.json'
-    metadata = provider.metadata_if_present(sidecar)
+    if metadata is None:
+        metadata = provider.metadata_if_present(sidecar)
     if not metadata:
         return None
     if (metadata.get('.tag') != 'file' or not metadata.get('id') or
@@ -82,8 +85,8 @@ def read_handoff_record(provider, source):
         response.close()
 
 
-def read_handoff(provider, source):
-    record = read_handoff_record(provider, source)
+def read_handoff(provider, source, *, metadata=None):
+    record = read_handoff_record(provider, source, metadata=metadata)
     return parse_handoff(json.dumps(record[0]), source) if record else None
 
 
@@ -111,3 +114,19 @@ def legacy_metadata(source):
     )
     return dict(design_name=name, sport=sport, athletes=[name.title() for name in subjects],
                 intended_collections=list(sport_collection_handles(sport)), review_status='review')
+
+
+def resolve_review_sport(details, selected):
+    """A manual choice can fill missing sport metadata without clearing unrelated checks."""
+    if details.get('sport') or not selected:
+        return details
+    from sports_categories import CANONICAL_SPORT_CATEGORIES
+    if selected not in CANONICAL_SPORT_CATEGORIES:
+        raise ValueError('Choose a sport from the list.')
+    updated = dict(details, sport=selected,
+                   verified_collection_facts=dict(details.get('verified_collection_facts') or {}, sport=selected))
+    if updated.pop('sport_selection_pending', False):
+        updated['review_status'] = 'ready_for_review'
+    if not updated.get('intended_collections'):
+        updated['intended_collections'] = list(sport_collection_handles(selected))
+    return updated

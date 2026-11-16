@@ -1,7 +1,7 @@
 """Design Studio gallery for the exact PSDs in the Dropbox review folder."""
-import base64
-import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import lru_cache
 from html import escape
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlencode
@@ -9,9 +9,11 @@ import logging
 
 import streamlit as st
 
-from design_review_metadata import is_working_file, legacy_metadata, read_handoff, review_key
+from design_review_metadata import is_working_file, legacy_metadata, read_handoff, resolve_review_sport, review_key
 from product_upload_dropbox import REVIEW, approved, select, within
 from product_upload_intake import Intakes, action_mode
+
+_HANDOFF_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='review-handoff')
 
 
 def final_psd(entry):
@@ -21,14 +23,11 @@ def final_psd(entry):
 
 
 def folder_page(provider, cursor):
-    return provider.api.list_folder_page(provider.token, REVIEW, cursor=cursor, limit=20)
+    return provider.api.list_folder_page(provider.token, REVIEW, cursor=cursor, limit=500)
 
 
-@st.cache_data(ttl=120, max_entries=48, show_spinner=False)
-def _thumbnail(actor_id, file_id, revision):
-    from product_upload_api import Dropbox
-    provider = Dropbox()
-    return provider.api.get_psd_thumbnail_bytes(provider.token, file_id, revision=revision)
+def _thumbnail(provider, source):
+    return provider.api.get_psd_thumbnail_bytes(provider.token, source['id'], revision=source['rev'])
 
 
 def status(row, job, details):
@@ -51,7 +50,7 @@ def status(row, job, details):
     return 'Needs attention' if details.get('review_status') == 'needs_attention' else 'In review'
 
 
-def _review(app, provider, user, entry, command):
+def _review(app, provider, user, entry, command, *, selected_sport=None):
     from product_upload_api import connect, Dropbox
     from product_upload_jobs import JOBS, generate
     from product_upload_export import folder_sport, sport_categories
@@ -70,7 +69,9 @@ def _review(app, provider, user, entry, command):
     if command != 'approved' and job and job['state'] in ('Queued', 'Running'):
         raise ValueError('The approved job is already generating mockups.')
     if command == 'approved':
-        details = read_handoff(provider, current) or legacy_metadata(current)
+        original_details = read_handoff(provider, current) or legacy_metadata(current)
+        saved_data = (existing or {}).get('data') or {}
+        details = resolve_review_sport(original_details, saved_data.get('review_sport') or selected_sport)
         if details['review_status'] == 'needs_attention':
             raise ValueError(details.get('review_notes') or 'This saved revision has unresolved verification or metadata checks.')
         if not details.get('sport'):
@@ -99,9 +100,15 @@ def _review(app, provider, user, entry, command):
             raise ValueError('This intake belongs to another artwork revision.')
         if row['data'].get('product_gid'):
             return key
+        if command == 'approved':
+            data = row['data']
+            if details != original_details and data.get('metadata') == original_details:
+                data['metadata'] = details
+            if data.get('metadata') != details:
+                raise ValueError('The upload metadata changed. Review the exact PSD again.')
+            if details != original_details:
+                data['review_sport'] = details['sport']
         row['data']['design_review'] = dict(decision=command, at=datetime.now(timezone.utc).isoformat())
-        if command == 'approved' and row['data'].get('metadata') != details:
-            raise ValueError('The upload metadata changed. Review the exact PSD again.')
     if command == 'approved' and not row['data'].get('mockups_exported') and (job or {}).get('state') != 'Ready':
         def finalize(result):
             return app.rebuild_result_artifacts(app.ensure_lifestyle_prompts(result))
@@ -111,58 +118,38 @@ def _review(app, provider, user, entry, command):
     return key
 
 
-def _artwork(app, preview, title):
-    encoded = base64.b64encode(preview).decode('ascii')
-    template = (Path(__file__).parent/'components/design_review_artwork.html').read_text(encoding='utf-8-sig')
-    markup = template.replace('__TITLE__', escape(title, quote=True)).replace('__IMAGE__', 'data:image/jpeg;base64,' + encoded)
-    app.get_components_module().html(markup, height=280, scrolling=False)
+def _artwork(source, title, *, eager=False):
+    url = escape('/api/design-review/thumbnail?' + urlencode(dict(id=source['id'], rev=source['rev'])), quote=True)
+    description = escape(f'Open artwork preview for {title} in a new tab', quote=True)
+    loading = 'eager' if eager else 'lazy'
+    st.html(f'<a class="sc-review-artwork" href="{url}" target="_blank" rel="noopener" aria-label="{description}">'
+            f'<img src="{url}" alt="" width="1024" height="724" loading="{loading}" decoding="async"></a>')
 
 
-@st.dialog('Review & Improve', width='large')
-def _edit_dialog(app, provider, user, source, details, preview):
-    from home_morning_brief_actions import PROJECT_URL, _prompt
-    title = details.get('design_name') or PurePosixPath(source['name']).stem
-    prompt = _prompt(title, details.get('product_context') or 'Preserve the story in the original artwork.',
-                     edit=dict(source=source, metadata=details))
-    st.caption('The project opens with a copied brief. Attach the preview and PSD, then paste and send the brief.')
-    actions = st.columns(2)
-    with actions[0]:
-        if preview:
-            st.download_button('Download preview', preview, title + '.jpg', mime='image/jpeg')
-    with actions[1]:
-        st.link_button('Download exact PSD', '/api/design-review/source?' + urlencode(
-            dict(id=source['id'], rev=source['rev'])))
-    payload = json.dumps(prompt).replace('<', r'\u003c')
-    project = json.dumps(PROJECT_URL)
-    app.get_components_module().html(
-        """<style>body{margin:0;font:14px system-ui;color:#39332c}button{background:#8d6923;color:white;
-        border:0;border-radius:7px;padding:10px 14px;font:600 14px system-ui;cursor:pointer}
-        button:focus-visible{outline:2px solid #44320f;outline-offset:3px}</style>
-        <button id="copy" type="button">Copy brief and open Sports Cave Designs</button>
-        <span id="state" role="status"></span><script>
-        document.getElementById('copy').addEventListener('click',async()=>{
-          let copied=false;
-          try{const field=document.createElement('textarea');field.value=""" + payload + """;
-          field.style.cssText='position:fixed;left:-9999px';document.body.append(field);
-          field.select();copied=document.execCommand('copy');field.remove();}catch{}
-          if(!copied){document.getElementById('state').textContent=' Copy failed. Use the brief below.';return;}
-          window.open(""" + project + """,'_blank','noopener,noreferrer');
-          document.getElementById('state').textContent=' Copied. Attach the files and send the brief.';
-        });</script>""", height=52)
-    with st.expander('Review brief and attachment fallback'):
-        st.link_button('Open Sports Cave Designs', PROJECT_URL)
-        st.code(prompt, language=None)
+def _edit_link(source, title):
+    from home_morning_brief_actions import PROJECT_URL
+
+    endpoint = '/api/design-review/edit-prompt?' + urlencode(dict(id=source['id'], rev=source['rev']))
+    st.html(f'<a class="sc-review-edit" href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
+            f'data-design-review-prompt="{escape(endpoint, quote=True)}" '
+            f'title="{escape(f"Edit {title} in Sports Cave Designs", quote=True)}">Edit</a>')
+
+
+def _staged_replacement(user, source, key):
+    from product_upload_api import Dropbox
+
     with st.expander('Apply staged replacement'):
         st.caption('Use this when ChatGPT can stage the edit in Dropbox but cannot apply a revision-checked update.')
         stem = str(PurePosixPath(source['path_display']).with_suffix('')) + ' - EDIT-' + source['rev']
-        trial = st.text_input('Trial PSD path', value=stem + ' - TRIAL.psd')
-        staged = st.text_input('Staged final PSD path', value=stem + ' - STAGING.psd')
-        number_checked = st.checkbox('I verified the live edition number updates in place and restored its value in the staged PSD.')
-        if st.button('Apply staged replacement', type='primary', disabled=not number_checked):
+        trial = st.text_input('Trial PSD path', value=stem + ' - TRIAL.psd', key=key+'-trial')
+        staged = st.text_input('Staged final PSD path', value=stem + ' - STAGING.psd', key=key+'-staged')
+        number_checked = st.checkbox('I verified the live edition number updates in place and restored its value in the staged PSD.',
+                                     key=key+'-number-checked')
+        if st.button('Apply staged replacement', type='primary', disabled=not number_checked, key=key+'-replace'):
             from design_review_replace import apply
             try:
                 with st.spinner('Checking both saved files and replacing the exact revision'):
-                    final, backup, warnings = apply(provider, source, trial, staged)
+                    final, _, warnings = apply(Dropbox(), source, trial, staged)
             except ValueError as error:
                 st.error(str(error))
             except Exception:
@@ -174,64 +161,74 @@ def _edit_dialog(app, provider, user, source, details, preview):
                 st.rerun()
 
 
-def _details(provider, source):
+@lru_cache(maxsize=512)
+def _handoff(actor_id, file_id, revision, path, sidecar_id, sidecar_rev, size):
+    from product_upload_api import Dropbox
+    return read_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path),
+                        metadata={'.tag': 'file', 'id': sidecar_id, 'rev': sidecar_rev, 'size': size})
+
+
+def _details(actor, source, sidecar):
+    if sidecar is None:
+        return legacy_metadata(source), ''
     try:
-        details = read_handoff(provider, source) or legacy_metadata(source)
-        return details, ''
+        return _handoff(actor, source['id'], source['rev'], source['path_display'],
+                        sidecar.get('id'), sidecar.get('rev'), sidecar.get('size')) or legacy_metadata(source), ''
     except ValueError as exc:
         return dict(legacy_metadata(source), review_status='needs_attention'), str(exc)
     except Exception:
         return dict(legacy_metadata(source), review_status='needs_attention'), 'Upload metadata could not be read for this PSD.'
 
 
-def _card(app, provider, user, source, details, reason, *, editing=False):
-    from product_upload_api import connect
+def _card(app, user, source, details, reason, key, row, *, editing=False, eager=False, show_replacement=False):
+    from product_upload_api import Dropbox
     from product_upload_jobs import JOBS
-    key = review_key(source)
-    row = Intakes(connect).read_review(key, user['id'], source)
+    card_key = key
     if row:
         key = str(row['id'])
-    job = JOBS.snapshot(key, user['id'], 'generate')
+    job = JOBS.snapshot(key, user['id'], 'generate') if row else None
     title = details.get('design_name') or PurePosixPath(source['name']).stem
     current = status(row, job, details)
     if editing and current in ('Ready to publish', 'In review'):
         current = 'Editing'
-    facts = details.get('verified_collection_facts') or {}
-    description = ' · '.join(filter(None, (
-        ', '.join(details.get('athletes', ())), details.get('sport'), facts.get('league'),
-        ', '.join(facts.get('teams', ())),
-    )))
-    target = details.get('shopify_product_id')
-    intent = (f'Updates product {target.rsplit("/", 1)[-1]}' if target else
-              'New product' if details.get('upload_intent') == 'new_product' else '')
-    with st.container(border=True):
-        preview = None
-        try:
-            preview = _thumbnail(str(user['id']), source['id'], source['rev'])
-            _artwork(app, preview, title)
-        except Exception:
-            st.caption('Preview unavailable for this revision.')
-        st.html(f'<h3>{escape(title)}</h3><div class="sc-review-meta">{escape(description)}</div>'
-                f'<div class="sc-review-status"><strong data-ready="{str(current == "Ready to publish").lower()}">'
-                f'{escape(current)}</strong><span>{escape(intent)}</span></div>')
-        if details.get('intended_collections'):
-            st.caption(' · '.join(details['intended_collections']))
-        if reason or details.get('review_notes'):
-            st.caption(reason or details['review_notes'])
-        if job and job['state'] == 'Failed':
-            st.warning(job.get('error') or 'Mockup generation failed.')
+    with st.container(key=f'design-review-card-{card_key}'):
+        _artwork(source, title, eager=eager)
         published = bool(row and row['data'].get('product_gid'))
-        if published and row['data'].get('product_url'):
-            st.link_button('Open Shopify product', row['data']['product_url'], key=key+'-shopify')
         resumable = current in ('Generating mockups', 'Mockups ready', 'Ready for Shopify handoff')
-        edit_button, publish = st.columns((1, 1.3))
-        if edit_button.button('Edit', key=key+'-edit', use_container_width=True, disabled=resumable):
-            _edit_dialog(app, provider, user, source, details, preview)
-        if publish.button('Publish now', key=key+'-approved', use_container_width=True,
-                          type='primary', disabled=published or editing or (not preview and not resumable)):
+        chosen_sport = (row or {}).get('data', {}).get('review_sport')
+        needs_sport = not (published or editing or resumable or chosen_sport or details.get('sport'))
+        name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
+        note = (job or {}).get('error') or reason or details.get('review_notes') or current
+        name.html(f'<h3 class="sc-review-title" title="{escape(title, quote=True)}">{escape(title)}</h3>'
+                  + (f'<div class="sc-review-status" title="{escape(note, quote=True)}">{escape(current)}</div>'
+                     if current not in ('In review', 'Ready to publish') else ''))
+        with edit_button:
+            if resumable:
+                st.button('Edit', key=key+'-edit', disabled=True)
+            else:
+                _edit_link(source, title)
+        sport_picker = st.empty() if needs_sport else None
+        clicked = False
+        if published and row['data'].get('product_url'):
+            publish.link_button('Open listing', row['data']['product_url'], key=key+'-shopify')
+        else:
+            clicked = publish.button('Publish now', key=key+'-approved', type='primary',
+                                     disabled=published or editing, help=f'Publish {title}')
+        if clicked and needs_sport:
+            st.session_state[key+'-needs-sport'] = True
+        if sport_picker is not None and st.session_state.get(key+'-needs-sport'):
+            from sports_categories import CANONICAL_SPORT_CATEGORIES
+            chosen_sport = sport_picker.selectbox('Sport for ' + title, CANONICAL_SPORT_CATEGORIES,
+                                                  index=None, placeholder='Choose a sport', key=key+'-sport')
+        if clicked and (not needs_sport or chosen_sport):
             try:
                 if not resumable:
-                    key = _review(app, provider, user, source, 'approved')
+                    provider = Dropbox()
+                    try:
+                        _thumbnail(provider, source)
+                    except Exception:
+                        raise ValueError('The preview is unavailable for this revision. Refresh the gallery before publishing.') from None
+                    key = _review(app, provider, user, source, 'approved', selected_sport=chosen_sport)
             except ValueError as exc:
                 st.error(str(exc))
             except Exception:
@@ -241,30 +238,34 @@ def _card(app, provider, user, source, details, reason, *, editing=False):
                 app.set_current_page('Product Uploads', source='design_studio')
                 st.query_params['upload'] = key
                 st.rerun()
+        if show_replacement and editing and not resumable:
+            _staged_replacement(user, source, key)
 
 
-def _published(user):
+def _published(user, query):
     from product_upload_api import connect
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
-            """SELECT id, data FROM product_upload_intakes WHERE actor_id=%s
+            """SELECT id, data->>'product_title' AS title, data->>'product_url' AS url,
+                      data->'master_mapping_pending' AS mapping_pending
+               FROM product_upload_intakes WHERE actor_id=%s
                AND data->'design_review'->>'decision'='approved'
                AND data->>'product_gid' IS NOT NULL
                AND data->>'shopify_completion' IN ('Published live', 'Listing updated')
-               ORDER BY updated_at DESC LIMIT 20""",
+               ORDER BY updated_at DESC""",
             (str(user['id']),),
         )
-        results = cur.fetchall()
+        results = [row for row in cur.fetchall()
+                   if query in (row['title'] or 'Confirmed Shopify product').casefold()]
     if not results:
         st.caption('No published gallery designs have been confirmed for this account.')
     for result in results:
-        data = result['data']
-        title = data.get('product_title') or 'Confirmed Shopify product'
-        if data.get('product_url'):
-            st.link_button(title, data['product_url'], key=f"published-{result['id']}")
+        title = result['title'] or 'Confirmed Shopify product'
+        if result['url']:
+            st.link_button(title, result['url'], key=f"published-{result['id']}")
         else:
             st.write(title)
-        if data.get('master_mapping_pending'):
+        if result['mapping_pending']:
             st.caption('Edition master replacement pending in Edition Ops.')
 
 
@@ -272,94 +273,96 @@ def _published(user):
 def _folder(actor_id):
     from product_upload_api import Dropbox
     provider = Dropbox()
-    cursor, entries, seen, working = '', [], set(), []
-    for _ in range(10):
+    cursor, entries, seen, working, sidecars = '', {}, set(), set(), {}
+    while True:
         page = folder_page(provider, cursor)
-        entries.extend(entry for entry in page['entries'] if final_psd(entry))
-        working.extend(entry.get('name', '') for entry in page['entries']
-                       if entry.get('.tag') == 'file' and ' - EDIT-' in entry.get('name', '')
-                       and (' - TRIAL' in entry['name'] or ' - STAGING' in entry['name']))
+        for entry in page['entries']:
+            if final_psd(entry):
+                entries[entry['id']] = entry
+            elif entry.get('.tag') == 'file':
+                name = entry.get('name', '')
+                if name.lower().endswith('.upload.json') and entry.get('path_display'):
+                    sidecars[entry['path_display'].casefold()] = entry
+                stem, marked, edit = name.rpartition(' - EDIT-')
+                if marked:
+                    revision, _, stage = edit.partition(' - ')
+                    if stage.startswith(('TRIAL', 'STAGING')):
+                        working.add((stem, revision))
         if not page.get('has_more'):
             break
         cursor = page.get('cursor')
         if not cursor or cursor in seen:
             raise ValueError('Review folder pagination could not be completed.')
         seen.add(cursor)
-    ordered = sorted(entries, key=lambda item: str(item.get('server_modified', '')), reverse=True)
-    editing = {entry['id'] for entry in ordered if any(
-        name.startswith(PurePosixPath(entry['name']).stem + ' - EDIT-' + entry['rev'] + ' - ')
-        for name in working
-    )}
-    return ordered, editing, datetime.now(timezone.utc), bool(page.get('has_more'))
+    ordered = sorted(entries.values(), key=lambda item: str(item.get('server_modified', '')), reverse=True)
+    sidecars_by_path = [sidecars.get(entry['path_display'][:-4].casefold() + '.upload.json') for entry in ordered]
+    pending = {i: _HANDOFF_POOL.submit(_details, actor_id, entry, sidecar)
+               for i, (entry, sidecar) in enumerate(zip(ordered, sidecars_by_path)) if sidecar is not None}
+    designs = [(entry, *(pending[i].result() if i in pending else _details(actor_id, entry, None)),
+                (PurePosixPath(entry['name']).stem, entry['rev']) in working)
+               for i, entry in enumerate(ordered)]
+    return designs, datetime.now(timezone.utc)
 
 
-@st.cache_data(ttl=45, max_entries=200, show_spinner=False)
-def _cached_details(actor_id, source):
-    from product_upload_api import Dropbox
-    return _details(Dropbox(), source)
-
-
-@st.fragment(run_every='50s')
+@st.fragment
 def _gallery(app, user):
-    from product_upload_api import Dropbox
+    from product_upload_api import connect
     actor = str(user['id'])
-    try:
-        entries, editing, synced, partial = _folder(actor)
-    except Exception:
-        logging.getLogger(__name__).exception('Design Review gallery unavailable')
-        st.warning('Review folder sync failed. The gallery will retry automatically.')
-        return
-    heading, sync = st.columns((3, 1))
-    heading.title('Design Studio')
-    ago = int((datetime.now(timezone.utc) - synced).total_seconds())
-    sync.caption('● Synced just now' if ago < 15 else f'● Synced {ago}s ago')
+    with st.container(key='design-review-header'):
+        heading, sync, refresh = st.columns((5, 1, 1), vertical_alignment='center')
+        heading.title('Design Studio')
     result = st.session_state.pop('_review_replace_result', None)
     if result:
         path, warnings = result
         st.success('Verified replacement saved: ' + PurePosixPath(path).name)
         for warning in warnings:
             st.warning(warning)
-    page, search, sport = st.columns((1, 1.5, 1))
-    view = page.segmented_control('Designs', ('Review', 'Editing', 'Published'), default='Review',
-                                  key='design-review-view', label_visibility='collapsed') or 'Review'
-    query = search.text_input('Search designs', placeholder='Search designs…', label_visibility='collapsed')
-    matched = []
+    with st.container(key='design-review-toolbar'):
+        tabs, search, sport = st.columns((1, 1.5, 1))
+        view = tabs.segmented_control('Designs', ('Review', 'Editing', 'Published'), default='Review',
+                                      key='design-review-view', label_visibility='collapsed') or 'Review'
+        query = search.text_input('Search designs', placeholder='Search designs…',
+                                  label_visibility='collapsed').strip().casefold()
     if view == 'Published':
-        _published(user)
+        _published(user, query)
         return
-    for entry in entries:
-        if view == 'Editing' and entry['id'] not in editing:
-            continue
-        if query.strip() and query.strip().casefold() not in entry['name'].casefold():
-            continue
-        matched.append(entry)
     from sports_categories import CANONICAL_SPORT_CATEGORIES
     picked = sport.selectbox('Sport', ('All sports', *CANONICAL_SPORT_CATEGORIES), label_visibility='collapsed')
-    if picked != 'All sports':
-        matched = [entry for entry in matched if _cached_details(actor, entry)[0].get('sport') == picked]
-    if partial:
-        st.caption('Showing the first 200 entries from the Review folder.')
+    if refresh.button('Refresh', help='Check Dropbox for new designs and revisions.'):
+        _folder.clear(actor)
+    try:
+        designs, synced = _folder(actor)
+    except Exception:
+        logging.getLogger(__name__).exception('Design Review gallery unavailable')
+        st.warning('Review folder sync failed. Select Refresh to try again.')
+        return
+    ago = int((datetime.now(timezone.utc) - synced).total_seconds())
+    sync.caption('Synced just now' if ago < 15 else f'Synced {ago}s ago')
+    matched = [(entry, details, reason, editing) for entry, details, reason, editing in designs
+               if (view != 'Editing' or editing)
+               and (query in entry['name'].casefold() or query in (details.get('design_name') or '').casefold())
+               and (picked == 'All sports' or details.get('sport') == picked)]
     if not matched:
         st.info('No PSDs match this view.')
         return
-    limit = 8
-    pages = (len(matched) + limit - 1) // limit
-    index = st.selectbox('Page', range(1, pages+1)) - 1 if pages > 1 else 0
-    provider = Dropbox()
+    sources = {review_key(entry): entry for entry, *_ in matched}
+    rows = Intakes(connect).read_review_gallery(actor, sources)
+    keys = list(sources)
     with st.container(key='design-review-grid'):
-        window = matched[index*limit:(index+1)*limit]
-        for offset in range(0, len(window), 2):
+        for offset in range(0, len(matched), 2):
             columns = st.columns(2)
-            for column, entry in zip(columns, window[offset:offset+2]):
+            for i, (column, (entry, details, reason, editing)) in enumerate(zip(columns, matched[offset:offset+2]), start=offset):
+                key = keys[i]
                 with column:
-                    _card(app, provider, user, entry, *_cached_details(actor, entry),
-                          editing=entry['id'] in editing)
+                    _card(app, user, entry, details, reason, key, rows.get(key), editing=editing,
+                          eager=i < 2, show_replacement=view == 'Editing')
 
 
 def render(app, user):
     from product_upload_services import enabled
     css = Path(__file__).parent/'components/design_review_gallery.css'
     st.html(css.read_text(encoding='utf-8-sig'))
+    st.html(css.with_name('design_review_edit.html'), unsafe_allow_javascript=True)
     with st.container(key='design-review-gallery'):
         if not all(app.os_accounts.can_access_page(user, name) for name in ('Files', 'Product Uploads')):
             st.title('Design Studio')

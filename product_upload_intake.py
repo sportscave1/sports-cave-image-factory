@@ -130,6 +130,36 @@ class Intakes:
             row = cur.fetchone()
             return dict(row) if row else None
 
+    def read_review_gallery(self, actor, sources):
+        """Get just the display state for the visible exact revisions in one lookup."""
+        if not sources:
+            return {}
+        requested = [dict(key=key, file_id=source['id'], revision=source['rev'])
+                     for key, source in sources.items()]
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """WITH requested AS (
+                       SELECT * FROM jsonb_to_recordset(%s::jsonb)
+                       AS source(key uuid, file_id text, revision text)
+                   )
+                   SELECT DISTINCT ON (requested.key) requested.key AS review_key, intake.id,
+                          jsonb_build_object('product_gid', intake.data->'product_gid',
+                              'shopify_completion', intake.data->'shopify_completion',
+                              'design_review', intake.data->'design_review',
+                              'review_sport', intake.data->'review_sport',
+                              'mockups_exported', intake.data->'mockups_exported',
+                              'product_url', intake.data->'product_url') AS data
+                   FROM product_upload_intakes AS intake JOIN requested ON (
+                       intake.id=requested.key OR (intake.data->>'smart_upload'='true'
+                           AND intake.data->'source'->>'id'=requested.file_id
+                           AND intake.data->'source'->>'rev'=requested.revision))
+                   WHERE intake.actor_id=%s
+                   ORDER BY requested.key, (intake.data->>'smart_upload'='true') DESC NULLS LAST,
+                            intake.created_at""",
+                (json.dumps(requested), str(actor)),
+            )
+            return {str(row['review_key']): dict(row) for row in cur.fetchall()}
+
     def create(self, key, actor, selected, name, size, provider, content_hash):
         key = str(uuid.UUID(key)); mode(selected)
         if selected == 'SMART':
