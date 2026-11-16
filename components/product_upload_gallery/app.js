@@ -157,7 +157,8 @@
     if(!autoKey)return;
     function afterPreviews(){
       if(signal.aborted || upload.disabled || (!handoff.companion_id && !parent.document.hasFocus()))return;
-      if(!parent.document.querySelector('iframe[data-sc-upload-previews="'+receipt+'"]'))return;
+      if(!handoff.companion_id &&
+         !parent.document.querySelector('iframe[data-sc-upload-previews="'+receipt+'"]'))return;
       try{
         if(sessionStorage.getItem(autoKey))return;
         sessionStorage.setItem(autoKey,'attempted');

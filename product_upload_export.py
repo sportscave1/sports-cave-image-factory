@@ -57,7 +57,7 @@ def resolve_category(api, token, root, category_id):
 
 
 def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress, *, conflict='numbered',
-             category_id=None, core_only=False, extend_core=None):
+             category_id=None, core_only=False, extend_core=None, number_on_conflict=False):
     from product_upload_mockups import save,bind_export
     import auto_editions as ae
     import mockup_storage
@@ -121,6 +121,11 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
                     remote=receipt.get('metadata') or {}
                     if remote.get('content_hash')!=expected or remote.get('size')!=entry['byte_length']:
                         raise ValueError('Dropbox verification did not match the original output. Retry to check the stored file.')
+                if core_only and (
+                        not remote.get('id') or not remote.get('rev')
+                        or remote.get('name') != PurePosixPath(name).name
+                        or (remote.get('path_display') or remote.get('path_lower') or '').casefold() != path.casefold()):
+                    raise ValueError('Dropbox did not confirm the exact saved filename and revision.')
                 successes[name]=receipt
                 checkpoint(confirmed=list(successes.values()))
             except Exception as error:
@@ -133,9 +138,13 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
 
     if conflict not in ('cancel','numbered'):raise ValueError('Choose a safe output-folder conflict option.')
     options = dict(checkpointed=True, parent_identity=category_id)
+    if core_only: options['recheck_complete'] = True
     if extend_core: options['extend_core'] = extend_core
     receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,**options)
     if core_only:
+        if number_on_conflict and receipt.get('cancelled'):
+            # Keep existing Dropbox files intact when the approved output name is already taken.
+            receipt=save(connect,actor,result,manifest,provider,parent,clean,'numbered',perform,**options)
         return receipt
     if not receipt.get('failures') and len(receipt.get('successes',()))==total:
         import image_factory

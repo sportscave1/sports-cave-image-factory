@@ -93,12 +93,14 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
     if numbered:
         unrelated = api.create_folder('fixture', parent, 'Product')
         assert save(core, core_only=True, conflict='cancel')['cancelled']
-    conflict = 'numbered' if numbered else 'cancel'
+    # Approved automatic uploads cycle through the same first choice as manual saves
+    # and reserve a numbered folder when the original is already owned.
+    automatic = dict(core_only=True, conflict='cancel', number_on_conflict=numbered)
     api.fail_once = core[0]['archive_name']
-    incomplete = save(core, core_only=True, conflict=conflict)
+    incomplete = save(core, **automatic)
     with pytest.raises(ValueError):
         prepare(result, row, incomplete, 'Exact original lifestyle prompt.')
-    receipt = save(core, core_only=True, conflict=conflict)
+    receipt = save(core, **automatic)
     assert len(receipt['successes']) == 5
     assert {total for _, _, total in progress} == {5}
     assert not store.read(row['id'], ADMIN['id'])['data']['mockups_exported']
@@ -113,11 +115,17 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
     assert "pasted.txt" in prompt and 'Leave the other four WebPs in Dropbox' in prompt
     assert 'Fetch the temporary download URL directly' in prompt
 
+    # A stale completion record must recover a missing WebP before it can dispatch.
+    del api.files[black['path_display']]
+    refreshed = save(core, **automatic)
+    assert refreshed['destination'] == receipt['destination']
+    assert len(refreshed['successes']) == 5 and black['path_display'] in api.files
+
     full = save(manifest, conflict='cancel', extend_core=receipt['export_fingerprint'])
     assert len(full['successes']) == 8
     assert full['destination'] == receipt['destination']
     assert full['product_folder_id'] == receipt['product_folder_id']
-    assert sum(kind == 'upload' for kind, _ in api.calls) == 9  # eight originals and one failed attempt
+    assert sum(kind == 'upload' for kind, _ in api.calls) == 10  # eight originals, one failed, one recovered
     assert current_source(store.read(row['id'], ADMIN['id']))['expected_webp_count'] == 8
     if numbered:
         assert api.files[parent + '/Product'] == unrelated

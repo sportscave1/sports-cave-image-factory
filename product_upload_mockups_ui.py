@@ -126,9 +126,19 @@ def progress_preview(path):
 
 # Leave time for progress paint/terminal result hydration between fragment ticks.
 @st.fragment(run_every=1.0)
-def poll_generation(app,key,actor,name,sport,source_hash):
+def poll_generation(app,key,actor,name,sport,source_hash,*,can_autosave=False):
     from product_upload_jobs import JOBS
     if st.session_state.get('_product_upload_active')!=key:return
+    result=app._mockups_result()
+    if result:
+        save=JOBS.snapshot(key,actor,'save')
+        if save and save.get('token')==st.session_state.get('product-upload-core-save-job-'+key):
+            from product_upload_outputs_ui import render_save_progress
+            render_save_progress(app,key,actor,core=True)
+        elif can_autosave and not save and st.session_state.get('product-upload-generation-ack-'+key) and not (
+                result.get('product_upload_core_receipt') or result.get('product_upload_save_receipt')):
+            st.progress(.5,text='Mockups generated · preparing Dropbox save')
+        return
     job=JOBS.snapshot(key,actor,'generate')
     if not job:return
     if job['state'] in ('Queued','Running'):
@@ -155,7 +165,6 @@ def poll_generation(app,key,actor,name,sport,source_hash):
             if st.session_state.get(marker)!=job['token']:
                 st.session_state[marker]=job['token'];st.rerun()
             st.info('Product details changed during generation. Generate mockups again for the current details.');return
-        if st.session_state.get('product-upload-job-applied-'+key)==job['token']:return
         st.session_state['product-upload-job-applied-'+key]=job['token']
         app._set_mockups_result(app.normalize_generation_result(result))
         st.rerun()
@@ -203,8 +212,15 @@ def render_design(app,row,user):
     decision = (row['data'].get('design_review') or {}).get('decision')
     from_review = decision in ('approved', 'preparing')
     ready = spec.get('state') == 'Ready'
-    from product_upload_generation_status import attempt, status, markup
+    from product_upload_generation_status import attempt, status, markup, recover_review_attempt
     acknowledgement='product-upload-generation-ack-'+key
+    current=st.session_state.get(acknowledgement)
+    if result and not running:
+        state, _=status(current,pending,st.session_state.get('product-upload-job-applied-'+key),
+                       result,key,name,sport,row['data']['source']['content_hash'])
+        if not current or state!='ready':
+            recovered=recover_review_attempt(row,result,choice,name)
+            if recovered:st.session_state[acknowledgement]=recovered
     def queue_generation(*, automatic=False):
         if (not ready and not from_review) or running or st.session_state.get('_product_upload_active')!=key:return
         active_save=JOBS.snapshot(key,user['id'],'save')
@@ -271,15 +287,10 @@ def render_design(app,row,user):
         poll_render(key,user['id'],spec.get('state'))
     elif ready and not running and not result:st.caption('Artwork ready. Generate mockups to continue.')
     with st.container(key='product-upload-generation'):
-        if pending and not result:poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'])
+        if pending or (result and st.session_state.get(acknowledgement)):
+            poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'],
+                            can_autosave=bool(choice and app.os_accounts.can_access_page(user,'Files')))
         if result:
-            if saving and saving.get('token') and saving['token']==st.session_state.get('product-upload-core-save-job-'+key):
-                from product_upload_outputs_ui import save_progress
-                save_progress(app,key,user['id'],core=True)
-            elif (pending and pending['state']=='Ready' and choice and not saving
-                  and app.os_accounts.can_access_page(user,'Files')
-                  and not result.get('product_upload_core_receipt') and not result.get('product_upload_save_receipt')):
-                st.progress(.5,text='Mockups generated · preparing Dropbox save')
             result['_product_upload_actor_id']=str(user['id'])
             from product_upload_outputs_ui import render_outputs
             render_outputs(app,result,row,user,name)

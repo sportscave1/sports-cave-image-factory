@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sports Cave Upload Companion",
   "description": "Starts the ChatGPT project workflow when Product Uploads confirms the Dropbox save.",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "permissions": ["storage"],
   "background": {"service_worker": "worker.js"},
   "content_scripts": [

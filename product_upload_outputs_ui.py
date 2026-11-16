@@ -32,8 +32,7 @@ def core_preview_items(app,result,source):
     return items
 
 
-@st.fragment(run_every=.25)
-def save_progress(app,key,actor,*,core=False):
+def render_save_progress(app,key,actor,*,core=False):
     from product_upload_jobs import JOBS
     if st.session_state.get('_product_upload_active')!=key:return
     job=JOBS.snapshot(key,actor,'save')
@@ -57,7 +56,7 @@ def save_progress(app,key,actor,*,core=False):
             if core and result.get('product_upload_core_receipt')==receipt:
                 if receipt.get('cancelled') or receipt.get('failures'):
                     st.caption('Mockups generated · Dropbox save needs attention below.')
-                else:
+                elif len(receipt.get('successes',()))==5:
                     st.progress(1.,text='Mockups generated and saved to Dropbox')
             return
         from product_upload_api import connect
@@ -72,6 +71,9 @@ def save_progress(app,key,actor,*,core=False):
             result[receipt_key]=receipt
             app._set_mockups_result(result)
             st.rerun()
+
+
+save_progress = st.fragment(run_every=.25)(render_save_progress)
 
 
 def save_controls(app,result,row,user,name,*,generation_receipt=None):
@@ -114,7 +116,7 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
         if saved:st.caption('Saving to: '+' / '.join(receipt['destination'].rstrip('/').split('/')[-2:]))
         elif core_saved:st.caption('Saving to: '+' / '.join(core_receipt['destination'].rstrip('/').split('/')[-2:]))
         elif destination:st.caption('Saving to: '+destination)
-        elif choice:st.caption('Saving to: '+choice['name']+' / '+(folder or 'Enter Product name'))
+        elif choice:st.caption('Dropbox destination: '+choice['name']+' / '+(folder or 'Enter Product name'))
     if receipt and not saved and not running and receipt.get('successes') and not receipt.get('failures'):
         result.pop('product_upload_save_receipt',None)
         app._set_mockups_result(result)
@@ -143,6 +145,8 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
         numbered = True
         save_requested = True
     core_requested=False
+    if generation_receipt and choice and permitted and not core_ready and not running:
+        st.warning('Dropbox save needs all five generated WebPs. Generate the mockups again to replace missing files.')
     if generation_receipt and core_stamp and folder and permitted and not running and not saved and not core_saved and not save_requested:
         attempt_key='product-upload-auto-core-save-'+key
         # Remember the attempt across polling reruns. Recoverable failures use the same save worker.
@@ -184,7 +188,8 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
             if not core_requested and core_receipt.get('product_folder_id'):
                 extend_core=core_receipt['export_fingerprint']
             options=dict(conflict=conflict,category_id=category_id)
-            if core_requested:options['core_only']=True
+            if core_requested:
+                options.update(core_only=True,number_on_conflict=approved)
             if extend_core:options['extend_core']=extend_core
             fingerprint=hashlib.sha256(repr((scoped['_product_upload_source'],category_id,parent,folder,conflict,
                 [(x['archive_name'],str(x['path']),Path(x['path']).stat().st_mtime_ns) for x in manifest])).encode()).hexdigest()
@@ -194,10 +199,11 @@ def save_controls(app,result,row,user,name,*,generation_receipt=None):
                 from product_upload_source import invalidate
                 invalidate(current)
                 scoped['_product_upload_save_token']=current['data']['mockup_save_token']
-            queued=JOBS.submit(key,actor,'save',fingerprint,
-                lambda progress:dict(transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,
-                                         **options),package_stamp=stamp,core_only=core_requested,
-                                         generation_receipt=generation_receipt if core_requested else None))
+            def work(progress):
+                receipt=transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,**options)
+                return dict(receipt,package_stamp=stamp,core_only=core_requested,
+                            generation_receipt=generation_receipt if core_requested else None)
+            queued=JOBS.submit(key,actor,'save',fingerprint,work)
             if core_requested:
                 st.session_state['product-upload-core-save-job-'+key]=queued['token']
             st.session_state[state_key(key)+'-saving-destination']=resolved['name']+' / '+folder
@@ -270,12 +276,15 @@ def render_outputs(app,result,row,user,name):
             manifest=[entry for entry in manifest if entry.get('product_slot_id') in CORE]
             if core_receipt.get('package_stamp')==package_stamp(source,choice['id'],name,manifest):
                 handoff=prepare(result,row,core_receipt,prompt)
-                if core_receipt.get('generation_receipt')==preview_receipt:
+                if (core_receipt.get('generation_receipt')==preview_receipt
+                        or (row['data'].get('design_review') or {}).get('decision')=='approved'):
                     handoff['receipt']=preview_receipt
         except ValueError as error:
             handoff={'error': str(error)}
         except Exception:
             handoff={'error': 'Upload needs all five WebPs confirmed in Dropbox.'}
+    if handoff.get('error') and core_receipt and not core_receipt.get('cancelled') and not core_receipt.get('failures'):
+        st.warning(handoff['error'])
     with st.container(key='product-upload-lifestyle-actions'):
         st.html('''<style>
         .st-key-product-upload-lifestyle-actions {gap:10px!important;}

@@ -51,7 +51,8 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
             op['output']['webp_source'] = current_source(row)
 
 
-def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None, extend_core=None):
+def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False,
+         parent_identity=None, extend_core=None, recheck_complete=False):
     """Reserve a destination once, including the existing numbered-folder rule.
 
     The provider call never occurs under a long DB transaction. Failed/unknown
@@ -101,7 +102,7 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         result['_product_upload_export_fingerprint']=fingerprint
         row['data']['mockup_save_fingerprint']=fingerprint
         row['data'].update(mockups_exported=False,mockups_context=None,copied=False)
-        if old and old['state']=='Complete':
+        if old and old['state']=='Complete' and not recheck_complete:
             return dict(old['receipt'],export_fingerprint=fingerprint,save_token=token)
         if old: target=old['target']
         else:

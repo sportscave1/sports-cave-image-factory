@@ -1,7 +1,8 @@
 'use strict';
 
 const project = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
-const osComponent = /^https:\/\/sports-cave-image-factory\.onrender\.com\/component\/product_upload_gallery\.product_upload_gallery\/[^?#]*$/;
+const osOrigin = 'https://sports-cave-image-factory.onrender.com';
+const osComponentPath = '/component/product_upload_gallery.product_upload_gallery/index.html';
 const suppliedReceipt = /^[a-f0-9]{64}$/;
 const pending = new Map();
 const latest = 'uploadCompanionLast';
@@ -14,7 +15,7 @@ async function save(id, state, reason = '') {
   await chrome.storage.local.set({[keyFor(id)]: record, [latest]: record});
 }
 function promptIsValid(prompt) {
-  return typeof prompt === 'string' && prompt.length <= 131072 &&
+  return typeof prompt === 'string' && prompt.length <= 1048576 &&
     prompt.startsWith('Run this Product Uploads workflow for ') &&
     prompt.includes('https://www.dropbox.com/home/') &&
     prompt.includes('STEP 5 — VERIFY EDITION OPS AND ATTACH THE ORIGINAL PSD');
@@ -95,11 +96,20 @@ async function permit(message, sender) {
   await save(message.id, 'sending');
   return {ok:true};
 }
+function isOsComponent(address) {
+  try {
+    const url = new URL(address);
+    // Streamlit appends streamlitUrl to the component iframe URL.
+    return url.origin === osOrigin && url.pathname === osComponentPath && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let action;
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
-  } else if (sender.frameId > 0 && sender.tab && osComponent.test(sender.url || '')) {
+  } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {
     if (message?.type === 'os:health') action = health();
     if (message?.type === 'os:start') action = start(message);
   }
