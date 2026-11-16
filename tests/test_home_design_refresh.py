@@ -6,6 +6,7 @@ import re
 from unittest.mock import Mock
 
 import crm_growth_reporting
+from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from home_design_refresh import RECOMMENDATION_GUIDANCE, _render_candidate
 
@@ -29,6 +30,7 @@ def test_home_handoff_commissions_two_new_artwork_passes():
     assert 'Reuse a photo from the existing PSD only when' in prompt
     assert 'Do not revert to the old layout' in prompt
     assert 'original editable edition-number layer' in prompt
+    assert COLLECTOR_ASSET_PLACEMENT in prompt
     assert REVIEW_REPLACEMENT_RULE in prompt
 
 

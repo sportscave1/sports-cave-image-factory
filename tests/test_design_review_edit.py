@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from auto_editions import file_hash
+from design_collector_assets import COLLECTOR_ASSET_HEADING, COLLECTOR_ASSET_PLACEMENT
 from design_review_metadata import is_working_file
 from design_review_replace import apply, keep_original
 from home_morning_brief_actions import _prompt
@@ -25,7 +26,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
     })
     assert edit.count('**MANDATORY EXECUTION ORDER**') == 1
-    for start, end in (('**MANDATORY — MOVE THE PLAQUE', '**8E.'),
+    for start, end in ((COLLECTOR_ASSET_HEADING, '**8E.'),
                        ('**Recover from tool failures.**', 'Verified story')):
         assert edit[edit.index(start):edit.index(end)] == standard[standard.index(start):standard.index(end)]
     assert '12. **Final improvement.**' in edit and 'PASS, CHANGE or UNVERIFIED' in edit
@@ -69,6 +70,10 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'three-design scorecard' not in standard
     assert 'REVIEW REPLACEMENT RULE' not in edit
     assert 'Never delete the canonical PSD' in edit
+    for prompt in (standard, edit):
+        assert COLLECTOR_ASSET_PLACEMENT in prompt
+        assert 'reserve quiet space along the bottom' not in prompt
+        assert 'reserved bottom space' not in prompt
 
 
 def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
@@ -267,6 +272,9 @@ def test_layer_verification_requires_original_number_id_and_alignment(monkeypatc
             return iter(self)
 
     monkeypatch.setattr(PSDImage, 'open', lambda p: Document(staged if p == 'staging' else [badge, text]))
+    _inspect('original', 'trial', 'staging')
+    staged[0] = layer('SC_EDITION_PLAQUE', bbox=(31, 15, 91, 75))
+    staged[1] = layer('SC_EDITION_NUMBER', kind='type', ident=11, bbox=(43, 27, 67, 39))
     _inspect('original', 'trial', 'staging')
     staged[1] = layer('SC_EDITION_NUMBER', kind='type', ident=99, bbox=(20, 20, 60, 40))
     with pytest.raises(ValueError, match='preserve the original'):

@@ -3,6 +3,7 @@ import json
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
+from design_collector_assets import COLLECTOR_ASSET_HEADING
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from psd_directory import REVIEW_METADATA_FOLDER, ROOT, product_id
 
@@ -69,7 +70,7 @@ def build_edit_prompt(workflow, source, details):
     ))
     replace_section('Step 2. Inspect designs-canvas.psd', 'Step 3. Define the composition', (
         'Step 2. Use a working copy of the verified original PSD as the layout master. Preserve '
-        'its exact dimensions, orientation, colour profile, plaque and editable edition number. '
+        'its exact dimensions, orientation and colour profile. Keep the original plaque and editable number layers. '
         'Consult designs-canvas.psd for layout guidance when accessible. If the original is '
         'unavailable, use verified canvas details, keep the layout provisional and reserve room '
         'for the original plaque and number. Defer only the assembly and replacement work '
@@ -150,7 +151,7 @@ def build_edit_prompt(workflow, source, details):
         'Record any remaining failed or unverified checks in REVIEW NOTES, then continue to '
         'the three-design comparison in 8D.', 1,
     )
-    replace_section('**8D. Prepare', '**MANDATORY — MOVE THE PLAQUE', (
+    replace_section('**8D. Prepare', COLLECTOR_ASSET_HEADING, (
         '**8D. Score all three designs and select one winner**\n\n'
         'After completing and inspecting both new passes, compare the rendered current design, '
         'Pass 1 and Pass 2 side by side at 100% and at thumbnail size. Score each from 0 to 10 '
@@ -172,8 +173,7 @@ def build_edit_prompt(workflow, source, details):
         'If the current design wins, skip 8E and go directly to its cleanup in 8F. If an edit '
         'wins, place it in FINAL POLISHED ARTWORK. Keep the pre-edit artwork in hidden ORIGINAL '
         'REVIEW SOURCE and the winning edit’s editable source layers in hidden ORIGINAL EDITABLE '
-        'ARTWORK. Keep verified signatures on separate visible layers, '
-        'the original badge above the artwork and the editable edition number at the top. '
+        'ARTWORK. Keep verified signatures on separate visible layers. '
         'Maintain the selected original PSD’s dimensions and colour profile. Apply the shared '
         'border and print-safety rules and use Step 3 to balance the final layout.\n\n'
         'If the required source layers or either pass remain unavailable, preserve the completed '
@@ -192,8 +192,8 @@ def build_edit_prompt(workflow, source, details):
         'the previous PSD and record the specific problem in REVIEW NOTES.\n\n'
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '
         'to verify the original editable SC_EDITION_NUMBER layer, its exact name, text data, '
-        'transform, position and alignment inside SC_EDITION_PLAQUE. Verify that the original '
-        'plaque was preserved. A flattened preview alone cannot verify the text layer. '
+        'live transform and alignment inside SC_EDITION_PLAQUE at the chosen scale and position. '
+        'Verify that the original plaque was preserved. A flattened preview alone cannot verify the text layer. '
         'Once these checks pass, proceed to the replacement instructions in 8F. If a required property '
         'cannot be verified after recovery, retain the original and available temporary files '
         'and report the exact pending check while delivering the artwork.'

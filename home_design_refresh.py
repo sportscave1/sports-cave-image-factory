@@ -6,6 +6,7 @@ from html import escape
 import json
 import re
 
+from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from home_morning_brief_actions import PROJECT_URL
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER, ROOT as LIVE_FOLDER
@@ -80,7 +81,8 @@ that the artwork caused poor sales.
    Sports Cave artwork as style references. Use the old artwork only for diagnosis and comparison.
    Cosmetic changes such as repositioning portraits, resizing text or applying a filter are
    insufficient. If the same photo or title wins the research, rebuild its presentation around
-   a distinctly stronger concept. Generate the artwork itself without a frame, wall or room.
+   a distinctly stronger concept. Plan space for the original plaque and number to fit the new
+   composition. Generate the artwork itself without a frame, wall or room.
 
    Inspect Pass 1. In a separate full image-generation call, make Pass 2 a refinement of that
    new design. Use Pass 1 as the creative reference and the selected original photographs as
@@ -93,7 +95,8 @@ that the artwork caused poor sales.
 
    In both passes, preserve the identity, expression, anatomy, pose, uniform, team details and
    era shown in the selected verified photographs. Preserve verified signatures and official
-   logos, and reuse the exact official plaque and original editable edition-number layer.
+   logos. Add the exact official plaque and original editable edition-number layer during PSD
+   assembly.
    After each pass and on the assembled PSD, compare each face at 100% with the selected
    verified source. Check eyes and gaze, nose, mouth and teeth, jaw, ears, hairline, expression
    and natural skin texture. Restore feature loss, AI warping or altered details using precisely
@@ -114,11 +117,13 @@ that the artwork caused poor sales.
    mark any staged result needs_attention with the specific problems in review_notes.
 
 5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
-   Keep usable editable layers and retain the exact original official plaque and editable
-   edition number aligned in the assembled PSD. Place the selected generated artwork in a
-   named layer. Save it in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
+   Keep usable editable layers and place the selected generated artwork in a named layer.
+
+{COLLECTOR_ASSET_PLACEMENT}   Save in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
    [Original PSD stem] - REFRESH - STAGING - [unique run token].psd. Reopen the staged
-   PSD and confirm its exact Dropbox ID, path and revision before preparing its JSON.
+   PSD and confirm its exact Dropbox ID, path and revision before preparing its JSON. Verify
+   the original plaque and editable text layer are visible, readable and aligned at their
+   chosen position and scale in the saved PSD.
    Never claim an unverified save or rename a PNG or JPEG to .psd.
 
 SMART UPLOAD HANDOFF METADATA
