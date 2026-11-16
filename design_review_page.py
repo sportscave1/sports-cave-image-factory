@@ -59,7 +59,8 @@ def status(row, job, details):
     return 'Needs attention' if details.get('review_status') == 'needs_attention' else 'In review'
 
 
-def _review(provider, user, entry, command, *, selected_sport=None):
+def _review(provider, user, entry, command, *, selected_sport=None, resume_pending=False):
+    """Approve the exact revision or resume its earlier Publish now request when ready."""
     from product_upload_api import connect
     from product_upload_jobs import JOBS
     actor = user['id']
@@ -71,8 +72,12 @@ def _review(provider, user, entry, command, *, selected_sport=None):
     existing = store.read_review(key, actor, current)
     if existing:
         key = str(existing['id'])
+    if resume_pending and (
+        not existing or (existing['data'].get('design_review') or {}).get('decision') != 'preparing'
+    ):
+        return None
     if existing and existing['data'].get('product_gid'):
-        return key
+        return None if resume_pending else key
     job = JOBS.snapshot(key, actor, 'generate')
     preparing = False
     if command != 'approved' and job and job['state'] in ('Queued', 'Running'):
@@ -82,6 +87,8 @@ def _review(provider, user, entry, command, *, selected_sport=None):
         saved_data = (existing or {}).get('data') or {}
         details = resolve_review_sport(original_details, saved_data.get('review_sport') or selected_sport)
         preparing = details['review_status'] == 'needs_attention'
+        if resume_pending and (preparing or details['review_status'] != 'ready_for_review'):
+            return None
         if not details.get('sport'):
             raise ValueError('The sport could not be resolved from this PSD or its metadata.')
         if not preparing and details.get('shopify_product_id'):
@@ -101,10 +108,12 @@ def _review(provider, user, entry, command, *, selected_sport=None):
                for field in ('id', 'rev', 'path_display', 'content_hash', 'size')):
             raise ValueError('This intake belongs to another artwork revision.')
         if row['data'].get('product_gid'):
-            return key
+            return None if resume_pending else key
         if command == 'approved':
             data = row['data']
             prior_decision = (data.get('design_review') or {}).get('decision')
+            if resume_pending and (prior_decision != 'preparing' or data.get('copied')):
+                return None
             if prior_decision == 'preparing' and not data.get('copied'):
                 data['metadata'] = details
                 row['mode'] = stored_mode('SMART', details)

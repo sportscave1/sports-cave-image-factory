@@ -76,6 +76,26 @@ def render_save_progress(app,key,actor,*,core=False):
 save_progress = st.fragment(run_every=.25)(render_save_progress)
 
 
+@st.fragment(run_every=20)
+def recheck_artwork_review(row, user):
+    from design_review_page import _review
+    from product_upload_services import Dropbox
+
+    key = str(row['id'])
+    if st.session_state.get('_product_upload_active') != key:
+        return
+    try:
+        resumed = _review(Dropbox(), user, row['data']['source'], 'approved', resume_pending=True)
+    except ValueError as error:
+        st.warning(str(error))
+        return
+    except Exception:
+        st.caption('Could not recheck the artwork review. The saved mockups are retained. Retrying shortly.')
+        return
+    if resumed == key:
+        st.rerun()
+
+
 def save_controls(app,result,row,user,name,*,generation_receipt=None):
     from product_upload_chat_handoff import CORE
     from product_upload_jobs import JOBS
@@ -266,7 +286,11 @@ def render_outputs(app,result,row,user,name):
     core_receipt=result.get('product_upload_core_receipt') or {}
     core_saved = (len(core_receipt.get('successes', ())) == 5
                   and not core_receipt.get('cancelled') and not core_receipt.get('failures'))
-    if core_saved and not saving:
+    review_pending = bool(row['data'].get('smart_upload') and (row['data'].get('metadata') or {}).get('review_status') == 'needs_attention')
+    if core_saved and not saving and review_pending:
+        metadata = row['data']['metadata']
+        handoff = {'error': metadata.get('review_notes') or 'Review the exact PSD and complete its artwork checks and product metadata.'}
+    elif core_saved and not saving:
         try:
             from product_upload_chat_handoff import CORE,prepare
             manifest=app._mockup_dropbox_manifest(result,(app.ASSET_CATEGORY_CORE,))
@@ -301,7 +325,14 @@ def render_outputs(app,result,row,user,name):
                 'SC_UPLOAD_BLOCKED: APPROVAL. Explain the pending action above that line.'
             )
     if core_saved and not saving and core_receipt.get('generation_receipt'):
-        if handoff.get('error'):
+        if review_pending:
+            st.progress(.85, text='Mockups saved to Dropbox · Waiting for artwork review')
+            st.warning(handoff['error'])
+            decision = (row['data'].get('design_review') or {}).get('decision')
+            if not staff_job and decision == 'preparing':
+                st.caption('Keep this upload open. The ChatGPT handoff will resume when the review for this PSD revision is ready.')
+                recheck_artwork_review(row, user)
+        elif handoff.get('error'):
             st.progress(.85,text='Mockups saved to Dropbox · ChatGPT handoff needs attention')
             st.warning(handoff['error'])
         elif automatic_handoff:

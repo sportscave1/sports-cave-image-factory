@@ -277,8 +277,11 @@ else:
     with pytest.raises(ValueError, match='pending artwork checks'):
         store.copied(key, ADMIN['id'], 'SMART')
 
+    assert gallery._review(provider, ADMIN, record, 'approved', resume_pending=True) is None
+    assert store.read(key, ADMIN['id'])['data']['design_review'] == saved['data']['design_review']
     value.update(dropbox_revision=record['rev'], upload_intent='new_product', existing_shopify_product_id=None)
     install_json()
-    assert gallery._review(provider, ADMIN, record, 'approved') == key
+    assert gallery._review(provider, ADMIN, record, 'approved', resume_pending=True) == key
     assert store.read(key, ADMIN['id'])['data']['design_review']['decision'] == 'approved'
+    assert gallery._review(provider, ADMIN, record, 'approved', resume_pending=True) is None
     submit.assert_called_once()
