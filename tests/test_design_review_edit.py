@@ -25,7 +25,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
     })
     assert edit.count('**MANDATORY EXECUTION ORDER**') == 1
-    for start, end in (('**8A. Re-read and review**', '**8D. Prepare'),
+    for start, end in (('**8A. Re-read and review**', '**8D.'),
                        ('**MANDATORY — MOVE THE PLAQUE', '**8E.'),
                        ('**Border and print safety', 'Step 4.'),
                        ('**Recover from tool failures.**', 'Verified story')):
@@ -46,8 +46,17 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert edit.index('Reopen the saved canonical PSD') < edit.index('**Update the matching Smart Upload JSON**')
     assert REVIEW_METADATA_FOLDER in edit
     assert 'Preserve the design’s confirmed sport, upload intent, Shopify product ID and collection linkage' in edit
-    assert 'this edit’s exact trial and staging files only' in edit
-    assert 'Always display the strongest inspected artwork' in edit
+    assert edit.index('compare the rendered current design') < edit.index('Save a separate create-only file')
+    assert 'Pass 1 and Pass 2 side by side at 100% and at thumbnail size' in edit
+    assert 'collector appeal' in edit and 'Sports Cave style' in edit and 'mean of those three scores' in edit
+    assert 'Reject any edit that looks less realistic than the current design' in edit
+    assert 'Keep the current design if no edit scores higher' in edit
+    assert 'If the current design wins, skip 8E and go directly to its cleanup in 8F' in edit
+    assert 'exact trial, staging and rollback backup PSDs' in edit
+    assert 'Display the winner and the three-design scorecard' in edit
+    assert 'eyes and gaze, nose, mouth and teeth' in edit
+    assert 'background, border, headline wording and hierarchy, typography, layout' in edit
+    assert 'three-design scorecard' not in standard
 
 
 @pytest.fixture
@@ -82,7 +91,9 @@ def files(tmp_path, monkeypatch):
         yield current[id_]
 
     def backup(token, path, target, **kwargs):
-        return dict(current[path], path_display=target)
+        result = dict(current[path], id='id:Backup', rev='555555555', path_display=target)
+        current[target] = result
+        return result
 
     api = SimpleNamespace(copy_path=Mock(side_effect=backup), upload_revision=Mock(side_effect=upload),
                           get_verified_psd_stream=verified, delete_path_recoverable=Mock())
@@ -93,7 +104,7 @@ def files(tmp_path, monkeypatch):
     return provider, original, trial, staging, current, validate
 
 
-def test_replace_preserves_id_path_backup_and_cleans_only_exact_temporary_revisions(files):
+def test_replace_preserves_id_and_path_and_cleans_only_exact_temporary_revisions(files):
     provider, original, trial, staging, current, validate = files
     final, backup, warnings = apply(provider, original, trial['path_display'], staging['path_display'])
     assert (final['id'], final['path_display']) == (original['id'], original['path_display'])
@@ -106,6 +117,25 @@ def test_replace_preserves_id_path_backup_and_cleans_only_exact_temporary_revisi
     deletes = provider.api.delete_path_recoverable.call_args_list
     assert [(x.args[1], x.kwargs['expected_revision']) for x in deletes] == [
         (trial['path_display'], trial['rev']), (staging['path_display'], staging['rev']),
+        (backup['path_display'], backup['rev']),
+    ]
+
+
+def test_cleanup_retains_a_draft_replaced_during_canonical_verification(files):
+    provider, original, trial, staging, current, _ = files
+    verified = provider.api.get_verified_psd_stream
+
+    @contextmanager
+    def verify_and_change_trial(*args):
+        with verified(*args) as receipt:
+            current[trial['path_display']] = dict(trial, id='id:Different', rev='999999999')
+            yield receipt
+
+    provider.api.get_verified_psd_stream = verify_and_change_trial
+    _, backup, warnings = apply(provider, original, trial['path_display'], staging['path_display'])
+    assert len(warnings) == 1 and trial['name'] in warnings[0]
+    assert [x.args[1] for x in provider.api.delete_path_recoverable.call_args_list] == [
+        staging['path_display'], backup['path_display'],
     ]
 
 

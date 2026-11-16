@@ -137,10 +137,12 @@ def apply(provider, original, trial_path, staged_path):
                 warnings.append('The canonical PSD is verified. Its upload metadata still needs a revision update.')
                 logging.getLogger(__name__).warning('Design replacement metadata update failed')
         if not warnings:
-            for temporary in (trial, staged):
+            for temporary in (trial, staged, backup):
                 try:
+                    if not _same(provider.metadata_if_present(temporary['path_display']), temporary):
+                        raise ValueError('The temporary PSD changed before cleanup.')
                     api.delete_path_recoverable(token, temporary['path_display'], root_path=root,
                                                 expected_revision=temporary['rev'])
                 except Exception:
-                    warnings.append(f"Could not remove this run’s {temporary['name']}.")
+                    warnings.append(f"Could not remove {PurePosixPath(temporary['path_display']).name}.")
     return final, backup, warnings
