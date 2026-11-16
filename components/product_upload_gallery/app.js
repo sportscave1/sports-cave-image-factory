@@ -78,7 +78,7 @@
       if(signal.aborted)return;
       const label=states[report?.state] || 'Upload Companion is not connected in this Edge profile.';
       const time=report?.time ? ' · '+new Date(report.time).toLocaleString() : '';
-      status.textContent=label+time+(report?.reason ? ' · '+report.reason : '');
+      status.textContent=label+(report?.version ? ' · '+report.version : '')+time+(report?.reason ? ' · '+report.reason : '');
       resize();
       setTimeout(()=>{if(!signal.aborted)void refresh();},5000);
     }
@@ -102,6 +102,15 @@
     }
     function markDispatched(){
       if(autoKey){try{sessionStorage.setItem(autoKey,'dispatched');}catch{}}
+    }
+    async function watchSubmission(attempts=26){
+      const result=await companionRequest('health',{receipt:handoff.companion_id});
+      if(signal.aborted || !result?.version)return;
+      if(result.state==='submitted')stage(100,'ChatGPT accepted the full upload prompt in SC Mockups/Uploads.');
+      else if(result.state==='failed' || result.state==='uncertain'){
+        if(autoKey && result.state==='failed'){try{sessionStorage.removeItem(autoKey);}catch{}}
+        stage(95,result.reason || 'ChatGPT submission needs attention.');
+      }else if(attempts>1)setTimeout(()=>{if(!signal.aborted)void watchSubmission(attempts-1);},2500);
     }
     function projectLink(){
       const anchor=document.createElement('a');
@@ -136,8 +145,11 @@
             else{
               stage(100,'Upload sent to the Edge companion. Opening SC Mockups/Uploads.');
               void copying.then(copied=>{
-                if(copied && !signal.aborted)stage(100,'Full upload prompt copied. Edge Companion is opening SC Mockups/Uploads.');
+                if(copied && !signal.aborted && status.textContent.startsWith('Upload sent')){
+                  stage(100,'Full upload prompt copied. Edge Companion is opening SC Mockups/Uploads.');
+                }
               });
+              if(result.version)void watchSubmission();
             }
             return;
           }
@@ -154,7 +166,7 @@
         if(popup && copied)status.textContent+='Paste it into the new project chat.';
         if(!popup){
           if(automatic)status.textContent+=handoff.prompt.length>131072
-            ? 'Automatic opening requires Upload Companion 1.0.2 or later. Reload it in Personal Edge. '
+            ? 'Reload Upload Companion 1.0.6 in Personal Edge to send the full prompt to the ChatGPT Work composer. '
             : 'Edge did not open the project automatically. Check Developer → Upload Companion. ';
           status.append(projectLink());
           resize();

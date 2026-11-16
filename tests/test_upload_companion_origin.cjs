@@ -6,7 +6,7 @@ const vm = require('node:vm');
 async function main() {
   let onMessage;
   const chrome = {
-    runtime: {onMessage: {addListener: listener => { onMessage = listener; }}},
+    runtime: {getManifest: () => ({version:'1.0.6'}),onMessage: {addListener: listener => { onMessage = listener; }}},
     storage: {local: {get: async key => ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
   };
   const source = fs.readFileSync(path.join(__dirname, '../windows-upload-companion/worker.js'), 'utf8');
@@ -64,6 +64,8 @@ async function main() {
   assert.equal((await invoke(request,bridge)).accepted,true);
   assert.deepEqual(opened,['https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project']);
   assert.deepEqual(sent,[longPrompt]);
+  assert.equal((await invoke({type:'os:health',receipt:request.receipt},bridge)).state,'submitted');
+  assert.equal((await invoke({type:'os:health',receipt:'c'.repeat(64)},bridge)).state,'ready');
   console.log('Upload Companion accepts the live Streamlit iframe URL and rejects other origins, paths and top-level frames.');
 }
 main().catch(error => {

@@ -8,11 +8,13 @@
     .replace(/\n{3,}/g, '\n\n').trimEnd();
   let busy = false;
   const inProject = () => location.href === project;
-  const input = () => document.querySelector('#prompt-textarea[contenteditable="true"]');
+  const workEditor = '[role="textbox"][contenteditable="true"][aria-label="New chat in SC Mockups/Uploads"]';
+  const input = () => document.querySelector(workEditor) || document.querySelector('#prompt-textarea[contenteditable="true"]');
   const formFor = node => node?.closest('form');
-  const sendButton = form => form?.querySelector('button[data-testid="send-button"]');
-  const existingTurn = () => document.querySelector('[data-message-author-role="user"], [data-message-author-role="assistant"]');
-  const hasAttachment = form => form?.querySelector('[aria-label^="Remove file"], [aria-label^="Remove image"], [data-testid*="attachment"]');
+  const sendButton = form => form?.querySelector('button[data-testid="send-button"], button[type="submit"][aria-label="Send"]');
+  const existingTurn = () => document.querySelector('[data-message-author-role="user"], [data-message-author-role="assistant"], h4[data-conversation-role="user"], h4[data-conversation-role="assistant"]');
+  const attachments = form => Array.from(form?.querySelectorAll('button[aria-label^="Remove file"], button[aria-label^="Remove image"], button[aria-label="Remove pasted text attachment"], button[data-testid*="attachment"]') || []);
+  const pastedText = 'Remove pasted text attachment';
   async function waitFor(check, ms) {
     const end = Date.now() + ms;
     do {
@@ -22,37 +24,73 @@
     } while (Date.now() < end);
     return null;
   }
+  async function fill(node, form, prompt) {
+    // Work turns long pastes into a text attachment, just like Ctrl+V.
+    if (node.matches(workEditor)) {
+      const data = new DataTransfer();
+      data.setData('text/plain', prompt);
+      node.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
+      const pasted = await waitFor(() => node.innerText.trim() || attachments(form).length, 1200);
+      if (pasted) return;
+    }
+    if (inProject() && document.activeElement === node && !node.innerText.trim() && !attachments(form).length) {
+      document.execCommand('insertText', false, prompt);
+    }
+  }
+
+  function submittedPrompt(prompt, sentAsAttachment) {
+    if (!inProject() && !conversation.test(location.href)) return false;
+    const workTurns = Array.from(document.querySelectorAll('h4[data-conversation-role="user"]'));
+    if (sentAsAttachment) {
+      return conversation.test(location.href) && workTurns.length === 1 &&
+        !!workTurns[0].nextElementSibling?.querySelector('button[aria-label^="Pasted text("]');
+    }
+    const bodies = [...workTurns.map(turn => turn.nextElementSibling),
+      ...Array.from(document.querySelectorAll('[data-message-author-role="user"]'),
+        turn => turn.querySelector('.whitespace-pre-wrap') || turn)];
+    return bodies.some(body => body && normalize(body.innerText) === normalize(prompt));
+  }
   async function send({id, prompt}) {
     if (!inProject() || busy || typeof prompt !== 'string') return {sent:false};
     busy = true;
     try {
       const node = await waitFor(() => inProject() && input(), 7500);
       const form = formFor(node);
-      if (!node || !form || existingTurn() || hasAttachment(form) || node.innerText.trim()) return {sent:false};
+      if (!node || !form || existingTurn() || attachments(form).length || node.innerText.trim()) return {sent:false};
 
-      // Edge's editing command makes the same DOM input update as pasting text,
-      // without reading or replacing the user's system clipboard.
       node.focus();
       if (!inProject() || document.activeElement !== node || node.innerText.trim()) return {sent:false};
-      if (!document.execCommand('insertText', false, prompt)) return {sent:false};
-      const exact = () => inProject() && input() === node && !existingTurn() && !hasAttachment(form) &&
-        normalize(node.innerText) === normalize(prompt);
+      await fill(node, form, prompt);
+      const promptText = normalize(prompt);
+      const isWork = node.matches(workEditor);
+      const previewText = promptText.replace(/\s+/g, ' ');
       const ready = () => {
-        const button = sendButton(form);
-        return exact() && button?.isConnected && !button.disabled &&
-          button.getAttribute('aria-disabled') !== 'true' && button;
+        if (!inProject() || existingTurn()) return null;
+        // Work can replace the composer while it uploads a pasted attachment.
+        const editor = input();
+        if (!editor || editor.matches(workEditor) !== isWork) return null;
+        const composer = formFor(editor);
+        const button = sendButton(composer);
+        if (!button?.isConnected || button.disabled || button.getAttribute('aria-disabled') === 'true') return null;
+        const files = attachments(composer);
+        if (!files.length && normalize(editor.innerText) === promptText) return {button, asAttachment:false};
+        if (!isWork || editor.innerText.trim() || files.length !== 1 ||
+          files[0].getAttribute('aria-label') !== pastedText) return null;
+        const preview = files[0].parentElement?.querySelector('button[aria-label]:not([aria-label="Remove pasted text attachment"])');
+        const prefix = preview?.getAttribute('aria-label')?.replace(/…$/, '');
+        if (!prefix || prefix.length < 32 || !previewText.startsWith(prefix.replace(/\s+/g, ' ').trimEnd())) return null;
+        return {button, asAttachment:true};
       };
-      const button = await waitFor(ready, 4500);
-      if (!button) return {sent:false};
+      // Long Work pastes upload before Send is enabled.
+      if (!await waitFor(ready, isWork ? 25000 : 4500)) {
+        return {sent:false, reason:'ChatGPT did not make the pasted prompt ready to send.'};
+      }
       const permission = await chrome.runtime.sendMessage({type:'project:permit', id});
-      if (!permission?.ok || ready() !== button) return {sent:false};
+      const current = ready();
+      if (!permission?.ok || !current) return {sent:false};
+      const {button, asAttachment:sentAsAttachment} = current;
       button.click();
-
-      const accepted = await waitFor(() => {
-        if (!inProject() && !conversation.test(location.href)) return false;
-        return Array.from(document.querySelectorAll('[data-message-author-role="user"]'))
-          .some(turn => normalize((turn.querySelector('.whitespace-pre-wrap') || turn).innerText) === normalize(prompt));
-      }, 12000);
+      const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment), 12000);
       return {sent:Boolean(accepted)};
     } finally {
       busy = false;

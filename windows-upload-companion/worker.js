@@ -43,7 +43,7 @@ async function run(id, prompt, job) {
     } else if (job.sending) {
       await save(id, 'uncertain', 'Check the new ChatGPT tab for the sent prompt before retrying.');
     } else {
-      await save(id, 'failed', 'ChatGPT did not provide an empty project composer and a ready Send button.');
+      await save(id, 'failed', result?.reason || 'ChatGPT did not provide an empty project composer and a ready Send button.');
     }
   } catch {
     await save(id, job.sending ? 'uncertain' : 'failed', job.sending
@@ -75,15 +75,19 @@ async function start(message) {
     return {accepted:false};
   }
 }
-async function health() {
-  const record = (await chrome.storage.local.get(latest))[latest];
-  if (record && record.state === 'sending' && !pending.size) return {
-    state:'uncertain', reason:'Check the last ChatGPT tab for the sent prompt.', time:record.time,
+async function health(receipt) {
+  const exact = suppliedReceipt.test(receipt || '');
+  const key = exact ? keyFor(receipt) : latest;
+  const record = (await chrome.storage.local.get(key))[key] || {state:'ready'};
+  const active = exact ? pending.has(receipt) : pending.size > 0;
+  const version = chrome.runtime.getManifest().version;
+  if (record.state === 'sending' && !active) return {
+    state:'uncertain', reason:'Check the last ChatGPT tab for the sent prompt.', time:record.time, version,
   };
-  if (record && record.state === 'opening' && !pending.size) return {
-    state:'failed', reason:'Edge closed before the prompt was sent. Retry from Product Uploads.', time:record.time,
+  if (record.state === 'opening' && !active) return {
+    state:'failed', reason:'Edge closed before the prompt was sent. Retry from Product Uploads.', time:record.time, version,
   };
-  return record || {state:'ready'};
+  return {...record, version};
 }
 async function permit(message, sender) {
   const job = pending.get(message.id);
@@ -110,8 +114,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
   } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {
-    if (message?.type === 'os:health') action = health();
-    if (message?.type === 'os:start') action = start(message);
+    if (message?.type === 'os:health') action = health(message.receipt);
+    if (message?.type === 'os:start') action = start(message).then(result => ({...result, version:chrome.runtime.getManifest().version}));
   }
   if (!action) return;
   action.then(reply, () => reply({error:true}));
