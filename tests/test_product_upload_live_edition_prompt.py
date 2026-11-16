@@ -124,3 +124,13 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
     assert 'Create the product as ACTIVE from the first create call' in prompt
     assert prompt.index('STEP 3') < prompt.index('STEP 4') < prompt.index('STEP 5')
     assert prompt.index('Wait for the published product') < prompt.index('Move that original master') < prompt.index('Open Add / Attach PSD')
+
+
+    recreated = dict(receipt, recreated_folder=True, successes=[
+        {**item, 'metadata': {**item['metadata'], 'id': item['metadata']['id'] + '-recreated'}}
+        for item in receipt['successes']
+    ])
+    recreated_id = prepare(result, row, recreated, creative)['companion_id']
+    assert recreated_id != handoff['companion_id']
+    assert recreated_id == prepare(result, row, {**recreated, 'recreated_folder': False}, creative)['reference_companion_id']
+    assert recreated_id == prepare(result, row, recreated, creative)['companion_id']

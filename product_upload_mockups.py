@@ -127,6 +127,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         checkpoint(state='Failed')
         raise
     receipt=dict(receipt,export_fingerprint=fingerprint,save_token=token)
+    if old and old.get('recreated_folder'):
+        receipt['recreated_folder'] = True
     checkpoint(state='Failed' if receipt.get('failures') or receipt.get('cancelled') or
                {x.get('relative_path') for x in receipt.get('successes', [])} != {x['name'] for x in entries}
                else 'Complete',receipt=receipt)
@@ -150,7 +152,7 @@ def resolve_reserved_folder(api, token, parent, folder_name, saved, recover_miss
                 proposed = api.join_upload_path(parent, folder_name)
                 target = api.numbered_path(token, proposed)
             # Keep the save fingerprint but discard every receipt for the old folder.
-            return dict(state='Failed', target=target)
+            return dict(state='Failed', target=target, recreated_folder=True)
     target = api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
     if (not owned or owned.get('id') != folder_id or owned.get('.tag') != 'folder'
             or target.rsplit('/', 1)[0].casefold() != parent.casefold()):

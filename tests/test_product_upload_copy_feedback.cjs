@@ -20,7 +20,7 @@ function harness(crypto,textItem=true,options={}){
   sessionStorage:{getItem:key=>session.get(key),setItem:(key,value)=>session.set(key,value)},
   setTimeout:(fn,delay)=>{const id=next++;timers.set(id,{fn,at:now+delay});return id;},clearTimeout:id=>timers.delete(id)};
  const window=ctx.window={ClipboardItem:ctx.ClipboardItem,frameElement:{},addEventListener:(_type,fn)=>bridgeReplies.add(fn),removeEventListener:(_type,fn)=>bridgeReplies.delete(fn),
-  postMessage(message,origin){requests.push(message);for(const reply of bridgeReplies)reply({source:window,origin,data:{...message,direction:'response',result:options.companion}});},
+  postMessage(message,origin){requests.push(message);for(const reply of bridgeReplies)reply({source:window,origin,data:{...message,direction:'response',result:typeof options.companion==='function'?options.companion(message):options.companion}});},
   open(){return options.blockPopups ? null : {location:{replace:project=>popups.push(project)}};}};
  if(crypto){ctx.crypto=crypto;ctx.TextEncoder=TextEncoder;}
  vm.runInNewContext(fs.readFileSync('components/product_upload_gallery/app.js','utf8'),ctx);
@@ -73,6 +73,15 @@ function harness(crypto,textItem=true,options={}){
  assert.equal(edge.elements.get('root').children[0].value,100);
  assert.equal(edge.writes[0],full);assert.deepEqual(edge.popups,[]);
  edge.render('manual copy after rerender',workflow,'handoff');await flush();assert.equal(edge.requests.length,1);
+ const reference='b'.repeat(64), savedAt='2026-11-16T12:40:00Z';
+ for(const [time,expected] of [[Date.parse(savedAt)-1000,reference],[Date.parse(savedAt)+1000,workflow.companion_id]]){
+  const rebuilt=harness(require('node:crypto').webcrypto,true,{companion:message=>
+   message.action==='health'?{state:'submitted',time,version:'1.0.6'}:{accepted:true,version:'1.0.6'}});
+  rebuilt.render('manual copy',{...workflow,reference_companion_id:reference,reference_saved_at:savedAt},'handoff');await flush();
+  assert.deepEqual(rebuilt.requests.map(m=>[m.action,m.receipt]),
+   [['health',workflow.companion_id],['start',expected],['health',expected]]);
+  assert.match(rebuilt.elements.get('status').textContent,/accepted the full upload prompt/);
+ }
  const background=harness(require('node:crypto').webcrypto,true,{companion:{accepted:true},focused:false});
  background.render('manual copy',workflow);await flush();assert.equal(background.requests.length,1);assert.equal(background.writes.length,0);
  const rejected=harness(require('node:crypto').webcrypto,true,{companion:{accepted:false},blockPopups:true});

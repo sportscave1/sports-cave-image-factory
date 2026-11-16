@@ -78,8 +78,15 @@ Wait for the published product to appear in Sports Cave OS → Edition Ops throu
 Original PSD identity: {psd}
 Read the PSD's Dropbox metadata by the saved file ID and verify the selected revision and content hash before moving it. Move that original master from {json.dumps(REVIEW_FOLDER)} to the main live folder {json.dumps(ROOT)}. Use the current filename and preserve the file ID and content hash. If the same exact file is already in the live folder, use it there. If the destination belongs to another file, stop and report the conflict. Read back the live path and verify the same file ID and content hash before attachment. Never move a lookalike or substitute a different revision.
 Open Add / Attach PSD for the exact Edition Ops product and select the verified live-folder master. Read the mapping back against the exact Shopify product ID and Dropbox file ID. Resume the remaining step on retry if the move already succeeded. Edition Ops owns edition state. Preserve edition numbers, allocations, runs, counters and history. Leave Shopify's sports_cave edition metafields to the existing webhook and Edition Ops. If authorised access or sync is unavailable, report the specific unfinished step. Report success only after verifying all eight Dropbox WebPs, Shopify Online Store publication, the live PSD location and the exact Edition Ops PSD mapping. Return the Dropbox folder, storefront URL, Shopify product ID and verified mapping result."""
-    companion_id = hashlib.sha256(
-        f"{row['id']}:{receipt['export_fingerprint']}".encode('utf-8')
-    ).hexdigest()
-    return dict(project=PROJECT, prompt=combined, companion_id=companion_id,
+    dispatch_key = f"{row['id']}:{receipt['export_fingerprint']}"
+    companion_id = hashlib.sha256(dispatch_key.encode('utf-8')).hexdigest()
+    reference_id = hashlib.sha256(f"{dispatch_key}:{black['file_id']}".encode('utf-8')).hexdigest()
+    reference_metadata = next((entry['metadata'] for entry in receipt['successes']
+                               if entry.get('metadata', {}).get('id') == black['file_id']), {})
+    # Keep existing receipts unless the folder was recreated, or the browser
+    # can prove that the reference was saved after an older submission.
+    return dict(project=PROJECT, prompt=combined,
+                companion_id=reference_id if receipt.get('recreated_folder') else companion_id,
+                reference_companion_id=reference_id,
+                reference_saved_at=reference_metadata.get('server_modified'),
                 automatic=bool(receipt.get('generation_receipt')))

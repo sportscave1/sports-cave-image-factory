@@ -103,14 +103,14 @@
     function markDispatched(){
       if(autoKey){try{sessionStorage.setItem(autoKey,'dispatched');}catch{}}
     }
-    async function watchSubmission(attempts=26){
-      const result=await companionRequest('health',{receipt:handoff.companion_id});
+    async function watchSubmission(receipt,attempts=26){
+      const result=await companionRequest('health',{receipt});
       if(signal.aborted || !result?.version)return;
       if(result.state==='submitted')stage(100,'ChatGPT accepted the full upload prompt in SC Mockups/Uploads.');
       else if(result.state==='failed' || result.state==='uncertain'){
         if(autoKey && result.state==='failed'){try{sessionStorage.removeItem(autoKey);}catch{}}
         stage(95,result.reason || 'ChatGPT submission needs attention.');
-      }else if(attempts>1)setTimeout(()=>{if(!signal.aborted)void watchSubmission(attempts-1);},2500);
+      }else if(attempts>1)setTimeout(()=>{if(!signal.aborted)void watchSubmission(receipt,attempts-1);},2500);
     }
     function projectLink(){
       const anchor=document.createElement('a');
@@ -135,7 +135,15 @@
       try{
         const copying=copyUploadPrompt(automatic);
         if(handoff.companion_id){
-          const payload={receipt:handoff.companion_id,prompt:handoff.prompt};
+          let receipt=handoff.companion_id;
+          const reference=handoff.reference_companion_id;
+          const savedAt=Date.parse(handoff.reference_saved_at);
+          if(automatic && reference && reference!==receipt && Number.isFinite(savedAt)){
+            const previous=await companionRequest('health',{receipt});
+            active(version);
+            if(previous?.state==='submitted' && previous.time>0 && previous.time<savedAt)receipt=reference;
+          }
+          const payload={receipt,prompt:handoff.prompt};
           let result=await companionRequest('start',payload,2200);
           if(automatic && !signal.aborted && !result)result=await companionRequest('start',payload,2200);
           if(result?.accepted && !result.busy)markDispatched();
@@ -149,7 +157,7 @@
                   stage(100,'Full upload prompt copied. Edge Companion is opening SC Mockups/Uploads.');
                 }
               });
-              if(result.version)void watchSubmission();
+              if(result.version)void watchSubmission(receipt);
             }
             return;
           }
