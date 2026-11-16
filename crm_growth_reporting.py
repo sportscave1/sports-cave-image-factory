@@ -124,7 +124,7 @@ def published_sports_edition(day):
 
 def refresh_traffic(day):
     """Return product landing traffic and previously suggested IDs for the worker."""
-    from home_design_refresh import recent_ids
+    from home_design_refresh import RECOMMENDATION_GUIDANCE, recent_ids
     from sports_sales_calendar import sydney_date
 
     report = GoogleReports()
@@ -136,7 +136,7 @@ def refresh_traffic(day):
     report = report.for_request(report.connection())
     result = _ga4(report, report.connection(), contract, day - timedelta(days=29), day)
     if result.get("quality") != "GA4 verified":
-        return {"status": "unavailable"}
+        return {"status": "unavailable", "recommendation_guidance": RECOMMENDATION_GUIDANCE}
     sessions = {}
     for row in result["rows"]:
         match = re.search(r"(?:^|/)products/([a-z0-9-]+)/?$", row["dimensions"].get("landingPage", ""))
@@ -145,5 +145,6 @@ def refresh_traffic(day):
             sessions[handle] = sessions.get(handle, 0) + int(row["metrics"]["sessions"])
     ranked = sorted(sessions.items(), key=lambda row: (-row[1], row[0]))[:150]
     return {"start": result["start"], "end": result["end"], "timezone": result["timezone"],
+            "recommendation_guidance": RECOMMENDATION_GUIDANCE,
             "excluded_product_ids": recent_ids(sydney_date()),
             "products": [{"handle": handle, "sessions": count} for handle, count in ranked if count > 0]}

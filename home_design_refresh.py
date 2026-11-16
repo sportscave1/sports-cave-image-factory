@@ -20,16 +20,28 @@ LEGACY_FIELDS = {"product_id", "handle", "title", "created", "image_updated",
 REVIEW_FIELDS = {"product_id", "handle", "title", "reason", "evidence",
                  "sessions", "orders", "suggestion"}
 REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
+RECOMMENDATION_GUIDANCE = (
+    "Write each suggestion as a testable creative problem and opportunity for a complete redesign. "
+    "Describe the collector appeal, story, subject hierarchy or thumbnail recognition worth "
+    "investigating. Commission fresh image research and reconsider the hero, scene, title and "
+    "composition. Treat existing artwork and the recommendation as research leads. Avoid "
+    "prescribing only a crop, brightness or text-size change. Weak sales warrant investigation "
+    "and a creative test. They do not establish that artwork caused the result."
+)
 
 
 def _refresh_prompt(row, product_url):
-    return f"""Redesign an existing Sports Cave collector artwork for review.
+    return f"""Create a complete new Sports Cave collector design for the verified existing product.
+Use the New Product / Create Design research and creative process for both full artwork passes.
 
 Product: {row["title"]}
 Shopify product ID: {row["product_id"]}
 Product page: {product_url}
-Refresh recommendation: {row["suggestion"]}
+Research hypothesis from the Home recommendation: {row["suggestion"]}
 Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sessions'}
+Use the recommendation to start research and follow the evidence when it points elsewhere.
+Weak sales are a reason to investigate and test a creative direction. They do not establish
+that the artwork caused poor sales.
 
 1. Find the current master PSD in Dropbox Live: {LIVE_FOLDER}/
    Match it to this product using the product ID or handle, filename and live artwork.
@@ -38,46 +50,73 @@ Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sess
    Open the original for read-only reference. Record its path and revision if available,
    inspect its artwork and preserve its canvas dimensions, orientation and print settings.
 
-2. Diagnose the artwork and choose a creative direction.
-   Treat the refresh recommendation as a hypothesis. Inspect the verified original artwork
-   for collector appeal, subject hierarchy, photographic integration, typography and
-   thumbnail recognition. Briefly identify its three biggest weaknesses with visual evidence.
-   Describe any storefront mockup or listing presentation issues separately. State the stronger
-   creative direction and which weaknesses it addresses, then execute it.
+2. Research a fresh collector concept using the New Product workflow.
+   Treat the existing artwork as a comparison baseline and product-identity reference, not a
+   layout to preserve. Briefly identify its three biggest visually supported weaknesses and
+   describe storefront mockup or listing presentation issues separately. Independently reconsider
+   the hero photograph, supporting imagery, scene, background, title, typography, composition,
+   colours and border. Preserve the verified subject identity, any defining event or rivalry
+   promised by the product, official collector assets, production requirements and explicit
+   user locks. Develop the new concept for that same subject and existing product.
 
-3. Use ChatGPT image generation to create a full upgraded flat artwork. Use the project's
-   approved Sports Cave Collector Series references and deliver the artwork itself without a
-   frame, wall or room. This refresh explicitly overrides the project's "change only the
-   specified element" rule for composition, scale and placement of existing subjects,
-   typography, effects, background, border and spacing. Rebuild those elements where the
-   diagnosis supports it. Keep elements that already work.
+   Review relevant verified Sports Cave bestsellers in the sport or collection where reporting
+   is available. Inspect the actual artwork for story, hierarchy, typography and use of space.
+   Use approved Sports Cave Collector Series examples when sales evidence is unavailable.
+   Use those examples as style references.
 
-   Preserve each athlete's authentic identity, facial features, expression, anatomy, pose,
-   uniform, team details, era and sporting story. Keep faces realistic and free of warping.
-   Preserve verified signatures and logos, and reuse the exact official plaque and edition
-   assets from the source. Keep the original canvas and print settings. Where generation
-   changes photographic details, restore the authentic source imagery with precise masking
-   and natural blending. Match edges, lighting and grain to the composition. Reject rectangular
-   source overlays, visible seams, ghosting and abrupt cutoffs.
+   Run a fresh web image search before designing. Aim to inspect 4–8 suitable candidates on
+   their original source pages and show the strongest usable references in chat as a progress
+   checkpoint. Compare authentic action, achievement, celebration and legacy photographs
+   appropriate to the subject. Rank story fit and emotional impact first, then recognisability,
+   readable pose, composition potential and source quality at print size. For a promised event
+   or rivalry, keep the imagery faithful to it. Reuse a photo from the existing PSD only when
+   it wins the comparison. Consider stronger alternatives even when the existing photo is
+   technically sound. Compare headline options against the shortlisted photos. Briefly state
+   the strongest hero, story, title treatment and creative direction before generating.
 
-4. Before saving, compare the original and refresh side by side at matching display sizes,
-   first full-size and then at thumbnail size. After each pass and on the assembled PSD,
-   compare each face at 100% with verified source photography. Check eyes and gaze, nose,
-   mouth and teeth, jaw, ears, hairline, expression and natural skin texture. Correct any
-   feature loss, AI warping or visible patches with precisely masked source pixels and
-   recheck the blend. A candidate with unresolved facial distortion or unverified facial
-   fidelity needs_attention. Require a clear, meaningful improvement in all three areas:
+3. Generate and inspect two complete designs with ChatGPT image generation.
+   Pass 1 must be a complete new flat design, with a materially new composition and visual
+   treatment. Supply the selected authentic photographs as identity references and relevant
+   Sports Cave artwork as style references. Use the old artwork only for diagnosis and comparison.
+   Cosmetic changes such as repositioning portraits, resizing text or applying a filter are
+   insufficient. If the same photo or title wins the research, rebuild its presentation around
+   a distinctly stronger concept. Generate the artwork itself without a frame, wall or room.
+
+   Inspect Pass 1. In a separate full image-generation call, make Pass 2 a refinement of that
+   new design. Use Pass 1 as the creative reference and the selected original photographs as
+   the authority for identity and sporting details. Resolve visible weaknesses within the fresh
+   concept and keep the surrounding artwork free to evolve. Do not revert to the old layout.
+   If Pass 1 was unavailable after recovery, use the chosen fresh concept and verified photos
+   for Pass 2. Use the New Product allowance of at most two additional generation attempts
+   total across both passes, including recovery. Preserve the strongest inspected work and
+   report any incomplete pass.
+
+   In both passes, preserve the identity, expression, anatomy, pose, uniform, team details and
+   era shown in the selected verified photographs. Preserve verified signatures and official
+   logos, and reuse the exact official plaque and original editable edition-number layer.
+   After each pass and on the assembled PSD, compare each face at 100% with the selected
+   verified source. Check eyes and gaze, nose, mouth and teeth, jaw, ears, hairline, expression
+   and natural skin texture. Restore feature loss, AI warping or altered details using precisely
+   masked source pixels and natural blending. Match edges, lighting and grain. Reject
+   rectangular overlays, visible patches, seams, ghosting and abrupt cutoffs. Mark any
+   unresolved or unverified facial fidelity as needs_attention.
+
+4. Compare and score the original, Pass 1 and Pass 2 side by side at matching full and
+   thumbnail display sizes. Score photographic realism, collector appeal and Sports Cave style
+   from 0 to 10 for each and report the mean and a short reason. A replacement must have a
+   materially new composition and visual treatment and clearly improve all three areas:
    - Subject hierarchy and emotional impact.
    - Composition and photographic integration.
    - Typography, spacing and collector finish.
-   A larger name, tighter crop or brighter gold alone is insufficient. If the refresh is
-   weaker overall, falls short on any of the three criteria or has visible defects, revise it
-   and repeat the comparison before saving. Use needs_attention for unresolved issues and
-   record the specific problem in review_notes.
+   Choose the strongest eligible redesign, whether Pass 1 or Pass 2. Authenticity and clear
+   improvement are required regardless of score. If neither pass qualifies, use the existing
+   correction allowance and compare again. If issues remain, retain the current version and
+   mark any staged result needs_attention with the specific problems in review_notes.
 
 5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
-   Keep usable editable layers where available and place the generated artwork in a named
-   layer. Save it in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
+   Keep usable editable layers and retain the exact original official plaque and editable
+   edition number aligned in the assembled PSD. Place the selected generated artwork in a
+   named layer. Save it in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
    [Original PSD stem] - REFRESH - STAGING - [unique run token].psd. Reopen the staged
    PSD and confirm its exact Dropbox ID, path and revision before preparing its JSON.
    Never claim an unverified save or rename a PNG or JPEG to .psd.
@@ -101,8 +140,9 @@ Use null or empty arrays for unknown values. Never substitute a similar product 
 refresh target.
 
 {REVIEW_REPLACEMENT_RULE}
-Display the generated artwork in chat, report what changed, and give the verified final
-Dropbox paths, or the staged paths and pending steps if closeout is incomplete. If Dropbox
+Display the strongest generated artwork and three-design scorecard in chat. Report what
+changed and give the verified final Dropbox paths, or the staged paths and pending steps if
+closeout is incomplete. If Dropbox
 access, visual inspection, image generation, PSD export or upload is unavailable, explain
 exactly what is blocked and report only what actually completed.
 """
@@ -118,7 +158,7 @@ def _render_candidate(row):
         f'<a class="sc-refresh-action" href="{PROJECT_URL}" target="_blank" '
         f'rel="noopener noreferrer" aria-label="Create Refresh for {title}" '
         f'data-refresh-prompt="{prompt}">Create Refresh</a>'
-        f'<br>{escape(row["suggestion"])}</li>'
+        f'<br>Redesign research lead: {escape(row["suggestion"])}</li>'
     )
 
 

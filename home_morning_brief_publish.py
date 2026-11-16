@@ -37,7 +37,8 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
     )
     if refresh_brief:
         instructions = ("Enter today's Sydney date and up to three verified candidates. "
-                        "Performance and artwork review candidates are supported.")
+                        "Performance and artwork review candidates are supported. "
+                        f"{refresh.RECOMMENDATION_GUIDANCE}")
     body = f"<p>{escape(message)}</p>" if message else ""
     if form:
         body += (
