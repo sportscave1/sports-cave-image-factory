@@ -22,7 +22,7 @@ REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
 
 
 def _refresh_prompt(row, product_url):
-    return f"""Refresh an existing Sports Cave collector design for review.
+    return f"""Redesign an existing Sports Cave collector artwork for review.
 
 Product: {row["title"]}
 Shopify product ID: {row["product_id"]}
@@ -37,24 +37,47 @@ Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sess
    Open the original for read-only reference. Record its path and revision if available,
    inspect its artwork and preserve its canvas dimensions, orientation and print settings.
 
-2. Use ChatGPT image generation to create the full updated artwork based on the original
-   and the recommendation above. Apply the requested changes to the existing design while
-   keeping its subject, event and collector identity. Use this project's approved Sports Cave
-   Collector Series references for typography, colour, depth, and visual hierarchy. Keep
-   athletes recognisable and realistic, using authentic reference photography and preserving
-   face, anatomy, uniform, team details and era. Preserve verified signatures, logos, plaque
-   and edition details; do not invent them. Generate flat artwork, without a frame, wall or
-   room mockup. Check the result against the original and recommendation for accuracy,
-   readability, composition and realistic subjects. Correct visible issues before saving.
+2. Diagnose the artwork and choose a creative direction.
+   Treat the refresh recommendation as a hypothesis. Inspect the verified original artwork
+   for collector appeal, subject hierarchy, photographic integration, typography and
+   thumbnail recognition. Briefly identify its three biggest weaknesses with visual evidence.
+   Describe any storefront mockup or listing presentation issues separately. State the stronger
+   creative direction and which weaknesses it addresses, then execute it.
 
-3. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
+3. Use ChatGPT image generation to create a full upgraded flat artwork. Use the project's
+   approved Sports Cave Collector Series references and deliver the artwork itself without a
+   frame, wall or room. This refresh explicitly overrides the project's "change only the
+   specified element" rule for composition, scale and placement of existing subjects,
+   typography, effects, background, border and spacing. Rebuild those elements where the
+   diagnosis supports it. Keep elements that already work.
+
+   Preserve each athlete's authentic identity, facial features, expression, anatomy, pose,
+   uniform, team details, era and sporting story. Keep faces realistic and free of warping.
+   Preserve verified signatures and logos, and reuse the exact official plaque and edition
+   assets from the source. Keep the original canvas and print settings. Where generation
+   changes photographic details, restore the authentic source imagery with precise masking
+   and natural blending. Match edges, lighting and grain to the composition. Reject rectangular
+   source overlays, visible seams, ghosting and abrupt cutoffs.
+
+4. Before saving, compare the original and refresh side by side at matching display sizes,
+   first full-size and then at thumbnail size. Check facial features and compositing at full
+   resolution. Require a clear, meaningful improvement in all three areas:
+   - Subject hierarchy and emotional impact.
+   - Composition and photographic integration.
+   - Typography, spacing and collector finish.
+   A larger name, tighter crop or brighter gold alone is insufficient. If the refresh is
+   weaker overall, falls short on any of the three criteria or has visible defects, revise it
+   and repeat the comparison before saving. Use needs_attention for unresolved issues and
+   record the specific problem in review_notes.
+
+5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
    Keep usable editable layers where available and place the generated artwork in a named
    layer. Save only in Dropbox Review: {REVIEW_FOLDER}/
    Use a new filename: [Original PSD stem] - REFRESH.psd. If it exists, choose an unused
    version suffix and use create-only mode. Do not overwrite, move, rename or delete any
    Dropbox file. Do not update the live Shopify listing or its PSD mapping.
 
-4. Verify that the new PSD opens and Dropbox confirms the new Review path. Display the
+6. Verify that the new PSD opens and Dropbox confirms the new Review path. Display the
    generated artwork in chat, report what changed, and provide the verified Dropbox path.
    If Dropbox access, visual inspection, image generation, PSD export or upload is
    unavailable, explain exactly what is blocked and report only what actually completed.
@@ -72,10 +95,12 @@ intended_collections (array of confirmed Shopify collection IDs or handles),
 upload_intent (existing_product_refresh), existing_shopify_product_id (the exact Shopify
 product ID above), dropbox_file_id, dropbox_revision, dropbox_path, and review_status.
 Record what improved in design_story. Use the verified original product's sport and existing
-collection mappings. Set review_status to ready_for_review only when the PSD is verified and
-the original product link and required metadata are confirmed. Otherwise use needs_attention
-and document missing fields or checks in review_notes. Use null or empty arrays for unknown
-values. Never substitute a similar product as the refresh target.
+collection mappings. Set review_status to ready_for_review only when the PSD is verified,
+the original product link and required metadata are confirmed, and the visual comparison
+passes with all visible defects resolved. Otherwise use needs_attention and document the
+specific unresolved artwork issues, missing fields or incomplete checks in review_notes.
+Use null or empty arrays for unknown values. Never substitute a similar product as the
+refresh target.
 
 This metadata prepares a later upload. Save it for review without publishing or changing
 Shopify. If the handoff cannot be saved or confirmed, preserve the artwork and report that
