@@ -78,6 +78,28 @@ _CREATE_DESIGN_COLLECTOR_FINISH = (
     "its retry limits and report any unresolved defects honestly.\n\n"
 )
 
+_CREATE_DESIGN_COLLECTOR_BACKGROUND = (
+    "**SPORTS CAVE COLLECTOR BACKGROUND — BOTH GENERATIONS**\n\n"
+    "Transform the photographic environment into a distinctive, dark Sports Cave collector "
+    "backdrop. Keep the source setting’s recognisable structure, perspective and sporting "
+    "context visible. Reduce its brightness, saturation and distracting detail so it reads as "
+    "subtle atmosphere with believable depth.\n\n"
+    "Build a restrained charcoal-and-black treatment with soft tonal gradients, fine material "
+    "texture and low-contrast abstract patterns informed by the team, sport or era. Choose "
+    "only treatments that suit this artwork. Keep meaningful team-colour accents controlled. "
+    "Subdue bright turf, crowds, signage and advertising while keeping the original setting "
+    "quietly visible beneath the treatment. Avoid repeating logos, obvious wallpaper patterns, "
+    "heavy grunge, smoke, sparks and decorative clutter.\n\n"
+    "Apply the treatment only to the background. Preserve the athlete’s authentic photographic "
+    "details, natural skin, uniform colours and equipment. Match the background lighting to "
+    "the subject and blend edges subtly. Keep the treatment’s darkening and texture off the "
+    "athlete.\n\n"
+    "When applying or refining the backdrop, preserve the successful composition, subject "
+    "scale, title, signature, official plaque and safe border placement. Judge the treatment "
+    "at thumbnail size. The subject reads first, the title second, and the background "
+    "supports both.\n\n"
+)
+
 
 def _story_without_meta_ad(text):
     lines = []
@@ -96,6 +118,21 @@ def _story_without_meta_ad(text):
 
 def _prompt(title, story, *, edit=None):
     context = _story_without_meta_ad(story)
+    if edit is None:
+        background_guide = _CREATE_DESIGN_COLLECTOR_BACKGROUND
+        first_background = "Use the collector background treatment above. "
+        second_background = (
+            "Carry forward the collector background treatment from Step 5. Refine it only where the "
+            "artwork benefits. Use the same guidance if the first pass was unavailable.\n\n"
+        )
+        background_effects = "and keep supporting effects within the collector background guidance above. "
+    else:
+        background_guide = second_background = ""
+        first_background = (
+            "Build a cohesive vintage background with subtle textures and details from the sport "
+            "or venue and restrained team colours. "
+        )
+        background_effects = "and keep glow, sparks, smoke and haze restrained. "
     workflow = (
         f"Sports Cave event: {title}\n\n"
         "**EXECUTION AUTHORITY — START NOW**\n"
@@ -349,9 +386,11 @@ def _prompt(title, story, *, edit=None):
         "the signature or fill in missing strokes. Omit it if the search and extraction checks "
         "produce no faithful result. Record the sources checked, extraction attempted, and exact "
         "reason it failed in REVIEW NOTES, and continue.\n\n"
+        f"{background_guide}"
         "Step 5. Use the image generation tool to generate the first complete Sports Cave "
-        "Collector Series artwork. Build a cohesive vintage background with subtle textures "
-        "and details from the sport or venue and restrained team colours. Keep vintage texture, "
+        "Collector Series artwork. "
+        f"{first_background}"
+        "Keep vintage texture, "
         "grain, distressing and sharpening effects off the athlete. Integrate the original "
         "hero photo through matching light, colour, and depth while preserving the athlete’s face, "
         "anatomy, pose, and uniform. Keep any verified signature as a separate asset and show the "
@@ -404,6 +443,7 @@ def _prompt(title, story, *, edit=None):
         "\n"
         "Use the visual guidance below to solve specific weaknesses while keeping the strengths locked in 8A.\n"
         "\n"
+        f"{second_background}"
         "Give fans a specific reason to display the artwork. Make the sporting moment, rivalry, "
         "era, team identity or personal legacy immediately recognisable. Use the strongest original "
         "photograph to establish the subject and story. Add supporting imagery only when it adds "
@@ -428,7 +468,8 @@ def _prompt(title, story, *, edit=None):
         "Use deep black, charcoal and warm white as the foundation, with restrained gold for "
         "titles, fine borders and small dividers. Preserve meaningful colours in uniforms, flags, "
         "vehicle liveries and equipment. Match the background to the subject's lighting and "
-        "perspective. Use natural contact shadows and keep glow, sparks, smoke and haze restrained. "
+        "perspective. Use natural contact shadows "
+        f"{background_effects}"
         "Choose backgrounds that convey setting, era or emotion. Keep working gold lines, colour accents "
         "and other effects when they serve this composition. Add them only when they improve the artwork.\n"
         "\n"
