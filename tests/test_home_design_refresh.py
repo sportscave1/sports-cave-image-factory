@@ -32,6 +32,9 @@ def test_home_handoff_commissions_two_new_artwork_passes():
     assert 'original editable edition-number layer' in prompt
     assert COLLECTOR_ASSET_PLACEMENT in prompt
     assert REVIEW_REPLACEMENT_RULE in prompt
+    assert 'Missing or stale JSON alone must not block replacement.' in prompt
+    assert 'Pending cleanup alone does not change an otherwise verified artwork' in prompt
+    assert 'update the exact JSON\n   revision to ready_for_review before resuming' in prompt
 
 
 def test_recommendation_source_supplies_editorial_guidance_with_or_without_traffic(monkeypatch):

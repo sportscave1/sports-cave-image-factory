@@ -47,6 +47,32 @@ def test_folder_reaches_last_cursor_and_uses_listed_sidecars(monkeypatch):
     details.assert_called_once_with('fixture', artwork, (handoff, legacy))
 
 
+def test_folder_shows_refresh_staging_with_cleanup_pending(monkeypatch):
+    staged = source('staged', 'Andrew Johns - REFRESH - STAGING - run.psd')
+    sidecar = source('json', 'Andrew Johns - REFRESH - STAGING - run.upload.json', root=REVIEW_METADATA_FOLDER)
+    trial = source('trial', 'Andrew Johns - TRIAL.psd')
+    ordinary_staging = source('edit', 'Andrew Johns - EDIT-exact - STAGING.psd')
+    folder = {'.tag': 'folder', 'path_display': REVIEW_METADATA_FOLDER}
+    value = dict(upload_intent='existing_product_refresh', existing_shopify_product_id='123',
+                 design_title='Andrew Johns', design_story='Career tribute', sport='Rugby League',
+                 intended_collections=['rugby-league'], review_status='ready_for_review', cleanup_status='pending',
+                 dropbox_file_id=staged['id'], dropbox_revision=staged['rev'], dropbox_path=staged['path_display'])
+    raw = json.dumps(value).encode()
+    sidecar['size'] = len(raw)
+    provider = SimpleNamespace(token='fixture', api=SimpleNamespace(
+        list_folder_page=lambda token, path, **_: dict(
+            entries=[sidecar] if path == REVIEW_METADATA_FOLDER else [staged, trial, ordinary_staging, folder]),
+        get_file_response=lambda *_: (sidecar, SimpleNamespace(iter_content=lambda **_: iter([raw]), close=lambda: None)),
+    ))
+    monkeypatch.setattr(api, 'Dropbox', lambda: provider)
+
+    [(artwork, details, reason, editing)], _ = gallery._folder.__wrapped__('staged-refresh-test')
+
+    assert artwork == staged and not reason and not editing
+    assert details['review_status'] == 'ready_for_review' and details['cleanup_status'] == 'pending'
+    assert not gallery.final_psd(staged)
+
+
 def test_delete_review_design_moves_only_exact_psd_and_matching_sidecar():
     from design_review_delete import delete_design
 
@@ -106,6 +132,8 @@ def test_delete_review_design_rejects_out_of_scope_or_stale_items(record):
     ({'Product Uploads'}, source('a', 'Final.psd'), 'exact', 403),
     ({'Files', 'Product Uploads'}, source('a', 'Final.psd'), 'stale', 409),
     ({'Files', 'Product Uploads'}, source('a', 'Final - TRIAL.psd'), 'exact', 409),
+    ({'Files', 'Product Uploads'}, source('a', 'Final - EDIT-exact - STAGING.psd'), 'exact', 409),
+    ({'Files', 'Product Uploads'}, source('a', 'Final - REFRESH - STAGING - run.psd'), 'exact', 200),
     ({'Files', 'Product Uploads'}, source('a', 'Final.psd', root='/elsewhere'), 'exact', 409),
 ])
 def test_thumbnail_checks_access_and_exact_review_revision(monkeypatch, permissions, record, revision, expected):
@@ -173,6 +201,16 @@ def test_edit_endpoint_returns_full_prompt_for_exact_dropbox_source(monkeypatch)
     assert record['path_display'] in prompt and record['id'] in prompt
     assert '"rev": "exact"' in prompt and '**8F. Replace the original and return it to review**' in prompt
     assert stale.status_code == 409
+
+
+def test_refresh_staging_cannot_start_an_edit_prompt(monkeypatch):
+    staged = source('staged', 'Final - REFRESH - STAGING - run.psd')
+    monkeypatch.setattr(api, '_gallery_review_user', AsyncMock())
+    monkeypatch.setattr(api, 'Dropbox', lambda: SimpleNamespace(metadata_if_present=lambda _: staged))
+    app = Starlette(routes=[Route('/api/design-review/edit-prompt', api.review_edit_prompt)])
+    with TestClient(app) as client:
+        response = client.get('/api/design-review/edit-prompt', params={'id': staged['id'], 'rev': staged['rev']})
+    assert response.status_code == 409
 
 
 def test_missing_sport_is_saved_for_the_exact_revision(env, monkeypatch):

@@ -426,9 +426,9 @@ async def _review_user(request):
     return user
 
 
-def _review_metadata(request, provider):
+def _review_metadata(request, provider, *, allow_refresh_staging=False):
     from product_upload_dropbox import REVIEW, approved, within
-    from design_review_metadata import is_working_file
+    from design_review_metadata import is_refresh_staging, is_working_file
 
     file_id, revision = (request.query_params.get(key, '') for key in ('id', 'rev'))
     if not file_id.startswith('id:') or not revision:
@@ -436,7 +436,8 @@ def _review_metadata(request, provider):
     metadata = provider.metadata_if_present(file_id)
     if (not metadata or not approved(metadata) or metadata['id'] != file_id
             or not within(metadata['path_display'], REVIEW) or metadata['rev'] != revision
-            or is_working_file(metadata['name'])):
+            or (is_working_file(metadata['name'])
+                and not (allow_refresh_staging and is_refresh_staging(metadata['name'])))):
         raise ValueError('The selected Review PSD changed. Choose its current revision.')
     return metadata
 
@@ -458,7 +459,7 @@ async def review_thumbnail(request):
 
         def thumbnail():
             provider = Dropbox()
-            metadata = _review_metadata(request, provider)
+            metadata = _review_metadata(request, provider, allow_refresh_staging=True)
             return provider.api.get_psd_thumbnail_bytes(provider.token, metadata['id'], revision=metadata['rev'])
 
         data = await run_in_threadpool(thumbnail)

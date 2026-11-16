@@ -166,7 +166,13 @@ def read_gallery_handoff(provider, source, candidates):
     if not record:
         return None
     data, _, details = record
-    return dict(details, title_sync_pending=True) if data and isinstance(data.get(TITLE_RENAME), dict) else details
+    if data and isinstance(data.get(TITLE_RENAME), dict):
+        details['title_sync_pending'] = True
+    if data and details.get('upload_intent') == 'existing_product_refresh':
+        cleanup = data.get('cleanup_status')
+        if cleanup in ('pending', 'complete'):
+            details['cleanup_status'] = cleanup
+    return details
 
 
 def review_key(source):
@@ -180,6 +186,13 @@ def is_trial(name):
 def is_working_file(name):
     return is_trial(name) or bool(re.search(
         r'\b(?:staging|backup)\b|\.sports-cave-replaced-', name.rsplit('.', 1)[0], re.IGNORECASE
+    ))
+
+
+def is_refresh_staging(name):
+    return bool(re.search(
+        r' - REFRESH(?: - v[0-9]+)?(?: - EDIT-[^ ]+)? - STAGING(?: - .+)?\.psd\Z',
+        name, re.IGNORECASE,
     ))
 
 

@@ -130,7 +130,7 @@ this JSON subfolder if needed and keep the staged PSD directly in Review.
 Include design_title, design_story, sport, league, teams and athletes (arrays),
 intended_collections (array of confirmed Shopify collection IDs or handles),
 upload_intent (existing_product_refresh), existing_shopify_product_id (the exact Shopify
-product ID above), dropbox_file_id, dropbox_revision, dropbox_path, and review_status.
+product ID above), dropbox_file_id, dropbox_revision, dropbox_path, review_status and cleanup_status.
 Record what improved in design_story. Use the verified original product's sport and existing
 collection mappings. Set review_status to ready_for_review only when the PSD is verified,
 the original product link and required metadata are confirmed, and the visual comparison

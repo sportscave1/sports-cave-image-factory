@@ -10,7 +10,7 @@ import logging
 import streamlit as st
 
 from design_review_metadata import (
-    handoff_paths, is_working_file, legacy_metadata, read_gallery_handoff, read_handoff,
+    handoff_paths, is_refresh_staging, is_working_file, legacy_metadata, read_gallery_handoff, read_handoff,
     resolve_review_sport, review_key,
 )
 from product_upload_dropbox import REVIEW, approved, select, within
@@ -258,7 +258,8 @@ def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
     if pending:
         details = {key: value for key, value in details.items() if key != 'title_sync_pending'}
     title = details.get('design_name')
-    if sidecars and title and not reason and not has_edit_files:
+    if (sidecars and title and not reason and not has_edit_files
+            and not is_refresh_staging(source['name']) and details.get('cleanup_status') != 'pending'):
         from design_review_title import resume_review_title, sync_review_title, title_destination, unclaimed_artwork
         try:
             if pending:
@@ -283,6 +284,8 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         key = str(row['id'])
     job = JOBS.snapshot(key, user['id'], 'generate') if row else None
     title = details.get('design_name') or PurePosixPath(source['name']).stem
+    staged = is_refresh_staging(source['name'])
+    cleanup_pending = staged or details.get('cleanup_status') == 'pending'
     current = status(row, job, details)
     if editing and current in ('Ready to publish', 'In review'):
         current = 'Editing'
@@ -292,19 +295,23 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         resumable = current in ('Generating mockups', 'Mockups ready', 'Ready for Shopify handoff')
         decision = ((row or {}).get('data', {}).get('design_review') or {}).get('decision')
         chosen_sport = (row or {}).get('data', {}).get('review_sport')
-        needs_sport = not (published or editing or resumable or chosen_sport or details.get('sport'))
-        if selectable:
+        needs_sport = not (published or editing or staged or resumable or chosen_sport or details.get('sport'))
+        if selectable and not staged:
             check, name, edit_button, publish = st.columns((1, 4, 1, 2), vertical_alignment='center', gap='small')
             check.checkbox(f'Select {title} for deletion', key=_selection_key(source), label_visibility='collapsed')
         else:
             name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
         label = 'Needs attention' if reason and current in ('In review', 'Ready to publish') else current
+        if cleanup_pending:
+            if label == 'Ready to publish' and staged:
+                label = 'Ready for review'
+            label = f'{label} · Cleanup pending'
         name.html(f'<h3 class="sc-review-title" title="{escape(title, quote=True)}">{escape(title)}</h3>'
                   + (f'<div class="sc-review-status" title="{escape(note, quote=True)}">{escape(label)}</div>'
-                     if reason or current not in ('In review', 'Ready to publish') else ''))
+                     if cleanup_pending or reason or current not in ('In review', 'Ready to publish') else ''))
         with edit_button:
-            if resumable:
+            if resumable or staged:
                 st.button('Edit', key=key+'-edit', disabled=True)
             else:
                 _edit_link(source, title)
@@ -314,7 +321,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             publish.link_button('Open listing', row['data']['product_url'], key=key+'-shopify')
         else:
             clicked = publish.button('Publish now', key=key+'-approved', type='primary',
-                                     disabled=published or editing, help=f'Publish {title}')
+                                     disabled=published or editing or staged, help=f'Publish {title}')
         if clicked and needs_sport:
             st.session_state[key+'-needs-sport'] = True
         if sport_picker is not None and st.session_state.get(key+'-needs-sport'):
@@ -341,7 +348,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 st.session_state['_design_review_upload'] = key
                 st.query_params['upload'] = key
                 st.rerun()
-        if show_replacement and editing and not resumable:
+        if show_replacement and editing and not resumable and not staged:
             _staged_replacement(user, source, key)
             _keep_original(user, source, key)
 
@@ -387,6 +394,8 @@ def _folder(actor_id):
                 handoff_folder_found = True
         elif entry.get('.tag') == 'file':
             name = entry.get('name', '')
+            if is_refresh_staging(name) and entry.get('rev') and approved(entry):
+                entries[entry['id']] = entry
             if name.lower().endswith('.upload.json') and entry.get('path_display'):
                 sidecars[entry['path_display'].casefold()] = entry
             stem, marked, edit = name.rpartition(' - EDIT-')
@@ -482,7 +491,8 @@ def _gallery(app, user):
     selectable = view == 'Review' and can_delete_files(user)
     if selectable:
         selected = [(entry, details.get('design_name') or PurePosixPath(entry['name']).stem)
-                    for entry, details, _, _ in matched if st.session_state.get(_selection_key(entry))]
+                    for entry, details, _, _ in matched
+                    if final_psd(entry) and st.session_state.get(_selection_key(entry))]
         if selected and trash.button('Delete selected', icon=':material/delete:', key='design-review-trash',
                                      help=f'Delete {len(selected)} selected from Dropbox Review'):
             _confirm_delete(user, selected)

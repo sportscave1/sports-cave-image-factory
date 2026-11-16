@@ -269,7 +269,7 @@ def build_edit_prompt(workflow, source, details):
             'with design_title, design_story, the verified sport, league, teams, athletes and '
             'intended_collections, upload_intent existing_product_refresh, the exact '
             'existing_shopify_product_id, and the staged dropbox_file_id, dropbox_revision and '
-            'dropbox_path. Set review_status to ready_for_review only after all '
+            'dropbox_path, review_status and cleanup_status. Set review_status to ready_for_review only after all '
             'required visual, PSD and metadata checks pass. Otherwise record the specific '
             'defects or pending checks in review_notes and use needs_attention.\n\n'
             f'{REVIEW_REPLACEMENT_RULE}\n'
