@@ -16,16 +16,32 @@ TEMPLATE = Path(__file__).parent / "components" / "morning_brief_actions.html"
 META_AD_HEADING = re.compile(r"^(?:recommended|suggested)\b.*\bmeta\b.*\bad\b", re.I)
 META_AD_COPY = re.compile(r"^(?:headline|primary text|description|cta|call to action)\s*:", re.I)
 
+_BORDER_STYLE_GUIDANCE = (
+    "Choose a border that suits the artwork. Restrained antique gold, fine double lines or "
+    "subtle heritage corners can work where they add to the design. A simple, elegant border "
+    "is equally suitable. Avoid heavy ornament and vary the treatment across designs."
+)
+
 _CREATE_DESIGN_BORDER_RULES = (
+    "**Border and print safety for both artwork passes and the final layout**\n\n"
+    "Leave an even framing-safe margin equal to 3% of the canvas’s shorter dimension on all "
+    "four sides. Measure from the canvas edge to the outermost decorative border detail, "
+    "including corner ornaments. On the 2835 × 2004 master, use 60 px.\n\n"
+    f"{_BORDER_STYLE_GUIDANCE}\n\n"
+    "Extend the background to every canvas edge. Adjust only the border and its corner details "
+    "to achieve the margin. Preserve the existing artwork scale and layout. Verify the margin "
+    "after generation and correct it during final assembly.\n\n"
+    "This is a framing-safe margin. Apply any printer-required bleed separately.\n\n"
+)
+
+_EDIT_DESIGN_BORDER_RULES = (
     "**Border and print safety for both artwork passes and the final layout**\n\n"
     "Target an even border inset of 2% of the canvas’s shorter dimension. Calculate it once "
     "and use the same pixel distance on all four sides. Keep the margin modest so the subject "
     "stays large and impactful. Extend the background fully to the canvas edges. Keep the "
     "decorative border and all important subject details, text, signatures and the official "
     "badge inside the framing-safe area. Use only expendable background in the outer margin.\n\n"
-    "Choose a border that suits the artwork. Restrained antique gold, fine double lines or "
-    "subtle heritage corners can work where they add to the design. A simple, elegant border "
-    "is equally suitable. Avoid heavy ornament and vary the treatment across designs. "
+    f"{_BORDER_STYLE_GUIDANCE} "
     "Preserve the existing composition and subject scale wherever possible. Make only the "
     "minimum adjustments needed for safe spacing.\n\n"
     "Treat the inset as a framing safety margin. Determine print bleed separately. Follow "
@@ -33,6 +49,33 @@ _CREATE_DESIGN_BORDER_RULES = (
     "requirements override the default inset. If they cannot be checked, use the default, "
     "record print safety as unverified in REVIEW NOTES and continue the workflow. Claim "
     "verified print safety only after checking the artwork against those requirements.\n\n"
+)
+
+_CREATE_DESIGN_COLLECTOR_FINISH = (
+    "**COLLECTOR FINISH — APPLY WITHIN THE EXISTING REVIEW**\n\n"
+    "Use these criteria within the existing image selection, generation and correction steps. "
+    "Follow the same execution order, retry limits, save requirements and continuation rules.\n\n"
+    "Judge the actual artwork. Identify its three most visible weaknesses and address them "
+    "within the existing correction allowance. Preserve successful elements and apply only "
+    "improvements relevant to this design.\n\n"
+    "- **Photographic consistency.** Match sharpness, texture, lighting and colour across the "
+    "face, body, uniform and equipment. Blend a restored face naturally into the surrounding "
+    "helmet, neck and body. Check for visible patches even when using original pixels.\n"
+    "- **Complete, believable action.** Prefer sources that show the important limbs and "
+    "equipment. Compose deliberately around any source crop. Do not disguise missing anatomy "
+    "with smoke, darkness or excessive spray. Never invent missing parts.\n"
+    "- **Subject-first hierarchy.** Make the athlete, vehicle or meaningful interaction read "
+    "first at thumbnail size. Adjust title scale, line breaks and spacing if text competes "
+    "with the subject. Avoid oversized filler words. Choose a layout that suits this design.\n"
+    "- **Purposeful placement.** Arrange the title, signature and official badge deliberately. "
+    "Place signatures against quiet, contrasting space and preserve their actual strokes. "
+    "Keep collector details subordinate and readable.\n"
+    "- **Believable environment.** Match the sport’s real surface, perspective and lighting. "
+    "Reduce reflections, artificial glow and decorative effects that weaken realism or compete "
+    "with the subject.\n\n"
+    "Compare each correction with the strongest previous version at full size and thumbnail "
+    "size. Keep it only when the whole artwork improves. Complete the existing workflow within "
+    "its retry limits and report any unresolved defects honestly.\n\n"
 )
 
 
@@ -117,6 +160,7 @@ def _prompt(title, story, *, edit=None):
         "adapt the composition to the available crop, or regenerate. Preserve the verified event "
         "when the design commemorates one. Do not invent missing anatomy.\n"
         "\n"
+        f"{_CREATE_DESIGN_COLLECTOR_FINISH if edit is None else ''}"
         "**The first Dropbox save is a review checkpoint, not final production approval.** After "
         "generating and inspecting the first complete artwork, save it on a copy of the master PSD "
         "in the specified review folder. Document remaining concerns in a hidden `REVIEW NOTES` "
@@ -287,7 +331,7 @@ def _prompt(title, story, *, edit=None):
         "for the original badge and editable number to be restored from the master.\n\n"
         "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
         "a strong focal point and clear visual hierarchy.\n\n"
-        f"{_CREATE_DESIGN_BORDER_RULES}"
+        f"{_CREATE_DESIGN_BORDER_RULES if edit is None else _EDIT_DESIGN_BORDER_RULES}"
         "Step 4. For each featured person, search both web and image results. Check at least "
         "three distinct credible sources when accessible before skipping a signature. Use a clear, "
         "verified example and place it on a separate layer where it fits naturally with the artwork "
@@ -433,7 +477,8 @@ def _prompt(title, story, *, edit=None):
         "After every new generation or correction, compare it side by side with the strongest previous "
         "version at full size and thumbnail size. Assess subject authenticity, emotional impact, "
         "composition, integration, lighting and depth, typography and sporting context. Keep a change "
-        "only if it corrects a weakness and the whole artwork remains as strong or becomes stronger. "
+        "only if it corrects a weakness and the whole artwork "
+        f"{'improves' if edit is None else 'remains as strong or becomes stronger'}. "
         "Reject a weaker version even if one detail improves. Return to the stronger version as the "
         "working master for any remaining targeted corrections. Never regenerate repeatedly from a "
         "weaker result. If the first artwork still wins, use it. Record unresolved defects in REVIEW "
