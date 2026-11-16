@@ -2,8 +2,10 @@
 from product_upload_intake import mode
 
 
-def build(selected, filename='', *, source=None, metadata=None, app_module=None, load=None):
+def build(selected, filename='', *, source=None, metadata=None, app_module=None, load=None, automatic=False):
     mode(selected)
+    if automatic and selected == 'DRAFT':
+        selected = 'LIVE'
     smart = selected == 'SMART'
     details = metadata or {}
     if smart:
@@ -34,7 +36,7 @@ def build(selected, filename='', *, source=None, metadata=None, app_module=None,
         update_existing=cfg['update_existing'], publication_mode=cfg['publication_mode'])
     baseline = app.apply_product_upload_prompt_updates(default, legacy_metadata,
         update_existing=cfg['update_existing'], publication_mode=cfg['publication_mode'])
-    prompt = compact(selected, filename, source, details, template_additions(patched, baseline))
+    prompt = compact(selected, filename, source, details, template_additions(patched, baseline), automatic=automatic)
     if not smart:
         return prompt
     import json

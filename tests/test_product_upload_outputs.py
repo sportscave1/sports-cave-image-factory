@@ -113,7 +113,15 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
                  if item['relative_path'] == core[0]['archive_name'])
     assert black['id'] in prompt and black['path_display'] in prompt
     assert 'Exact original lifestyle prompt.' in prompt and 'lossless WebP, method 1' in prompt
-    assert 'Create as DRAFT' in prompt and 'Add / Attach PSD' in prompt
+    from psd_directory import REVIEW_FOLDER, ROOT
+    assert 'Upload to Live' in prompt and 'Create as DRAFT' not in prompt
+    assert 'Use ACTIVE from the first Shopify create call' in prompt
+    assert 'Online Store publication confirmed' in prompt
+    mapping = prompt.split('STEP 5 — VERIFY EDITION OPS AND ATTACH THE ORIGINAL PSD', 1)[1]
+    assert mapping.index('Wait for the published product') < mapping.index('Move that original master') < mapping.index('Open Add / Attach PSD')
+    assert all(value in mapping for value in (REVIEW_FOLDER, ROOT, row['data']['source']['id'],
+                                               row['data']['source']['rev'], row['data']['source']['content_hash']))
+    assert 'use Add / Attach PSD manually' not in prompt
     assert 'https://www.dropbox.com/home/' in prompt
     assert 'STEP 1 DOWNLOAD EXCEPTION' in prompt
     assert "pasted.txt" in prompt and 'Leave the other four WebPs in Dropbox' in prompt

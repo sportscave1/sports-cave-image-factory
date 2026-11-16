@@ -186,7 +186,7 @@ def sport_requirements(metadata):
                 collection_handles=list(sport_collection_handles(sport)) if sport else [])
 
 
-def build(selected, filename, source, metadata, additions=None):
+def build(selected, filename, source, metadata, additions=None, *, automatic=False):
     from product_upload_intake import MODES
     from product_upload_source import prompt_section
     m = dict(metadata or {})
@@ -319,15 +319,19 @@ def build(selected, filename, source, metadata, additions=None):
         targets = ('the saved channel/Market selection: ' + encoded(m['publication_settings']) if m.get('publication_settings') else 'all enabled normal wall-art channels: Online Store, Facebook & Instagram, Google & YouTube, Shop, Pinterest and Linktree where enabled, and applicable active Markets/catalogs')
         publication = ('Create/configure the product, then set ACTIVE and publish the product AND every selected collection to ' + targets + '. Discover their current publication IDs; apply product availability, including inherited channel availability where a catalog has no publication. Reuse existing publications. Preserve shared collection publications and global Markets, currencies and price lists. ACTIVE alone is not proof of publication. Report disabled/absent channels as not applicable and unsupported required channel/Market operations as unfinished. Downstream Meta catalogue propagation is separate; do not edit ads.')
     else:
-        publication = ('Never create a product in Update Existing mode. Use the saved product ID/handle or one exact matching product; resolve an ambiguous target for that step only. Preserve existing status and publication state (Active stays Active, Draft stays Draft); an Archived product needs explicit edit authorization. ' +
+        update_status = ('The exact existing product must be ACTIVE and published to Online Store before continuing. An Archived product needs explicit edit authorization. ' if automatic else
+                         'Preserve existing status and publication state (Active stays Active, Draft stays Draft); an Archived product needs explicit edit authorization. ')
+        publication = ('Never create a product in Update Existing mode. Use the saved product ID/handle or one exact matching product; resolve an ambiguous target for that step only. ' + update_status +
             ('Apply the selected full standardisation within the requested copy/collection scope and existing-price protection; keep quantities and unrelated settings.' if full else
              'Change only replacement images, gallery order, alt text and frame-image mapping, plus required additive tags. Other product/business settings remain unchanged.'))
     sections.append('7. SELECTED-MODE PUBLICATION OR UPDATE\n' + publication +
         ('\nExplicitly selected publication changes: ' + encoded(m['publication_settings']) + '. Apply only these requested changes.' if is_update and m.get('publication_settings') else '') +
         '\nRetain completed work on partial failure; retry the same product. Incidental or unsupported checks do not trigger rollback to Draft or unpublishing.' + extra(7))
     edition_result = (' Pending edition setup alone does not block Live publication. An unavailable storefront message is an observation, not an instruction to disable the product. For a published product awaiting setup report PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING; do not claim it is ready to purchase.' if selected == 'LIVE' else ' Preserve existing edition state; do not write setup-pending purchase restrictions.')
+    mapping = ('After verifying Online Store publication, continue directly to Step 5 for the same product and original PSD. ' if automatic else
+               'Then return to Product Uploads → Mapping to open Edition Ops. Find the product and use Add / Attach PSD manually. Eligible products sync automatically without a PSD; if not found, report sync pending. Mapping must not create another product or move files. ')
     sections.append('8. COMPLETION CHECK AND RETURN TO MAPPING\n'
         'Read the resulting product once to check the requested copy/SEO/classification, actual saved image count/order, 16 variants and permitted prices/SKUs/inventory, frame mappings, tags/collections and selected publication result. Report completed work and specific unfinished items without claiming unverified success; no separate preflight report or QA matrix.\n'
-        'Return exact product title, admin URL, stable product ID/handle and a brief result. Then return to Product Uploads → Mapping to open Edition Ops. Find the product and use Add / Attach PSD manually. Eligible products sync automatically without a PSD; if not found, report sync pending. Mapping must not create another product or move files.\n'
+        'Return exact product title, admin URL, stable product ID/handle and a brief result. ' + mapping + '\n'
         'Publication and edition setup are separate. Leave edition numbers, allocations, runs, counters and history untouched.' + edition_result)
     return '\n\n'.join(sections)
