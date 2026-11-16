@@ -9,13 +9,15 @@
     const message = event.data;
     if (event.source !== window || event.origin !== location.origin ||
         message?.channel !== channel || message.direction !== 'request' ||
-        !['health', 'start'].includes(message.action)) return;
+        !['health', 'start', 'pair'].includes(message.action)) return;
     const frame = window.frameElement;
-    if (!frame || (message.action === 'start' && frame.id !== 'sc-product-upload-copy')) return;
+    if (!frame || (message.action === 'start' && frame.id !== 'sc-product-upload-copy') ||
+        (message.action === 'pair' && frame.id !== 'sc-upload-companion-health')) return;
     let result;
     try {
       result = await chrome.runtime.sendMessage({
         type: 'os:' + message.action, receipt: message.receipt, prompt: message.prompt,
+        staffJob: message.staffJob, token: message.token,
       });
     } catch { return; }
     window.postMessage({channel, direction: 'response', id: message.id, result}, location.origin);

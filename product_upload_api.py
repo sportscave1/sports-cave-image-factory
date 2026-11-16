@@ -517,7 +517,9 @@ async def review_source(request):
         return failure(error)
 
 
-ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+from product_upload_staff_queue import ROUTES as STAFF_QUEUE_ROUTES
+
+ROUTES = (*RENDER_ROUTES, *STAFF_QUEUE_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
           ('/product-upload-native', clipboard_page, ('GET',)),
           ('/product-upload-native.js', clipboard_page, ('GET',)),
           ('/api/product-uploads/clipboard-launch', clipboard_launch, ('POST',)),

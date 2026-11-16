@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "navigation-controls-v1";
+  const CONTROLLER_VERSION = "navigation-controls-v2";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -196,6 +196,30 @@
       width: 100%;
     }
     #sc-os-posting-slot {width:250px;height:40px;margin-right:8px;}
+    #sc-os-staff-uploads {position:relative;min-width:0;margin-right:12px;color:#f8edcf;}
+    #sc-os-staff-uploads[hidden] {display:none;}
+    #sc-os-staff-upload-summary {
+      width:clamp(135px,18vw,285px);padding:5px 10px;border:1px solid #63512d;
+      border-radius:8px;background:#211c15;cursor:pointer;list-style:none;
+    }
+    #sc-os-staff-upload-summary::-webkit-details-marker {display:none;}
+    #sc-os-staff-upload-title,#sc-os-staff-upload-stage {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    #sc-os-staff-upload-title {font-size:12px;font-weight:700;}
+    #sc-os-staff-upload-stage {font-size:11px;}
+    #sc-os-staff-upload-meter {display:block;width:100%;height:5px;margin-top:4px;accent-color:#d3a94e;}
+    #sc-os-staff-uploads[data-stage="7"] summary {border-color:#c87872;color:#ffd3cb;}
+    #sc-os-staff-uploads[data-stage="6"] summary {border-color:#71936d;color:#cef1c9;}
+    #sc-os-staff-upload-list {
+      position:absolute;top:calc(100% + 8px);right:0;width:min(360px,90vw);max-height:60vh;overflow:auto;
+      padding:12px 16px;background:#191612;border:1px solid #63512d;border-radius:8px;font-size:13px;
+    }
+    #sc-os-staff-upload-list article+article {margin-top:8px;padding-top:8px;border-top:1px solid #63512d;}
+    #sc-os-staff-upload-list p {margin:3px 0;overflow-wrap:anywhere;}
+    #sc-os-staff-upload-list a {color:#f3ce7e;}
+    #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-search-wrap {justify-self:start;max-width:500px;}
+    #${ROOT_ID}.sc-has-staff-upload.sc-has-posting {
+      grid-template-columns:var(--sc-sidebar-width) auto auto minmax(0,1fr) auto auto auto;
+    }
     #sc-os-posting-slot[hidden] {display:none;}
     #${ROOT_ID}.sc-has-posting .sc-os-topbar-search-wrap {justify-self:start;max-width:620px;}
     @media(max-width:1100px) {#sc-os-posting-slot {width:180px;}}
@@ -774,6 +798,13 @@
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
       }
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:100px;}
+      #${ROOT_ID}.sc-has-staff-upload, #${ROOT_ID}.sc-has-staff-upload.sc-has-posting {
+        grid-template-columns:minmax(0, 1fr) auto auto auto auto;
+        grid-template-rows:56px 44px;
+      }
+      #sc-os-staff-uploads {grid-column:1 / -1;grid-row:2;justify-self:stretch;margin:0 8px;}
+      #sc-os-staff-upload-summary {width:100%;box-sizing:border-box;}
       #${LOADER_ID} { left: 0; }
       .sc-os-topbar-brand {
         gap: 4px;
@@ -867,6 +898,12 @@
       }
       #sc-os-files { grid-column: 2; grid-row: 2; justify-self: end; }
       #sc-os-posting-slot {grid-column:2;grid-row:2;justify-self:start;width:120px;}
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:144px!important;}
+      #${ROOT_ID}.sc-has-staff-upload, #${ROOT_ID}.sc-has-staff-upload.sc-has-posting {
+        grid-template-columns:minmax(76px,1fr) auto;
+        grid-template-rows:56px 44px 44px;
+      }
+      #sc-os-staff-uploads {grid-row:3;}
     }
     @media (max-width: 430px) {
       #sc-os-profile { display: none; }
@@ -910,6 +947,13 @@
       <div id="sc-os-search-results" class="sc-os-topbar-panel" role="listbox" aria-label="Global search results" hidden></div>
     </div>
     <div id="sc-os-posting-slot" aria-hidden="true" hidden></div>
+    <details id="sc-os-staff-uploads" hidden>
+      <summary id="sc-os-staff-upload-summary">
+        <span id="sc-os-staff-upload-title"></span><span id="sc-os-staff-upload-stage" role="status"></span>
+        <progress id="sc-os-staff-upload-meter" max="100" aria-label="Product upload progress"></progress>
+      </summary>
+      <div id="sc-os-staff-upload-list" aria-label="Your product uploads"></div>
+    </details>
     <div class="sc-os-topbar-actions">
       <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}</button>
       <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
@@ -981,6 +1025,71 @@
       }, delay);
       timers.add(timer);
       return timer;
+    };
+    let staffProgressStarted = false;
+    const staffProgress = root.querySelector("#sc-os-staff-uploads");
+    let lastStaffStatus = "";
+    const refreshStaffProgress = async () => {
+      try {
+        const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
+          credentials:"same-origin", cache:"no-store", signal:listenerController.signal,
+        });
+        if (!response.ok || listenerController.signal.aborted) return;
+        const status = await response.json();
+        if (listenerController.signal.aborted) return;
+        const jobs = status.jobs || [];
+        staffProgress.hidden = !jobs.length;
+        root.classList.toggle("sc-has-staff-upload", Boolean(jobs.length));
+        const serialized = JSON.stringify(status);
+        if (!jobs.length || serialized === lastStaffStatus) return;
+        lastStaffStatus = serialized;
+        const label = job => job.stage > 0 && job.stage < 6 && !status.online
+          ? job.label + " · desktop offline" : job.label;
+        const job = jobs[0];
+        staffProgress.dataset.stage = job.stage;
+        root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
+        root.querySelector("#sc-os-staff-upload-stage").textContent = label(job);
+        const meter = root.querySelector("#sc-os-staff-upload-meter");
+        if (job.stage === 0) meter.removeAttribute("value");
+        else meter.value = job.percent;
+        const list = root.querySelector("#sc-os-staff-upload-list");
+        list.replaceChildren(...jobs.map(item => {
+          const entry = doc.createElement("article");
+          const title = doc.createElement("strong");
+          title.textContent = item.title;
+          const progress = doc.createElement("p");
+          progress.textContent = label(item);
+          entry.append(title, progress);
+          if (item.detail) {
+            const detail = doc.createElement("p");
+            detail.textContent = item.detail;
+            entry.append(detail);
+          }
+          if (/^https:\/\//.test(item.storefront)) {
+            const link = doc.createElement("a");
+            link.href = item.storefront;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.textContent = "View live listing";
+            entry.append(link);
+          }
+          return entry;
+        }));
+        const stopped = jobs.find(item => item.stage === 7);
+        if (stopped) {
+          const errorKey = "sc-staff-upload-error:" + stopped.id;
+          try {
+            if (!parentWindow.sessionStorage.getItem(errorKey)) {
+              staffProgress.open = true;
+              parentWindow.sessionStorage.setItem(errorKey, "seen");
+            }
+          } catch (_error) {}
+        }
+      } catch (_error) {
+        // The next refresh keeps the latest confirmed state visible during connection loss.
+      } finally {
+        if (!listenerController.signal.aborted) later(refreshStaffProgress, 6000);
+      }
     };
     const state = {
       config: {},
@@ -3057,6 +3166,13 @@
         root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";
         root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
         filesButton.hidden = !state.config.filesEnabled;
+        if (state.config.staffUploadProgress && !staffProgressStarted) {
+          staffProgressStarted = true;
+          void refreshStaffProgress();
+        } else if (!state.config.staffUploadProgress) {
+          staffProgress.hidden = true;
+          root.classList.remove("sc-has-staff-upload");
+        }
         if (revisionChanged) {
           cancelPendingReads();
           state.notifications = null;

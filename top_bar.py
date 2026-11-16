@@ -110,6 +110,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
     )
     return {
         "appName": "Sports Cave OS",
+        "staffUploadProgress": 'Design Studio' in allowed_routes and not os_accounts.is_admin(user),
         "appSubtitle": "Operations System",
         "logoSrc": str(logo_src or ""),
         "currentRoute": str(current_route or ""),

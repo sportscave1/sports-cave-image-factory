@@ -7,6 +7,7 @@ const suppliedReceipt = /^[a-f0-9]{64}$/;
 const pending = new Map();
 const latest = 'uploadCompanionLast';
 let queue = Promise.resolve();
+importScripts('staff-queue.js');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const keyFor = id => 'upload:' + id;
 
@@ -25,6 +26,7 @@ async function run(id, prompt, job) {
     const tab = await chrome.tabs.create({url: project, active: true});
     job.tab = tab.id;
     if (!Number.isInteger(job.tab)) throw new Error();
+    if (job.staffJob) await rememberChatTab(job.staffJob, job.tab);
     const deadline = Date.now() + 18000;
     let ready;
     do {
@@ -54,11 +56,12 @@ async function run(id, prompt, job) {
   }
 }
 async function start(message) {
-  const {receipt, prompt} = message;
+  const {receipt, prompt, staffJob} = message;
   if (!suppliedReceipt.test(receipt || '') || !promptIsValid(prompt)) return {accepted:false};
+  if (staffJob && !await rememberStaffReceipt(staffJob, receipt, message.senderTab)) return {accepted:false};
   if (pending.has(receipt)) return {accepted:true};
   if (pending.size >= 4) return {accepted:true, busy:true};
-  const job = {tab:null, sending:false};
+  const job = {tab:null, sending:false, staffJob};
   pending.set(receipt, job);
   try {
     const key = keyFor(receipt);
@@ -113,9 +116,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let action;
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
+  } else if (message?.type === 'project:blocked' && sender.frameId === 0) {
+    action = recordChatBlock(sender, message.code);
   } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {
     if (message?.type === 'os:health') action = health(message.receipt);
-    if (message?.type === 'os:start') action = start(message).then(result => ({...result, version:chrome.runtime.getManifest().version}));
+    if (message?.type === 'os:start') action = start({...message, senderTab:sender.tab.id}).then(result => ({...result, version:chrome.runtime.getManifest().version}));
+    if (message?.type === 'os:pair') action = pairStaffQueue(message.token);
   }
   if (!action) return;
   action.then(reply, () => reply({error:true}));

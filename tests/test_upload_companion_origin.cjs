@@ -5,12 +5,17 @@ const vm = require('node:vm');
 
 async function main() {
   let onMessage;
+  let alarm;
+  let fetchQueue;
   const chrome = {
-    runtime: {getManifest: () => ({version:'1.0.6'}),onMessage: {addListener: listener => { onMessage = listener; }}},
+    runtime: {getManifest: () => ({version:'1.1.0'}),onMessage: {addListener: listener => { onMessage = listener; }},
+      onInstalled:{addListener(){}},onStartup:{addListener(){}}},
     storage: {local: {get: async key => ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
+    alarms:{get:async()=>alarm,create:async name=>{alarm={name};},onAlarm:{addListener(){}}},
   };
-  const source = fs.readFileSync(path.join(__dirname, '../windows-upload-companion/worker.js'), 'utf8');
-  vm.runInNewContext(source, {chrome, URL});
+  const context = vm.createContext({chrome, URL, AbortSignal, fetch:(...args)=>fetchQueue(...args)});
+  context.importScripts = file => vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
+  context.importScripts('worker.js');
 
   function health(url, frameId = 1) {
     return new Promise(resolve => {
@@ -66,6 +71,40 @@ async function main() {
   assert.deepEqual(sent,[longPrompt]);
   assert.equal((await invoke({type:'os:health',receipt:request.receipt},bridge)).state,'submitted');
   assert.equal((await invoke({type:'os:health',receipt:'c'.repeat(64)},bridge)).state,'ready');
+  const queued = '33441519-3951-40f3-a5d7-e2edb528e5a7';
+  const credential = 'a'.repeat(43);
+  const requests = [];
+  let connected = false;
+  let claim = {id:queued,stage:1};
+  fetchQueue = async (url, options) => {
+    assert.equal(url, origin + '/api/staff-product-uploads/tick');
+    assert.equal(options.headers.Authorization,'Bearer '+credential);
+    requests.push(JSON.parse(options.body));
+    if (!connected) throw new Error('Offline');
+    return {ok:true,json:async()=>({job:claim})};
+  };
+  const tabs = [];
+  chrome.tabs.create = async options => {
+    tabs.push(options);
+    return {id:tabId + tabs.length};
+  };
+  chrome.tabs.get = async id => ({url:tabs[id-tabId-1].url});
+  await context.pairStaffQueue(credential);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(tabs.length,0);
+  assert.ok(alarm);
+  connected = true;
+  await context.staffQueueTick();
+  await context.staffQueueTick();
+  assert.equal(tabs.length,1);
+  assert.equal(tabs[0].active,false);
+  assert.equal(new URL(tabs[0].url).searchParams.get('staff_upload_job'),queued);
+  assert.equal((await invoke({...request,staffJob:queued},bridge)).accepted,false);
+  assert.equal(await context.rememberStaffReceipt(queued,request.receipt,tabId+1),true);
+  claim = {...claim,stage:5};
+  await context.staffQueueTick();
+  assert.equal(requests.at(-1).state,'submitted');
+  assert.equal(tabs.length,1);
   console.log('Upload Companion accepts the live Streamlit iframe URL and rejects other origins, paths and top-level frames.');
 }
 main().catch(error => {

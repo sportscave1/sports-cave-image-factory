@@ -281,6 +281,25 @@ def render_outputs(app,result,row,user,name):
         except Exception:
             handoff={'error': 'Upload needs all five WebPs confirmed in Dropbox.'}
     automatic_handoff = bool(handoff.get('automatic') and handoff.get('prompt'))
+    staff_job = st.query_params.get('staff_upload_job')
+    if staff_job:
+        from product_upload_staff_queue import advance
+        failure = handoff.get('error')
+        if core_receipt.get('cancelled') or core_receipt.get('failures'):
+            failure = 'Dropbox did not confirm all five core WebPs. Review the save details in Product Uploads.'
+        if failure:
+            advance(staff_job, user['id'], 7, failure, allowed=[1, 2, 3, 4])
+        elif automatic_handoff:
+            advance(staff_job, user['id'], 4, allowed=[1, 2, 3, 4])
+            handoff['staff_job'] = staff_job
+            handoff['prompt'] += (
+                '\n\nIf the workflow pauses, place a line at the end of your response with '
+                'exactly one of these applicable statuses: SC_UPLOAD_BLOCKED: REFERENCE, '
+                'SC_UPLOAD_BLOCKED: GENERATION, SC_UPLOAD_BLOCKED: DROPBOX, '
+                'SC_UPLOAD_BLOCKED: SHOPIFY, SC_UPLOAD_BLOCKED: EDITION_SYNC, '
+                'SC_UPLOAD_BLOCKED: PSD_MOVE, SC_UPLOAD_BLOCKED: PSD_MAPPING, or '
+                'SC_UPLOAD_BLOCKED: APPROVAL. Explain the pending action above that line.'
+            )
     if core_saved and not saving and core_receipt.get('generation_receipt'):
         if handoff.get('error'):
             st.progress(.85,text='Mockups saved to Dropbox · ChatGPT handoff needs attention')

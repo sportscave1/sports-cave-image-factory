@@ -22,6 +22,44 @@ def render_page(app):
     resume=None
     requested=st.query_params.get('upload')
     review_launch = st.session_state.pop('_design_review_upload', None)
+    staff_key = st.query_params.get('staff_upload_job')
+    if staff_key:
+        from product_upload_staff_queue import worker_job, advance
+        from os_accounts import is_admin
+        try:
+            staff_job = worker_job(staff_key, user['id']) if is_admin(user) else None
+        except ValueError:
+            staff_job = None
+        if not staff_job:
+            st.info('This desktop upload has finished or is unavailable.')
+            return
+        if staff_job['stage'] >= 5:
+            st.info('ChatGPT accepted the upload. The desktop companion is verifying publication and mapping.')
+            return
+        if not staff_job['intake_id']:
+            from design_review_page import _review
+            from product_upload_services import Dropbox
+            try:
+                provider = Dropbox()
+                original = provider.metadata_if_present(staff_job['source_id'])
+                if not original or original.get('rev') != staff_job['source_rev']:
+                    raise ValueError('The original PSD changed after this request. Open Design Studio to review its current revision.')
+                intake = _review(provider, user, original, 'approved', selected_sport=staff_job['sport'])
+                advance(staff_key, user['id'], 1, intake=intake, allowed=[1])
+                staff_job = worker_job(staff_key, user['id'])
+            except ValueError as error:
+                advance(staff_key, user['id'], 7, str(error), allowed=[1])
+                st.error(str(error))
+                return
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception('Desktop PSD preparation could not start')
+                advance(staff_key, user['id'], 7, 'Could not open the original PSD. Check Dropbox and Design Studio.', allowed=[1])
+                return
+        requested = str(staff_job['intake_id'])
+        if st.session_state.get('_product_upload_active') != requested:
+            review_launch = requested
+        desktop_progress(staff_key, requested, user['id'])
     if requested and (st.session_state.get('_product_upload_resume_seen')!=requested or review_launch==requested):
         st.session_state['_product_upload_resume_seen']=requested
         try:
@@ -82,6 +120,8 @@ def render_page(app):
     if row and row['data'].get('workflow_version') == 3:
         from product_upload_dropbox import status
         row = status(row, connect)
+    if staff_key and key != requested:
+        return
     if not row or not row['data'].get('basic_validated'): return
     with st.container(key='product-upload-workspace'):
         with st.container(key='mockups-workspace'):
@@ -106,6 +146,26 @@ def render_page(app):
     if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
         st.session_state['_product_upload_linked']=linked['nonce']
         st.rerun()
+
+
+@st.fragment(run_every=4)
+def desktop_progress(job_id, intake, actor):
+    from product_upload_jobs import JOBS
+    from product_upload_staff_queue import advance
+    from product_upload_sport import state_key
+    error = st.session_state.get('product-upload-job-error-'+intake) or st.session_state.get(state_key(intake)+'-error')
+    if error:
+        advance(job_id, actor, 7, str(error), allowed=[1, 2, 3])
+        return
+    for stage, operation in ((3, 'save'), (2, 'generate'), (1, 'prepare')):
+        task = JOBS.snapshot(intake, actor, operation)
+        if not task:
+            continue
+        if task['state'] in ('Failed', 'Cancelled'):
+            advance(job_id, actor, 7, task.get('error') or 'Artwork processing was cancelled.', allowed=[1, 2, 3])
+        else:
+            advance(job_id, actor, stage, allowed=[1, 2, 3])
+        return
 
 
 @st.fragment(run_every=0.25)

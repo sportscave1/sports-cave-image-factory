@@ -1,0 +1,106 @@
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+import product_upload_staff_queue as queue
+from test_auto_editions_jobs import database
+
+
+@pytest.fixture
+def store(database, monkeypatch):
+    jobs, cursor = database
+    sql = Path(__file__).resolve().parents[1] / 'migrations' / '20261117110000_product_upload_staff_queue.sql'
+    cursor.execute(sql.read_text(encoding='utf8'))
+    monkeypatch.setattr(queue, 'connect', jobs.connect)
+    monkeypatch.setattr('design_review_page.final_psd', lambda source: True)
+    return jobs.connect
+
+
+def submit(actor, revision='A'):
+    return queue.enqueue({'id': actor}, {'id': 'id:original', 'rev': revision}, 'Design', 'NFL Wall Art')
+
+
+def test_offline_requests_are_durable_private_and_claimed_once(store, monkeypatch):
+    first = submit('staff-one')
+    assert submit('staff-two') == first
+    assert submit('staff-one') == first
+    second = submit('staff-one', 'B')
+    assert queue.list_jobs('unrelated')['jobs'] == []
+    assert queue.list_jobs('staff-two')['jobs'][0]['stage'] == 0
+    assert queue.list_jobs('staff-one')['online'] is False
+    with pytest.raises(PermissionError):
+        queue.desktop_tick('x' * 43)
+
+    token = queue.pair({'id': 'desktop-admin'})
+    with pytest.raises(ValueError):
+        queue.pair({'id': 'different-admin'})
+    assert str(queue.tick(token, {})['job']['id']) == str(first)
+    assert str(queue.tick(token, {})['job']['id']) == str(first)
+    assert queue.list_jobs('staff-one')['online']
+    assert queue.worker_job(str(first), 'staff-one') is None
+
+    queue.advance(first, 'desktop-admin', 1, intake=uuid4(), allowed=[1])
+    queue.advance(first, 'desktop-admin', 3, allowed=[1, 2])
+    queue.advance(first, 'desktop-admin', 2)
+    assert queue.worker_job(str(first), 'desktop-admin')['stage'] == 3
+    queue.advance(first, 'desktop-admin', 4)
+    verify_calls = []
+    monkeypatch.setattr(queue, 'verify', lambda job: verify_calls.append(job))
+    queue.tick(token, {'id': str(first), 'state': 'submitted'})
+    assert verify_calls
+    assert queue.list_jobs('staff-two')['jobs'][0]['stage'] == 5
+    queue.tick(token, {'id': str(first), 'state': 'blocked', 'reason': 'PSD mapping unavailable.'})
+    stopped = queue.list_jobs('staff-two')['jobs'][0]
+    assert stopped['stage'] == 7
+    assert stopped['detail'] == 'PSD mapping unavailable.'
+    assert queue.tick(token, {})['job']['id'] == str(second)
+
+
+def test_success_requires_live_product_and_exact_mapped_master(store, monkeypatch):
+    import product_upload_intake
+    import product_upload_mapping
+    import product_upload_services
+    import psd_directory
+    import psd_mapping_store
+    import shopify_sync
+    from product_upload_identity import tag
+
+    key = submit('staff')
+    intake = uuid4()
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    queue.advance(key, 'desktop', 1, intake=intake)
+    queue.advance(key, 'desktop', 4)
+    pid = 'gid://shopify/Product/100'
+    path = psd_directory.ROOT + '/Master.psd'
+    current = {'id': 'id:original', 'content_hash': 'exact', 'path_display': path}
+    mapping = {'dropbox_file_id': 'id:original', 'verified': True, 'path': path}
+    listing = {'shopify_product_id': pid, 'status': 'DRAFT', 'tags': [tag(intake)],
+               'online_store_url': 'https://example.com/products/design'}
+
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('CREATE TABLE product_psd_mappings (shopify_product_gid text, dropbox_file_id text)')
+        cur.execute('INSERT INTO product_psd_mappings VALUES (%s,%s)', (pid, 'id:original'))
+
+    monkeypatch.setattr(product_upload_intake.Intakes, 'read', lambda *args: {'data': {'source': {'content_hash': 'exact'}}})
+    monkeypatch.setattr(product_upload_mapping, 'read_edition', lambda *args: {'id': 1})
+    monkeypatch.setattr(psd_mapping_store.STORE, 'read_one', lambda *args: mapping)
+    monkeypatch.setattr(shopify_sync, 'fetch_product_by_shopify_id', lambda *args: listing)
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Dropbox', (), {'metadata_if_present': lambda *args: current})())
+
+    queue.tick(token, {'id': str(key), 'state': 'submitted'})
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 5
+    listing['status'] = 'ACTIVE'
+    listing['tags'] = []
+    queue.tick(token, {})
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 5
+    listing['tags'] = [tag(intake)]
+    current['content_hash'] = 'different'
+    queue.tick(token, {})
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 5
+    current['content_hash'] = 'exact'
+    queue.tick(token, {})
+    done = queue.list_jobs('staff')['jobs'][0]
+    assert done['stage'] == 6
+    assert done['storefront'] == listing['online_store_url']

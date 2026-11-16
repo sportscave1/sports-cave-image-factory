@@ -66,16 +66,37 @@
     });
   }
   function companionHealth(){
+    if(window.frameElement)window.frameElement.id='sc-upload-companion-health';
     const status=document.createElement('div');
     status.setAttribute('role','status');
     status.textContent='Checking this Edge profile…';
     root.append(status);
+    const pair=button('Pair this Edge profile','pairStaffQueue');
+    pair.hidden=true;
+    root.append(pair);
+    pair.onclick=async()=>{
+      pair.disabled=true;
+      try{
+        const response=await fetch('/api/staff-product-uploads/pair',{method:'POST',credentials:'same-origin'});
+        const payload=await response.json();
+        if(!response.ok)throw new Error(payload.error);
+        const result=await companionRequest('pair',{token:payload.token},3000);
+        if(!result?.paired)throw new Error('The companion did not accept pairing. Reload it in Edge and try again.');
+        pair.textContent='Paired for staff uploads';
+      }catch(error){
+        status.textContent=error.message;
+        pair.disabled=false;
+      }
+      resize();
+    };
     const states={ready:'Connected · ready',opening:'Opening the ChatGPT project',sending:'Sending the prompt',
       submitted:'Submitted · ChatGPT accepted the prompt',failed:'Stopped before submission',uncertain:'Submission could not be verified'};
     const signal=controller.signal;
     async function refresh(){
       const report=await companionRequest('health');
       if(signal.aborted)return;
+      pair.hidden=!(report?.version && (Number(report.version.split('.')[0])>1 ||
+        Number(report.version.split('.')[1])>=1));
       const label=states[report?.state] || 'Upload Companion is not connected in this Edge profile.';
       const time=report?.time ? ' · '+new Date(report.time).toLocaleString() : '';
       status.textContent=label+(report?.version ? ' · '+report.version : '')+time+(report?.reason ? ' · '+report.reason : '');
@@ -143,7 +164,7 @@
             active(version);
             if(previous?.state==='submitted' && previous.time>0 && previous.time<savedAt)receipt=reference;
           }
-          const payload={receipt,prompt:handoff.prompt};
+          const payload={receipt,prompt:handoff.prompt,staffJob:handoff.staff_job};
           let result=await companionRequest('start',payload,2200);
           if(automatic && !signal.aborted && !result)result=await companionRequest('start',payload,2200);
           if(result?.accepted && !result.busy)markDispatched();
@@ -161,6 +182,10 @@
             }
             return;
           }
+        }
+        if(handoff.staff_job){
+          stage(95,'Waiting for the paired desktop to open the ChatGPT project.');
+          return;
         }
         const popup=(!automatic || parent.document.hasFocus()) && window.open('about:blank','_blank');
         if(popup){

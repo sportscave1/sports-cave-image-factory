@@ -272,6 +272,12 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
         if clicked and (not needs_sport or chosen_sport):
             try:
+                import os_accounts
+                if not os_accounts.is_admin(user):
+                    from product_upload_staff_queue import enqueue
+                    enqueue(user, source, title, chosen_sport)
+                    st.toast('Upload queued for the desktop companion.')
+                    return
                 if not resumable or decision != 'approved':
                     key = _review(Dropbox(), user, source, 'approved', selected_sport=chosen_sport)
             except ValueError as exc:

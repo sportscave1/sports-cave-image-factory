@@ -91,10 +91,25 @@
       const {button, asAttachment:sentAsAttachment} = current;
       button.click();
       const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment), 12000);
+      if (accepted && prompt.includes('SC_UPLOAD_BLOCKED: REFERENCE')) watchStaffResponse();
       return {sent:Boolean(accepted)};
     } finally {
       busy = false;
     }
+  }
+  function watchStaffResponse() {
+    const timer = setInterval(() => {
+      if (!conversation.test(location.href)) return;
+      const turns = document.querySelectorAll('[data-message-author-role="assistant"], h4[data-conversation-role="assistant"]');
+      const last = turns[turns.length - 1];
+      const body = last?.matches('h4') ? last.nextElementSibling : last;
+      if (!body || document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"]')) return;
+      const status = body.innerText.trim().match(/(?:^|\n)SC_UPLOAD_BLOCKED: ([A-Z_]+)\s*$/);
+      if (!status) return;
+      clearInterval(timer);
+      void chrome.runtime.sendMessage({type:'project:blocked', code:status[1]}).catch(() => {});
+    }, 3500);
+    setTimeout(() => clearInterval(timer), 2 * 60 * 60 * 1000);
   }
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (sender.id !== chrome.runtime.id || !inProject()) return;
