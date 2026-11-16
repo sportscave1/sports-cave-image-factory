@@ -93,6 +93,10 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
 
     row = saved_row()
     row['data']['name'] = 'Jahmyr Gibbs - The Takeover'
+    row['data']['smart_upload'] = True
+    row['data']['design_review'] = {'decision': 'preparing'}
+    row['data']['metadata'] = {'upload_intent': 'new_product', 'review_status': 'needs_attention',
+                               'review_notes': 'Unverified print bleed'}
     output = row['data']['upload_operation']['output']
     result = dict(product_name=row['data']['name'], sport_category='NFL Wall Art',
                   product_image_manifest=output['manifest'])
@@ -114,6 +118,7 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
     prompt = handoff['prompt']
 
     assert handoff['automatic']
+    assert 'Unverified print bleed' not in prompt
     assert creative in prompt
     assert 'Retrieve only the original black-frame WebP' in prompt
     assert 'report the exact pending action and wait for direct approval' in prompt

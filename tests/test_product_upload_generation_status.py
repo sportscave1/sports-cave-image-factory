@@ -38,9 +38,10 @@ def test_reused_result_has_a_fresh_acknowledgement_and_cannot_acknowledge_stale_
         markup("ready", '<script>')
 
 
-def test_review_recovers_the_exact_prepared_result_without_a_browser_acknowledgement():
+@pytest.mark.parametrize('decision', ['approved', 'preparing'])
+def test_review_recovers_the_exact_prepared_result_without_a_browser_acknowledgement(decision):
     row = {'id': 'design', 'data': {'source': {'content_hash': 'source-a', 'rev': 'revision-a'},
-                                   'design_review': {'decision': 'approved'}}}
+                                   'design_review': {'decision': decision}}}
     choice = {'id': 'folder-a', 'sport': 'Cricket'}
     result = dict(_product_upload_intake='design', _product_upload_source_hash='source-a',
                   product_name='Example', sport_category='Cricket', run_dir='retained-run')

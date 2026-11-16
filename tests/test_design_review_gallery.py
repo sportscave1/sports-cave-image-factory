@@ -225,10 +225,9 @@ def test_first_publish_click_prepares_exact_psd_and_automatically_generates_mock
 
     folder = {'.tag': 'folder', 'name': 'JSON', 'path_display': REVIEW_METADATA_FOLDER}
     path = REVIEW_METADATA_FOLDER + '/Gallery fixture.upload.json'
-    value = dict(dropbox_file_id=record['id'], dropbox_path=record['path_display'], dropbox_revision='abc122',
+    value = dict(dropbox_file_id=record['id'], dropbox_path=record['path_display'], dropbox_revision=record['rev'],
                  sport='Cricket', design_title='Gallery fixture', intended_collections=['cricket'],
-                 upload_intent='existing_product_refresh', existing_shopify_product_id='123',
-                 review_status='ready_for_review')
+                 upload_intent='new_product', review_status='needs_attention', review_notes='Unverified print bleed')
 
     def install_json():
         raw = json.dumps(value).encode()
@@ -325,16 +324,13 @@ else:
     assert saved['data']['source'] == record
     assert saved['data']['server_artwork']['state'] == 'Ready'
     assert saved['data']['metadata']['sport'] == 'Cricket'
-    assert saved['data']['design_review']['decision'] == 'preparing'
-    assert saved['mode'] == 'LIVE' and 'shopify_product_id' not in saved['data']['metadata']
-    with pytest.raises(ValueError, match='pending artwork checks'):
+    assert saved['data']['design_review']['decision'] == 'approved'
+    assert saved['data']['metadata']['review_status'] == 'needs_attention'
+    assert saved['mode'] == 'LIVE' and not saved['data']['metadata'].get('shopify_product_id')
+    with pytest.raises(ValueError, match='completed image package'):
         store.copied(key, ADMIN['id'], 'SMART')
+    with store.locked(key, ADMIN['id']) as (row, _):
+        row['data']['mockups_exported'] = True
+    assert store.copied(key, ADMIN['id'], 'SMART')['data']['copied']
 
-    assert gallery._review(provider, ADMIN, record, 'approved', resume_pending=True) is None
-    assert store.read(key, ADMIN['id'])['data']['design_review'] == saved['data']['design_review']
-    value.update(dropbox_revision=record['rev'], upload_intent='new_product', existing_shopify_product_id=None)
-    install_json()
-    assert gallery._review(provider, ADMIN, record, 'approved', resume_pending=True) == key
-    assert store.read(key, ADMIN['id'])['data']['design_review']['decision'] == 'approved'
-    assert gallery._review(provider, ADMIN, record, 'approved', resume_pending=True) is None
     submit.assert_called_once()

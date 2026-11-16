@@ -79,7 +79,7 @@ def context_from_row(row):
         result['confirmed_limit'] = task['confirmed_limit']
     if data.get('smart_upload'):
         metadata = data.get('metadata') or {}
-        for key in ('upload_intent', 'review_status', 'intended_collections'):
+        for key in ('upload_intent', 'intended_collections', 'refresh_target_pending'):
             if key in metadata:
                 result[key] = metadata[key]
         if metadata.get('upload_intent') == 'existing_product_refresh':

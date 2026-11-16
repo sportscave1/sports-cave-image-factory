@@ -51,9 +51,20 @@ def test_stale_metadata_and_ambiguous_refresh_are_rejected():
         parse_handoff(handoff(dropbox_revision='other'), SOURCE)
     with pytest.raises(ValueError, match='exact existing Shopify product ID'):
         parse_handoff(handoff(upload_intent='existing_product_refresh'), SOURCE)
-    with pytest.raises(ValueError, match='pending artwork checks'):
-        prompt('SMART', parse_handoff(handoff(review_status='needs_attention'), SOURCE))
     assert review_key(SOURCE) != review_key(dict(SOURCE, rev='updated'))
+
+
+def test_review_checklist_does_not_block_the_smart_prompt():
+    details = parse_handoff(handoff(review_status='needs_attention', review_notes='Unverified print bleed'), SOURCE)
+    built = prompt('SMART', details)
+    assert built.endswith(prompt('LIVE', details))
+    assert 'Unverified print bleed' not in built
+
+
+def test_unverified_refresh_target_does_not_supply_create_instructions():
+    built = prompt('SMART', {'refresh_target_pending': True})
+    assert 'pause Shopify and PSD mapping' in built
+    assert 'Create the Shopify product' not in built
 
 
 def test_handoff_download_is_identity_checked_and_closed():
@@ -79,7 +90,8 @@ def test_handoff_prefers_matching_json_and_falls_back_to_matching_legacy(canonic
     provider = Mock()
     legacy_raw = handoff(design_title='Legacy title')
     fields = {
-        'different revision': {'dropbox_revision': 'old'},
+        'different revision': {'dropbox_revision': 'old', 'upload_intent': 'existing_product_refresh',
+                               'existing_shopify_product_id': '123'},
         'different path': {'dropbox_path': REVIEW + '/Different.psd'},
         'different ID': {'dropbox_file_id': 'id:Different'},
     }
@@ -110,6 +122,7 @@ def test_handoff_prefers_matching_json_and_falls_back_to_matching_legacy(canonic
             assert details['sport'] == 'Cricket'
             assert details['review_status'] == 'needs_attention'
             assert details['design_name'] == 'Adelaide'
+            assert details['refresh_target_pending']
             assert 'upload_intent' not in details and 'shopify_product_id' not in details
         else:
             with pytest.raises(ValueError, match='different Dropbox PSD revision'):

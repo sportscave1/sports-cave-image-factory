@@ -59,8 +59,7 @@ def status(row, job, details):
     return 'Needs attention' if details.get('review_status') == 'needs_attention' else 'In review'
 
 
-def _review(provider, user, entry, command, *, selected_sport=None, resume_pending=False):
-    """Approve the exact revision or resume its earlier Publish now request when ready."""
+def _review(provider, user, entry, command, *, selected_sport=None):
     from product_upload_api import connect
     from product_upload_jobs import JOBS
     actor = user['id']
@@ -72,26 +71,20 @@ def _review(provider, user, entry, command, *, selected_sport=None, resume_pendi
     existing = store.read_review(key, actor, current)
     if existing:
         key = str(existing['id'])
-    if resume_pending and (
-        not existing or (existing['data'].get('design_review') or {}).get('decision') != 'preparing'
-    ):
-        return None
     if existing and existing['data'].get('product_gid'):
-        return None if resume_pending else key
+        return key
     job = JOBS.snapshot(key, actor, 'generate')
-    preparing = False
     if command != 'approved' and job and job['state'] in ('Queued', 'Running'):
         raise ValueError('The approved job is already generating mockups.')
     if command == 'approved':
         original_details = read_handoff(provider, current, allow_stale_sport=True) or legacy_metadata(current)
         saved_data = (existing or {}).get('data') or {}
         details = resolve_review_sport(original_details, saved_data.get('review_sport') or selected_sport)
-        preparing = details['review_status'] == 'needs_attention'
-        if resume_pending and (preparing or details['review_status'] != 'ready_for_review'):
-            return None
         if not details.get('sport'):
             raise ValueError('The sport could not be resolved from this PSD or its metadata.')
-        if not preparing and details.get('shopify_product_id'):
+        if details.get('refresh_target_pending'):
+            raise ValueError('Verify the Shopify refresh target for this PSD revision in Design Studio.')
+        if details.get('shopify_product_id'):
             from shopify_sync import fetch_product_by_shopify_id
             target = fetch_product_by_shopify_id(details['shopify_product_id'])
             if target.get('shopify_product_id') != details['shopify_product_id'] or target.get('status') not in ('ACTIVE', 'DRAFT'):
@@ -108,12 +101,10 @@ def _review(provider, user, entry, command, *, selected_sport=None, resume_pendi
                for field in ('id', 'rev', 'path_display', 'content_hash', 'size')):
             raise ValueError('This intake belongs to another artwork revision.')
         if row['data'].get('product_gid'):
-            return None if resume_pending else key
+            return key
         if command == 'approved':
             data = row['data']
             prior_decision = (data.get('design_review') or {}).get('decision')
-            if resume_pending and (prior_decision != 'preparing' or data.get('copied')):
-                return None
             if prior_decision == 'preparing' and not data.get('copied'):
                 data['metadata'] = details
                 row['mode'] = stored_mode('SMART', details)
@@ -123,8 +114,7 @@ def _review(provider, user, entry, command, *, selected_sport=None, resume_pendi
                 raise ValueError('The upload metadata changed. Review the exact PSD again.')
             if details != original_details:
                 data['review_sport'] = details['sport']
-        decision = 'preparing' if preparing else command
-        row['data']['design_review'] = dict(decision=decision, at=datetime.now(timezone.utc).isoformat())
+        row['data']['design_review'] = dict(decision=command, at=datetime.now(timezone.utc).isoformat())
     return key
 
 
@@ -363,7 +353,7 @@ def _published(user, query):
             """SELECT id, data->>'product_title' AS title, data->>'product_url' AS url,
                       data->'master_mapping_pending' AS mapping_pending
                FROM product_upload_intakes WHERE actor_id=%s
-               AND data->'design_review'->>'decision'='approved'
+               AND data->'design_review'->>'decision' IN ('approved', 'preparing')
                AND data->>'product_gid' IS NOT NULL
                AND data->>'shopify_completion' IN ('Published live', 'Listing updated')
                ORDER BY updated_at DESC""",

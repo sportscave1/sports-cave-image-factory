@@ -46,12 +46,12 @@ def markup(state, receipt):
 
 
 def recover_review_attempt(row, result, choice, name):
-    """Resume already generated files from an approved Design Studio upload."""
+    """Resume already generated files from a Design Studio Publish now request."""
     data = row['data']
     source = data['source']
     key = str(row['id'])
     if (not result or not choice or data.get('product_gid') or data.get('mockups_exported')
-            or (data.get('design_review') or {}).get('decision') != 'approved'
+            or (data.get('design_review') or {}).get('decision') not in ('approved', 'preparing')
             or result.get('_product_upload_intake') != key
             or result.get('_product_upload_source_hash') != source['content_hash']
             or result.get('product_name') != name.strip() or result.get('sport_category') != choice['sport']):

@@ -9,8 +9,10 @@ def build(selected, filename='', *, source=None, metadata=None, app_module=None,
     smart = selected == 'SMART'
     details = metadata or {}
     if smart:
-        if details.get('review_status') == 'needs_attention':
-            raise ValueError('Resolve the pending artwork checks or metadata before copying Smart Upload.')
+        if details.get('refresh_target_pending'):
+            return ('The earlier PSD revision requested a Shopify refresh. The current revision needs its exact '
+                    'existing Shopify product ID verified in Design Studio. Report the missing refresh target '
+                    'and pause Shopify and PSD mapping at this step. Preserve the saved Dropbox images.')
         from product_upload_intake import stored_mode
         selected = stored_mode(selected, details)
         if selected == 'UPDATE':

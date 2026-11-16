@@ -131,9 +131,6 @@ def render_page(app):
     # runs those effects and competed with PSD preparation in the last release.
     row=Intakes(connect).read(key,user['id'])
     if not row or not row['data'].get('mockups_exported'):return
-    if row['data'].get('smart_upload') and (row['data'].get('metadata') or {}).get('review_status') == 'needs_attention':
-        st.warning('Shopify handoff is waiting for verified review metadata for the current PSD.')
-        return
     from product_upload_jobs import JOBS
     if any((JOBS.snapshot(key,user['id'],operation) or {}).get('state') in ('Queued','Running')
            for operation in ('prepare','generate','save')):return

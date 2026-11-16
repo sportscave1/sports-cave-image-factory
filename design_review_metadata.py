@@ -116,6 +116,7 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
     if candidates is None:
         candidates = (provider.metadata_if_present(path) for path in paths)
     first_error, stale_sport, pending = None, '', (None, None)
+    stale_refresh = False
     for metadata in candidates:
         if metadata:
             value = actual = None
@@ -125,13 +126,15 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
             except ValueError as error:
                 if first_error is None:
                     first_error = error
-                if allow_stale_sport and not stale_sport and isinstance(error, _StaleRevision):
-                    label = _text(value.get('sport'), 100)
-                    # Match Product Uploads' separate Soccer destination.
-                    stale_sport = 'Soccer' if label.casefold() == 'soccer' else normalize_sport_category(label)
+                if allow_stale_sport and isinstance(error, _StaleRevision):
+                    stale_refresh |= value.get('upload_intent') == 'existing_product_refresh'
+                    if not stale_sport:
+                        label = _text(value.get('sport'), 100)
+                        # Match Product Uploads' separate Soccer destination.
+                        stale_sport = 'Soccer' if label.casefold() == 'soccer' else normalize_sport_category(label)
                 if allow_stale_sport and value and isinstance(value.get(TITLE_RENAME), dict):
                     pending = value, actual
-    if stale_sport or pending[0]:
+    if stale_sport or pending[0] or stale_refresh:
         details = dict(
             design_name=PurePosixPath(source['path_display']).stem,
             sport=stale_sport, verified_collection_facts={'sport': stale_sport},
@@ -140,6 +143,8 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
             review_notes='The JSON describes an earlier PSD revision. Verify the current PSD and update '
                          'its review JSON before Shopify handoff.',
         )
+        if stale_refresh:
+            details['refresh_target_pending'] = True
         return pending[0], pending[1], details
     if first_error is not None:
         raise first_error
