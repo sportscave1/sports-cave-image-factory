@@ -9,6 +9,7 @@ from auto_editions import file_hash
 from design_collector_assets import COLLECTOR_ASSET_HEADING, COLLECTOR_ASSET_PLACEMENT
 from design_review_metadata import is_working_file
 from design_review_replace import apply, keep_original
+from design_subject_authenticity import AUTHENTICITY_CHECK, AUTHENTICITY_HEADING
 from home_morning_brief_actions import _prompt
 from product_upload_dropbox import REVIEW
 from psd_directory import REVIEW_METADATA_FOLDER
@@ -53,7 +54,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'If the current design wins, skip 8E and go directly to its cleanup in 8F' in edit
     assert 'exact trial, staging and rollback backup PSDs' in edit
     assert 'Display the winner and the three-design scorecard' in edit
-    assert 'eyes and gaze, nose, mouth and teeth' in edit
+    assert 'eyes and gaze, eyelids, eyebrows, nose, mouth and teeth' in edit
     assert 'background, border, headline wording and hierarchy, typography, layout' in edit
     assert '8. **Title and placement.**' in edit
     assert 'headline longevity and placement' in edit.replace('\n', ' ')
@@ -64,7 +65,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert edit.count('Inspect the rendered, assembled PSD') == 2
     assert 'or text, dates or statistics are removed, reassess the whole layout' in edit
     assert 'A new layout is optional' in standard and 'A new layout is optional' not in edit
-    assert 'first restore the altered areas from verified photographs using precise masks' in edit
+    assert 'Preserve successful typography and layout during source-based restoration.' in edit
     assert 'before recoverably deleting that exact file by ID' in edit
     assert 'Keep original and finish edit' in edit and 'Keep original and finish edit' not in standard
     assert 'three-design scorecard' not in standard
@@ -74,6 +75,8 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
         assert COLLECTOR_ASSET_PLACEMENT in prompt
         assert 'reserve quiet space along the bottom' not in prompt
         assert 'reserved bottom space' not in prompt
+        assert AUTHENTICITY_CHECK in prompt and prompt.count(AUTHENTICITY_HEADING) == 1
+        assert 'MANDATORY SUBJECT AUTHENTICITY CHECK' not in prompt
 
 
 def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
@@ -96,7 +99,9 @@ def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
         assert prompt.index('Recoverably delete only') < prompt.index('Rename the staged PSD')
         assert prompt.index('Rename the staged PSD') < prompt.index('Update the moved JSON')
         assert 'exact Shopify product' in prompt and 'its Product GID as the same ID' in prompt
-        assert 'AI warping' in prompt and 'unverified facial fidelity' in ' '.join(prompt.split())
+        assert AUTHENTICITY_CHECK in prompt and prompt.count(AUTHENTICITY_HEADING) == 1
+        assert prompt.index(AUTHENTICITY_HEADING) < prompt.index('**FALLBACK COLLECTOR FINISH**')
+        assert 'AI warping' in prompt and 'needs_attention' in prompt
 
 
 @pytest.fixture

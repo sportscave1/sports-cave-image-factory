@@ -8,6 +8,7 @@ import re
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
+from design_subject_authenticity import AUTHENTICITY_CHECK
 from home_morning_brief_actions import PROJECT_URL
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER, ROOT as LIVE_FOLDER
 from sports_sales_calendar import sydney_date
@@ -97,14 +98,8 @@ that the artwork caused poor sales.
    era shown in the selected verified photographs. Preserve verified signatures and official
    logos. Add the exact official plaque and original editable edition-number layer during PSD
    assembly.
-   After each pass and on the assembled PSD, compare each face at 100% with the selected
-   verified source. Check eyes and gaze, nose, mouth and teeth, jaw, ears, hairline, expression
-   and natural skin texture. Restore feature loss, AI warping or altered details using precisely
-   masked source pixels and natural blending. Match edges, lighting and grain. Reject
-   rectangular overlays, visible patches, seams, ghosting and abrupt cutoffs. Mark any
-   unresolved or unverified facial fidelity as needs_attention.
 
-4. Compare and score the original, Pass 1 and Pass 2 side by side at matching full and
+{AUTHENTICITY_CHECK}4. Compare and score the original, Pass 1 and Pass 2 side by side at matching full and
    thumbnail display sizes. Score photographic realism, collector appeal and Sports Cave style
    from 0 to 10 for each and report the mean and a short reason. A replacement must have a
    materially new composition and visual treatment and clearly improve all three areas:

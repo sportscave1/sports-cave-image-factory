@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from design_collector_assets import COLLECTOR_ASSET_HEADING
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
+from design_subject_authenticity import AUTHENTICITY_HEADING
 from psd_directory import REVIEW_METADATA_FOLDER, ROOT, product_id
 
 REVIEW = Path(__file__).with_name('design_review_instructions.md')
@@ -135,21 +136,18 @@ def build_edit_prompt(workflow, source, details):
         'Restore the existing assets afterward on separate layers.',
         'Restore the exact assets during PSD assembly and perform the rendered checks in Steps 7 and 8E.', 1,
     )
-    replace_section('**MANDATORY ACCEPTANCE CHECK', '**MANDATORY SUBJECT AUTHENTICITY CHECK**', (
+    replace_section('**MANDATORY ACCEPTANCE CHECK', AUTHENTICITY_HEADING, (
         '**Review corrections before scoring**\n\n'
-        'If a pass improves composition but distorts facial features, anatomy or sporting details, '
-        'first restore the altered areas from verified photographs using precise masks. Keep the '
-        'improved typography and layout. Use the existing correction budget and reassess the '
+        'Apply the photographic authenticity and integration check below to both passes. '
+        'Preserve successful typography and layout during source-based restoration. Reassess the '
         'corrected versions before scoring in 8D.'
     ))
     workflow = workflow.replace(
-        'If the strongest candidate still has visible subject defects or a disconnected photo and title',
-        'If a promising candidate still has visible subject defects or a disconnected photo and title', 1,
+        'If the strongest candidate still has visible subject defects or a disconnect between',
+        'If a promising candidate still has visible subject defects or a disconnect between', 1,
     ).replace(
-        'Use the strongest faithful composition, record any failed or unverified checks in REVIEW '
-        'NOTES, and continue directly to the final PSD.',
-        'Record any remaining failed or unverified checks in REVIEW NOTES, then continue to '
-        'the three-design comparison in 8D.', 1,
+        'Use the strongest inspected result and continue directly to the final PSD.',
+        'Use the strongest inspected results in the three-design comparison in 8D.', 1,
     )
     replace_section('**8D. Prepare', COLLECTOR_ASSET_HEADING, (
         '**8D. Score all three designs and select one winner**\n\n'
@@ -187,9 +185,9 @@ def build_edit_prompt(workflow, source, details):
         'and report the trial checkpoint as pending. Reopen or download the saved staging '
         'revision. Check that the visible artwork, hidden references, signatures, dimensions, '
         'colour profile and original layers match the intended replacement. '
-        f'{signature_check} Recheck each visible face on the rendered PSD at 100% against the '
-        'verified source photos. If any feature is missing, distorted or unverified, retain '
-        'the previous PSD and record the specific problem in REVIEW NOTES.\n\n'
+        f'{signature_check} Recheck photographic authenticity on the rendered PSD. If any '
+        'discrepancy remains unverified, keep the previous PSD, record the specific problem and '
+        'continue the existing delivery steps.\n\n'
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '
         'to verify the original editable SC_EDITION_NUMBER layer, its exact name, text data, '
         'live transform and alignment inside SC_EDITION_PLAQUE at the chosen scale and position. '
