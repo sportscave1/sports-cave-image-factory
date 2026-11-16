@@ -36,14 +36,17 @@ def build(selected, filename='', *, source=None, metadata=None, app_module=None,
         update_existing=cfg['update_existing'], publication_mode=cfg['publication_mode'])
     baseline = app.apply_product_upload_prompt_updates(default, legacy_metadata,
         update_existing=cfg['update_existing'], publication_mode=cfg['publication_mode'])
-    prompt = compact(selected, filename, source, details, template_additions(patched, baseline), automatic=automatic)
+    prompt = compact(selected, filename, source, details, template_additions(patched, baseline, automatic=automatic),
+                     automatic=automatic)
     if not smart:
         return prompt
     import json
+    manual_instruction = ('' if automatic else
+                          'Submitting this Smart Upload prompt authorises the appropriate action below. No additional routine confirmation is needed. ')
     policy = (
         'SMART UPLOAD — CHOOSE THE ACTION FROM THE ARTWORK AND VERIFIED CATALOGUE\n'
-        'Submitting this Smart Upload prompt authorises the appropriate action below. No additional routine confirmation is needed. '
-        'Check the operation tag and exact design version first. Reuse an already recorded result and resume partial work on the same product. '
+        + manual_instruction
+        + 'Check the operation tag and exact design version first. Reuse an already recorded result and resume partial work on the same product. '
         'Verify the design story against the catalogue before changing Shopify. A different moment, title or collector concept is a new product even when the athlete is the same. '
         'Only replace artwork when this is an improved version of the same design and the supplied exact Shopify product ID identifies its original. '
         'Similarity alone never authorises replacement. If an existing match is plausible but the identity or improvement is uncertain, report Needs attention and leave Shopify untouched.\n'

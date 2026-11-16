@@ -86,3 +86,41 @@ def test_live_has_no_staging_appendix_vetoes():
     for rule in ('Only after all prior', 'Only if EVERY', 'COMMON PRODUCT BUILD',
                  'Never set product status to Active', 'Before upload show a compact table'):
         assert rule not in text
+
+
+def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monkeypatch):
+    from product_upload_chat_handoff import CORE, prepare
+
+    row = saved_row()
+    row['data']['name'] = 'Jahmyr Gibbs - The Takeover'
+    output = row['data']['upload_operation']['output']
+    result = dict(product_name=row['data']['name'], sport_category='NFL Wall Art',
+                  product_image_manifest=output['manifest'])
+    saved = {item['output_filename'] for item in output['manifest'] if item['slot_id'] in CORE}
+    receipt = dict(destination=output['folder'], export_fingerprint='original-core',
+                   generation_receipt='fixture', successes=[
+                       item for item in output['files'] if item['metadata']['name'] in saved
+                   ])
+    additions = (
+        'Do not publish. Return the draft link.',
+        'Create the Shopify product as a draft.',
+        '- Invent specifications or materials.',
+        'Use only verified details in the variant descriptions.',
+    )
+    monkeypatch.setattr('prompt_store.get_prompt',
+                        lambda _id, default, **kwargs: '\n'.join((default, *additions)))
+    creative = 'Use the original scenes.\n  Keep their exact framing, lighting and room requirements.'
+    handoff = prepare(result, row, receipt, creative)
+    prompt = handoff['prompt']
+
+    assert handoff['automatic']
+    assert creative in prompt
+    assert 'Retrieve only the original black-frame WebP' in prompt
+    assert 'report the exact pending action and wait for direct approval' in prompt
+    assert 'The user explicitly authorises' not in prompt
+    assert all(item not in prompt for item in additions[:3])
+    assert '- Do not invent specifications or materials.' in prompt
+    assert additions[3] in prompt
+    assert 'Create the product as ACTIVE from the first create call' in prompt
+    assert prompt.index('STEP 3') < prompt.index('STEP 4') < prompt.index('STEP 5')
+    assert prompt.index('Wait for the published product') < prompt.index('Move that original master') < prompt.index('Open Add / Attach PSD')

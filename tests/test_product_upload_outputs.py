@@ -123,9 +123,10 @@ def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path
                                                row['data']['source']['rev'], row['data']['source']['content_hash']))
     assert 'use Add / Attach PSD manually' not in prompt
     assert 'https://www.dropbox.com/home/' in prompt
-    assert 'STEP 1 DOWNLOAD EXCEPTION' in prompt
-    assert "pasted.txt" in prompt and 'Leave the other four WebPs in Dropbox' in prompt
-    assert 'Fetch the temporary download URL directly' in prompt
+    assert 'Retrieve only the original black-frame WebP using the connected Dropbox tools' in prompt
+    assert 'Leave the other four WebPs in Dropbox' in prompt
+    assert 'If an approval is required or denied, report the exact pending action' in prompt
+    assert 'Create the product as ACTIVE from the first create call' in prompt
 
     # A stale completion record must recover a missing WebP before it can dispatch.
     del api.files[black['path_display']]
