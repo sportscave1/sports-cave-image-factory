@@ -195,6 +195,53 @@ def _keep_original(user, source, key):
                 st.rerun()
 
 
+def _selection_key(source):
+    return 'design-review-select-' + review_key(source)
+
+
+@st.dialog('Delete Review designs?', dismissible=False)
+def _confirm_delete(user, selected):
+    from design_review_delete import delete_design
+    from files_upload_api import invalidate_directory_cache, invalidate_thumbnail_cache
+    from os_accounts import can_delete_files
+    from product_upload_api import Dropbox
+
+    st.write('Move the selected PSDs and their matching upload JSON files to Dropbox Deleted Files.')
+    st.text('\n'.join(title for _, title in selected))
+    cancel, confirm = st.columns(2)
+    if cancel.button('Cancel', key='design-review-delete-cancel'):
+        st.rerun()
+    if not confirm.button('Delete from Dropbox', type='primary', key='design-review-delete-confirm'):
+        return
+    if not can_delete_files(user):
+        st.error('Your account does not have permission to delete Dropbox files.')
+        return
+    deleted, warnings = [], []
+    try:
+        provider = Dropbox()
+    except Exception:
+        logging.getLogger(__name__).exception('Dropbox is unavailable for Review deletion')
+        st.error('Dropbox is unavailable. Try again or cancel.')
+        return
+    with st.spinner('Removing selected designs from Dropbox'):
+        for source, title in selected:
+            try:
+                warnings.extend(delete_design(provider, source))
+            except ValueError as error:
+                warnings.append(f'{title}: {error}')
+            except Exception:
+                logging.getLogger(__name__).exception('Could not delete Review PSD %s', source['id'])
+                warnings.append(f'{title}: Dropbox did not confirm removal.')
+            else:
+                deleted.append(source['path_display'])
+                st.session_state.pop(_selection_key(source), None)
+    _folder.clear()
+    invalidate_directory_cache(REVIEW, REVIEW_METADATA_FOLDER)
+    invalidate_thumbnail_cache(*deleted)
+    st.session_state['_review_delete_result'] = (len(deleted), warnings)
+    st.rerun()
+
+
 @lru_cache(maxsize=512)
 def _handoff(actor_id, file_id, revision, path, sidecars):
     from product_upload_api import Dropbox
@@ -237,7 +284,8 @@ def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
     return source, details, reason, editing
 
 
-def _card(app, user, source, details, reason, key, row, *, editing=False, eager=False, show_replacement=False):
+def _card(app, user, source, details, reason, key, row, *, editing=False, eager=False,
+          show_replacement=False, selectable=False):
     from product_upload_api import Dropbox
     from product_upload_jobs import JOBS
     card_key = key
@@ -255,7 +303,11 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         decision = ((row or {}).get('data', {}).get('design_review') or {}).get('decision')
         chosen_sport = (row or {}).get('data', {}).get('review_sport')
         needs_sport = not (published or editing or resumable or chosen_sport or details.get('sport'))
-        name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
+        if selectable:
+            check, name, edit_button, publish = st.columns((1, 4, 1, 2), vertical_alignment='center', gap='small')
+            check.checkbox(f'Select {title} for deletion', key=_selection_key(source), label_visibility='collapsed')
+        else:
+            name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
         label = 'Needs attention' if reason and current in ('In review', 'Ready to publish') else current
         name.html(f'<h3 class="sc-review-title" title="{escape(title, quote=True)}">{escape(title)}</h3>'
@@ -379,11 +431,19 @@ def _folder(actor_id):
 
 @st.fragment
 def _gallery(app, user):
+    from os_accounts import can_delete_files
     from product_upload_api import connect
     actor = str(user['id'])
     with st.container(key='design-review-header'):
-        heading, sync, refresh = st.columns((5, 1, 1), vertical_alignment='center')
+        heading, sync, trash, refresh = st.columns((5, 1.5, .5, 1), vertical_alignment='center')
         heading.title('Design Studio')
+    removed = st.session_state.pop('_review_delete_result', None)
+    if removed:
+        count, warnings = removed
+        if count:
+            st.toast(f'Moved {count} design{"s" if count != 1 else ""} to Dropbox Deleted Files.')
+        for warning in warnings:
+            st.warning(warning)
     result = st.session_state.pop('_review_replace_result', None)
     if result:
         path, warnings = result
@@ -429,6 +489,13 @@ def _gallery(app, user):
     if not matched:
         st.info('No PSDs match this view.')
         return
+    selectable = view == 'Review' and can_delete_files(user)
+    if selectable:
+        selected = [(entry, details.get('design_name') or PurePosixPath(entry['name']).stem)
+                    for entry, details, _, _ in matched if st.session_state.get(_selection_key(entry))]
+        if selected and trash.button('Delete selected', icon=':material/delete:', key='design-review-trash',
+                                     help=f'Delete {len(selected)} selected from Dropbox Review'):
+            _confirm_delete(user, selected)
     sources = {review_key(entry): entry for entry, *_ in matched}
     rows = Intakes(connect).read_review_gallery(actor, sources)
     keys = list(sources)
@@ -439,7 +506,7 @@ def _gallery(app, user):
                 key = keys[i]
                 with column:
                     _card(app, user, entry, details, reason, key, rows.get(key), editing=editing,
-                          eager=i < 2, show_replacement=view == 'Editing')
+                          eager=i < 2, show_replacement=view == 'Editing', selectable=selectable)
 
 
 def render(app, user):

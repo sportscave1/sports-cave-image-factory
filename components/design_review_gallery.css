@@ -1,6 +1,28 @@
 <style>
 .st-key-design-review-gallery {--sc-review-gold:#8d6923;--sc-review-line:#e4dbcf}
 .st-key-design-review-gallery h1 {font-size:2rem;letter-spacing:-.035em;padding-bottom:.15em}
+.st-key-design-review-header [data-testid="stHorizontalBlock"] {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto auto;
+  align-items:center;
+  gap:.5rem;
+}
+.st-key-design-review-header [data-testid="stHorizontalBlock"]:has(.st-key-design-review-trash) {
+  grid-template-columns:minmax(0, 1fr) auto auto auto;
+}
+.st-key-design-review-header [data-testid="stColumn"] {width:auto !important;min-width:0 !important}
+.st-key-design-review-header [data-testid="stColumn"]:nth-child(3):not(:has(.st-key-design-review-trash)) {display:none}
+.st-key-design-review-trash button {width:2.15rem;min-height:2.15rem;padding:0}
+.st-key-design-review-trash [data-testid="stMarkdownContainer"] {
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip-path:inset(50%);
+  white-space:nowrap;
+}
 .st-key-design-review-grid [class*="st-key-design-review-card-"] {
   border:1px solid var(--sc-review-line);
   border-radius:12px;
@@ -24,6 +46,9 @@
   align-items:center;
   gap:.5rem;
   padding:.45rem .6rem;
+}
+.st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stCheckbox"]) {
+  grid-template-columns:auto minmax(0, 1fr) auto auto;
 }
 .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stColumn"] {
   width:auto !important;
@@ -79,6 +104,9 @@
     min-width:0 !important;
   }
   .st-key-design-review-header [data-testid="stColumn"]:nth-child(2) {display:none}
+  .st-key-design-review-header [data-testid="stHorizontalBlock"]:has(.st-key-design-review-trash) {
+    grid-template-columns:minmax(0, 1fr) auto auto;
+  }
   .st-key-design-review-toolbar [data-testid="stHorizontalBlock"] {grid-template-columns:minmax(0, 1fr) minmax(7rem, 36%)}
   .st-key-design-review-toolbar [data-testid="stColumn"]:first-child {grid-column:1 / -1}
   .st-key-design-review-toolbar [data-testid="stColumn"]:nth-child(2):not(:has(+ [data-testid="stColumn"] [data-testid="stSelectbox"])) {grid-column:1 / -1}
@@ -98,5 +126,9 @@
     justify-content:space-between;
   }
   .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stColumn"]:first-child {grid-column:1 / -1}
+  .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stCheckbox"]) {
+    grid-template-columns:auto minmax(0, 1fr);
+  }
+  .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stColumn"]:first-child:has([data-testid="stCheckbox"]) {grid-column:auto}
 }
 </style>

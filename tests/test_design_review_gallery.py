@@ -47,6 +47,59 @@ def test_folder_reaches_last_cursor_and_uses_listed_sidecars(monkeypatch):
     details.assert_called_once_with('fixture', artwork, (handoff, legacy))
 
 
+def test_delete_review_design_moves_only_exact_psd_and_matching_sidecar():
+    from design_review_delete import delete_design
+
+    psd = source('art', 'Final.psd')
+    central = source('json', 'Final.upload.json', root=REVIEW_METADATA_FOLDER)
+    legacy = source('legacy', 'Final.upload.json')
+    data = dict(dropbox_file_id=psd['id'], dropbox_revision=psd['rev'], dropbox_path=psd['path_display'])
+    contents = {central['id']: json.dumps(data).encode(),
+                legacy['id']: json.dumps(dict(data, dropbox_revision='old')).encode()}
+    central['size'], legacy['size'] = (len(contents[item['id']]) for item in (central, legacy))
+    files = {item['path_display']: item for item in (psd, central, legacy)}
+    by_id = {item['id']: item for item in files.values()}
+
+    def read(_, id_):
+        return by_id[id_], SimpleNamespace(iter_content=lambda **_: iter([contents[id_]]), close=Mock())
+
+    def remove(_, path, *, root_path, expected_revision):
+        assert root_path == REVIEW
+        assert files[path]['rev'] == expected_revision
+        return files.pop(path)
+
+    def metadata(locator):
+        return files.get(by_id.get(locator, {}).get('path_display', locator))
+
+    provider = SimpleNamespace(token='fixture', metadata_if_present=metadata,
+                               api=SimpleNamespace(get_file_response=read, delete_path_recoverable=Mock(side_effect=remove)))
+    provider.api.delete_path_recoverable.side_effect = OSError('Dropbox unavailable')
+    with pytest.raises(OSError):
+        delete_design(provider, psd)
+    assert len(files) == 3
+    provider.api.delete_path_recoverable.reset_mock(side_effect=True)
+    provider.api.delete_path_recoverable.side_effect = remove
+    warnings = delete_design(provider, psd)
+    assert list(files) == [legacy['path_display']]
+    assert len(warnings) == 1 and legacy['path_display'] in warnings[0]
+    assert [call.args[1] for call in provider.api.delete_path_recoverable.call_args_list] == [
+        psd['path_display'], central['path_display']]
+
+
+@pytest.mark.parametrize('record', [source('a', 'Live.psd', root=REVIEW.rsplit('/', 1)[0]),
+                                    source('a', 'Artwork - STAGING.psd'),
+                                    source('a', 'Changed.psd', revision='stale')])
+def test_delete_review_design_rejects_out_of_scope_or_stale_items(record):
+    from design_review_delete import delete_design
+
+    remove = Mock()
+    provider = SimpleNamespace(token='fixture', metadata_if_present=lambda _: dict(record, rev='current'),
+                               api=SimpleNamespace(delete_path_recoverable=remove))
+    with pytest.raises(ValueError):
+        delete_design(provider, record)
+    remove.assert_not_called()
+
+
 @pytest.mark.parametrize(('permissions', 'record', 'revision', 'expected'), [
     ({'Files', 'Product Uploads'}, source('a', 'Final.psd'), 'exact', 200),
     ({'Files'}, source('a', 'Final.psd'), 'exact', 403),
