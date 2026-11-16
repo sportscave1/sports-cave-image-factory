@@ -127,10 +127,13 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
 
 
     recreated = dict(receipt, recreated_folder=True, successes=[
-        {**item, 'metadata': {**item['metadata'], 'id': item['metadata']['id'] + '-recreated'}}
+        {**item, 'metadata': {**item['metadata'], 'id': item['metadata']['id'] + '-recreated',
+                              'server_modified': '2026-11-16T12:47:04'}}
         for item in receipt['successes']
     ])
-    recreated_id = prepare(result, row, recreated, creative)['companion_id']
+    rebuilt_handoff = prepare(result, row, recreated, creative)
+    assert rebuilt_handoff['reference_saved_at'] == '2026-11-16T12:47:04+00:00'
+    recreated_id = rebuilt_handoff['companion_id']
     assert recreated_id != handoff['companion_id']
     assert recreated_id == prepare(result, row, {**recreated, 'recreated_folder': False}, creative)['reference_companion_id']
     assert recreated_id == prepare(result, row, recreated, creative)['companion_id']

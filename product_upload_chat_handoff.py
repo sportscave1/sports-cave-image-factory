@@ -1,6 +1,7 @@
 """Compose the text-only ChatGPT handoff from the verified five-file Dropbox save."""
 import json
 import hashlib
+from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
 
 PROJECT = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project'
@@ -83,10 +84,17 @@ Open Add / Attach PSD for the exact Edition Ops product and select the verified 
     reference_id = hashlib.sha256(f"{dispatch_key}:{black['file_id']}".encode('utf-8')).hexdigest()
     reference_metadata = next((entry['metadata'] for entry in receipt['successes']
                                if entry.get('metadata', {}).get('id') == black['file_id']), {})
+    try:
+        saved_at = datetime.fromisoformat(reference_metadata.get('server_modified') or '')
+    except (TypeError, ValueError):
+        saved_at = None
+    # The Dropbox SDK parses its UTC server timestamps as naive datetimes.
+    if saved_at is not None and saved_at.tzinfo is None:
+        saved_at = saved_at.replace(tzinfo=timezone.utc)
     # Keep existing receipts unless the folder was recreated, or the browser
     # can prove that the reference was saved after an older submission.
     return dict(project=PROJECT, prompt=combined,
                 companion_id=reference_id if receipt.get('recreated_folder') else companion_id,
                 reference_companion_id=reference_id,
-                reference_saved_at=reference_metadata.get('server_modified'),
+                reference_saved_at=saved_at.isoformat() if saved_at is not None else None,
                 automatic=bool(receipt.get('generation_receipt')))
