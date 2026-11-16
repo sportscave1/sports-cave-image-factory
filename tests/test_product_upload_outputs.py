@@ -68,6 +68,58 @@ def test_save_uses_standalone_manifest_partial_retry_lost_ack_and_duplicate(env,
     assert any(isinstance(u[1],float) and not u[1].is_integer() for u in updates)
 
 
+@pytest.mark.parametrize('numbered', [False, True])
+def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path, monkeypatch, numbered):
+    from product_upload_chat_handoff import CORE, prepare
+    from product_upload_source import current_source
+    store, _, _ = env
+    row, result, manifest = make_result(env, tmp_path)
+    core = [entry for entry in manifest if entry['product_slot_id'] in CORE]
+    api = Outputs()
+    provider = SimpleNamespace(api=api, token='fixture')
+    parent = api.base + '/Baseball'
+    category = api.files[parent]['id']
+    find = api.get_metadata_if_exists
+    monkeypatch.setattr(api, 'get_metadata_if_exists', lambda token, key: find(token, key) or
+                        next((dict(value) for value in api.files.values() if value.get('id') == key), None))
+    monkeypatch.setattr('prompt_store.get_prompt', lambda _key, default, **kwargs: default)
+    progress = []
+
+    def save(entries, **options):
+        return transfer(provider, result, entries, api.root, parent, 'Product', store.connect,
+                        ADMIN['id'], lambda *event: progress.append(event), category_id=category,
+                        **options)
+
+    if numbered:
+        unrelated = api.create_folder('fixture', parent, 'Product')
+        assert save(core, core_only=True, conflict='cancel')['cancelled']
+    conflict = 'numbered' if numbered else 'cancel'
+    api.fail_once = core[0]['archive_name']
+    incomplete = save(core, core_only=True, conflict=conflict)
+    with pytest.raises(ValueError):
+        prepare(result, row, incomplete, 'Exact original lifestyle prompt.')
+    receipt = save(core, core_only=True, conflict=conflict)
+    assert len(receipt['successes']) == 5
+    assert {total for _, _, total in progress} == {5}
+    assert not store.read(row['id'], ADMIN['id'])['data']['mockups_exported']
+    prompt = prepare(result, row, receipt, 'Exact original lifestyle prompt.')['prompt']
+    black = next(item['metadata'] for item in receipt['successes']
+                 if item['relative_path'] == core[0]['archive_name'])
+    assert black['id'] in prompt and black['path_display'] in prompt
+    assert 'Exact original lifestyle prompt.' in prompt and 'lossless WebP, method 1' in prompt
+    assert 'Create as DRAFT' in prompt and 'Add / Attach PSD' in prompt
+    assert 'https://www.dropbox.com/home/' in prompt
+
+    full = save(manifest, conflict='cancel', extend_core=receipt['export_fingerprint'])
+    assert len(full['successes']) == 8
+    assert full['destination'] == receipt['destination']
+    assert full['product_folder_id'] == receipt['product_folder_id']
+    assert sum(kind == 'upload' for kind, _ in api.calls) == 9  # eight originals and one failed attempt
+    assert current_source(store.read(row['id'], ADMIN['id']))['expected_webp_count'] == 8
+    if numbered:
+        assert api.files[parent + '/Product'] == unrelated
+
+
 def test_save_collision_numbered_no_replace_and_source_fence(env,tmp_path):
     store,_,_=env;row,result,manifest=make_result(env,tmp_path)
     api=Outputs();provider=SimpleNamespace(api=api,token='fixture')

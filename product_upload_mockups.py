@@ -51,7 +51,7 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
             op['output']['webp_source'] = current_source(row)
 
 
-def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None):
+def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None, extend_core=None):
     """Reserve a destination once, including the existing numbered-folder rule.
 
     The provider call never occurs under a long DB transaction. Failed/unknown
@@ -72,6 +72,19 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         token=result.get('_product_upload_save_token')
         if token and row['data'].get('mockup_save_token') != token:
             raise ValueError('A newer image set or save operation replaced this save.')
+        if not old and extend_core:
+            core = saves.get(extend_core) or {}
+            target = core.get('target', '')
+            core_manifest = core.get('manifest') or []
+            core_names = {entry['name'] for entry in core_manifest}
+            if (core.get('state') == 'Saving' or not core.get('folder_id')
+                    or core.get('requested_folder') != folder_name
+                    or core.get('parent_identity') != parent_identity
+                    or len(core_manifest) != 5 or len(core_names) != 5
+                    or not all(entry in entries for entry in core_manifest)):
+                raise ValueError('The earlier core save no longer matches this package. Use a new destination.')
+            old = dict(target=target, folder_id=core['folder_id'], confirmed=core.get('confirmed', []),
+                       state='Failed')
         if old and parent_identity and old.get('folder_id'):
             owned=api.get_metadata_if_exists(provider.token,old['folder_id'])
             target=api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
@@ -88,7 +101,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         result['_product_upload_export_fingerprint']=fingerprint
         row['data']['mockup_save_fingerprint']=fingerprint
         row['data'].update(mockups_exported=False,mockups_context=None,copied=False)
-        if old and old['state']=='Complete': return dict(old['receipt'],export_fingerprint=fingerprint,save_token=token)
+        if old and old['state']=='Complete':
+            return dict(old['receipt'],export_fingerprint=fingerprint,save_token=token)
         if old: target=old['target']
         else:
             proposed=api.join_upload_path(parent,api.sanitize_path_component(folder_name,fallback='mockups'))
@@ -98,7 +112,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
             target=api.numbered_path(provider.token,proposed) if existing and conflict=='numbered' else proposed
         import uuid
         attempt=uuid.uuid4().hex
-        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt,manifest=entries)
+        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt,
+                                manifest=entries,requested_folder=folder_name,parent_identity=parent_identity)
     def checkpoint(**changes):
         with store.locked(key,actor) as (row,cur):
             record=row['data']['mockup_saves'][fingerprint]

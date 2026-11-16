@@ -56,7 +56,8 @@ def resolve_category(api, token, root, category_id):
     return dict(id=category_id,path=path,name=name,sport=folder_sport(name),root=root)
 
 
-def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress, *, conflict='numbered', category_id=None):
+def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress, *, conflict='numbered',
+             category_id=None, core_only=False, extend_core=None):
     from product_upload_mockups import save,bind_export
     import auto_editions as ae
     import mockup_storage
@@ -65,6 +66,10 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
     # its old JPG masters as new final assets. Source PSD storage is separate.
     manifest=[entry for entry in manifest if PurePosixPath(entry['archive_name']).parts[0]=='WEBP'
               and PurePosixPath(entry['archive_name']).suffix.casefold()=='.webp']
+    if core_only:
+        from product_upload_chat_handoff import CORE
+        if len(manifest) != len(CORE) or {entry['product_slot_id'] for entry in manifest} != CORE:
+            raise ValueError('Save needs all five generated WebPs.')
     if category_id and resolve_category(api,provider.token,root,category_id)['path']!=parent:
         raise ValueError('The sport folder changed before saving. Refresh the top selection and retry.')
     base=collection_root(api,root)
@@ -122,11 +127,16 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
                 logging.getLogger(__name__).warning('product_upload_save_file_failed name=%s error_type=%s',name,type(error).__name__)
                 failures.append(dict(relative_path=name,error=str(error) if isinstance(error,ValueError) else 'Dropbox transfer failed. Retry Save all.'))
             progress('Saving '+name,index,total)
-        receipt = dict(destination=target,successes=list(successes.values()),failures=failures,cancelled=False)
+        receipt = dict(destination=target,successes=list(successes.values()),failures=failures,
+                       cancelled=False,product_folder_id=owned or created['id'])
         return receipt
 
     if conflict not in ('cancel','numbered'):raise ValueError('Choose a safe output-folder conflict option.')
-    receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,checkpointed=True,parent_identity=category_id)
+    options = dict(checkpointed=True, parent_identity=category_id)
+    if extend_core: options['extend_core'] = extend_core
+    receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,**options)
+    if core_only:
+        return receipt
     if not receipt.get('failures') and len(receipt.get('successes',()))==total:
         import image_factory
         if image_factory.product_image_readiness(result['product_image_manifest'])['complete']:

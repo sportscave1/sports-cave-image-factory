@@ -43,6 +43,75 @@
       active(version);return result;
     }finally{bitmap.close();}
   }
+  const project='https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
+  const previewEvent='sc-product-uploads-previews-ready';
+  function uploadAction(row,status,handoff){
+    if(!handoff)return;
+    const upload=button('Upload','uploadToChat');
+    upload.title=handoff.error || (handoff.prompt ? 'Copy the upload workflow and open ChatGPT' : 'Available once the five WebPs are saved in Dropbox');
+    upload.disabled=!handoff.prompt || handoff.project!==project;
+    row.append(upload);
+    if(upload.disabled)return;
+    const version=epoch;
+    const signal=controller.signal;
+    function projectLink(){
+      const anchor=document.createElement('a');
+      anchor.href=project;
+      anchor.target='_blank';
+      anchor.rel='noopener noreferrer';
+      anchor.textContent='Open SC Mockups/Uploads';
+      return anchor;
+    }
+    async function start(automatic){
+      if(upload.disabled || signal.aborted || !upload.isConnected)return;
+      upload.disabled=true;
+      status.textContent='Copying upload prompt…';
+      resize();
+      try{
+        const clipboard=automatic ? parent.navigator.clipboard : navigator.clipboard;
+        await clipboard.writeText(handoff.prompt);
+        active(version);
+        // Keep the opener isolated and preserve a manual link if the browser blocks the launch.
+        const popup=window.open('about:blank','_blank');
+        if(popup){
+          popup.opener=null;
+          popup.location.replace(project);
+          status.textContent='Upload prompt copied. Paste it into the new project chat.';
+        }else{
+          status.textContent='Upload prompt copied. ';
+          status.append(projectLink());
+        }
+      }catch{
+        if(signal.aborted)return;
+        status.textContent=automatic ? 'Click Upload to copy the prompt and open ChatGPT.' :
+          'Could not copy the upload prompt. Click Upload again to retry.';
+      }finally{
+        if(!signal.aborted){upload.disabled=false;resize();}
+      }
+    }
+    const {receipt}=handoff;
+    const autoKey=/^[a-f0-9]{32}$/.test(receipt||'') ? 'sc-product-upload-handoff:'+receipt : '';
+    upload.onclick=()=>{
+      if(autoKey){
+        try{sessionStorage.setItem(autoKey,'attempted');}catch{}
+      }
+      return start(false);
+    };
+    if(!autoKey)return;
+    function afterPreviews(){
+      if(signal.aborted || !parent.document.hasFocus())return;
+      if(!parent.document.querySelector('iframe[data-sc-upload-previews="'+receipt+'"]'))return;
+      try{
+        if(sessionStorage.getItem(autoKey))return;
+        sessionStorage.setItem(autoKey,'attempted');
+      }catch{return;}
+      void start(true);
+    }
+    parent.addEventListener(previewEvent,afterPreviews,{signal});
+    parent.addEventListener('focus',afterPreviews,{signal});
+    window.addEventListener('focus',afterPreviews,{signal});
+    requestAnimationFrame(afterPreviews);
+  }
   function actions(args){
     // Stable frame identity for the recorder across Streamlit reruns.
     if(window.frameElement)window.frameElement.id='sc-product-upload-copy';
@@ -65,6 +134,7 @@
       }).catch(()=>{}); // Manual Copy remains available; recorder refuses missing proof.
     }
     const status=document.createElement('div');status.id='status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(status);
+    uploadAction(row,status,args.handoff);
     copyPrompt.onclick=async()=>{
       if(copyPrompt.disabled)return;
       const version=epoch;copyPrompt.dataset.scCopyStatus='copying';promptFeedback.begin();status.textContent='';resize();
@@ -90,9 +160,21 @@
     if(theme.font)document.body.style.setProperty('--font',theme.font);
     const next=JSON.stringify(args);if(signature===next){resize();return;}
     signature=next;epoch++;controller.abort();clearAllFeedback();controller=new AbortController();root.replaceChildren();
+    if(window.frameElement)delete window.frameElement.dataset.scUploadPreviews;
     if(args.mode==='actions')actions(args);
     else{const container=document.createElement('div');container.className=args.mode==='gallery'?'gallery':'single-preview';container.setAttribute('aria-label',args.mode==='gallery'?'Generated mockup previews':'Lifestyle mockup preview');
-      for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);}
+      for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);
+      if(args.mode==='gallery' && args.preview_receipt && window.frameElement){
+        const previews=Array.from(container.querySelectorAll('img'));
+        if(previews.length!==5){resize();return;}
+        const signal=controller.signal;
+        Promise.all(previews.map(img=>img.decode())).then(()=>{
+          if(signal.aborted)return;
+          window.frameElement.dataset.scUploadPreviews=args.preview_receipt;
+          parent.dispatchEvent(new Event(previewEvent));
+        }).catch(()=>{}); // A broken preview should never trigger automatic handoff.
+      }
+    }
     resize();
   });
   addEventListener('pagehide',()=>{epoch++;controller.abort();clearAllFeedback();});
