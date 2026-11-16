@@ -413,17 +413,22 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     first_review = result.index("Step 6. Inspect the generated artwork")
     first_save = result.index("Step 7. Place the first complete artwork")
     second_pass = result.index("**STEP 8")
-    confirmed_first_save = result.index("**Entry requirement:**", second_pass)
+    pending_trial = result.index("If the trial save is pending, use the retained first artwork", second_pass)
     second_generation = result.index("Make a **new image-generation call**")
     final_save = result.index("**8E. Save and verify the final PSD**")
     cleanup = result.index("Only after successful final verification")
     display = result.index("After Dropbox confirms trial deletion, display the final artwork")
     assert signature < first_generation < first_review < first_save < second_pass
-    assert confirmed_first_save < second_generation < final_save < cleanup < display
+    assert pending_trial < second_generation < final_save < cleanup < display
+    assert "If master PSD retrieval or a Dropbox save fails after reasonable recovery attempts" in result
+    assert "Never invent or replace the master badge or editable edition-number layer." in result
+    assert "Dropbox must have confirmed the trial save" not in result
+    assert "After Dropbox confirms the trial save and before the second generation" not in result
+    assert "If any PSD save, verification or cleanup step is pending, display the inspected final artwork" in result
     assert "as a review draft" in result[first_save:second_pass]
     assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[first_save:second_pass]
     assert "hidden REVIEW NOTES layer" in result[first_save:second_pass]
-    assert "Confirm the save and continue immediately to Step 8" in result[first_save:second_pass]
+    assert "Continue immediately to Step 8 in either case." in result[first_save:second_pass]
     assert "[Product Title] - TRIAL.psd" in result[first_save:second_pass]
     assert "[Product Title] - v2 - TRIAL.psd" in result[first_save:second_pass]
     assert "[Product Title] - v2.psd" in result[first_save:second_pass]
