@@ -67,6 +67,31 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'before recoverably deleting that exact file by ID' in edit
     assert 'Keep original and finish edit' in edit and 'Keep original and finish edit' not in standard
     assert 'three-design scorecard' not in standard
+    assert 'REVIEW REPLACEMENT RULE' not in edit
+    assert 'Never delete the canonical PSD' in edit
+
+
+def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
+    from home_design_refresh import _refresh_prompt
+
+    refresh = _refresh_prompt(dict(title='Collector', product_id='123', suggestion='Refine', sessions=4),
+                              'https://www.sportscaveshop.com/products/collector')
+    edit = _prompt('Collector', 'Verified story', edit={
+        'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH},
+        'metadata': {'upload_intent': 'existing_product_refresh',
+                     'shopify_product_id': 'gid://shopify/Product/123'},
+    })
+    assert 'Never delete the canonical PSD' not in edit
+    assert 'Apply staged replacement' not in edit
+    assert 'Target an even border inset of 2%' in edit
+    for prompt in (refresh, edit):
+        assert prompt.count('**REVIEW REPLACEMENT RULE**') == 1
+        assert prompt.index('Read back both files') < prompt.index('Recoverably delete only')
+        assert prompt.index('retain the previous refresh') < prompt.index('Recoverably delete only')
+        assert prompt.index('Recoverably delete only') < prompt.index('Rename the staged PSD')
+        assert prompt.index('Rename the staged PSD') < prompt.index('Update the moved JSON')
+        assert 'exact Shopify product' in prompt and 'its Product GID as the same ID' in prompt
+        assert 'AI warping' in prompt and 'unverified facial fidelity' in ' '.join(prompt.split())
 
 
 @pytest.fixture

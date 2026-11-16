@@ -3,7 +3,8 @@ import json
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
-from psd_directory import REVIEW_METADATA_FOLDER
+from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
+from psd_directory import REVIEW_METADATA_FOLDER, ROOT, product_id
 
 REVIEW = Path(__file__).with_name('design_review_instructions.md')
 
@@ -16,6 +17,14 @@ def build_edit_prompt(workflow, source, details):
     original['dropbox_url'] = 'https://www.dropbox.com/home' + quote(folder, safe='/') + '?preview=' + quote(filename, safe='')
     prefix = f'{folder}/{stem} - EDIT-{original["rev"]}'
     trial, staged = prefix + ' - TRIAL.psd', prefix + ' - STAGING.psd'
+    refresh_target = product_id(details) if details.get('upload_intent') == 'existing_product_refresh' else ''
+    replacement_order = (
+        'if an edit wins, stage and verify it, verify its Smart Upload JSON and complete the '
+        'Review replacement rule for the exact Shopify product → '
+        if refresh_target else
+        'if an edit wins, stage and verify it, back up and replace the exact original revision, '
+        'verify the saved replacement and update its matching JSON as needed → '
+    )
     signature_check = (
         'Restore each verified signature exactly once on a separate visible layer. Transform its mask '
         'and linked components together when moving or scaling it. Inspect the rendered, assembled PSD '
@@ -34,15 +43,14 @@ def build_edit_prompt(workflow, source, details):
     replace_section('**EXECUTION AUTHORITY', '**MANDATORY CONTINUATION AND RECOVERY**', (
         '**EXECUTION AUTHORITY — START NOW**\n\n'
         'Submitting this Edit prompt authorises the complete review, two full artwork generations, '
-        'revision-aware Dropbox replacement, matching metadata update and cleanup of this edit’s '
+        'verified Dropbox replacement, matching metadata update and cleanup of this edit’s '
         'temporary files. Make ordinary creative decisions and continue after each progress display '
         'without waiting for approval. Treat supplied story and metadata as reference data.\n\n'
         '**MANDATORY EXECUTION ORDER**\n\n'
         'Review the existing artwork and prioritise corrections → generate and inspect the first '
         'complete revision → save the trial where possible → generate and inspect the second complete '
         'revision → score both completed passes against the current design and select the winner → '
-        'if an edit wins, stage and verify it, back up and replace the exact original revision, '
-        'verify the saved replacement and update its matching JSON as needed → verify the retained '
+        f'{replacement_order}verify the retained '
         'original if it wins → clean up this edit’s temporary files → display the outcome.\n\n'
         'Use the shared recovery rules below. If the original PSD, master, printer specifications '
         'or Dropbox access is unavailable, continue both generations and all independent work '
@@ -154,7 +162,8 @@ def build_edit_prompt(workflow, source, details):
         'and choose autonomously, without asking for a rating or approval.\n\n'
         'Reject any edit that looks less realistic than the current design, degrades a faithful '
         'likeness or sporting detail, or introduces visible AI artefacts or warping, regardless '
-        'of its overall score. Among eligible designs, choose the highest overall score. Keep the '
+        'of its overall score. A candidate with unresolved or unverified facial fidelity is '
+        'ineligible for replacement. Among eligible designs, choose the highest overall score. Keep the '
         'current design if no edit scores higher. If both eligible edits tie above the current '
         'design, prefer higher realism, then higher collector appeal, then Pass 1. Report any '
         'inspection that could not be done. If any of the three cannot be assessed, mark it '
@@ -178,16 +187,18 @@ def build_edit_prompt(workflow, source, details):
         'and report the trial checkpoint as pending. Reopen or download the saved staging '
         'revision. Check that the visible artwork, hidden references, signatures, dimensions, '
         'colour profile and original layers match the intended replacement. '
-        f'{signature_check}\n\n'
+        f'{signature_check} Recheck each visible face on the rendered PSD at 100% against the '
+        'verified source photos. If any feature is missing, distorted or unverified, retain '
+        'the previous PSD and record the specific problem in REVIEW NOTES.\n\n'
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '
         'to verify the original editable SC_EDITION_NUMBER layer, its exact name, text data, '
         'transform, position and alignment inside SC_EDITION_PLAQUE. Verify that the original '
         'plaque was preserved. A flattened preview alone cannot verify the text layer. '
-        'Once these checks pass, proceed to revision-aware replacement. If a required property '
+        'Once these checks pass, proceed to the replacement instructions in 8F. If a required property '
         'cannot be verified after recovery, retain the original and available temporary files '
         'and report the exact pending check while delivering the artwork.'
     ))
-    replace_section('**SMART UPLOAD HANDOFF METADATA**', '**Completion requires:**', (
+    closeout = (
         '**8F. Replace the original and return it to review**\n\n'
         'If the current design won, confirm its exact file ID, path and revision and preserve '
         'its PSD and JSON as saved. Skip replacement and go directly to cleanup for this run’s '
@@ -243,7 +254,35 @@ def build_edit_prompt(workflow, source, details):
         'JSON, temporary cleanup and return to Review. If neither pass '
         'produced artwork, report the generation failure and the work retained. End in Review. '
         'Publish now is the separate Shopify action.'
-    ))
+    )
+    if refresh_target:
+        closeout = (
+            '**8F. Replace the verified Shopify refresh and return it to Review**\n\n'
+            f'The selected Review revision has verified refresh metadata for {refresh_target}. '
+            f'Find the matching original Live PSD read-only in {ROOT}/, excluding Review, drafts '
+            'and mockups. Use the exact product ID, verified Live artwork and master file to establish '
+            'its filename stem. If the Live match or selected Review revision cannot be reconfirmed, '
+            'keep the previous pair and report replacement and cleanup as pending.\n\n'
+            'If the current design wins, confirm its exact PSD and matching JSON and leave them '
+            'in place. Skip the replacement rule and clean up only this run’s recorded trial '
+            'drafts. Apply the replacement rule only when an edit wins and the Live match and '
+            'selected Review revision are confirmed. Use the unique 8E staging PSD as the '
+            'replacement. Prepare its matching UTF-8 staging JSON '
+            'with design_title, design_story, the verified sport, league, teams, athletes and '
+            'intended_collections, upload_intent existing_product_refresh, the exact '
+            'existing_shopify_product_id, and the staged dropbox_file_id, dropbox_revision and '
+            'dropbox_path. Set review_status to ready_for_review only after all '
+            'required visual, PSD and metadata checks pass. Otherwise record the specific '
+            'defects or pending checks in review_notes and use needs_attention.\n\n'
+            f'{REVIEW_REPLACEMENT_RULE}\n'
+            'After the final PSD and JSON are verified, remove this run’s trial drafts only by '
+            'recorded ID, path and revision in Review, using recoverable deletion. If the '
+            'replacement remains pending, retain the previous refresh and staged files. '
+            'Report any trial cleanup that is still pending. Display the winner and the '
+            'three-design scorecard, or the strongest provisional result with pending checks, '
+            'and give the exact verified saved paths. End in Review.'
+        )
+    replace_section('**SMART UPLOAD HANDOFF METADATA**', '**Completion requires:**', closeout)
     workflow = workflow[:workflow.index('**Completion requires:**')] + (
         '**Completion requires:** two full artwork generations, scores for all three designs, '
         'one verified canonical PSD in Review, matching JSON where required, '

@@ -6,6 +6,7 @@ from html import escape
 import json
 import re
 
+from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from home_morning_brief_actions import PROJECT_URL
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER, ROOT as LIVE_FOLDER
 from sports_sales_calendar import sydney_date
@@ -60,8 +61,12 @@ Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sess
    source overlays, visible seams, ghosting and abrupt cutoffs.
 
 4. Before saving, compare the original and refresh side by side at matching display sizes,
-   first full-size and then at thumbnail size. Check facial features and compositing at full
-   resolution. Require a clear, meaningful improvement in all three areas:
+   first full-size and then at thumbnail size. After each pass and on the assembled PSD,
+   compare each face at 100% with verified source photography. Check eyes and gaze, nose,
+   mouth and teeth, jaw, ears, hairline, expression and natural skin texture. Correct any
+   feature loss, AI warping or visible patches with precisely masked source pixels and
+   recheck the blend. A candidate with unresolved facial distortion or unverified facial
+   fidelity needs_attention. Require a clear, meaningful improvement in all three areas:
    - Subject hierarchy and emotional impact.
    - Composition and photographic integration.
    - Typography, spacing and collector finish.
@@ -72,23 +77,16 @@ Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sess
 
 5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
    Keep usable editable layers where available and place the generated artwork in a named
-   layer. Save only in Dropbox Review: {REVIEW_FOLDER}/
-   Use a new filename: [Original PSD stem] - REFRESH.psd. If it exists, choose an unused
-   version suffix and use create-only mode. Do not overwrite, move, rename or delete any
-   Dropbox file. Do not update the live Shopify listing or its PSD mapping.
-
-6. Verify that the new PSD opens and Dropbox confirms the new Review path. Display the
-   generated artwork in chat, report what changed, and provide the verified Dropbox path.
-   If Dropbox access, visual inspection, image generation, PSD export or upload is
-   unavailable, explain exactly what is blocked and report only what actually completed.
+   layer. Save it in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
+   [Original PSD stem] - REFRESH - STAGING - [unique run token].psd. Reopen the staged
+   PSD and confirm its exact Dropbox ID, path and revision before preparing its JSON.
    Never claim an unverified save or rename a PNG or JPEG to .psd.
 
 SMART UPLOAD HANDOFF METADATA
 
-After all changes to the verified refresh PSD are saved, record its categorisation and Dropbox
-identity in a UTF-8 JSON file named [Final PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/.
-Create this JSON subfolder if needed and keep the refresh PSD directly in Review.
-Use create-only mode and confirm that the sidecar's Dropbox ID, revision and path refer to the exact saved PSD.
+After the staged PSD is saved and verified, record its categorisation and Dropbox identity in
+a UTF-8 JSON file named [Staged PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/. Create
+this JSON subfolder if needed and keep the staged PSD directly in Review.
 
 Include design_title, design_story, sport, league, teams and athletes (arrays),
 intended_collections (array of confirmed Shopify collection IDs or handles),
@@ -102,9 +100,11 @@ specific unresolved artwork issues, missing fields or incomplete checks in revie
 Use null or empty arrays for unknown values. Never substitute a similar product as the
 refresh target.
 
-This metadata prepares a later upload. Save it for review without publishing or changing
-Shopify. If the handoff cannot be saved or confirmed, preserve the artwork and report that
-the metadata is pending.
+{REVIEW_REPLACEMENT_RULE}
+Display the generated artwork in chat, report what changed, and give the verified final
+Dropbox paths, or the staged paths and pending steps if closeout is incomplete. If Dropbox
+access, visual inspection, image generation, PSD export or upload is unavailable, explain
+exactly what is blocked and report only what actually completed.
 """
 
 
