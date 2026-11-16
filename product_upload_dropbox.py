@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from product_upload_intake import Intakes, mode, action_mode, stored_mode, smart_claim, MAX_BYTES
 import psd_directory
 
-REVIEW = psd_directory.ROOT + '/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE'
+REVIEW = psd_directory.REVIEW_FOLDER
 ROOTS = {'review': REVIEW, 'live': psd_directory.ROOT}
 
 

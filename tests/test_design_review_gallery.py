@@ -13,6 +13,7 @@ import design_review_page as gallery
 import files_upload_api
 import product_upload_api as api
 from product_upload_dropbox import REVIEW
+from psd_directory import REVIEW_METADATA_FOLDER
 from tests.test_product_upload_intake import database, env  # noqa: F401
 
 
@@ -23,12 +24,16 @@ def source(id_, name, revision='exact', root=REVIEW):
 
 def test_folder_reaches_last_cursor_and_uses_listed_sidecars(monkeypatch):
     artwork = source('a', 'Final.psd')
-    handoff = source('b', 'Final.upload.json')
-    trial = source('c', 'Final - EDIT-exact - TRIAL.psd')
+    legacy = source('b', 'Final.upload.json')
+    handoff = source('c', 'Final.upload.json', root=REVIEW_METADATA_FOLDER)
+    trial = source('d', 'Final - EDIT-exact - TRIAL.psd')
+    folder = {'.tag': 'folder', 'name': 'JSON', 'path_display': REVIEW_METADATA_FOLDER}
 
-    def page(_, __, *, cursor, limit):
+    def page(_, path, *, cursor, limit):
+        if path == REVIEW_METADATA_FOLDER:
+            return dict(entries=[handoff], has_more=False)
         index = int(cursor or '0')
-        entries = [artwork] if index == 0 else [handoff, trial] if index == 11 else []
+        entries = [artwork] if index == 0 else [legacy, trial, folder] if index == 11 else []
         return dict(entries=entries, has_more=index < 11, cursor=str(index + 1))
 
     monkeypatch.setattr(api, 'Dropbox', lambda: SimpleNamespace(
@@ -39,7 +44,7 @@ def test_folder_reaches_last_cursor_and_uses_listed_sidecars(monkeypatch):
     designs, _ = gallery._folder.__wrapped__('fixture')
 
     assert designs == [(artwork, {'design_name': 'Sidecar title'}, '', True)]
-    details.assert_called_once_with('fixture', artwork, handoff)
+    details.assert_called_once_with('fixture', artwork, (handoff, legacy))
 
 
 @pytest.mark.parametrize(('permissions', 'record', 'revision', 'expected'), [

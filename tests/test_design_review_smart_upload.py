@@ -8,6 +8,7 @@ from design_review_metadata import parse_handoff, read_handoff, review_key
 from product_upload_dropbox import REVIEW
 from product_upload_intake import action_mode, stored_mode
 from product_upload_prompts import build
+from psd_directory import REVIEW_METADATA_FOLDER
 
 
 SOURCE = dict(id='id:Art', rev='abcdef123', path_display=REVIEW + '/Adelaide.psd')
@@ -64,11 +65,47 @@ def test_handoff_download_is_identity_checked_and_closed():
     response.iter_content.return_value = iter([raw])
     provider.api.get_file_response.return_value = (stored, response)
     assert read_handoff(provider, SOURCE)['sport'] == 'Cricket'
-    provider.metadata_if_present.assert_called_once_with(REVIEW + '/Adelaide.upload.json')
+    provider.metadata_if_present.assert_called_once_with(REVIEW_METADATA_FOLDER + '/Adelaide.upload.json')
     response.close.assert_called_once()
     provider.api.get_file_response.return_value = (dict(stored, rev='changed'), response)
     with pytest.raises(ValueError, match='metadata changed'):
         read_handoff(provider, SOURCE)
+
+
+@pytest.mark.parametrize('canonical', ('missing', 'different revision', 'different path', 'different ID', 'valid'))
+def test_handoff_prefers_matching_json_and_falls_back_to_matching_legacy(canonical):
+    from io import BytesIO
+
+    provider = Mock()
+    legacy_raw = handoff(design_title='Legacy title')
+    fields = {
+        'different revision': {'dropbox_revision': 'old'},
+        'different path': {'dropbox_path': REVIEW + '/Different.psd'},
+        'different ID': {'dropbox_file_id': 'id:Different'},
+    }
+    canonical_raw = handoff(design_title='Canonical title', **fields.get(canonical, {}))
+    files = {}
+    for id_, path, raw in (('legacy', REVIEW, legacy_raw), ('canonical', REVIEW_METADATA_FOLDER, canonical_raw)):
+        if id_ == 'canonical' and canonical == 'missing':
+            continue
+        files[path + '/Adelaide.upload.json'] = (dict(id=id_, rev='rev', size=len(raw), **{'.tag': 'file'}), raw)
+
+    provider.metadata_if_present.side_effect = lambda path: files.get(path, (None, None))[0]
+
+    def download(_, id_):
+        entry, raw = next((entry, raw) for entry, raw in files.values() if entry['id'] == id_)
+        return entry, Mock(iter_content=lambda **_: BytesIO(raw), close=Mock())
+
+    provider.api.get_file_response.side_effect = download
+    title = read_handoff(provider, SOURCE)['design_name']
+    assert title == ('Canonical title' if canonical == 'valid' else 'Legacy title')
+    if canonical != 'valid':
+        del files[REVIEW + '/Adelaide.upload.json']
+        if canonical == 'missing':
+            assert read_handoff(provider, SOURCE) is None
+        else:
+            with pytest.raises(ValueError, match='different Dropbox PSD revision'):
+                read_handoff(provider, SOURCE)
 
 def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypatch):
     from contextlib import contextmanager
@@ -118,6 +155,30 @@ def test_review_gallery_approval_uses_the_exact_psd_and_starts_mockups(monkeypat
     assert generate.call_count == 1
 
 from tests.test_product_upload_intake import database, env  # noqa: E402,F401
+
+
+def test_smart_selection_retains_canonical_sport_collections_and_refresh_target(env):
+    import uuid
+    from io import BytesIO
+    from product_upload_dropbox import select
+    from tests.test_product_upload_dropbox import provider_fixture
+    from tests.test_product_upload_intake import ADMIN
+
+    store, _, provider = env
+    source = provider_fixture(provider)(SOURCE['id'], 'Adelaide.psd', SOURCE['rev'])
+    raw = handoff(upload_intent='existing_product_refresh', existing_shopify_product_id=TARGET)
+    path = REVIEW_METADATA_FOLDER + '/Adelaide.upload.json'
+    metadata = dict(id='id:Sidecar', rev='json-revision', size=len(raw), path_display=path, **{'.tag': 'file'})
+    provider.files[path] = metadata
+    provider.api.get_file_response.return_value = metadata, Mock(iter_content=lambda **_: BytesIO(raw))
+
+    row = select(store.connect, provider, str(uuid.uuid4()), ADMIN['id'], 'SMART', source['id'], source['rev'])
+
+    assert row['mode'] == 'UPDATE'
+    details = row['data']['metadata']
+    assert (details['sport'], details['intended_collections'], details['shopify_product_id']) == (
+        'Cricket', ['cricket-wall-art'], TARGET,
+    )
 
 
 def test_smart_revision_has_one_durable_intake_across_selection_and_mode_switch(env):

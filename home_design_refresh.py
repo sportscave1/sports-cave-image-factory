@@ -7,7 +7,7 @@ import json
 import re
 
 from home_morning_brief_actions import PROJECT_URL
-from psd_directory import ROOT as LIVE_FOLDER
+from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER, ROOT as LIVE_FOLDER
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -19,7 +19,6 @@ LEGACY_FIELDS = {"product_id", "handle", "title", "created", "image_updated",
 REVIEW_FIELDS = {"product_id", "handle", "title", "reason", "evidence",
                  "sessions", "orders", "suggestion"}
 REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
-REVIEW_FOLDER = f"{LIVE_FOLDER}/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE"
 
 
 def _refresh_prompt(row, product_url):
@@ -64,8 +63,9 @@ Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sess
 SMART UPLOAD HANDOFF METADATA
 
 After all changes to the verified refresh PSD are saved, record its categorisation and Dropbox
-identity in a UTF-8 JSON file named [Final PSD stem].upload.json beside it in Review.
-Use create-only mode and confirm that the sidecar describes the exact saved PSD revision.
+identity in a UTF-8 JSON file named [Final PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/.
+Create this JSON subfolder if needed and keep the refresh PSD directly in Review.
+Use create-only mode and confirm that the sidecar's Dropbox ID, revision and path refer to the exact saved PSD.
 
 Include design_title, design_story, sport, league, teams and athletes (arrays),
 intended_collections (array of confirmed Shopify collection IDs or handles),

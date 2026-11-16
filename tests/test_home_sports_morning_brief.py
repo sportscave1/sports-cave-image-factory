@@ -442,6 +442,11 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "[Product Title] - v2 - TRIAL.psd" in result[first_save:second_pass]
     assert "[Product Title] - v2.psd" in result[first_save:second_pass]
     assert "ORIGINAL EDITABLE ARTWORK" in result[second_generation:final_save]
+    assert "explicitly lock those strengths before generating again" in result[second_pass:second_generation]
+    assert "A new layout is optional." in result[second_generation:final_save]
+    assert "If the first artwork still wins, use it." in result[second_generation:final_save]
+    assert "Place the strongest inspected artwork in **FINAL POLISHED ARTWORK**" in result[second_generation:final_save]
+    assert "Generate a visibly different" not in result
     assert "download and inspect the strongest authentic candidates" in result[signature:first_generation]
     assert "Never generate, redraw, or reconstruct" in result[signature:first_generation]
     assert "at 100% magnification to this first generation" in result[first_review:first_save]
@@ -461,6 +466,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     metadata_end = result.index("**8F.", metadata_start)
     metadata = result[metadata_start:metadata_end]
     assert "Never write a handoff for the trial or overwrite an existing file." in metadata
+    assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/JSON/" in metadata
     assert "intended_collections" in metadata and "dropbox_revision" in metadata
     assert "overwrite" not in (result[:metadata_start] + result[metadata_end:]).lower()
 

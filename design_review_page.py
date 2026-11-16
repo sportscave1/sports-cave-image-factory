@@ -9,9 +9,12 @@ import logging
 
 import streamlit as st
 
-from design_review_metadata import is_working_file, legacy_metadata, read_handoff, resolve_review_sport, review_key
+from design_review_metadata import (
+    handoff_paths, is_working_file, legacy_metadata, read_handoff, resolve_review_sport, review_key,
+)
 from product_upload_dropbox import REVIEW, approved, select, within
 from product_upload_intake import Intakes, action_mode
+from psd_directory import REVIEW_METADATA_FOLDER
 
 _HANDOFF_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='review-handoff')
 
@@ -22,8 +25,17 @@ def final_psd(entry):
                 and not is_working_file(entry['name']))
 
 
-def folder_page(provider, cursor):
-    return provider.api.list_folder_page(provider.token, REVIEW, cursor=cursor, limit=500)
+def _folder_entries(provider, path):
+    cursor, seen = '', set()
+    while True:
+        page = provider.api.list_folder_page(provider.token, path, cursor=cursor, limit=500)
+        yield from page['entries']
+        if not page.get('has_more'):
+            return
+        cursor = page.get('cursor')
+        if not cursor or cursor in seen:
+            raise ValueError('Review folder pagination could not be completed.')
+        seen.add(cursor)
 
 
 def _thumbnail(provider, source):
@@ -162,18 +174,19 @@ def _staged_replacement(user, source, key):
 
 
 @lru_cache(maxsize=512)
-def _handoff(actor_id, file_id, revision, path, sidecar_id, sidecar_rev, size):
+def _handoff(actor_id, file_id, revision, path, sidecars):
     from product_upload_api import Dropbox
-    return read_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path),
-                        metadata={'.tag': 'file', 'id': sidecar_id, 'rev': sidecar_rev, 'size': size})
+    candidates = (dict(id=id_, rev=rev, size=size, **{'.tag': 'file'}) for id_, rev, size in sidecars)
+    return read_handoff(Dropbox(), dict(id=file_id, rev=revision, path_display=path), candidates=candidates)
 
 
-def _details(actor, source, sidecar):
-    if sidecar is None:
+def _details(actor, source, sidecars):
+    if not sidecars:
         return legacy_metadata(source), ''
     try:
+        versions = tuple((sidecar.get('id'), sidecar.get('rev'), sidecar.get('size')) for sidecar in sidecars)
         return _handoff(actor, source['id'], source['rev'], source['path_display'],
-                        sidecar.get('id'), sidecar.get('rev'), sidecar.get('size')) or legacy_metadata(source), ''
+                        versions) or legacy_metadata(source), ''
     except ValueError as exc:
         return dict(legacy_metadata(source), review_status='needs_attention'), str(exc)
     except Exception:
@@ -273,32 +286,34 @@ def _published(user, query):
 def _folder(actor_id):
     from product_upload_api import Dropbox
     provider = Dropbox()
-    cursor, entries, seen, working, sidecars = '', {}, set(), set(), {}
-    while True:
-        page = folder_page(provider, cursor)
-        for entry in page['entries']:
-            if final_psd(entry):
-                entries[entry['id']] = entry
-            elif entry.get('.tag') == 'file':
-                name = entry.get('name', '')
-                if name.lower().endswith('.upload.json') and entry.get('path_display'):
-                    sidecars[entry['path_display'].casefold()] = entry
-                stem, marked, edit = name.rpartition(' - EDIT-')
-                if marked:
-                    revision, _, stage = edit.partition(' - ')
-                    if stage.startswith(('TRIAL', 'STAGING')):
-                        working.add((stem, revision))
-        if not page.get('has_more'):
-            break
-        cursor = page.get('cursor')
-        if not cursor or cursor in seen:
-            raise ValueError('Review folder pagination could not be completed.')
-        seen.add(cursor)
+    entries, working, sidecars = {}, set(), {}
+    handoff_folder_found = False
+    for entry in _folder_entries(provider, REVIEW):
+        if final_psd(entry):
+            entries[entry['id']] = entry
+        elif entry.get('.tag') == 'folder':
+            if (entry.get('path_display') or '').casefold() == REVIEW_METADATA_FOLDER.casefold():
+                handoff_folder_found = True
+        elif entry.get('.tag') == 'file':
+            name = entry.get('name', '')
+            if name.lower().endswith('.upload.json') and entry.get('path_display'):
+                sidecars[entry['path_display'].casefold()] = entry
+            stem, marked, edit = name.rpartition(' - EDIT-')
+            if marked:
+                revision, _, stage = edit.partition(' - ')
+                if stage.startswith(('TRIAL', 'STAGING')):
+                    working.add((stem, revision))
+    if handoff_folder_found:
+        for entry in _folder_entries(provider, REVIEW_METADATA_FOLDER):
+            if (entry.get('.tag') == 'file' and entry.get('path_display')
+                    and entry.get('name', '').lower().endswith('.upload.json')):
+                sidecars[entry['path_display'].casefold()] = entry
     ordered = sorted(entries.values(), key=lambda item: str(item.get('server_modified', '')), reverse=True)
-    sidecars_by_path = [sidecars.get(entry['path_display'][:-4].casefold() + '.upload.json') for entry in ordered]
+    sidecars_by_path = [tuple(sidecars[p.casefold()] for p in handoff_paths(entry['path_display'])
+                              if p.casefold() in sidecars) for entry in ordered]
     pending = {i: _HANDOFF_POOL.submit(_details, actor_id, entry, sidecar)
-               for i, (entry, sidecar) in enumerate(zip(ordered, sidecars_by_path)) if sidecar is not None}
-    designs = [(entry, *(pending[i].result() if i in pending else _details(actor_id, entry, None)),
+               for i, (entry, sidecar) in enumerate(zip(ordered, sidecars_by_path)) if sidecar}
+    designs = [(entry, *(pending[i].result() if i in pending else _details(actor_id, entry, ())),
                 (PurePosixPath(entry['name']).stem, entry['rev']) in working)
                for i, entry in enumerate(ordered)]
     return designs, datetime.now(timezone.utc)

@@ -2,11 +2,22 @@
 import json
 import re
 import uuid
+from pathlib import PurePosixPath
 
 from product_upload_dropbox import REVIEW, within
+from psd_directory import REVIEW_METADATA_FOLDER
 from sports_categories import detect_sport_in_text, infer_sport_category, sport_collection_handles
 
 MAX_HANDOFF_BYTES = 32 * 1024
+
+
+def handoff_paths(psd_path):
+    """Prefer the central folder and accept a sibling sidecar during migration."""
+    if not within(psd_path, REVIEW) or not psd_path.lower().endswith('.psd'):
+        return ()
+    legacy_path = psd_path[:-4] + '.upload.json'
+    canonical_path = REVIEW_METADATA_FOLDER + '/' + PurePosixPath(legacy_path).name
+    return tuple(dict.fromkeys((canonical_path, legacy_path)))
 
 
 def _text(value, size=400):
@@ -56,15 +67,7 @@ def parse_handoff(raw, source):
                 **({'sport_selection_pending': True} if checks_passed and not sport else {}))
 
 
-def read_handoff_record(provider, source, *, metadata=None):
-    path = source.get('path_display') or ''
-    if not within(path, REVIEW):
-        return None
-    sidecar = path[:-4] + '.upload.json'
-    if metadata is None:
-        metadata = provider.metadata_if_present(sidecar)
-    if not metadata:
-        return None
+def _read_sidecar(provider, source, metadata):
     if (metadata.get('.tag') != 'file' or not metadata.get('id') or
             type(metadata.get('size')) is not int or not 0 < metadata['size'] <= MAX_HANDOFF_BYTES):
         raise ValueError('The artwork metadata file exceeds the supported size or is unavailable.')
@@ -85,8 +88,27 @@ def read_handoff_record(provider, source, *, metadata=None):
         response.close()
 
 
-def read_handoff(provider, source, *, metadata=None):
-    record = read_handoff_record(provider, source, metadata=metadata)
+def read_handoff_record(provider, source, *, candidates=None):
+    paths = handoff_paths(source.get('path_display') or '')
+    if not paths:
+        return None
+    if candidates is None:
+        candidates = (provider.metadata_if_present(path) for path in paths)
+    first_error = None
+    for metadata in candidates:
+        if metadata:
+            try:
+                return _read_sidecar(provider, source, metadata)
+            except ValueError as error:
+                if first_error is None:
+                    first_error = error
+    if first_error is not None:
+        raise first_error
+    return None
+
+
+def read_handoff(provider, source, *, candidates=None):
+    record = read_handoff_record(provider, source, candidates=candidates)
     return parse_handoff(json.dumps(record[0]), source) if record else None
 
 

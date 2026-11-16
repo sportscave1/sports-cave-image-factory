@@ -3,6 +3,8 @@ import json
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
+from psd_directory import REVIEW_METADATA_FOLDER
+
 REVIEW = Path(__file__).with_name('design_review_instructions.md')
 
 
@@ -33,10 +35,11 @@ def build_edit_prompt(workflow, source, details):
         '**8E. Save and verify the staged final PSD**\n\n'
         f'Save a separate create-only file at {staged}. If occupied, choose a unique staging '
         'suffix for this run and report the exact path. Preserve the pre-edit artwork in '
-        'ORIGINAL REVIEW SOURCE, the first new pass in ORIGINAL EDITABLE ARTWORK, and the second '
-        'new pass in FINAL POLISHED ARTWORK. Keep the two reference groups hidden. Retry any '
+        'ORIGINAL REVIEW SOURCE and the first new pass in ORIGINAL EDITABLE ARTWORK. Place the strongest '
+        'inspected new artwork in FINAL POLISHED ARTWORK regardless of generation order, and retain any '
+        'other useful versions in hidden groups. Keep both original reference groups hidden. Retry any '
         'pending trial before staging when access allows. Reopen or download the staged copy and '
-        'check all three artwork versions, signatures, dimensions, colour profile, badge, editable '
+        'check the selected artwork, hidden references, signatures, dimensions, colour profile, badge, editable '
         'number and alignment. Keep the original untouched on any failure.\n\n'
         'Verify that SC_EDITION_NUMBER remains the original editable text layer, retains its exact '
         'name, and stays correctly aligned inside SC_EDITION_PLAQUE. Check the saved text data, '
@@ -54,8 +57,11 @@ def build_edit_prompt(workflow, source, details):
         'on revision conflict or verification failure. If the interactive live-number check is '
         'pending, keep the original, trial and staging and report that check as pending.\n\n'
         'After replacement, reopen the canonical file and confirm its actual ID, revision and '
-        'verified contents. Update the revision in the existing Smart Upload metadata while preserving '
-        'the original product and collection linkage. Clean up only verified trial/staging files '
+        f'verified contents. Update the matching Smart Upload metadata in {REVIEW_METADATA_FOLDER}/ '
+        'with the canonical PSD file ID, path and revision, preserving the original product and collection '
+        'linkage. While legacy metadata is being migrated, look beside the original PSD as a fallback. '
+        'If its safe update is blocked, preserve the artwork and report metadata as pending. '
+        'Clean up only verified trial/staging files '
         'belonging to this edit, using revision-aware recoverable deletion. Display the improved '
         'artwork and report pending checks or cleanup. Return to review. Publish now is the separate '
         'Shopify action.\n'
