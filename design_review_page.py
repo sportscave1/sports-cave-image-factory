@@ -164,6 +164,28 @@ def _staged_replacement(user, source, key):
                 st.rerun()
 
 
+def _keep_original(user, source, key):
+    from product_upload_api import Dropbox
+
+    with st.expander('Keep original and finish edit'):
+        paths = st.text_area('Dropbox draft paths from this edit', key=key+'-closeout-paths',
+                             help='Enter one draft per line. Paste the path or the recorded path | file ID | revision.')
+        if st.button('Keep original and finish edit', key=key+'-keep-original', disabled=not paths.strip()):
+            from design_review_replace import keep_original
+            try:
+                with st.spinner('Verifying the original and removing the selected drafts'):
+                    warnings = keep_original(Dropbox(), source, paths.splitlines())
+            except ValueError as error:
+                st.error(str(error))
+            except Exception:
+                logging.getLogger(__name__).exception('Design Studio edit closeout failed')
+                st.error('The edit could not be closed. Refresh Design Studio to check the original and drafts.')
+            else:
+                _folder.clear(str(user['id']))
+                st.session_state['_review_keep_result'] = (source['name'], warnings)
+                st.rerun()
+
+
 @lru_cache(maxsize=512)
 def _handoff(actor_id, file_id, revision, path, sidecars):
     from product_upload_api import Dropbox
@@ -264,6 +286,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 st.rerun()
         if show_replacement and editing and not resumable:
             _staged_replacement(user, source, key)
+            _keep_original(user, source, key)
 
 
 def _published(user, query):
@@ -297,7 +320,7 @@ def _published(user, query):
 def _folder(actor_id):
     from product_upload_api import Dropbox
     provider = Dropbox()
-    entries, working, sidecars = {}, set(), {}
+    entries, working, backups, sidecars = {}, set(), set(), {}
     handoff_folder_found = False
     for entry in _folder_entries(provider, REVIEW):
         if final_psd(entry):
@@ -312,8 +335,11 @@ def _folder(actor_id):
             stem, marked, edit = name.rpartition(' - EDIT-')
             if marked:
                 revision, _, stage = edit.partition(' - ')
-                if stage.startswith(('TRIAL', 'STAGING')):
+                kind = PurePosixPath(stage).stem.split(' - ', 1)[0]
+                if kind in ('TRIAL', 'STAGING'):
                     working.add((stem, revision))
+                elif kind == 'BACKUP':
+                    backups.add((stem, revision))
     if handoff_folder_found:
         for entry in _folder_entries(provider, REVIEW_METADATA_FOLDER):
             if (entry.get('.tag') == 'file' and entry.get('path_display')
@@ -326,11 +352,11 @@ def _folder(actor_id):
     designs, pending = [], {}
     for i, (entry, sidecars) in enumerate(zip(ordered, sidecars_by_path)):
         stem = PurePosixPath(entry['name']).stem
-        editing = (stem, entry['rev']) in working
+        editing = (stem, entry['rev']) in working or (stem, entry['rev']) in backups
         designs.append((entry, legacy_metadata(entry), '', editing) if not sidecars else None)
         if sidecars:
             pending[i] = _HANDOFF_POOL.submit(_synced_design, provider, actor_id, entry, sidecars,
-                                              editing, stem in active_stems)
+                                              editing, editing or stem in active_stems)
     for i, task in pending.items():
         designs[i] = task.result()
     return designs, datetime.now(timezone.utc)
@@ -347,8 +373,19 @@ def _gallery(app, user):
     if result:
         path, warnings = result
         st.success('Verified replacement saved: ' + PurePosixPath(path).name)
+        st.session_state['design-review-view'] = 'Review'
         for warning in warnings:
             st.warning(warning)
+    kept = st.session_state.pop('_review_keep_result', None)
+    if kept:
+        name, warnings = kept
+        if warnings:
+            st.info('Original kept: ' + name)
+            for warning in warnings:
+                st.warning(warning)
+        else:
+            st.success('Original kept and selected drafts removed: ' + name)
+            st.session_state['design-review-view'] = 'Review'
     with st.container(key='design-review-toolbar'):
         tabs, search, sport = st.columns((1, 1.5, 1))
         view = tabs.segmented_control('Designs', ('Review', 'Editing', 'Published'), default='Review',

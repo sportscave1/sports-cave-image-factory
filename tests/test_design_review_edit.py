@@ -7,7 +7,7 @@ import pytest
 
 from auto_editions import file_hash
 from design_review_metadata import is_working_file
-from design_review_replace import apply
+from design_review_replace import apply, keep_original
 from home_morning_brief_actions import _prompt
 from product_upload_dropbox import REVIEW
 from psd_directory import REVIEW_METADATA_FOLDER
@@ -25,9 +25,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
     })
     assert edit.count('**MANDATORY EXECUTION ORDER**') == 1
-    for start, end in (('**8A. Re-read and review**', '**8D.'),
-                       ('**MANDATORY — MOVE THE PLAQUE', '**8E.'),
-                       ('**Border and print safety', 'Step 4.'),
+    for start, end in (('**MANDATORY — MOVE THE PLAQUE', '**8E.'),
                        ('**Recover from tool failures.**', 'Verified story')):
         assert edit[edit.index(start):edit.index(end)] == standard[standard.index(start):standard.index(end)]
     assert '12. **Final improvement.**' in edit and 'PASS, CHANGE or UNVERIFIED' in edit
@@ -58,8 +56,16 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert 'background, border, headline wording and hierarchy, typography, layout' in edit
     assert '8. **Title and placement.**' in edit
     assert 'headline longevity and placement' in edit.replace('\n', ' ')
-    assert 'design_title while retaining the canonical PSD filename' in edit
+    assert 'design_title at the canonical PSD path' in edit
     assert edit.index('use the authorised Shopify connection in read-only mode') < edit.index('Consider a few short, cinematic headline options')
+    assert 'Keep each existing verified signature' in edit
+    assert 'Transform its mask and linked components together' in edit
+    assert edit.count('Inspect the rendered, assembled PSD') == 2
+    assert 'or text, dates or statistics are removed, reassess the whole layout' in edit
+    assert 'A new layout is optional' in standard and 'A new layout is optional' not in edit
+    assert 'first restore the altered areas from verified photographs using precise masks' in edit
+    assert 'before recoverably deleting that exact file by ID' in edit
+    assert 'Keep original and finish edit' in edit and 'Keep original and finish edit' not in standard
     assert 'three-design scorecard' not in standard
 
 
@@ -99,13 +105,56 @@ def files(tmp_path, monkeypatch):
         current[target] = result
         return result
 
+    def delete(token, path, *, root_path, expected_revision):
+        item = current[path]
+        assert item['rev'] == expected_revision
+        del current[path]
+        current.pop(item['id'], None)
+
     api = SimpleNamespace(copy_path=Mock(side_effect=backup), upload_revision=Mock(side_effect=upload),
-                          get_verified_psd_stream=verified, delete_path_recoverable=Mock())
+                          get_verified_psd_stream=verified, delete_path_recoverable=Mock(side_effect=delete))
     provider = SimpleNamespace(metadata_if_present=lambda key: current.get(key),
                                download=download, token='synthetic', context={'root_path': REVIEW}, api=api)
     validate = Mock()
     monkeypatch.setattr('design_review_replace._inspect', validate)
     return provider, original, trial, staging, current, validate
+
+
+def test_keep_original_removes_only_explicit_drafts_and_is_retryable(files):
+    provider, original, trial, staging, current, _ = files
+    other = dict(trial, id='id:Other', rev='other', path_display=PREFIX+' - TRIAL - another-run.psd')
+    current[other['id']] = current[other['path_display']] = other
+    paths = (trial['path_display'], staging['path_display'])
+    assert keep_original(provider, original, paths) == []
+    assert keep_original(provider, original, paths) == []
+    assert current[original['id']] == original and current[other['id']] == other
+    assert provider.api.delete_path_recoverable.call_count == 2
+    provider.api.upload_revision.assert_not_called()
+    provider.api.copy_path.assert_not_called()
+
+
+def test_keep_original_leaves_drafts_when_canonical_verification_fails(files):
+    provider, original, trial, _, _, _ = files
+    provider.api.get_verified_psd_stream = Mock(side_effect=ValueError('could not reopen'))
+    with pytest.raises(ValueError, match='could not reopen'):
+        keep_original(provider, original, [trial['path_display']])
+    provider.api.delete_path_recoverable.assert_not_called()
+
+
+def test_keep_original_rejects_another_revision_before_deleting_any_draft(files):
+    provider, original, trial, _, _, _ = files
+    stale = trial['path_display'].replace(ORIGINAL_REV, 'earlier')
+    with pytest.raises(ValueError, match='this exact edit revision'):
+        keep_original(provider, original, [trial['path_display'], stale])
+    provider.api.delete_path_recoverable.assert_not_called()
+
+
+def test_keep_original_checks_recorded_draft_receipts(files):
+    provider, original, trial, staging, _, _ = files
+    receipts = [trial['path_display'], f"{staging['path_display']} | {staging['id']} | old"]
+    with pytest.raises(ValueError, match='differs from its recorded Dropbox identity or revision'):
+        keep_original(provider, original, receipts)
+    provider.api.delete_path_recoverable.assert_not_called()
 
 
 def test_replace_preserves_id_and_path_and_cleans_only_exact_temporary_revisions(files):

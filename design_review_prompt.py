@@ -16,6 +16,14 @@ def build_edit_prompt(workflow, source, details):
     original['dropbox_url'] = 'https://www.dropbox.com/home' + quote(folder, safe='/') + '?preview=' + quote(filename, safe='')
     prefix = f'{folder}/{stem} - EDIT-{original["rev"]}'
     trial, staged = prefix + ' - TRIAL.psd', prefix + ' - STAGING.psd'
+    signature_check = (
+        'Restore each verified signature exactly once on a separate visible layer. Transform its mask '
+        'and linked components together when moving or scaling it. Inspect the rendered, assembled PSD '
+        'at full size and as a thumbnail. Confirm each signature is visible, clean, correctly placed '
+        'and free of ghosting or duplicates, and that the original plaque and editable edition number '
+        'both appear once and align. Repair a hidden or displaced asset and render again. A layer '
+        'listed as visible alone does not verify the rendered result.'
+    )
 
     def replace_section(start, end, content):
         nonlocal workflow
@@ -59,13 +67,81 @@ def build_edit_prompt(workflow, source, details):
         'for the original plaque and number. Defer only the assembly and replacement work '
         'that requires the original layers.'
     ))
+    replace_section('Step 3. Define the composition', '**Border and print safety', (
+        'Step 3. Define the composition for this collector artwork. Whenever the title changes '
+        'or text, dates or statistics are removed, reassess the whole layout. Rebalance the '
+        'subject, headline, name, signature, plaque and negative space. Adjust placement, size, '
+        'tracking, line breaks and gaps so the elements read together. At thumbnail and full '
+        'size, check for disconnected text, crowding and excessive empty space. Leave '
+        'intentional breathing room and use only essential text and effects. Preserve explicit '
+        'user locks and authentic details.'
+    ))
+    workflow = workflow.replace(
+        'Preserve the existing composition and subject scale wherever possible. Make only the '
+        'minimum adjustments needed for safe spacing.',
+        'Keep the Step 3 layout within the safe area. If the border alone needs a correction, '
+        'use the smallest adjustment that restores clearance.', 1,
+    ).replace(
+        'identify what makes it effective and explicitly lock those strengths before generating again:',
+        'identify what makes it effective before generating again:', 1,
+    ).replace(
+        'Step 4. For each featured person, search both web and image results.',
+        'Step 4. Check the original PSD and project assets first. Keep each existing verified '
+        'signature unless the user requests removal or evidence shows it is incorrect. Carry '
+        'the exact asset and its mask forward even if new sources are unavailable. For each '
+        'featured person without a usable verified asset, search both web and image results.',
+        1,
+    )
     replace_section('Step 7. Place the first complete artwork', '**STEP 8', (
-        'Step 7. Place the first newly generated pass on a working copy of the selected PSD. Keep '
-        'verified signatures separate and record corrections in REVIEW NOTES. Save a unique, '
+        'Step 7. Place the first newly generated pass on a working copy of the selected PSD. '
+        f'{signature_check} Record any pending fixes in REVIEW NOTES. Save a unique, '
         f'create-only trial: {trial}. If that name is occupied, use a unique suffix for this run '
         'and record its exact file ID, path and revision. If the save remains unavailable, keep '
         'the first pass and notes. Continue immediately to Step 8 in either case.'
     ))
+    workflow = workflow.replace(
+        'If the first version is strong, keep its visual foundation and make subtle corrections. '
+        'Reserve larger changes for specific weaknesses that make the first composition ineffective.',
+        'Carry forward strengths that still serve the revised content. Reassess title placement '
+        'and spacing using Step 3 whenever the wording or supporting text changes.', 1,
+    ).replace(
+        'keeping the strengths locked in 8A.',
+        'preserving the strengths identified in 8A.', 1,
+    ).replace(
+        'including the strengths locked in 8A',
+        'including the strengths identified in 8A', 1,
+    ).replace(
+        '**8B. Second full generation — preserve what works**',
+        '**8B. Second full generation — refine the composition**', 1,
+    ).replace(
+        'Keep a successful primary composition. If a structural weakness warrants a change, choose '
+        'one that suits the story and source photographs:',
+        'Choose the composition that best serves the revised title, story and source photographs:', 1,
+    ).replace(
+        'A new layout is optional. Keep the athlete\'s successful scale and position, title treatment, '
+        'background and accents unless a specific issue warrants a change.',
+        'Reapply the Step 3 layout check after title or supporting-text changes. Adjust the layout '
+        'as needed while preserving successful elements and explicit locks.', 1,
+    ).replace(
+        'Restore the existing assets afterward on separate layers.',
+        'Restore the exact assets during PSD assembly and perform the rendered checks in Steps 7 and 8E.', 1,
+    )
+    replace_section('**MANDATORY ACCEPTANCE CHECK', '**MANDATORY SUBJECT AUTHENTICITY CHECK**', (
+        '**Review corrections before scoring**\n\n'
+        'If a pass improves composition but distorts facial features, anatomy or sporting details, '
+        'first restore the altered areas from verified photographs using precise masks. Keep the '
+        'improved typography and layout. Use the existing correction budget and reassess the '
+        'corrected versions before scoring in 8D.'
+    ))
+    workflow = workflow.replace(
+        'If the strongest candidate still has visible subject defects or a disconnected photo and title',
+        'If a promising candidate still has visible subject defects or a disconnected photo and title', 1,
+    ).replace(
+        'Use the strongest faithful composition, record any failed or unverified checks in REVIEW '
+        'NOTES, and continue directly to the final PSD.',
+        'Record any remaining failed or unverified checks in REVIEW NOTES, then continue to '
+        'the three-design comparison in 8D.', 1,
+    )
     replace_section('**8D. Prepare', '**MANDATORY — MOVE THE PLAQUE', (
         '**8D. Score all three designs and select one winner**\n\n'
         'After completing and inspecting both new passes, compare the rendered current design, '
@@ -90,7 +166,7 @@ def build_edit_prompt(workflow, source, details):
         'ARTWORK. Keep verified signatures on separate visible layers, '
         'the original badge above the artwork and the editable edition number at the top. '
         'Maintain the selected original PSD’s dimensions and colour profile. Apply the shared '
-        'border and print-safety rules with the smallest effective change to the layout.\n\n'
+        'border and print-safety rules and use Step 3 to balance the final layout.\n\n'
         'If the required source layers or either pass remain unavailable, preserve the completed '
         'work and proceed to delivery in Step 8F with assembly pending.'
     ))
@@ -101,7 +177,8 @@ def build_edit_prompt(workflow, source, details):
         'access has returned. If the trial still cannot be saved, verify staging independently '
         'and report the trial checkpoint as pending. Reopen or download the saved staging '
         'revision. Check that the visible artwork, hidden references, signatures, dimensions, '
-        'colour profile and original layers match the intended replacement.\n\n'
+        'colour profile and original layers match the intended replacement. '
+        f'{signature_check}\n\n'
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '
         'to verify the original editable SC_EDITION_NUMBER layer, its exact name, text data, '
         'transform, position and alignment inside SC_EDITION_PLAQUE. Verify that the original '
@@ -114,14 +191,19 @@ def build_edit_prompt(workflow, source, details):
         '**8F. Replace the original and return it to review**\n\n'
         'If the current design won, confirm its exact file ID, path and revision and preserve '
         'its PSD and JSON as saved. Skip replacement and go directly to cleanup for this run’s '
-        'saved drafts. If the comparison or verification is still pending, retain the available '
-        'work and continue to delivery.\n\n'
+        'saved drafts. If direct cleanup is unavailable, use Design Studio → Editing → '
+        'Keep original and finish edit with this run’s recorded drafts when an authorised '
+        'route is available. Enter one per line as path | file ID | revision. If that action '
+        'requires user interaction, give those receipts at delivery and report closeout pending. '
+        'If the comparison or verification is still '
+        'pending, retain the available work and continue to delivery.\n\n'
         'If an edit won and staging is verified, recheck the original’s ID, exact path and expected revision. '
         'Create a separate recoverable backup and verify it matches the original. Use a Dropbox '
         'revision-aware update at the original path to replace the artwork while keeping its '
         'file ID. Never delete the canonical PSD to clear the path. Reopen the saved canonical '
         'PSD and confirm its actual ID, path, new revision, file contents and original editable '
-        'collector layers against verified staging. If a write response is uncertain, read back '
+        'collector layers against verified staging, including their visibility in the rendered '
+        'artwork. If a write response is uncertain, read back '
         'the current identity and contents before attempting another write.\n\n'
         'If replacement is unavailable or the expected revision no longer matches, keep the '
         'original and verified staging. Complete independent work and deliver the artwork. If '
@@ -132,11 +214,12 @@ def build_edit_prompt(workflow, source, details):
         'complete its checks. If that control requires user interaction, report the exact trial '
         'and staging paths at delivery. Continue the run without asking for browser access.\n\n'
         '**Update the matching Smart Upload JSON**\n\n'
-        f'After confirming the canonical PSD, use its [PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/. '
+        f'If an edit won, confirm the canonical PSD and use its [PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/. '
         'Use a matching legacy sidecar beside the original PSD as a fallback source for existing '
         'metadata. Preserve the design’s confirmed sport, upload intent, Shopify product ID and '
         'collection linkage. If the winning edit changes the artwork headline, record it in '
-        'design_title while retaining the canonical PSD filename. Bind the JSON to the actual '
+        'design_title at the canonical PSD path so Design Studio can sync the new title and filenames. '
+        'Bind the JSON to the actual '
         'saved canonical PSD file ID, path and new revision. Update an existing matching sidecar '
         'with its expected JSON revision. '
         'If no central sidecar exists, use create-only mode with verified legacy or project '
@@ -147,18 +230,23 @@ def build_edit_prompt(workflow, source, details):
         'then read both back to confirm the exact match. Report pending metadata and continue delivery.\n\n'
         'After verifying the canonical replacement or confirming the current design won and '
         'its exact revision is still saved, use recoverable, revision-aware deletion for this '
-        'edit’s exact trial, staging and rollback backup PSDs, where created. Confirm their IDs, '
-        'paths and revisions before deletion and confirm the results. If cleanup fails, recheck '
-        'identity before retrying via an authorised route. Leave only the winning design at the '
-        'original filename in the Review folder. Report any pending cleanup and continue delivery.\n\n'
+        'edit’s exact trial, staging and rollback backup PSDs, where created. Record the backup '
+        'ID, path and revision when created, just as for trial and staging. Prefer atomic '
+        'revision-checked deletion. When unavailable, immediately confirm the recorded ID, path '
+        'and unchanged revision before recoverably deleting that exact file by ID. If any of '
+        'those fields differ, retain the file. Apply the same check before an authorised retry. '
+        'Leave earlier backups and other edit sessions alone. Verify the deleted IDs are gone '
+        'and that Review contains one canonical PSD for this edition with its matching JSON. '
+        'Report pending cleanup and continue delivery.\n\n'
         'Display the winner and the three-design scorecard, or the strongest available provisional '
-        'result with any unverified scores, and report the exact status of replacement, JSON and cleanup. If neither pass '
+        'result with any unverified scores, and report the status of the canonical save or retention, '
+        'JSON, temporary cleanup and return to Review. If neither pass '
         'produced artwork, report the generation failure and the work retained. End in Review. '
         'Publish now is the separate Shopify action.'
     ))
     workflow = workflow[:workflow.index('**Completion requires:**')] + (
         '**Completion requires:** two full artwork generations, scores for all three designs, '
-        'one verified winning PSD at the original filename in Review, matching JSON where required, '
+        'one verified canonical PSD in Review, matching JSON where required, '
         'confirmed temporary cleanup and display of the winner and scores. When a checkpoint remains unavailable '
         'after recovery, deliver the strongest available result and identify that checkpoint.'
     )
