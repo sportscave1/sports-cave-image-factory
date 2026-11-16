@@ -165,18 +165,17 @@ async def action(request):
             selected = body.get('mode')
             metadata = None
             if selected == 'SMART':
-                from design_review_metadata import is_trial, read_handoff
+                from design_review_metadata import is_working_file, legacy_metadata, read_handoff
                 current = await run_in_threadpool(store.read, key, uid)
                 if not current or current['data'].get('workflow_version') != 3:
                     raise ValueError('Choose a Dropbox PSD for Smart Upload.')
                 source = current['data']['source']
-                if is_trial(source['name']):
+                if is_working_file(source['name']):
                     raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
                 provider = await run_in_threadpool(Dropbox)
                 metadata = await run_in_threadpool(read_handoff, provider, source)
                 if metadata is None:
-                    from sports_categories import detect_sport_in_text
-                    metadata = dict(sport=detect_sport_in_text(source['path_display']))
+                    metadata = legacy_metadata(source)
             row = await run_in_threadpool(store.change_mode, key, uid, selected, metadata=metadata)
         elif op == 'copied':
             row = await run_in_threadpool(store.copied, key, uid, body.get('mode'), body.get('source_version', ''))
@@ -417,6 +416,38 @@ async def saved_image(request):
         return failure(error)
 
 
+async def review_source(request):
+    """Download the selected, immutable Review PSD through the signed-in Files session."""
+    from starlette.responses import StreamingResponse
+    from product_upload_dropbox import REVIEW, approved, within
+    from design_review_metadata import is_working_file
+    import files_upload_api as files
+    import os_accounts
+
+    upstream = None
+    try:
+        user = await run_in_threadpool(files._request_user, request, required_page='Design Studio')
+        if not os_accounts.can_access_page(user, 'Files'):
+            raise PermissionError('Files access is required to download the review PSD.')
+        provider = await run_in_threadpool(Dropbox)
+        file_id, revision = (request.query_params.get(key, '') for key in ('id', 'rev'))
+        metadata = await run_in_threadpool(provider.metadata_if_present, file_id)
+        if (not metadata or not approved(metadata) or metadata['id'] != file_id
+                or not within(metadata['path_display'], REVIEW) or metadata['rev'] != revision
+                or is_working_file(metadata['name'])):
+            raise ValueError('The selected Review PSD changed. Choose its current revision.')
+        actual, upstream = await run_in_threadpool(provider.api.get_psd_file_response, provider.token, file_id, revision)
+        if any(actual.get(key) != metadata.get(key) for key in ('id', 'rev', 'size', 'content_hash')):
+            raise ValueError('The selected Review PSD revision could not be verified.')
+        return StreamingResponse(files._stream_upstream_response(upstream), media_type='application/octet-stream',
+                                 headers={**HEADERS, 'Content-Length': str(metadata['size']),
+                                          'Content-Disposition': files._content_disposition('attachment', metadata['name'])})
+    except Exception as error:
+        if upstream is not None:
+            upstream.close()
+        return failure(error)
+
+
 ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
           ('/product-upload-native', clipboard_page, ('GET',)),
           ('/product-upload-native.js', clipboard_page, ('GET',)),
@@ -428,6 +459,7 @@ ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploa
           ('/api/product-uploads/saved-image', saved_image, ('GET',)),
           ('/product-upload-mapping.js', mapping_script, ('GET',)),
           ('/api/product-uploads/asset', original_asset, ('GET',)),
+          ('/api/design-review/source', review_source, ('GET',)),
           ('/api/product-uploads/source-preview', source_preview, ('GET',)),
           ('/api/product-uploads/mapping-status', mapping_status, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),

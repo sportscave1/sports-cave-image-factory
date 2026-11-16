@@ -70,12 +70,11 @@ def select(connect, provider, key, actor, selected_mode, file_id, revision):
         raise ValueError('Choose a layered PSD up to 1 GiB.')
     metadata = {}
     if selected_mode == 'SMART':
-        from design_review_metadata import is_trial, read_handoff, review_key
+        from design_review_metadata import is_working_file, legacy_metadata, read_handoff, review_key
         metadata = read_handoff(provider, meta) or {}
         if not metadata:
-            from sports_categories import detect_sport_in_text
-            metadata = dict(sport=detect_sport_in_text(meta['path_display']))
-        if is_trial(meta['name']):
+            metadata = legacy_metadata(meta)
+        if is_working_file(meta['name']):
             raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
         key = review_key(meta)
     store = Intakes(connect)

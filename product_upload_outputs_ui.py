@@ -114,6 +114,13 @@ def save_controls(app,result,row,user,name):
         st.warning('That product folder already exists. Save in a numbered folder or change Product name. Nothing was overwritten.')
         if st.button('Save in a numbered folder',disabled=disabled,key='product-upload-save-numbered-retry-'+key):
             numbered=True;st.session_state[numbering_key]=True;save_requested=True
+    approved = (row['data'].get('design_review') or {}).get('decision') == 'approved'
+    auto_key = 'product-upload-auto-save-'+key
+    if (approved and stamp and not disabled and not saved and not row['data'].get('mockups_exported')
+            and st.session_state.get(auto_key) != stamp):
+        st.session_state[auto_key] = stamp
+        numbered = True
+        save_requested = True
     if save_requested:
         from copy import deepcopy
         try:

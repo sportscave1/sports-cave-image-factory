@@ -31,7 +31,7 @@ def _story_without_meta_ad(text):
     return "\n".join(lines).strip()
 
 
-def _prompt(title, story):
+def _prompt(title, story, *, edit=None):
     context = _story_without_meta_ad(story)
     if "tom banton" in f"{title}\n{context}".casefold():
         context = re.sub(
@@ -42,7 +42,7 @@ def _prompt(title, story):
             context,
             flags=re.IGNORECASE | re.MULTILINE,
         )
-    return (
+    workflow = (
         f"Sports Cave event: {title}\n\n"
         "**EXECUTION AUTHORITY — START NOW**\n"
         "\n"
@@ -530,6 +530,11 @@ def _prompt(title, story):
         "Report any incomplete checkpoint plainly. Never describe the workflow as complete when one "
         "is missing."
     )
+    if edit is None:
+        return workflow
+    from design_review_prompt import build_edit_prompt
+    return build_edit_prompt(workflow, edit["source"], edit["metadata"])
+
 
 
 @lru_cache(maxsize=1)

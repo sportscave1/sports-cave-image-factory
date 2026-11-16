@@ -4,7 +4,7 @@ import re
 import uuid
 
 from product_upload_dropbox import REVIEW, within
-from sports_categories import detect_sport_in_text, infer_sport_category
+from sports_categories import detect_sport_in_text, infer_sport_category, sport_collection_handles
 
 MAX_HANDOFF_BYTES = 32 * 1024
 
@@ -49,10 +49,12 @@ def parse_handoff(raw, source):
                                                teams=_strings(value.get('teams'))),
                 intended_collections=collections, upload_intent=intent,
                 shopify_product_id=target, review_status='ready_for_review' if ready else 'needs_attention',
-                review_notes=_text(value.get('review_notes'), 1000))
+                review_notes=_text(value.get('review_notes'), 1000),
+                source_photographs=_strings(value.get('source_photographs')),
+                signature_assets=_strings(value.get('signature_assets')))
 
 
-def read_handoff(provider, source):
+def read_handoff_record(provider, source):
     path = source.get('path_display') or ''
     if not within(path, REVIEW):
         return None
@@ -74,9 +76,15 @@ def read_handoff(provider, source):
                 raise ValueError('The artwork metadata file exceeds the supported size.')
         if len(raw) != metadata['size']:
             raise ValueError('The artwork metadata download was incomplete.')
-        return parse_handoff(raw, source)
+        parse_handoff(raw, source)
+        return json.loads(raw), actual
     finally:
         response.close()
+
+
+def read_handoff(provider, source):
+    record = read_handoff_record(provider, source)
+    return parse_handoff(json.dumps(record[0]), source) if record else None
 
 
 def review_key(source):
@@ -87,7 +95,19 @@ def is_trial(name):
     return bool(re.search(r'\btrial\b', name.rsplit('.', 1)[0], re.IGNORECASE))
 
 
+def is_working_file(name):
+    return is_trial(name) or bool(re.search(
+        r'\b(?:staging|backup)\b|\.sports-cave-replaced-', name.rsplit('.', 1)[0], re.IGNORECASE
+    ))
+
+
 def legacy_metadata(source):
     name = source['name'].rsplit('.', 1)[0]
-    return dict(design_name=name, sport=detect_sport_in_text(source['path_display']),
-                review_status='needs_attention')
+    from product_sport_tags import ATHLETES, key
+    title_words = ' ' + key(name) + ' '
+    subjects = [athlete for athlete in ATHLETES if f' {athlete} ' in title_words]
+    sport = detect_sport_in_text(source['path_display']) or infer_sport_category(
+        ATHLETES[athlete] for athlete in subjects
+    )
+    return dict(design_name=name, sport=sport, athletes=[name.title() for name in subjects],
+                intended_collections=list(sport_collection_handles(sport)), review_status='review')

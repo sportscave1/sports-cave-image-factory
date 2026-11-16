@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlencode
@@ -1045,6 +1045,7 @@ def finish_upload_session(
     dropbox_path,
     *,
     mode="add",
+    expected_revision=None,
 ):
     """Commit a Dropbox upload session only after its final bounded chunk."""
     chunk = bytes(data or b"")
@@ -1055,12 +1056,18 @@ def finish_upload_session(
         session_id=str(session_id or ""),
         offset=max(0, int(offset or 0)),
     )
-    write_mode = sdk.files.WriteMode.overwrite if str(mode) == "overwrite" else sdk.files.WriteMode.add
+    if expected_revision is not None:
+        if not re.fullmatch(r'[0-9a-f]{9,}', expected_revision):
+            raise ValueError('An exact Dropbox revision is required.')
+        write_mode = sdk.files.WriteMode.update(expected_revision)
+    else:
+        write_mode = sdk.files.WriteMode.overwrite if str(mode) == "overwrite" else sdk.files.WriteMode.add
     commit = sdk.files.CommitInfo(
         path=normalize_dropbox_path(dropbox_path),
         mode=write_mode,
         autorename=False,
         mute=False,
+        **({'strict_conflict': True} if expected_revision is not None else {}),
     )
     try:
         metadata = team_space_client(access_token).files_upload_session_finish(
@@ -1071,6 +1078,18 @@ def finish_upload_session(
     except Exception as error:
         raise _dropbox_error(error, "Dropbox upload could not finish.") from error
     return _metadata_to_dict(metadata)
+
+
+def upload_revision(access_token, path, local_path, expected_revision):
+    """Write to the same Dropbox path, requiring the known current revision."""
+    session = start_upload_session(access_token)
+    offset = 0
+    with Path(local_path).open('rb') as stream:
+        while chunk := stream.read(DROPBOX_UPLOAD_CHUNK_SIZE):
+            append_upload_session(access_token, session, offset, chunk)
+            offset += len(chunk)
+    return finish_upload_session(access_token, session, offset, b'', path,
+                                 expected_revision=expected_revision)
 
 
 def upload_local_file(
@@ -1261,7 +1280,7 @@ def replace_path(access_token, source_path, destination_path, *, operation, root
     return metadata
 
 
-def delete_path_recoverable(access_token, path, *, root_path):
+def delete_path_recoverable(access_token, path, *, root_path, expected_revision=None):
     """Remove a Dropbox item while retaining Dropbox Deleted Files recovery."""
     clean_path = normalize_dropbox_path(path)
     clean_root = normalize_dropbox_path(root_path)
@@ -1270,7 +1289,9 @@ def delete_path_recoverable(access_token, path, *, root_path):
     if clean_path.casefold() == clean_root.casefold():
         raise ValueError("The shared Files folder cannot be removed.")
     try:
-        result = team_space_client(access_token).files_delete_v2(clean_path)
+        client = team_space_client(access_token)
+        result = (client.files_delete_v2(clean_path, parent_rev=expected_revision)
+                  if expected_revision else client.files_delete_v2(clean_path))
     except Exception as error:
         raise _dropbox_error(error, "Dropbox item could not be removed.") from error
     metadata = getattr(result, "metadata", result)
@@ -1341,6 +1362,18 @@ def get_psd_file_response(access_token, file_id, revision):
         if isinstance(error, DropboxSourceChangedError):
             raise
         raise _dropbox_error(error,'Dropbox original is unavailable.') from error
+
+
+@contextmanager
+def get_verified_psd_stream(access_token, file_id, revision):
+    metadata, response = get_psd_file_response(access_token, file_id, revision)
+    try:
+        first = next(response.iter_content(chunk_size=64), b'')
+        if not first.startswith(b'8BPS\x00\x01'):
+            raise DropboxSourceChangedError('The saved PSD header could not be verified.')
+        yield metadata
+    finally:
+        response.close()
 
 
 def get_psd_thumbnail_bytes(access_token, file_id, *, revision=None):
