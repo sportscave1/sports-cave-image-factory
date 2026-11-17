@@ -31,6 +31,24 @@ def publish(cur, day='2026-11-17', count=5):
     return edition
 
 
+def test_header_counts_waiting_jobs_and_reads_both_control_states(store):
+    cur, token = store
+    publish(cur)
+    queue.tick(token, [])
+    cur.execute("""INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport)
+        VALUES ('fa74cb28-f3c1-4b34-8ba5-0c39b3e8d31e', 'source', 'rev', 'Waiting upload', 'Sport')""")
+    assert uploads.header_queue_status() == {
+        'design': {'waiting': 4, 'enabled': True},
+        'upload': {'waiting': 1, 'enabled': True},
+    }
+    queue.settings(False)
+    uploads.settings(False)
+    assert uploads.header_queue_status() == {
+        'design': {'waiting': 4, 'enabled': False},
+        'upload': {'waiting': 1, 'enabled': False},
+    }
+
+
 def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     cur, token = store
     publish(cur)

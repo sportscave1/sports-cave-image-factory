@@ -2037,10 +2037,11 @@ def _editor_visible_rows(rows):
     params = getattr(st, 'query_params', {})
     product_hint = params.get('edition_product', '')
     title_hint = params.get('edition_search', '')
-    hint = (product_hint, title_hint)
+    handle_hint = params.get('edition_handle', '')
+    hint = (product_hint, title_hint, handle_hint)
     if any(hint) and st.session_state.get('edition-upload-navigation') != hint:
         from product_upload_edition_navigation import selection
-        matches = selection(rows, product_hint, title_hint)
+        matches = selection(rows, *hint)
         if len(matches) == 1:
             st.session_state[EDITOR_PRODUCT_SELECTION_KEY] = _stable_row_key(matches[0])
             st.session_state['edition-status-filter'] = 'All'

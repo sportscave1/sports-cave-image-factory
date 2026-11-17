@@ -98,6 +98,25 @@ def settings(enabled=None):
         return dict(enabled=_enabled(cur))
 
 
+def header_queue_status():
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute('''SELECT
+            (SELECT count(*) FROM morning_design_jobs WHERE stage=0) AS design_waiting,
+            (SELECT enabled FROM morning_design_control WHERE singleton) AS design_enabled,
+            (SELECT count(*) FROM product_upload_staff_jobs WHERE stage=0) AS upload_waiting,
+            (SELECT value FROM app_settings WHERE key=%s) AS upload_enabled''', (CONTROL_KEY,))
+        row = cur.fetchone()
+    return {
+        'design': dict(waiting=row['design_waiting'], enabled=bool(row['design_enabled'])),
+        'upload': dict(waiting=row['upload_waiting'], enabled=row['upload_enabled'] is not False),
+    }
+
+
+def can_control_queues(user):
+    import os_accounts
+    return os_accounts.is_admin(user) and os_accounts.can_access_page(user, 'Upload Companion')
+
+
 def desktop_tick(token):
     # Updating the singleton row serializes claims even across server processes.
     with connect() as conn, conn.cursor() as cur:
@@ -200,19 +219,44 @@ async def status_route(request):
     from starlette.responses import JSONResponse
     try:
         user = await run_in_threadpool(_request_user, request, required_page='Design Studio')
-        return JSONResponse(await run_in_threadpool(list_jobs, user['id']), headers=HEADERS)
+        result = await run_in_threadpool(list_jobs, user['id'])
+        if can_control_queues(user):
+            result['queues'] = await run_in_threadpool(header_queue_status)
+        return JSONResponse(result, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
+async def queue_control_route(request):
+    from files_upload_api import _request_user, _same_origin
+    from morning_design_queue import settings as design_settings
+    from product_upload_api import HEADERS, failure
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import JSONResponse
+    try:
+        if not request.headers.get('origin') or not _same_origin(request):
+            raise PermissionError('Request origin rejected.')
+        user = await run_in_threadpool(_request_user, request, required_page='Upload Companion')
+        if not can_control_queues(user):
+            raise PermissionError('An administrator must control the companion queues.')
+        body = await request.json()
+        if (not isinstance(body, dict) or body.get('queue') not in ('design', 'upload')
+                or not isinstance(body.get('enabled'), bool)):
+            raise ValueError('Choose a companion queue and Play or Pause.')
+        update = design_settings if body['queue'] == 'design' else settings
+        control = await run_in_threadpool(update, body['enabled'])
+        return JSONResponse({'enabled': control['enabled']}, headers=HEADERS)
     except Exception as error:
         return failure(error)
 
 
 async def pair_route(request):
-    import os_accounts
     from product_upload_api import HEADERS, actor, failure
     from starlette.concurrency import run_in_threadpool
     from starlette.responses import JSONResponse
     try:
         user = await actor(request, write=True)
-        if not os_accounts.is_admin(user) or not os_accounts.can_access_page(user, 'Upload Companion'):
+        if not can_control_queues(user):
             raise PermissionError('An administrator must pair the desktop.')
         return JSONResponse({'token': await run_in_threadpool(pair, user)}, headers=HEADERS)
     except Exception as error:
@@ -268,6 +312,7 @@ async def tick_route(request):
 
 ROUTES = (
     ('/api/staff-product-uploads/status', status_route, ('GET',)),
+    ('/api/staff-product-uploads/queue-control', queue_control_route, ('POST',)),
     ('/api/staff-product-uploads/pair', pair_route, ('POST',)),
     ('/api/staff-product-uploads/tick', tick_route, ('POST',)),
 )
