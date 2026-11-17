@@ -110,7 +110,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
     )
     return {
         "appName": "Sports Cave OS",
-        "staffUploadProgress": 'Design Studio' in allowed_routes and not os_accounts.is_admin(user),
+        "staffUploadProgress": 'Design Studio' in allowed_routes,
         "appSubtitle": "Operations System",
         "logoSrc": str(logo_src or ""),
         "currentRoute": str(current_route or ""),
@@ -163,6 +163,9 @@ def render_top_bar(components, user, *, logo_src, current_route, navigation_epoc
         current_route=current_route,
         navigation_epoch=navigation_epoch,
     )
+    import streamlit as st
+    config['uploadNotice'] = st.session_state.get('_product_upload_notice')
+    config['uploadScope'] = str(user.get('id', ''))
     components.html(component_html(config), height=0, width=0)
 
 

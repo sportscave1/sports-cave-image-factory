@@ -65,6 +65,7 @@ def test_folder_shows_refresh_staging_with_cleanup_pending(monkeypatch):
         get_file_response=lambda *_: (sidecar, SimpleNamespace(iter_content=lambda **_: iter([raw]), close=lambda: None)),
     ))
     monkeypatch.setattr(api, 'Dropbox', lambda: provider)
+    monkeypatch.setattr('product_upload_services.Dropbox', lambda: provider)
 
     [(artwork, details, reason, editing)], _ = gallery._folder.__wrapped__('staged-refresh-test')
 
@@ -280,6 +281,7 @@ def test_first_publish_click_prepares_exact_psd_and_automatically_generates_mock
         entries=[provider.files[REVIEW_METADATA_FOLDER + '/Gallery fixture.upload.json']]
         if path == REVIEW_METADATA_FOLDER else [record, folder], has_more=False)
     monkeypatch.setattr(api, 'Dropbox', lambda: provider)
+    monkeypatch.setattr('product_upload_services.Dropbox', lambda: provider)
     monkeypatch.setattr(api, 'connect', store.connect)
     provider.api.get_psd_thumbnail_bytes.side_effect = TimeoutError('Preview unavailable')
     scheduled = {}
@@ -337,7 +339,20 @@ else:
     gallery._gallery(app, user)
 """, default_timeout=25).run()
     assert not ui.exception
+    import product_upload_staff_queue as queue
+    cursor = env[1]
+    cursor.execute((Path(gallery.__file__).parent / 'migrations/20261117110000_product_upload_staff_queue.sql').read_text(encoding='utf-8'))
+    monkeypatch.setattr(queue, 'connect', store.connect)
     next(button for button in ui.button if button.label == 'Publish now').click().run()
+    assert not ui.exception and not ui.error, [error.value for error in (*ui.exception, *ui.error)]
+    assert ui.session_state['_product_upload_notice']['kind'] == 'success'
+    assert not scheduled, 'Publish queues work without rendering or navigating in the requester tab'
+    token = queue.pair(ADMIN)
+    queued = queue.tick(token, {})['job']
+    assert queued['id'] == ui.session_state['_product_upload_notice']['id']
+    ui.session_state['fixture_page'] = 'Product Uploads'
+    ui.query_params['staff_upload_job'] = queued['id']
+    ui.run()
     assert not ui.exception and not ui.error, [error.value for error in (*ui.exception, *ui.error)]
     assert ui.session_state['fixture_page'] == 'Product Uploads'
     assert next(box for box in ui.selectbox if box.label == 'Sport category').value == category['id']

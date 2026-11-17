@@ -196,6 +196,10 @@
       width: 100%;
     }
     #sc-os-posting-slot {width:250px;height:40px;margin-right:8px;}
+    #sc-upload-notices {position:fixed;right:24px;top:calc(var(--sc-topbar-height, 80px) + 14px);z-index:2147483000;max-width:min(420px,calc(100vw - 32px));display:grid;gap:8px;}
+    .sc-upload-notice {display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-radius:10px;background:#edf8ef;border:1px solid #9ac8a2;color:#174c27;box-shadow:0 6px 24px #0002;font:14px/1.45 Arial,sans-serif;transition:opacity .2s;}
+    .sc-upload-notice[data-kind="error"] {background:#fff1ef;border-color:#d69e96;color:#762820;}
+    .sc-upload-notice button {border:0;background:none;color:inherit;font:20px/1 Arial,sans-serif;cursor:pointer;padding:0 2px;}
     #sc-os-staff-uploads {position:relative;min-width:0;margin-right:12px;color:#f8edcf;}
     #sc-os-staff-uploads[hidden] {display:none;}
     #sc-os-staff-upload-summary {
@@ -947,6 +951,7 @@
       <div id="sc-os-search-results" class="sc-os-topbar-panel" role="listbox" aria-label="Global search results" hidden></div>
     </div>
     <div id="sc-os-posting-slot" aria-hidden="true" hidden></div>
+    <div id="sc-upload-notices" aria-label="Upload notifications"></div>
     <details id="sc-os-staff-uploads" hidden>
       <summary id="sc-os-staff-upload-summary">
         <span id="sc-os-staff-upload-title"></span><span id="sc-os-staff-upload-stage" role="status"></span>
@@ -1026,17 +1031,46 @@
       timers.add(timer);
       return timer;
     };
+    const uploadNotices = root.querySelector("#sc-upload-notices");
+    const shownUploadNotices = new Set();
+    const showUploadNotice = notice => {
+      if (!notice?.id || !notice.text) return;
+      const key = "sc-upload-notice:" + (state.config.uploadScope || "") + ":" + notice.kind + ":" + notice.id;
+      if (shownUploadNotices.has(key)) return;
+      try { if (parentWindow.sessionStorage.getItem(key)) return; } catch (_) {}
+      shownUploadNotices.add(key);
+      const toast = doc.createElement("div");
+      toast.className = "sc-upload-notice";
+      toast.dataset.kind = notice.kind;
+      toast.setAttribute("role", notice.kind === "error" ? "alert" : "status");
+      const message = doc.createElement("span");
+      message.textContent = notice.text;
+      const close = doc.createElement("button");
+      close.type = "button"; close.textContent = "×";
+      close.setAttribute("aria-label", "Dismiss upload notification");
+      const dismiss = () => {
+        toast.remove();
+        try { parentWindow.sessionStorage.setItem(key, "dismissed"); } catch (_) {}
+      };
+      close.addEventListener("click", dismiss);
+      toast.append(message, close); uploadNotices.append(toast);
+      if (notice.kind !== "error") later(() => {
+        toast.style.opacity = "0"; later(dismiss, 200);
+      }, 3000);
+    };
     let staffProgressStarted = false;
     const staffProgress = root.querySelector("#sc-os-staff-uploads");
     let lastStaffStatus = "";
     const refreshStaffProgress = async () => {
+      const scope = state.config.uploadScope;
+      if (!state.config.staffUploadProgress) {staffProgressStarted = false; return;}
       try {
         const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
           credentials:"same-origin", cache:"no-store", signal:listenerController.signal,
         });
         if (!response.ok || listenerController.signal.aborted) return;
         const status = await response.json();
-        if (listenerController.signal.aborted) return;
+        if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
         const jobs = status.jobs || [];
         staffProgress.hidden = !jobs.length;
         root.classList.toggle("sc-has-staff-upload", Boolean(jobs.length));
@@ -1075,6 +1109,9 @@
           }
           return entry;
         }));
+        for (const item of jobs.filter(item => item.stage === 7)) {
+          showUploadNotice({id:item.id + ":" + item.updated_at, kind:"error", text:item.title + " · " + (item.detail || item.label)});
+        }
         const stopped = jobs.find(item => item.stage === 7);
         if (stopped) {
           const errorKey = "sc-staff-upload-error:" + stopped.id;
@@ -3166,6 +3203,7 @@
         root.querySelector(".sc-os-topbar-name").textContent = state.config.appName || "Sports Cave OS";
         root.querySelector(".sc-os-topbar-subtitle").textContent = state.config.appSubtitle || "";
         filesButton.hidden = !state.config.filesEnabled;
+        showUploadNotice(state.config.uploadNotice);
         if (state.config.staffUploadProgress && !staffProgressStarted) {
           staffProgressStarted = true;
           void refreshStaffProgress();

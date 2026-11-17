@@ -1,4 +1,5 @@
 """Design Studio gallery for the exact PSDs in the Dropbox review folder."""
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -329,25 +330,17 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             chosen_sport = sport_picker.selectbox('Sport for ' + title, CANONICAL_SPORT_CATEGORIES,
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
         if clicked and (not needs_sport or chosen_sport):
+            from product_upload_staff_queue import enqueue
             try:
-                import os_accounts
-                if not os_accounts.is_admin(user):
-                    from product_upload_staff_queue import enqueue
-                    enqueue(user, source, title, chosen_sport)
-                    st.toast('Upload queued for the desktop companion.')
-                    return
-                if not resumable or decision != 'approved':
-                    key = _review(Dropbox(), user, source, 'approved', selected_sport=chosen_sport)
+                job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
+                notice = dict(id=str(job_id), kind='success', text=f'Upload started · {title}')
             except ValueError as exc:
-                st.error(str(exc))
+                notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:
                 logging.getLogger(__name__).exception('Smart Upload could not start')
-                st.error('Smart Upload could not start. Your PSD is retained.')
-            else:
-                app.set_current_page('Product Uploads', source='design_studio')
-                st.session_state['_design_review_upload'] = key
-                st.query_params['upload'] = key
-                st.rerun()
+                notice = dict(id=uuid.uuid4().hex, kind='error', text='Upload could not start. Your PSD is retained. Try Publish now again.')
+            st.session_state['_product_upload_notice'] = notice
+            st.rerun()
         if show_replacement and editing and not resumable and not staged:
             _staged_replacement(user, source, key)
             _keep_original(user, source, key)

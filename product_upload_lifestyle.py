@@ -1,5 +1,6 @@
 """Product Upload's master brief. Shared Mockups templates/overrides are read only."""
 import hashlib
+import random
 import re
 
 PROMPT_ID = 'lifestyle::product-upload-master-v6'
@@ -9,7 +10,8 @@ ROOMS = (
     ('airy coastal room', 'modern city apartment', 'warm mid-century interior', 'restrained luxury lounge', 'textured contemporary family room'),
 )
 LABELS = ('Man Cave', 'Office', 'Living Room')
-ROOM_COMBINATIONS = ((1,0,2),(2,2,0),(0,1,1),(3,4,4),(4,3,3))
+WALLS = ('warm off-white', 'stone taupe', 'smoky blue-grey', 'deep navy', 'warm charcoal', 'soft sand')
+WALL_FINISHES = ('matte painted plaster', 'subtle mineral limewash', 'painted residential brick', 'restrained timber panelling', 'fine textured plaster', 'smooth architectural concrete')
 FILENAMES = ('01-man-cave-prompt.txt', '02-office-prompt.txt', '03-living-room-prompt.txt')
 
 AUTOMATIC_START = '''AUTOMATIC START — GENERATE ALL THREE IN SEQUENCE
@@ -48,6 +50,10 @@ Describe fidelity honestly: reference-based image generation is not guaranteed p
 All Sports Cave editions are owner-confirmed as limited to 100 worldwide; no verification flag or confirmation is required for this approved claim.
 
 END FINISHED MOCKUPS ONLY'''
+
+
+from product_upload_scene_quality import upgrade as upgrade_scene_quality
+FINISHED_MOCKUPS = upgrade_scene_quality(FINISHED_MOCKUPS)
 
 
 def unified_instructions(text):
@@ -127,7 +133,8 @@ def sequential_instructions(text):
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
-    return AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n' + unified_instructions(text)
+    from product_upload_scene_quality import upgrade
+    return AUTOMATIC_START + '\n\n' + upgrade(FINISHED_MOCKUPS) + '\n\n' + upgrade(unified_instructions(text))
 
 
 def individual_prompt(text):
@@ -1386,16 +1393,23 @@ def scene_texts(result, current_text, saved_base):
     items = {item['filename']: item['prompt'] for item in result.get('final_prompt_items', ())}
     texts = []
     seed = str(result.get('_product_upload_intake') or result.get('run_dir', ''))
-    combination=ROOM_COMBINATIONS[int(hashlib.sha256(seed.encode()).hexdigest(),16)%len(ROOM_COMBINATIONS)]
+    seed += ':' + str(result.get('run_dir', ''))
+    draw = random.Random(hashlib.sha256(seed.encode()).hexdigest())
+    combination = [draw.randrange(len(rooms)) for rooms in ROOMS]
+    angles = draw.sample(list(scenes.ANGLES[:3]), 3)
+    walls = draw.sample(list(WALLS), 3)
+    finishes = draw.sample(list(WALL_FINISHES), 3)
     for index, filename in enumerate(FILENAMES):
         default = items.get(filename, '')
         text = current_text(filename, default)
         # Never rewrite a saved custom room/angle, including old-format overrides.
         if saved_base(filename, scenes.TEMPLATE).strip() == scenes.TEMPLATE.strip():
-            draw = combination[index]
-            angle=scenes.ANGLES[(combination[0]+index)%len(scenes.ANGLES)]
-            scene=(f'{scenes.MARKER}\nSelected room: {ROOMS[index][draw]}\nSelected camera angle: {angle}\n'
-                   f'{scenes.ANGLE_GUIDANCE[angle]}\nKeep this resolved room and angle stable in this workflow.\n{scenes.END}')
+            room_index = combination[index]
+            angle=angles[index]
+            scene=(f'{scenes.MARKER}\nSelected room: {ROOMS[index][room_index]}\nSelected camera angle: {angle}\n'
+                   f'{scenes.ANGLE_GUIDANCE[angle]}\nSelected wall colour: {walls[index]}\n'
+                   f'Selected wall finish: {finishes[index]}\n'
+                   f'Keep this resolved room, angle and wall treatment stable in this workflow.\n{scenes.END}')
             text = (scenes.SCENE.sub(lambda _: scene, text) if scenes.SCENE.search(text)
                     else text.rstrip() + '\n\n' + scene)
         texts.append(text)
@@ -1428,7 +1442,7 @@ def selected_details(text, index):
     scene = scenes.SCENE.search(text)
     source = scene.group() if scene else text
     details = []
-    for field in ('Selected room', 'Selected camera angle'):
+    for field in ('Selected room', 'Selected camera angle', 'Selected wall colour', 'Selected wall finish'):
         found = re.search(r'^' + field + r':[^\S\n]*(.+)$', source, re.M)
         value = found.group(1).strip() if found else f'As specified in Image {index} saved brief below'
         details.append(f'{field}: {value}')

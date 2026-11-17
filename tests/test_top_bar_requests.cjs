@@ -14,7 +14,7 @@ const accept=(request,payload={ok:true})=>request.resolve({ok:true,json:async()=
  const unmounted=context.read('/status');state.destroyed=true;context.cancel();accept(requests[6]);await assert.rejects(unmounted,{name:'AbortError'});
  await assert.rejects(context.read('/status'),{name:'AbortError'});assert.equal(requests.length,7);
  const timers=[],timerContext={state:{destroyed:false},parentWindow:{setTimeout(fn){timers.push(fn);return timers.length;}}};
- vm.createContext(timerContext);vm.runInContext(source.slice(source.indexOf('    const timers = new Set();'),source.indexOf('    let staffProgressStarted'))+'this.schedule=later;',timerContext);
+ vm.createContext(timerContext);vm.runInContext(source.slice(source.indexOf('    const timers = new Set();'),source.indexOf('    const uploadNotices'))+'this.schedule=later;',timerContext);
  let calls=0;timerContext.schedule(()=>calls++,10);timerContext.state.destroyed=true;timers[0]();assert.equal(calls,0);
  assert.equal(timerContext.schedule(()=>calls++,10),null);assert.equal(timers.length,1);
  assert.ok(source.includes('cancelPendingReads();'));console.log('Shell GET deduplication, completion eviction, identity isolation, abort recovery, no mutation deduplication, and stale-response rejection passed.');
