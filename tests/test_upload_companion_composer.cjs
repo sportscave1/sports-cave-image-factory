@@ -124,21 +124,21 @@ test('Work and Chat submit intact inline text and leave existing drafts alone', 
 });
 
 
-test('Design project uses the same verified paste and submit flow for inline and attached prompts', async () => {
+test('Designs uses the same second-from-top thinking level for inline and attached prompts', async () => {
   for (const asAttachment of [false, true]) {
-    const app = fixture({design:true, asAttachment});
+    const app = fixture({design:true, asAttachment, start:6});
     const prompt = 'Create a complete collector artwork. '.repeat(100);
     const result = await app.invoke({type:'project:send', id:'design-job', prompt});
     assert.equal(result.sent, true);
     assert.deepEqual(app.sent, [prompt]);
-    assert.deepEqual(app.thinking,[{selected:6, expanded:false}]);
+    assert.deepEqual(app.thinking,[{selected:5, expanded:false}]);
     assert.equal(app.permitted(), 1);
   }
 });
 
 test('Reads the number of stops from the picker and rechecks after a composer replacement', async () => {
   for (const [config, expected] of [
-    [{design:true, total:8, start:3, resetAfterPaste:true, asAttachment:true},8],
+    [{design:true, total:8, start:3, resetAfterPaste:true, asAttachment:true},7],
     [{total:4, start:4},3],
   ]) {
     const browser = fixture(config);

@@ -17,7 +17,7 @@
   const attachments = form => Array.from(form?.querySelectorAll('button[aria-label^="Remove file"], button[aria-label^="Remove image"], button[aria-label="Remove pasted text attachment"], button[data-testid*="attachment"]') || []);
   const pastedText = 'Remove pasted text attachment';
   const pickerSelector = 'button[aria-label="Select ChatGPT model"]';
-  const stepsFromMaximum = design ? 0 : 1;
+  const stepsFromMaximum = 1;
   async function waitFor(check, ms) {
     const end = Date.now() + ms;
     do {
@@ -83,7 +83,7 @@
   }
   const thinkingUnavailable = () => ({
     sent:false,
-    reason:`Could not verify ${design ? 'the maximum' : 'one step below maximum'} thinking level in the ChatGPT project composer.`,
+    reason:'Could not verify one step below maximum thinking level in the ChatGPT project composer.',
   });
   async function fill(node, form, prompt) {
     // Work turns long pastes into a text attachment, just like Ctrl+V.
