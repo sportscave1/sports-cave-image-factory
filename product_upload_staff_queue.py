@@ -12,6 +12,7 @@ LABELS = ('Waiting for desktop companion', 'Preparing the original PSD', 'Genera
           'Published and PSD mapped', 'Needs attention')
 PERCENT = (0, 12, 34, 62, 83, 93, 100, 0)
 LOG = logging.getLogger(__name__)
+CONTROL_KEY = 'product_upload_queue_enabled'
 
 
 def connect():
@@ -75,6 +76,25 @@ def pair(user):
     return token
 
 
+def _enabled(cur):
+    cur.execute('SELECT value FROM app_settings WHERE key=%s', (CONTROL_KEY,))
+    row = cur.fetchone()
+    return row is None or row['value'] is not False
+
+
+def settings(enabled=None):
+    """Persist new-upload starts; never interrupt an already claimed upload."""
+    with connect() as conn, conn.cursor() as cur:
+        if enabled is not None:
+            # Use the same lock as desktop_tick so pause and next-job claims
+            # have a definite order across all server processes.
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+            cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())
+                ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''',
+                (CONTROL_KEY, 'true' if enabled else 'false'))
+        return dict(enabled=_enabled(cur))
+
+
 def desktop_tick(token):
     # Updating the singleton row serializes claims even across server processes.
     with connect() as conn, conn.cursor() as cur:
@@ -85,7 +105,7 @@ def desktop_tick(token):
             raise PermissionError('Pair this Edge profile in Developer → Upload Companion.')
         cur.execute('SELECT * FROM product_upload_staff_jobs WHERE stage BETWEEN 1 AND 5')
         job = cur.fetchone()
-        if not job:
+        if not job and _enabled(cur):
             cur.execute('''UPDATE product_upload_staff_jobs SET stage=1,worker_actor=%s,updated_at=now()
                 WHERE id=(SELECT id FROM product_upload_staff_jobs WHERE stage=0 ORDER BY created_at,id LIMIT 1)
                 RETURNING *''', (device['actor_id'],))

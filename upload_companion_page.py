@@ -114,20 +114,40 @@ def _connection(online):
 
 def render_queue():
     import streamlit as st
-    from product_upload_staff_queue import list_jobs
+    from product_upload_staff_queue import list_jobs, settings
 
     @st.fragment(run_every=10)
     def history():
         try:
             status = list_jobs()
+            control = settings()
         except Exception:
             st.warning('Could not load the upload queue. Retrying automatically.')
             return
         _connection(status['online'])
-        _summary(status['jobs'], designs=False)
+        _summary(status['jobs'], designs=False, paused=not control['enabled'])
+        with st.container(border=True):
+            left, right = st.columns([2, 1])
+            with left:
+                _markup('<div class="cq-eyebrow">UPLOAD QUEUE</div><h3 class="cq-control-title">Control the next upload.</h3>')
+                st.caption('Pause holds the next upload. The current upload and its ChatGPT work continue until finished.')
+            with right:
+                enabled = control['enabled']
+                play, pause = st.columns(2)
+                with play:
+                    if st.button('Play', icon=':material/play_arrow:', disabled=enabled, key='cq-upload-play',
+                                 help='Resume starting queued uploads. Current work is never restarted.'):
+                        settings(True)
+                        st.rerun()
+                with pause:
+                    if st.button('Pause', icon=':material/pause:', disabled=not enabled, key='cq-upload-pause',
+                                 help='Hold the next upload. The current upload keeps running.'):
+                        settings(False)
+                        st.rerun()
+                _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
         _markup('<div class="cq-notice"><b>Add uploads from Design Studio</b><span>Press Publish now on each artwork. '
-                'They wait here and run one at a time, continuing after success or failure.</span></div>')
-        _jobs(status['jobs'], designs=False)
+                'They wait here and run one at a time while the queue is playing.</span></div>')
+        _jobs(status['jobs'], designs=False, paused=not control['enabled'])
         st.caption('Showing the latest 20 upload jobs. Keep Edge open and the computer awake.')
     history()
 

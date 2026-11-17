@@ -12,6 +12,7 @@ def store(database, monkeypatch):
     jobs, cursor = database
     sql = Path(__file__).resolve().parents[1] / 'migrations' / '20261117110000_product_upload_staff_queue.sql'
     cursor.execute(sql.read_text(encoding='utf8'))
+    cursor.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     monkeypatch.setattr(queue, 'connect', jobs.connect)
     monkeypatch.setattr('design_review_page.final_psd', lambda source: True)
     return jobs.connect
@@ -122,3 +123,48 @@ def test_many_publish_requests_wait_and_advance_after_failure_or_verified_succes
     monkeypatch.setattr(queue, 'verify', lambda job: queue.advance(job['id'], 'desktop', 6, allowed=[5]))
     queue.tick(token, {})
     assert queue.tick(token, {})['job']['id'] == str(keys[2])
+
+
+@pytest.mark.parametrize('outcome', ['completed', 'blocked'])
+def test_pause_finishes_current_and_holds_next_until_play(store, monkeypatch, outcome):
+    first = submit('staff', 'A')
+    second = submit('staff', 'B')
+    token = queue.pair({'id': 'desktop'})
+    assert queue.settings() == {'enabled': True}
+    assert queue.tick(token, {})['job']['id'] == str(first)
+    assert queue.settings(False) == {'enabled': False}
+    # Ongoing preparation is still returned to the companion while paused.
+    assert queue.tick(token, {})['job'] == {'id': str(first), 'stage': 1}
+    queue.advance(first, 'desktop', 4)
+    verified = []
+    def finish(job):
+        verified.append(str(job['id']))
+        if outcome == 'completed':
+            queue.advance(job['id'], 'desktop', 6, storefront='https://example.test/product', allowed=[5])
+    monkeypatch.setattr(queue, 'verify', finish)
+    result = queue.tick(token, {'id': str(first), 'state': 'submitted'})
+    assert verified == [str(first)]
+    if outcome == 'blocked':
+        assert result['job']['stage'] == 5
+        queue.tick(token, {'id': str(first), 'state': 'blocked', 'reason': 'Review needed'})
+    assert queue.tick(token, {}) == {}
+    assert queue.tick(token, {}) == {}
+    assert queue.settings() == {'enabled': False}
+    rows = {j['id']: j for j in queue.list_jobs()['jobs']}
+    assert rows[str(first)]['stage'] == (6 if outcome == 'completed' else 7)
+    assert rows[str(second)]['stage'] == 0
+    # Re-pairing/restarting the companion cannot clear the durable pause.
+    token = queue.pair({'id': 'desktop'})
+    assert queue.tick(token, {}) == {}
+    queue.settings(True)
+    assert queue.tick(token, {})['job']['id'] == str(second)
+    assert queue.tick(token, {})['job']['id'] == str(second)
+
+
+def test_pause_before_pairing_holds_first_upload(store):
+    key = submit('staff')
+    queue.settings(False)
+    token = queue.pair({'id': 'desktop'})
+    assert queue.tick(token, {}) == {}
+    queue.settings(True)
+    assert queue.tick(token, {})['job']['id'] == str(key)
