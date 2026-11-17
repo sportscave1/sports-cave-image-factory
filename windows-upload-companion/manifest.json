@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Sports Cave Companion",
+  "description": "Processes Product Uploads, morning designs and new Meta Ads through the paired Edge desktop.",
+  "version": "1.4.6",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://sports-cave-image-factory.onrender.com/*"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://sports-cave-image-factory.onrender.com/component/product_upload_gallery.product_upload_gallery/*"
+      ],
+      "js": [
+        "os-bridge.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b*",
+        "https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654*",
+        "https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2*"
+      ],
+      "js": [
+        "composer.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
+
