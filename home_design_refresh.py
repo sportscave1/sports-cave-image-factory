@@ -6,7 +6,7 @@ from html import escape
 import json
 import re
 
-from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
@@ -87,14 +87,16 @@ that the artwork caused poor sales.
 
 {COLLECTOR_TITLE_GUIDANCE}{BACKGROUND_RESEARCH}{COLLECTOR_BACKGROUND}
 
+   {BADGE_FOOTPRINT}
+
 3. Generate and inspect two complete designs with ChatGPT image generation.
    Pass 1 must be a complete new flat design, with a materially new composition and visual
    treatment. Supply the selected authentic photographs as identity references and relevant
    Sports Cave artwork as style references. Use the old artwork only for diagnosis and comparison.
    Cosmetic changes such as repositioning portraits, resizing text or applying a filter are
    insufficient. If the same photo or title wins the research, rebuild its presentation around
-   a distinctly stronger concept. Plan space for the original plaque and number to fit the new
-   composition. Generate the artwork itself without a frame, wall or room.
+   a distinctly stronger concept. Keep the planned badge footprint clear in both passes.
+   Generate the artwork itself without a frame, wall or room.
 
    Inspect Pass 1. In a separate full image-generation call, make Pass 2 a refinement of that
    new design. Use Pass 1 for successful composition and styling. Resolve visible weaknesses within the fresh
@@ -104,8 +106,7 @@ that the artwork caused poor sales.
    total across both passes, including recovery. Preserve the strongest inspected work and
    report any incomplete pass.
 
-   Apply the source-photo checklist after each pass, correction and final assembly. Add the original
-   plaque and original editable edition-number layer during PSD assembly.
+   Apply the source-photo checklist after each pass, correction and final assembly.
 
 {SIGNATURE_FREE_COMPOSITION}
 
@@ -125,7 +126,7 @@ that the artwork caused poor sales.
 5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
    Keep usable editable layers and place the selected generated artwork in a named layer.
 
-{COLLECTOR_ASSET_PLACEMENT}   Save in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
+{BADGE_PLACEMENT_VERIFICATION}   Save in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
    [Original PSD stem] - REFRESH - STAGING - [unique run token].psd. Reopen the staged
    PSD and confirm its exact Dropbox ID, path and revision before preparing its JSON. Verify
    the original plaque and editable text layer are visible, readable and aligned at their

@@ -8,8 +8,9 @@ from urllib.parse import urlencode
 
 from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
-    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
+    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS,
 )
+from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
@@ -100,11 +101,13 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 {COMPLETE_COMPOSITION}{_CREATE_DESIGN_BORDER_RULES}{_CREATE_DESIGN_TYPOGRAPHY}
 
+{BADGE_FOOTPRINT}
+
 {_CREATE_DESIGN_COLLECTOR_BACKGROUND}Lock the verified subjects and exact title. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Plan how the hero, supporting photograph if useful, authentic setting, styling, text, framing-safe border and plaque footprint work together at print and thumbnail sizes. Confirm the story is recognisable with the title hidden. Briefly state the chosen direction and record the layout and source decisions in REVIEW NOTES.
 
 **3. Generate the complete flat artwork once**
 
-Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins and visible collector treatment. Generate the full artwork with subject, venue, abstract depth, typography and border. Keep the planned space clear for the official plaque and edition number, which are added during PSD assembly. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
+Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins, the reserved badge footprint and visible collector treatment. Generate the full artwork with subject, venue, abstract depth, typography and border. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
 
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
