@@ -33,6 +33,65 @@ def edition(day="2026-11-13", recommendation="Schedule the campaign after the of
     })
 
 
+def legend():
+    return {"title": "A hall of fame tribute", "recommendation": "Design idea: A timeless collector portrait.",
+            "sport": "Baseball", "markets": ["USA"],
+            "links": [{"label": "Club tribute", "url": "https://sports.example.test/tribute"}],
+            "product_url": "https://www.sportscaveshop.com/products/tribute-edition"}
+
+
+def test_legends_has_its_own_rows_and_uses_existing_actions_before_calendar():
+    from home_morning_brief_actions import brief_html
+
+    payload = {**json.loads(edition()), "full_brief": "Sports edition", "legends": [legend()]}
+    parsed = brief.parse_edition(json.dumps(payload), TODAY)
+    html = brief_html(parsed, editions=[parsed], today=TODAY, allow_ads=True)
+    assert html.index('<section class="sc-sports-stories"') < html.index('aria-label="Legends Brief"') < html.index('<section class="sc-cal">')
+    rows = html.split('aria-label="Legends Brief"', 1)[1].split('</section>', 1)[0]
+    assert '1. A hall of fame tribute' in rows
+    assert 'data-prompt=' in rows and 'Create Design' in rows and 'Create Ad' in rows
+    assert 'brief_product=tribute-edition' in rows
+    assert 'Fixture release' not in rows
+    invalid = {**payload, "legends": [legend()] * 5}
+    assert brief.parse_edition(json.dumps(invalid), TODAY) == {k: v for k, v in parsed.items() if k != "legends"}
+
+
+def test_legends_can_be_added_today_and_survives_a_sports_only_repeat(database, monkeypatch):
+    jobs, sql = database
+    sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
+    for module in (brief, db):
+        monkeypatch.setattr(module, "connect", jobs.connect)
+    addition = json.dumps({"date": str(TODAY), "legends": [legend()]})
+    with pytest.raises(ValueError, match="Sports Updates must be published"):
+        brief.publish(addition, OWNER)
+    prior = brief.publish(edition(), OWNER)
+    added = brief.publish(addition, OWNER)
+    brief.publish(edition(), OWNER)
+    expected = {**prior, "legends": added["legends"]}
+    assert db.get_app_setting(brief.SETTING_KEY, ensure_schema_first=False) == expected
+    assert brief.archive_page(TODAY)[0] == [expected]
+
+
+def test_hosted_legends_fills_an_already_published_sports_edition(database, monkeypatch):
+    import daily_brief_worker as worker
+
+    jobs, sql = database
+    sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY, value jsonb, updated_at timestamptz)")
+    monkeypatch.setattr(worker, "sydney_date", lambda: TODAY)
+    for module in (db, brief, worker):
+        monkeypatch.setattr(module, "connect", jobs.connect)
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, "get_user", lambda _: {**OWNER, "session_version": 1})
+    monkeypatch.setattr(os_accounts, "can_access_page", lambda *_: True)
+    prior = brief.publish(edition(), OWNER)
+    payload = {**json.loads(edition(recommendation="Hosted story")), "full_brief": "Complete edition.",
+               "legends": [legend()]}
+    worker.enqueue("sports", payload, {"sub": "owner", "version": "1"})
+    assert worker.process_one() and worker.status("sports")["status"] == "completed"
+    result = db.get_app_setting(brief.SETTING_KEY, ensure_schema_first=False)
+    assert result["recommendations"] == prior["recommendations"]
+    assert result["legends"][0]["title"] == legend()["title"]
+
+
 def test_cloud_submission_publishes_once_without_browser_session(database, monkeypatch):
     from starlette.applications import Starlette
     from starlette.routing import Route

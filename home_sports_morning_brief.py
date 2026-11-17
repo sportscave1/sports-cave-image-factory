@@ -43,27 +43,7 @@ def _link(item):
     return {"label": label, "url": url}
 
 
-def parse_edition(raw, today):
-    if not isinstance(raw, str) or len(raw) > MAX_PAYLOAD:
-        raise ValueError("The brief is too long.")
-    try:
-        data = json.loads(raw)
-    except (ValueError, RecursionError):
-        raise ValueError("Enter valid Morning Brief JSON.") from None
-    if not isinstance(data, dict) or not {"date", "recommendations"} <= set(data) <= {"date", "recommendations", "full_brief"}:
-        raise ValueError("Include the Sydney date and a list of recommendations.")
-    raw_day = data["date"]
-    if not isinstance(raw_day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_day):
-        raise ValueError("Use YYYY-MM-DD for the Sydney date.")
-    try:
-        day = date.fromisoformat(raw_day)
-    except ValueError:
-        raise ValueError("Enter a valid Sydney date.") from None
-    if day > today:
-        raise ValueError("The brief cannot be dated after today in Sydney.")
-    items = data["recommendations"]
-    if not isinstance(items, list) or not 1 <= len(items) <= 10:
-        raise ValueError("Include 1 to 10 recommendations.")
+def _recommendations(items):
     recommendations = []
     for item in items:
         if not isinstance(item, dict) or set(item) - {"title", "recommendation", "links", "sport", "markets", "start_date", "end_date", "product_url"}:
@@ -87,9 +67,53 @@ def parse_edition(raw, today):
                 article["links"].append(recommended)
         article.update(article_fields({**item, **article}))
         recommendations.append(article)
+    return recommendations
+
+
+def _legends(items):
+    if not isinstance(items, list) or len(items) > 4:
+        raise ValueError("Include up to four ranked Legends Brief entries.")
+    articles = _recommendations(items)
+    if any(not raw.get("links") or not article["sport"] or not article["markets"]
+           for raw, article in zip(items, articles)):
+        raise ValueError("Each legend needs a source link, sport and market.")
+    return articles
+
+
+def parse_edition(raw, today):
+    if not isinstance(raw, str) or len(raw) > MAX_PAYLOAD:
+        raise ValueError("The brief is too long.")
+    try:
+        data = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise ValueError("Enter valid Morning Brief JSON.") from None
+    if not isinstance(data, dict) or not {"date", "recommendations"} <= set(data) <= {"date", "recommendations", "full_brief", "legends"}:
+        raise ValueError("Include the Sydney date and a list of recommendations.")
+    raw_day = data["date"]
+    if not isinstance(raw_day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_day):
+        raise ValueError("Use YYYY-MM-DD for the Sydney date.")
+    try:
+        day = date.fromisoformat(raw_day)
+    except ValueError:
+        raise ValueError("Enter a valid Sydney date.") from None
+    if day > today:
+        raise ValueError("The brief cannot be dated after today in Sydney.")
+    items = data["recommendations"]
+    if not isinstance(items, list) or not 1 <= len(items) <= 10:
+        raise ValueError("Include 1 to 10 recommendations.")
+    recommendations = _recommendations(items)
     edition = {"date": day.isoformat(), "recommendations": recommendations}
     if "full_brief" in data:
         edition["full_brief"] = _text(data["full_brief"], 50000, "Full brief")
+    if "legends" in data:
+        try:
+            edition["legends"] = _legends(data["legends"])
+            if len(_edition_json(edition)) > MAX_PAYLOAD:
+                raise ValueError("The Legends Brief exceeds the edition size limit.")
+        except ValueError:
+            # A problem in the optional section must not stop the Sports Updates.
+            edition.pop("legends", None)
+            LOG.warning("home_legends_brief_invalid date=%s", edition["date"])
     if len(_edition_json(edition)) > MAX_PAYLOAD:
         raise ValueError("The brief is too long.")
     return edition
@@ -102,7 +126,14 @@ def _edition_json(edition):
 def publish(raw, user):
     if not os_accounts.is_reporting_owner(user):
         raise PermissionError("Only the Sports Cave OS owner can publish the Morning Brief.")
-    edition = parse_edition(raw, sydney_date())
+    today = sydney_date()
+    try:
+        payload = json.loads(raw) if isinstance(raw, str) and len(raw) <= MAX_PAYLOAD else None
+    except (ValueError, RecursionError):
+        payload = None
+    if isinstance(payload, dict) and set(payload) == {"date", "legends"}:
+        return publish_legends(payload, today)
+    edition = parse_edition(raw, today)
     with connect() as conn:
         with conn.cursor() as cursor:
             # Preserve the pre-archive edition before replacing the latest pointer.
@@ -118,7 +149,13 @@ def publish(raw, user):
                 """
                 INSERT INTO app_settings(key, value, updated_at)
                 VALUES (%s, %s::jsonb, now()), (%s, %s::jsonb, now())
-                ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
+                ON CONFLICT (key) DO UPDATE SET
+                    value=CASE WHEN app_settings.value->>'date'=EXCLUDED.value->>'date'
+                        AND app_settings.value ? 'legends'
+                        AND COALESCE(jsonb_array_length(EXCLUDED.value->'legends'), 0)=0
+                        THEN EXCLUDED.value || jsonb_build_object('legends', app_settings.value->'legends')
+                        ELSE EXCLUDED.value END,
+                    updated_at=now()
                 WHERE app_settings.key <> %s OR
                     (app_settings.value->>'date') <= (EXCLUDED.value->>'date')
                 """,
@@ -126,6 +163,36 @@ def publish(raw, user):
                  SETTING_KEY, _edition_json(edition), SETTING_KEY),
             )
     return edition
+
+
+def publish_legends(payload, today, *, overwrite=True):
+    """Add today's companion section without rewriting any Sports Updates."""
+    day = today.isoformat()
+    if payload["date"] != day:
+        raise ValueError("Add Legends to today's Sydney edition.")
+    legends = _legends(payload["legends"])
+    if not legends:
+        raise ValueError("Include at least one verified legend when adding to a published edition.")
+    with connect() as conn, conn.cursor() as cursor:
+        rows = []
+        for key in (HISTORY_PREFIX + day, SETTING_KEY):
+            cursor.execute(
+                """
+                UPDATE app_settings
+                SET value=CASE WHEN %s OR COALESCE(jsonb_array_length(value->'legends'), 0)=0
+                    THEN jsonb_set(value, '{legends}', %s::jsonb) ELSE value END
+                WHERE key=%s AND value->>'date'=%s
+                RETURNING value
+                """,
+                (overwrite, _edition_json(legends), key, day),
+            )
+            rows.extend(cursor.fetchall())
+        if not rows:
+            raise ValueError("Today's Sports Updates must be published before adding this section.")
+        for row in rows:
+            if not parse_edition(_edition_json(row["value"]), today).get("legends"):
+                raise ValueError("The combined Morning Brief is too long.")
+    return {"date": day, "legends": legends}
 
 
 def archive_page(today, *, before=None, size=20):

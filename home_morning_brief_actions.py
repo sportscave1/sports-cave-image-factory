@@ -721,7 +721,14 @@ def brief_html(edition, *, editions, today, allow_ads=False):
         for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
     )
     full_brief = (edition or {}).get("full_brief")
+    legends = (edition or {}).get("legends", ())
     if full_brief:
+        if legends:
+            full_brief += '\n\nLegends Brief\n\n' + '\n\n'.join(
+                f'{rank}. {item["title"]}\n{item["recommendation"]}\n' + '\n'.join(
+                    f'{link["label"]}: {link["url"]}' for link in item['links'])
+                for rank, item in enumerate(legends, 1)
+            )
         rows += (
             '<button type="button" class="sc-full-brief" aria-haspopup="dialog">Read the full Morning Brief</button>'
             '<dialog class="sc-cal-dialog sc-sports-full" aria-label="Full Sports Morning Brief">'
@@ -730,4 +737,11 @@ def brief_html(edition, *, editions, today, allow_ads=False):
         )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
-    return _template().replace("<!-- CALENDARS -->", tables).replace("<!-- RECOMMENDATIONS -->", stories)
+    legend_rows = "".join(article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads)
+                          for rank, item in enumerate(legends, 1))
+    if not legend_rows:
+        legend_rows = '<p class="sc-legends-empty">No Legends Brief entries for this edition.</p>'
+    legend_section = ('<section class="sc-sports-stories sc-legends" aria-label="Legends Brief">'
+                      f'<h3>Legends Brief</h3>{legend_rows}</section>')
+    return (_template().replace("<!-- CALENDARS -->", tables)
+            .replace("<!-- LEGENDS -->", legend_section).replace("<!-- RECOMMENDATIONS -->", stories))

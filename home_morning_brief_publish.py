@@ -33,7 +33,9 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
         f"Include date, report_date, roas, orders and actions. Add a short qualitative summary and up to {meta.MAX_RECOMMENDATIONS} distinct recommendations for Home. Optional insights cover Shopify, GA4, SEO and sports."
         if meta_brief else
         "Use the Sydney edition date and recommendations with title, recommendation, links, sport, "
-        "markets, and confirmed start_date and end_date when available. Include the complete edition as full_brief."
+        "markets, and confirmed start_date and end_date when available. Include the complete Sports Updates as full_brief. "
+        "Optional legends contains up to four ranked entries in the same format. Submit only date and legends "
+        "to add the section to today's published edition without changing Sports Updates."
     )
     if refresh_brief:
         instructions = ("Enter today's Sydney date and up to three verified candidates. "
@@ -99,6 +101,8 @@ async def publication(request):
     except Exception as error:
         LOG.warning("home_morning_brief_publish_failed type=%s", type(error).__name__)
         return page(f"The {title} could not be published. Try again.", 503, form=True)
+    if not meta_brief and not refresh_brief and "recommendations" not in edition and "legends" in edition:
+        return page(f"Published the {edition['date']} Legends Brief to Home.")
     return page(f"Published the {edition['date']} {title}.")
 
 

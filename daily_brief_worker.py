@@ -107,6 +107,15 @@ def process_one():
                 raise ValueError("retry limit reached")
             _, publish, _ = BRIEFS[job["kind"]]
             publish(json.dumps(job["edition"], ensure_ascii=False), owner)
+        elif (job["kind"] == "sports" and current.get("date") == job["date"]
+              and not current.get("legends") and job["edition"].get("legends")):
+            # The desktop fallback may have already published today's sports copy.
+            # Add the new section without replacing that edition's sports content.
+            edition = sports.parse_edition(json.dumps(job["edition"], ensure_ascii=False), today)
+            if edition.get("legends"):
+                if job["attempts"] > 3:
+                    raise ValueError("retry limit reached")
+                sports.publish_legends(edition, today, overwrite=False)
     except (ValueError, PermissionError) as error:
         job.update(status="failed", error=type(error).__name__)
     except Exception as error:
