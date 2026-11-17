@@ -60,12 +60,15 @@ def settings(enabled=None):
 
 
 def list_jobs(day=None):
+    from psd_directory import ROOT
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
-            ORDER BY edition_date DESC,created_at,id LIMIT 100''', (day, day))
+            ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
         return [dict(id=str(r['id']), title=r['title'],
-                     label='Uploaded · needs review' if r['stage'] == 5 and r['file_path'] else LABELS[r['stage']], stage=r['stage'],
-                     chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path']) for r in cur.fetchall()]
+                     label=('Completed · uploaded' if r['file_path'].rsplit('/', 1)[0] == ROOT
+                            else 'Uploaded · needs review' if r['stage'] == 5 and r['file_path'] else LABELS[r['stage']]), stage=r['stage'],
+                     chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path'],
+                     updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in cur.fetchall()]
 
 
 def verify_outputs(jobs):
