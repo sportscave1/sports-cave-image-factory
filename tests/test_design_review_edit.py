@@ -73,8 +73,8 @@ def test_edit_prioritises_the_request_and_preserves_review_checkpoints():
         'body and positioning changes within the requested scope',
     ):
         assert requirement in edit
+    assert COLLECTOR_ASSET_PLACEMENT in edit
     for prompt in (standard, edit):
-        assert COLLECTOR_ASSET_PLACEMENT in prompt
         assert prompt.count(AUTHENTICITY_HEADING) == 1
 
 

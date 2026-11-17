@@ -42,11 +42,13 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'Default to timeless player' not in prompt
         assert 'title first' not in prompt
         assert 'COMPOSE THE BADGE INTO THE ARTWORK' in prompt
-        assert 'Before generation, plan their intended position' in prompt
+        assert ('Include the full plaque footprint and live number in the layout plan' if prompt is new
+                else 'Before generation, plan their intended position') in prompt
         assert 'non-destructive tonal, colour and finish adjustments are permitted' in prompt
         assert 'never change its edition text, rasterise it' in prompt
         assert 'original editable text layer with the same name' in prompt
-        assert 'Do not automatically retain the master' in prompt
+        assert ('Use the master position only if it serves this design' if prompt is new
+                else 'Do not automatically retain the master') in prompt
         assert 'Preserve the exact official badge asset' not in prompt
         assert 'continue with the original setting or a non-specific abstract environment' in prompt
         assert 'without introducing an extra approval stage' in prompt

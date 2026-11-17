@@ -10,7 +10,6 @@ from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
 )
-from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
@@ -105,20 +104,18 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 **3. Generate the complete flat artwork once**
 
-Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins and visible collector treatment. Generate the full artwork with subject, venue, abstract depth, typography and border. Leave the official plaque and edition number for PSD assembly. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
+Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins and visible collector treatment. Generate the full artwork with subject, venue, abstract depth, typography and border. Keep the planned space clear for the official plaque and edition number, which are added during PSD assembly. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
 
-Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. After any completed generation, use original photo pixels and PSD adjustments for corrections. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
+Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
 **4. Inspect and finish at 100% and thumbnail size**
 
 {CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
-Verify the intended collector transformation is visible, with recognisable venue features where used, authentic colours, integrated title and plaque placement, adequate framing clearance and truthful sporting details. Use source-pixel finishing, masks, typography and PSD adjustments to correct defects. Preserve the strongest verified source material. Mark unresolved quality or identity as needs_attention and retain the strongest inspected result for Review when technically valid.
-
 **5. Assemble, save and verify one final Review PSD**
 
 On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
 
-{BADGE_PLACEMENT_VERIFICATION}{COLLECTOR_ASSET_PLACEMENT}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
+{BADGE_PLACEMENT_VERIFICATION}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 
 **6. Write the Smart Upload JSON and deliver**
 

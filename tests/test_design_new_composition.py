@@ -4,7 +4,7 @@ from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
 )
-from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_collector_assets import COLLECTOR_LAYER_RULES
 from design_motorsport import MOTORSPORT_ARTWORK
 
 
@@ -23,8 +23,9 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert 'For an event-specific design, supporting photographs must belong to that verified event.' in prompt
     assert 'Keep a single image when it tells the story more powerfully' in prompt
     assert 'not additional image-generation calls' in prompt
-    assert 'original canvas coordinates and proportional scale are starting values' in prompt
-    assert COLLECTOR_ASSET_PLACEMENT in prompt
+    assert 'Use the master position only if it serves this design' in prompt
+    assert prompt.count(COLLECTOR_LAYER_RULES) == 1
+    assert 'record the issue as needs_attention even if both layer checks pass' in prompt
     assert 'one full generation, verified final Review PSD, matching JSON and final display' in prompt
     assert 'Retry image generation once only if a technical failure produced no usable output' in prompt
     assert 'Use abstract treatment selectively:' not in prompt

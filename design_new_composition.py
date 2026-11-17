@@ -1,5 +1,7 @@
 """Creative refinements scoped to new artwork; no new execution checkpoints."""
 
+from design_collector_assets import COLLECTOR_LAYER_RULES
+
 COMPLEMENTARY_IMAGES = """**COMPLEMENTARY IMAGE SELECTION**
 
 Within the existing 4–8-image search, assess photographs for both the hero and a possible supporting role. Compare a strong single-image composition with one using complementary imagery. When a source naturally sequences or flows with the hero and adds a different part of the story, use it as subordinate background imagery if it improves the complete composition without clutter.
@@ -38,12 +40,16 @@ Make the collector treatment visible at thumbnail size. Use charcoal tonal shape
 
 Keep a verified venue recognisable through defining features. Blend it into the composition instead of isolating it in a blurred strip or inset. Use tonal transitions to distinguish separate photographic moments. Connect the premium title to the planned plaque position through alignment, scale, spacing and surrounding tones. Add the official plaque during assembly."""
 
-REVIEW_RELATIONSHIPS = """Preserve successful identity, story and styling. Check title-and-plaque spacing, supporting-image hierarchy, negative space and decorative placement. Use layer and source-pixel adjustments to rebalance only the relationships that need attention. Recheck the complete assembled artwork with the original plaque.
+REVIEW_RELATIONSHIPS = """Review can end with no creative changes. Preserve successful composition, typography, lighting and fades. Check that the collector treatment is visible, the venue is recognisable where used, and the colours and sporting details are authentic. Check title integration and supporting-image hierarchy. Make only targeted PSD corrections that improve the result. Measure the border on the master and correct only the border if clearance fails. Keep the strongest inspected artwork and mark unresolved quality or identity as needs_attention.
 
 """
 
-BADGE_PLACEMENT_VERIFICATION = """**Verify asset identity and the chosen placement separately.** The original plaque artwork, layer names, live edition text and internal plaque/number alignment remain protected. Their original canvas coordinates and proportional scale are starting values, not fixed layout requirements. During assembly, compare the planned placement with the actual title and subject. If detached, move or proportionally resize the plaque and live number together, or refine nearby spacing within the existing safe-area and collector-asset rules. Retain the original position only when it produces the strongest relationship in this artwork.
+BADGE_PLACEMENT_VERIFICATION = f"""**COMPOSE THE BADGE INTO THE ARTWORK**
 
-Verify both original layers received the matching transform and the number remains editable and aligned inside the plaque. Accept a valid move or proportional resize. Preserve the original asset design and text. Assess its relationship to the typography in the visual review.
+Place the badge within the safe border. Use a title or name alignment, or another clear compositional line, to connect it to the subject and typography. Adjust its shared scale and spacing until it reads with the title and name at thumbnail size. Match the badge's tone and contrast to the nearby type and background while keeping it legible. Use the master position only if it serves this design. Keep the finish restrained and free of added glow or ornament.
+
+{COLLECTOR_LAYER_RULES}
+
+Inspect the assembled badge at 100% and thumbnail size. If it still looks detached, reads too small or competes with the title through brightness, record the issue as needs_attention even if both layer checks pass.
 
 """
