@@ -28,12 +28,14 @@ Do not wait for approval between cards. Do not ask whether to continue. Do not r
 
 Use the ORIGINAL supplied framed product as the image reference for every call. Generate each complete mockup in one unified image-generation call, following the artwork-preservation and physical-realism requirements. Create three genuinely different rooms while respecting saved scene selections.
 
-If an image-loading error occurs, retry accessing the supplied file and resume automatically once resolved. If a genuine blocker prevents completion, explain the specific blocker and accurately identify which cards remain unfinished. Never claim an image was generated when it was not.
+For temporary image-loading, timeout or connection errors, check for a completed output before retrying the affected operation up to twice, using the original reference. Preserve completed cards and continue independent work. An explicit safety rejection is not a transient error: record its reason and request ID without guessing a cause or automatically retrying, rewording or switching tools to evade it. Continue only independent work that does not repeat the rejected content. Identify unfinished cards and the exact resume step honestly.
 END AUTOMATIC START'''
 
 FINISHED_MOCKUPS = '''FINISHED MOCKUPS ONLY — SUPPLIED PRODUCT REQUIRED
 
 Generate each COMPLETE mockup in one image-generation call using the ORIGINAL supplied full-resolution framed product as the image reference. Generate the room, displayed artwork, physical black frame, transparent glazing, reflections, lighting and shadows together as one genuine interior photograph. Never generate empty-room backgrounds or paste the product onto a completed room afterward.
+
+For each image-tool call, write a focused visual brief for that card: the supplied framed print displayed in its selected residential room, with the resolved camera, scale, glass and lighting requirements. Keep product identity and artwork faithful to the original reference. Keep Dropbox paths, hashes, Shopify publication, tags, approvals and workflow recovery instructions in the orchestration text; they are not image content. The image brief does not need to repeat the full upload procedure.
 
 Faithfully preserve the supplied artwork's subjects, faces, vehicles, uniforms, wording, typography, logos, signatures, edition details, colours and composition. Preserve the complete black frame's design, proportions, finish and moulding width. Do not redesign, crop, replace or invent product details. Allow the physical frame and transparent glazing to respond naturally to the room's lighting and camera angle, with coherent perspective, believable depth and natural frame bevel highlights.
 
@@ -1460,8 +1462,10 @@ def compose(instructions, texts):
 
     texts = [individual_prompt(text).removeprefix(FINISHED_MOCKUPS + '\n\n') for text in texts]
     shared = ('SHARED REQUIREMENTS FOR ALL THREE IMAGE GENERATION CALLS\n'
-              'For each separate call, include the full applicable master and shared requirements '
-              'together with that card’s saved brief and the original product image.\n\n'
+              'For each separate call, resolve the applicable creative master and shared requirements '
+              'into one focused visual brief for that card, together with the original product image. '
+              'Keep all resolved room, camera, artwork, glass, scale and realism requirements; '
+              'keep upload operations and recovery instructions outside the image-tool prompt.\n\n'
               + PER_IMAGE.removeprefix(FINISHED_MOCKUPS + '\n\n'))
     physical = [BLOCK.findall(text) for text in texts]
     if len(physical[0]) == 1 and all(blocks == physical[0] for blocks in physical):

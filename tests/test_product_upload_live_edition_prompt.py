@@ -121,7 +121,14 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
     assert 'Unverified print bleed' not in prompt
     assert creative in prompt
     assert 'Retrieve only the original black-frame WebP' in prompt
-    assert 'report the exact pending action and wait for direct approval' in prompt
+    assert 'report the exact pending action and required approval' in prompt
+    assert 'pause the affected step and any later steps' not in prompt
+    assert 'retry the affected operation up to twice' in prompt
+    assert 'check whether the previous call completed' in prompt
+    assert 'Continue other independent cards' in prompt
+    assert 'An explicit image safety rejection is different from a temporary tool error' in prompt
+    assert 'Do not automatically retry or reword the rejected request' in prompt
+    assert 'eight-image verification and publication checks' in prompt
     assert 'The user explicitly authorises' not in prompt
     assert all(item not in prompt for item in additions[:3])
     assert '- Do not invent specifications or materials.' in prompt
