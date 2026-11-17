@@ -18,14 +18,17 @@ class Jobs:
         self.lock=RLock();self.preparation=Lock();self.jobs={}
         self.staff_attempts={}
 
-    def begin_staff_attempt(self,key,actor,attempt):
+    def begin_staff_attempt(self,key,actor,attempt,*,full=False):
         """A clicked reset clears terminal errors once; polling never clears a new failure."""
         identity=(str(actor),str(key))
         with self.lock:
             if self.staff_attempts.get(identity)==attempt:return
             self.staff_attempts[identity]=attempt
             for task,job in list(self.jobs.items()):
-                if task[:2]==identity and job['state'] in ('Failed','Cancelled'):
+                if task[:2]==identity and (full or job['state'] in ('Failed','Cancelled')):
+                    if job['state'] in ('Queued','Running'):
+                        job['state']='Cancelled'
+                        job['future'].cancel()
                     del self.jobs[task]
 
     def submit(self,key,actor,operation,fingerprint,work):
@@ -177,7 +180,8 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                 latest=Intakes(connect).read(key,actor)
                 if not latest or source(latest)!=identity:raise ValueError('Selected PSD changed. Reselect it before generating mockups.')
                 if len(result['assets'])!=5 or any(not Path(a[field]).is_file() for a in result['assets'] for field in ('review_path','preview_path','webp_path')):raise ValueError('Mockup outputs are incomplete. Retry generation.')
-                result.update(_product_upload_intake=key,_product_upload_actor_id=str(actor),_product_upload_source_hash=row['data']['source']['content_hash'])
+                result.update(_product_upload_intake=key,_product_upload_actor_id=str(actor),_product_upload_source_hash=row['data']['source']['content_hash'],
+                              _staff_full_restart=row['data'].get('staff_full_restart'))
                 return result
             except BaseException:
                 if result or created_run:

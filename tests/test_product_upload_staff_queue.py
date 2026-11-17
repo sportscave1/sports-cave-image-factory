@@ -211,7 +211,8 @@ def test_reset_retains_intake_product_files_and_records_prior_error(store):
     intake = uuid4()
     data = dict(source={'id': 'id:original', 'rev': 'A'}, product_gid='gid://shopify/Product/100',
                 mockup_saves={'receipt': 'verified-files'}, staff_mapping={'job': str(key)},
-                upload_operation={'sync_map': {'staff_job': str(key), 'lease': 'old',
+                server_artwork={'state':'Ready'}, mockups_exported=True, copied=True,
+                upload_operation={'output':{'folder':'/Old output'}, 'sync_map': {'staff_job': str(key), 'lease': 'old',
                                               'moved': {'id': 'id:original'}, 'completed': ['moved']}})
     with store() as conn, conn.cursor() as cur:
         cur.execute('CREATE TABLE product_upload_intakes(id uuid PRIMARY KEY,data jsonb,updated_at timestamptz DEFAULT now())')
@@ -228,7 +229,13 @@ def test_reset_retains_intake_product_files_and_records_prior_error(store):
     assert str(job['intake_id']) == str(intake)
     assert saved['source'] == data['source']
     assert saved['product_gid'] == data['product_gid']
-    assert saved['mockup_saves'] == data['mockup_saves']
+    assert 'mockup_saves' not in saved
+    assert saved['staff_upload_restarts'][0]['retired_outputs']['mockup_saves'] == data['mockup_saves']
+    assert saved['staff_upload_restarts'][0]['retired_outputs']['output'] == data['upload_operation']['output']
+    assert 'server_artwork' not in saved and 'output' not in saved['upload_operation']
+    assert not saved['mockups_exported'] and not saved['copied']
+    assert saved['staff_full_restart'] == str(job['dispatch_id'])
+    assert saved['design_review']['decision'] == 'approved'
     assert saved['staff_upload_attempt'] == str(job['dispatch_id'])
     assert saved['staff_upload_restarts'][0]['reason'] == 'Image generation rejected'
     assert 'staff_mapping' not in saved  # re-armed for the new delivery only
@@ -251,5 +258,20 @@ def test_clicked_attempt_clears_only_old_errors_once():
         jobs.jobs[failed] = {'state': 'Failed'}
         jobs.begin_staff_attempt('upload', 'desktop', 'clicked-attempt')
         assert failed in jobs.jobs  # rerun/poll cannot retry this new failure
+    finally:
+        jobs.pool.shutdown(wait=False)
+
+
+def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
+    from product_upload_jobs import Jobs
+    jobs=Jobs()
+    try:
+        ready=('desktop','upload','generate')
+        jobs.jobs[ready]={'state':'Ready'}
+        jobs.begin_staff_attempt('upload','desktop','full-click',full=True)
+        assert ready not in jobs.jobs
+        jobs.jobs[ready]={'state':'Failed'}
+        jobs.begin_staff_attempt('upload','desktop','full-click',full=True)
+        assert ready in jobs.jobs
     finally:
         jobs.pool.shutdown(wait=False)

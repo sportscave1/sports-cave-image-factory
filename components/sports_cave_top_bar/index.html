@@ -989,7 +989,7 @@
           <div id="sc-os-staff-upload-list" aria-label="Your product uploads"></div>
         </div>
       </details>
-      <button id="sc-os-staff-upload-reset" class="sc-os-upload-reset" type="button" hidden aria-label="Restart failed upload" title="Restart this failed upload">↻</button>
+      <button id="sc-os-staff-upload-reset" class="sc-os-upload-reset" type="button" hidden aria-label="Restart failed upload" title="Restart from the original PSD and regenerate mockups">↻</button>
       ${["design", "upload"].map(queue =>
         `<button id="sc-os-queue-${queue}" class="sc-os-queue-control" type="button" hidden></button>`
       ).join("")}
@@ -1254,7 +1254,7 @@
             reset.type = "button";
             reset.className = "sc-os-upload-reset";
             reset.textContent = "↻";
-            reset.title = "Restart this failed upload";
+            reset.title = "Restart from the original PSD and regenerate mockups";
             reset.setAttribute("aria-label", "Restart upload: " + item.title);
             bindRestart(reset, item);
             entry.append(reset);

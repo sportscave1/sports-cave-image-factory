@@ -111,13 +111,45 @@
         turn => turn.querySelector('.whitespace-pre-wrap') || turn)];
     return bodies.some(body => body && normalize(body.innerText) === normalize(prompt));
   }
-  async function send({id, prompt}) {
+  async function preserveRestoredDraft(id, node, form, freshUpload) {
+    if (!node.innerText.trim()) return true;
+    if (design || !freshUpload || existingTurn() || attachments(form).length) return false;
+    const text=node.innerText;
+    const saved=await chrome.runtime.sendMessage({type:'project:backup-draft',id,text});
+    if (!saved?.ok || !inProject() || input()!==node || node.innerText!==text ||
+        existingTurn() || attachments(form).length) return false;
+    // Only the new tab owned by this upload is cleared. Keep a durable local
+    // backup plus a selectable copy in that tab; never submit the restored draft.
+    const note=document.createElement('details');
+    note.id='sc-companion-preserved-draft';
+    const title=document.createElement('summary');
+    title.textContent='Previous unsent draft — saved locally';
+    const body=document.createElement('pre');
+    body.textContent=text;
+    body.style.whiteSpace='pre-wrap';
+    note.append(title,body);
+    note.style.cssText='position:fixed;bottom:12px;right:12px;z-index:2147483000;max-width:420px;max-height:240px;overflow:auto;background:#fff;color:#222;border:1px solid #bbb;border-radius:8px;padding:8px;font:12px sans-serif';
+    document.body.append(note);
+    node.focus();
+    if (document.activeElement!==node) return false;
+    const range=document.createRange();
+    range.selectNodeContents(node);
+    const selection=window.getSelection();
+    selection.removeAllRanges();selection.addRange(range);
+    document.execCommand('insertText',false,'');
+    return Boolean(await waitFor(()=>inProject() && !existingTurn() && input() &&
+      !input().innerText.trim() && !attachments(formFor(input())).length,1500));
+  }
+  async function send({id, prompt, freshUpload=false}) {
     if (!inProject() || busy || typeof prompt !== 'string') return {sent:false};
     busy = true;
     try {
       let node = await waitFor(() => inProject() && input(), 7500);
       let form = formFor(node);
-      if (!node || !form || existingTurn() || attachments(form).length || node.innerText.trim()) return {sent:false};
+      if (!node || !form || existingTurn() || attachments(form).length) return {sent:false,
+        reason:'ChatGPT is not a new empty project chat; existing messages or attachments were left untouched.'};
+      if (!await preserveRestoredDraft(id,node,form,freshUpload)) return {sent:false,
+        reason:'The restored draft could not be saved safely. It was left untouched.'};
       if (!await setThinkingLevel()) return thinkingUnavailable();
       node = input();
       form = formFor(node);

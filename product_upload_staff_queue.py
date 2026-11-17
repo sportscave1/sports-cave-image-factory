@@ -70,7 +70,7 @@ def delivery(row):
 
 
 def restart(key, user, expected):
-    """Requeue only the selected failed snapshot; preserve its intake and external results."""
+    """Restart Publish now for this failed snapshot, regenerating its web-image package."""
     key = UUID(str(key))
     if not isinstance(expected, str) or not expected:
         raise ValueError('Refresh the upload status before restarting.')
@@ -100,21 +100,30 @@ def restart(key, user, expected):
             data = dict(intake['data'])
             history = list(data.get('staff_upload_restarts') or [])
             history.append(dict(previous_dispatch=str(job.get('dispatch_id') or job['id']),
-                                reason=job['message'], at=datetime.now(timezone.utc).isoformat()))
+                                reason=job['message'], at=datetime.now(timezone.utc).isoformat(),
+                                retired_outputs=dict(mockup_saves=data.get('mockup_saves'),
+                                    output=(data.get('upload_operation') or {}).get('output'))))
             data['staff_upload_restarts'] = history[-20:]
             data['staff_upload_attempt'] = str(attempt)
+            data['staff_full_restart'] = str(attempt)
+            from product_upload_source import invalidate
+            invalidate({'data': data})
+            data.pop('mockup_saves', None)
+            data.pop('server_artwork', None)
+            data.update(state='Uploaded', reason='')
+            data['design_review'] = dict(decision='approved', at=datetime.now(timezone.utc).isoformat())
             task = (data.get('upload_operation') or {}).get('sync_map') or {}
             if task.get('staff_job') == str(job.get('dispatch_id') or job['id']):
                 task['staff_job'] = str(attempt)
                 task.pop('lease', None)
                 task.pop('lease_until', None)
-            # Re-arm the same saved assets for this new delivery, retaining every
-            # product ID, operation tag, file receipt and completed mapping result.
+            # Keep source, product identity and completed PSD mapping; the previous
+            # output package is audit history only, never a new handoff source.
             data.pop('staff_mapping', None)
             cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb,updated_at=now() WHERE id=%s',
                         (json.dumps(data), job['intake_id']))
         cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,dispatch_id=%s,
-            message='Restart requested',updated_at=now() WHERE id=%s RETURNING *''', (attempt, key))
+            message='Restart requested · regenerating mockups',updated_at=now() WHERE id=%s RETURNING *''', (attempt, key))
         return public(cur.fetchone())
 
 

@@ -56,6 +56,12 @@ async function main() {
     create: async ({url}) => { opened.push(url); return {id: tabId}; },
     sendMessage: async (_tab, message) => {
       if (message.type === 'project:ready') return {ready: true};
+      assert.equal(message.freshUpload,true);
+      assert.equal((await invoke({type:'project:backup-draft',id:message.id,text:'Preserved unsent draft'},
+        {url:opened[0],frameId:0,tab:{id:tabId+999}})).ok,false);
+      assert.equal((await invoke({type:'project:backup-draft',id:message.id,text:'Preserved unsent draft'},
+        {url:opened[0],frameId:0,tab:{id:tabId}})).ok,true);
+      assert.equal(records.get('draft:'+message.id).text,'Preserved unsent draft');
       const approved = await invoke({type:'project:permit',id:message.id}, {url:opened[0],frameId:0,tab:{id:tabId}});
       assert.equal(approved.ok,true);
       sent.push(message.prompt);

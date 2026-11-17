@@ -41,7 +41,8 @@ async function run(id, prompt, job) {
       await save(id, 'failed', 'Open the project in this Edge profile and make sure ChatGPT is signed in.');
       return;
     }
-    const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt}, {frameId:0});
+    const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
+      freshUpload:!job.designJob}, {frameId:0});
     if (result?.sent && job.sending) {
       await save(id, 'submitted');
     } else if (job.sending) {
@@ -105,6 +106,14 @@ async function permit(message, sender) {
   await save(message.id, 'sending');
   return {ok:true};
 }
+async function backupDraft(message, sender) {
+  const job=pending.get(message.id);
+  if (!job || job.designJob || job.sending || sender.frameId!==0 || sender.tab?.id!==job.tab ||
+      sender.url!==project || typeof message.text!=='string' || !message.text.trim() ||
+      message.text.length>1048576) return {ok:false};
+  await chrome.storage.local.set({['draft:'+message.id]:{text:message.text, time:Date.now(), project}});
+  return {ok:true};
+}
 function isOsComponent(address) {
   try {
     const url = new URL(address);
@@ -118,6 +127,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let action;
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
+  } else if (message?.type === 'project:backup-draft') {
+    action = backupDraft(message, sender);
   } else if (message?.type === 'project:blocked' && sender.frameId === 0) {
     action = recordChatBlock(sender, message.code);
   } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {

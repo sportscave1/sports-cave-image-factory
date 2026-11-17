@@ -71,7 +71,7 @@ def _jobs(jobs, *, designs, paused=False, user=None):
                     st.caption(job.get('detail') or job['label'])
                 with action:
                     if st.button('', icon=':material/restart_alt:', key='cq-upload-reset-'+job['id'],
-                                 help='Restart this failed upload', disabled=user is None):
+                                 help='Restart from the original PSD and regenerate mockups', disabled=user is None):
                         from product_upload_staff_queue import restart
                         try:
                             restart(job['id'], user, job['updated_at'])
