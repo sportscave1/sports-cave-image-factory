@@ -85,31 +85,64 @@
     sent:false,
     reason:'Could not verify one step below maximum thinking level in the ChatGPT project composer.',
   });
-  async function fill(node, form, prompt) {
+  async function fill(node, form, prompt, reference) {
+    const promptAttachments=()=>attachments(form).filter(file=>file!==referenceControl(form,reference));
     // Work turns long pastes into a text attachment, just like Ctrl+V.
     if (node.matches(workEditor)) {
       const data = new DataTransfer();
       data.setData('text/plain', prompt);
       node.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
-      const pasted = await waitFor(() => node.innerText.trim() || attachments(form).length, 1200);
+      const pasted = await waitFor(() => node.innerText.trim() || promptAttachments().length, 1200);
       if (pasted) return;
     }
-    if (inProject() && document.activeElement === node && !node.innerText.trim() && !attachments(form).length) {
+    if (inProject() && document.activeElement === node && !node.innerText.trim() && !promptAttachments().length) {
       document.execCommand('insertText', false, prompt);
     }
   }
 
-  function submittedPrompt(prompt, sentAsAttachment) {
+  const sentReference=(body,reference)=>!reference || Boolean(body &&
+    (body.innerText?.includes(reference.name) || body.querySelector('img, [data-testid*="image-attachment"]')));
+  function submittedPrompt(prompt, sentAsAttachment, reference) {
     if (!inProject() && !conversation.test(location.href)) return false;
     const workTurns = Array.from(document.querySelectorAll('h4[data-conversation-role="user"]'));
     if (sentAsAttachment) {
       return conversation.test(location.href) && workTurns.length === 1 &&
-        !!workTurns[0].nextElementSibling?.querySelector('button[aria-label^="Pasted text("]');
+        !!workTurns[0].nextElementSibling?.querySelector('button[aria-label^="Pasted text("]') &&
+        sentReference(workTurns[0].nextElementSibling,reference);
     }
     const bodies = [...workTurns.map(turn => turn.nextElementSibling),
       ...Array.from(document.querySelectorAll('[data-message-author-role="user"]'),
         turn => turn.querySelector('.whitespace-pre-wrap') || turn)];
-    return bodies.some(body => body && normalize(body.innerText) === normalize(prompt));
+    return bodies.some(body => body && (normalize(body.innerText) === normalize(prompt) ||
+      (reference && normalize(body.innerText).includes(normalize(prompt)))) && sentReference(body,reference));
+  }
+  function referenceControl(form,reference){
+    if(!reference)return null;
+    const files=attachments(form).filter(file=>file.getAttribute('aria-label')!==pastedText);
+    if(files.length!==1)return null;
+    const file=files[0],label=file.getAttribute('aria-label')||'';
+    return label.includes(reference.name) || file.parentElement?.textContent?.includes(reference.name) ||
+      label==='Remove image' || label==='Remove file' ? file : null;
+  }
+  async function attachReference(node,form,reference){
+    if(!reference)return true;
+    if(reference.type!=='image/webp' || !reference.name?.endsWith('.webp') || /[/\\]/.test(reference.name) ||
+       !Number.isInteger(reference.size) || reference.size<1 || reference.size>16*1024*1024 ||
+       typeof reference.data!=='string' || reference.data.length>24*1024*1024)return false;
+    const bytes=Uint8Array.from(atob(reference.data),c=>c.charCodeAt(0));
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+    if(bytes.length!==reference.size || hash!==reference.sha256)return false;
+    const data=new DataTransfer();
+    data.items.add(new File([bytes],reference.name,{type:'image/webp'}));
+    const inputs=Array.from(form.querySelectorAll('input[type="file"]'));
+    if(inputs.length===1){
+      inputs[0].files=data.files;
+      inputs[0].dispatchEvent(new Event('change',{bubbles:true}));
+    }else{
+      node.focus();
+      node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+    }
+    return Boolean(await waitFor(()=>inProject() && !existingTurn() && referenceControl(formFor(input()),reference),25000));
   }
   async function preserveRestoredDraft(id, node, form, freshUpload) {
     if (!node.innerText.trim()) return true;
@@ -140,7 +173,7 @@
     return Boolean(await waitFor(()=>inProject() && !existingTurn() && input() &&
       !input().innerText.trim() && !attachments(formFor(input())).length,1500));
   }
-  async function send({id, prompt, freshUpload=false}) {
+  async function send({id, prompt, freshUpload=false, reference}) {
     if (!inProject() || busy || typeof prompt !== 'string') return {sent:false};
     busy = true;
     try {
@@ -155,9 +188,14 @@
       form = formFor(node);
       if (!node || !form || existingTurn() || attachments(form).length || node.innerText.trim()) return {sent:false};
 
+      if(!await attachReference(node,form,reference))return {sent:false,
+        reason:'ChatGPT could not attach the verified black-frame WebP. The prompt was not sent without its original.'};
+      node=input();form=formFor(node);
+      if(!node || !form || existingTurn())return {sent:false};
+
       node.focus();
       if (!inProject() || document.activeElement !== node || node.innerText.trim()) return {sent:false};
-      await fill(node, form, prompt);
+      await fill(node, form, prompt, reference);
       const promptText = normalize(prompt);
       const isWork = node.matches(workEditor);
       const previewText = promptText.replace(/\s+/g, ' ');
@@ -169,7 +207,10 @@
         const composer = formFor(editor);
         const button = sendButton(composer);
         if (!button?.isConnected || button.disabled || button.getAttribute('aria-disabled') === 'true') return null;
-        const files = attachments(composer);
+        const allFiles = attachments(composer);
+        const original=referenceControl(composer,reference);
+        if(reference && !original)return null;
+        const files=allFiles.filter(file=>file!==original);
         if (!files.length && normalize(editor.innerText) === promptText) return {button, asAttachment:false};
         if (!isWork || editor.innerText.trim() || files.length !== 1 ||
           files[0].getAttribute('aria-label') !== pastedText) return null;
@@ -190,7 +231,7 @@
       if (!permission?.ok || !current) return {sent:false};
       const {button, asAttachment:sentAsAttachment} = current;
       button.click();
-      const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment), 12000);
+      const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment,reference), 12000);
       if (accepted && prompt.includes('SC_UPLOAD_BLOCKED: REFERENCE')) watchStaffResponse();
       return {sent:Boolean(accepted)};
     } finally {

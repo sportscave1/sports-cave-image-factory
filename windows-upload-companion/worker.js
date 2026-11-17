@@ -42,7 +42,7 @@ async function run(id, prompt, job) {
       return;
     }
     const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
-      freshUpload:!job.designJob}, {frameId:0});
+      freshUpload:!job.designJob, reference:job.reference}, {frameId:0});
     if (result?.sent && job.sending) {
       await save(id, 'submitted');
     } else if (job.sending) {
@@ -59,12 +59,13 @@ async function run(id, prompt, job) {
   }
 }
 async function start(message) {
-  const {receipt, prompt, staffJob} = message;
+  const {receipt, prompt, staffJob, reference} = message;
   if (!suppliedReceipt.test(receipt || '') || !promptIsValid(prompt)) return {accepted:false};
+  if(reference && !await verifiedReference(reference))return {accepted:false};
   if (staffJob && !await rememberStaffReceipt(staffJob, receipt, message.senderTab)) return {accepted:false};
   if (pending.has(receipt)) return {accepted:true};
   if (pending.size >= 4) return {accepted:true, busy:true};
-  const job = {tab:null, sending:false, staffJob};
+  const job = {tab:null, sending:false, staffJob, reference};
   pending.set(receipt, job);
   try {
     const key = keyFor(receipt);
@@ -80,6 +81,18 @@ async function start(message) {
     pending.delete(receipt);
     return {accepted:false};
   }
+}
+async function verifiedReference(reference){
+  if(reference.type!=='image/webp' || typeof reference.name!=='string' ||
+     !reference.name.endsWith('.webp') || /[/\\]/.test(reference.name) ||
+     !Number.isInteger(reference.size) || reference.size<1 || reference.size>16*1024*1024 ||
+     typeof reference.data!=='string' || reference.data.length>24*1024*1024 ||
+     !/^[A-Za-z0-9+/]*={0,2}$/.test(reference.data) || !suppliedReceipt.test(reference.sha256||''))return false;
+  try{
+    const bytes=Uint8Array.from(atob(reference.data),c=>c.charCodeAt(0));
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+    return bytes.length===reference.size && hash===reference.sha256;
+  }catch{return false;}
 }
 async function health(receipt) {
   const exact = suppliedReceipt.test(receipt || '');

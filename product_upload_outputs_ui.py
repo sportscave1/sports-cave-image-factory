@@ -284,6 +284,8 @@ def render_outputs(app,result,row,user,name):
                 from product_upload_api import connect
                 if not arm(connect, str(row['id']), user['id'], mapping):
                     handoff=prepare(result,row,core_receipt,prompt)
+            from product_upload_reference import attachment
+            handoff['reference'] = attachment(result, row, core_receipt)
         except ValueError as error:
             handoff={'error': str(error)}
         except Exception:

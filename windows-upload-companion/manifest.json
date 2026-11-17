@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sports Cave Companion",
   "description": "Processes Product Uploads and morning designs through the paired Edge desktop.",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "permissions": [
     "storage",
     "alarms"
