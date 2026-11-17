@@ -22,7 +22,14 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert prompt.index('**5.') < prompt.index(BADGE_PLACEMENT_VERIFICATION) < prompt.index('**6.')
     assert 'same original-source, image-quality and photographic-authenticity checks' in prompt
     assert 'For an event-specific design, supporting photographs must belong to that verified event.' in prompt
-    assert 'Keep a single image when it tells the story more powerfully' in prompt
+    assert 'select the strongest hero using the existing best-image rules' in prompt
+    assert 'Run a focused search for that complementary photograph' in prompt
+    assert 'Use the strongest verified pairing by default' in prompt
+    assert 'continue with the hero and verified setting' in prompt
+    assert 'Include the hero and selected secondary source with its distinct story role' in prompt
+    assert 'partial portrait, shoulders and expression, cropped gesture or source-derived action silhouette' in prompt
+    assert 'selective softness only on non-essential transitions' in prompt
+    assert 'At 100%, verify the supporting likeness, crop and transition into the venue' in prompt
     assert 'not additional image-generation calls' in prompt
     assert '65–85% of the main title block’s width' in prompt
     assert 'at least two badge arrangements that test different sizes and positions using PSD transforms only' in prompt
