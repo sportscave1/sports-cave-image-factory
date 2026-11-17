@@ -14,7 +14,7 @@ from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATIO
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
-from design_motorsport import MOTORSPORT_ARTWORK
+from design_motorsport import MOTORSPORT_ARTWORK, MOTORSPORT_JSON
 from design_subject_authenticity import (
     CREATE_DESIGN_AUTHENTICITY_CHECK,
 )
@@ -132,6 +132,8 @@ On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Pre
 {BADGE_PLACEMENT_VERIFICATION}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 
 **6. Write the Smart Upload JSON and deliver**
+
+{MOTORSPORT_JSON}
 
 After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.{market_note}
 

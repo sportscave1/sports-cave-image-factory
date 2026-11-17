@@ -14,3 +14,5 @@ MOTORSPORT_SOURCE_SEARCH = (
     "Motorsport only: shortlist driver/rider and actual race vehicle photos from the verified "
     "portrait era. For event artwork use its exact vehicle and livery."
 )
+
+MOTORSPORT_JSON = """Motorsport JSON only: set sport to the verified specific discipline: Formula One (F1), NASCAR, V8 Supercars, MotoGP, Rally, IndyCar, Motocross or Road Racing. Never use Motorsport, Motor Sports, Motor Racing or combined labels. Choose from the depicted series/event and researched sources, not the driver’s fame or a broad collection. Example: Lewis Hamilton F1 artwork → sport: Formula One. Keep league specific and existing confirmed collection mappings. If unresolved, use null and explain in review_notes under the existing needs_attention rules. Other sports unchanged."""
