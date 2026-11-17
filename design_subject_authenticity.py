@@ -39,7 +39,14 @@ _REVIEW_STATUS = (
 AUTHENTICITY_CHECK = f"{AUTHENTICITY_HEADING}\n\n{_SOURCE_COMPARISON}{_SOURCE_FINISH}{_REVIEW_STATUS}"
 
 CREATE_DESIGN_AUTHENTICITY_CHECK = (
-    AUTHENTICITY_CHECK
+    f"{AUTHENTICITY_HEADING}\n\n{_SOURCE_COMPARISON}"
+    "Keep the generation as the visual baseline. Repair a specific visible defect only when a "
+    "verified original has enough detail at the intended placed size. Mask the smallest coherent "
+    "region, clean its edges and match the surrounding sharpness, lighting, colour and texture. "
+    "Compare before and after at 100% and thumbnail size. Keep the repair only if it improves authenticity without "
+    "introducing softness, halos or mismatched edges; otherwise revert it. If identity remains "
+    "unverified or visibly wrong, keep the strongest candidate provisional.\n\n"
+    + _REVIEW_STATUS
     + "For action, apply contact shadows only at actual points of contact and keep an airborne "
       "subject visibly separated from the ground. Match directional lighting and depth. Complete "
       "the digital integration review before selecting the artwork.\n\n"

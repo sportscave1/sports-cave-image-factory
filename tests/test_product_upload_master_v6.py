@@ -72,7 +72,7 @@ Do not regenerate already approved cards.'''
         self.assertIn(INSTRUCTIONS, prompt)
         shared = PER_IMAGE.removeprefix(FINISHED_MOCKUPS + '\n\n')
         self.assertEqual(prompt.count(shared), 1)
-        self.assertIn('For each separate call, include the full applicable master and shared requirements', prompt)
+        self.assertIn('into one focused visual brief for that card', prompt)
         for label, brief in zip(LABELS, ['saved lounge', 'saved office', 'saved living room']):
             self.assertIn(label, prompt)
             self.assertIn(brief, prompt)

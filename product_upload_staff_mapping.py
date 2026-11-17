@@ -20,7 +20,7 @@ def package(job, row, receipt, planned, originals):
 
 def require_job(cur, key, row, *, stages):
     source = row['data']['source']
-    cur.execute('''SELECT stage FROM product_upload_staff_jobs WHERE id=%s AND intake_id=%s
+    cur.execute('''SELECT stage FROM product_upload_staff_jobs WHERE COALESCE(dispatch_id,id)=%s AND intake_id=%s
         AND worker_actor=%s AND source_id=%s AND source_rev=%s AND stage=ANY(%s::smallint[])
         FOR UPDATE''',
                 (key, row['id'], row['actor_id'], source['id'], source['rev'], list(stages)))
@@ -46,6 +46,10 @@ def arm(connect, key, actor, handoff):
             raise ValueError('The saved PSD or upload action changed before handoff.')
         if not old:
             row['data']['staff_mapping'] = handoff
+            task = (row['data'].get('upload_operation') or {}).get('sync_map') or {}
+            if (row['data'].get('staff_upload_attempt') == handoff['job']
+                    and task.get('staff_job') == handoff['job']):
+                task['source_version'] = handoff['version']
     return True
 
 

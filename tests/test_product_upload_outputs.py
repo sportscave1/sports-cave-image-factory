@@ -29,6 +29,32 @@ def test_master_each_scene_complete_and_custom_selections_stable():
     assert all(filename in factory.PRODUCT_PAGE_PROMPT_FILENAMES for filename in FILENAMES)
 
 
+def test_full_restart_uses_fresh_folder_and_rejects_prior_outputs(env,tmp_path):
+    from product_upload_source import invalidate
+    store, _, _ = env
+    row,result,manifest=make_result(env,tmp_path)
+    api=Outputs();provider=SimpleNamespace(api=api,token='fixture')
+    def save(value):
+        return transfer(provider,value,manifest,api.root,api.base+'/Baseball','Reset fixture',store.connect,
+                        ADMIN['id'],lambda *a:None,conflict='numbered')
+    original=save(result)
+    assert not original['failures']
+    prior=deepcopy(result)
+    before=deepcopy(api.files)
+    with store.locked(row['id'],ADMIN['id']) as (current,_):
+        current['data']['staff_full_restart']='fresh-attempt'
+        invalidate(current)
+        current['data'].pop('mockup_saves',None)
+    with pytest.raises(ValueError,match='earlier reset'):
+        save(prior)
+    result['_staff_full_restart']='fresh-attempt'
+    result.pop('_product_upload_save_token',None)
+    fresh=save(result)
+    assert not fresh['failures'] and fresh['destination']!=original['destination']
+    assert fresh['destination'].endswith(' (2)')
+    assert all(api.files[path]==metadata for path,metadata in before.items())
+
+
 def make_result(env,tmp_path):
     from tests.test_mockup_eight_image_manifest import MockupEightImageManifestTests
     store,_,_=env;row=saved(env)

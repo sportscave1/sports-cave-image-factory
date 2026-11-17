@@ -10,11 +10,12 @@ const conversation = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b
 
 function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '',
   initialFiles = [], design = false, ad = false, start = 3, total = 6, canSet = true, powerAvailable = true,
-  resetAfterPaste = false} = {}) {
+  resetAfterPaste = false, draftBackupOK = true} = {}) {
   const location = {href:ad ? 'https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/project' : design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : project};
   const files = [...initialFiles];
   const sent = [];
   const thinking = [];
+  const backups = [], notes = [];
   let inserted = '', current = false, listener, permitted = 0;
   let now = 0;
   let selected = start, expanded = false;
@@ -62,6 +63,9 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
   editor = node;
   const body = {get innerText() {return asAttachment ? '' : inserted;}, querySelector:() => asAttachment ? {} : null};
   const document = {
+    body:{append:note=>notes.push(note)},
+    createElement:()=>({style:{},children:[],append(...items){this.children.push(...items);}}),
+    createRange:()=>({selectNodeContents(){}}),
     activeElement:null,
     getElementById: () => expanded ? menu : null,
     querySelector(query) {
@@ -77,7 +81,8 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
     },
     execCommand(_name, _showUI, value) {inserted = value; node.innerText = value; return true;},
   };
-  const chrome = {runtime:{id:'companion',onMessage:{addListener:callback => {listener=callback;}},sendMessage:async () => {
+  const chrome = {runtime:{id:'companion',onMessage:{addListener:callback => {listener=callback;}},sendMessage:async message => {
+    if(message.type==='project:backup-draft') {if(draftBackupOK)backups.push(message.text);return {ok:draftBackupOK};}
     permitted++;
     return {ok:true};
   }}};
@@ -88,14 +93,14 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
   class Paste {
     constructor(_type, options) {this.clipboardData = options.clipboardData;}
   }
-  vm.runInNewContext(source, {location, document, chrome, DataTransfer:Transfer, ClipboardEvent:Paste,
+  vm.runInNewContext(source, {location, document, chrome, window:{getSelection:()=>({removeAllRanges(){},addRange(){}})}, DataTransfer:Transfer, ClipboardEvent:Paste,
     KeyboardEvent:class {constructor(_type, options) {this.key = options.key;}},
     Date:{now:() => now}, setTimeout(callback, ms) {now += ms; queueMicrotask(callback);},
   });
   function invoke(message) {
     return new Promise(resolve => listener(message,{id:'companion'},resolve));
   }
-  return {invoke, sent, thinking, inserted:() => inserted, permitted:() => permitted};
+  return {invoke, sent, thinking, backups, notes, draft:()=>node.innerText, inserted:() => inserted, permitted:() => permitted};
 }
 
 test('Work waits for the delayed upload, submits the full pasted-text attachment and confirms its user turn', async () => {
@@ -123,22 +128,37 @@ test('Work and Chat submit intact inline text and leave existing drafts alone', 
   }
 });
 
+test('Only a new Companion-owned upload tab backs up a restored draft and sends the exact upload prompt', async () => {
+  const draft='My unfinished design instructions\nDo not send these.';
+  const app=fixture({initialDraft:draft});
+  const prompt='Run this Product Uploads workflow for Current product.\nExact upload content.';
+  assert.equal((await app.invoke({type:'project:send',id:'receipt',prompt,freshUpload:true})).sent,true);
+  assert.deepEqual(app.backups,[draft]);
+  assert.equal(app.notes[0].children[1].textContent,draft);
+  assert.deepEqual(app.sent,[prompt]);
+  assert.equal(app.permitted(),1);
+  const failed=fixture({initialDraft:draft,draftBackupOK:false});
+  assert.equal((await failed.invoke({type:'project:send',id:'receipt',prompt,freshUpload:true})).sent,false);
+  assert.equal(failed.draft(),draft);
+  assert.deepEqual(failed.sent,[]);
+});
 
-test('Design project uses the same verified paste and submit flow for inline and attached prompts', async () => {
+
+test('Designs uses the same second-from-top thinking level for inline and attached prompts', async () => {
   for (const asAttachment of [false, true]) {
-    const app = fixture({design:true, asAttachment});
+    const app = fixture({design:true, asAttachment, start:6});
     const prompt = 'Create a complete collector artwork. '.repeat(100);
     const result = await app.invoke({type:'project:send', id:'design-job', prompt});
     assert.equal(result.sent, true);
     assert.deepEqual(app.sent, [prompt]);
-    assert.deepEqual(app.thinking,[{selected:6, expanded:false}]);
+    assert.deepEqual(app.thinking,[{selected:5, expanded:false}]);
     assert.equal(app.permitted(), 1);
   }
 });
 
 test('Reads the number of stops from the picker and rechecks after a composer replacement', async () => {
   for (const [config, expected] of [
-    [{design:true, total:8, start:3, resetAfterPaste:true, asAttachment:true},8],
+    [{design:true, total:8, start:3, resetAfterPaste:true, asAttachment:true},7],
     [{total:4, start:4},3],
   ]) {
     const browser = fixture(config);

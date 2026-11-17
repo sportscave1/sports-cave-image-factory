@@ -44,6 +44,16 @@ def test_failed_job_retry_and_stale_result_cannot_overwrite_new_selection():
     jobs.pool.shutdown()
 
 
+def test_full_restart_preparation_identity_changes_without_changing_the_psd():
+    row={'data':{'source':{'id':'id:original','rev':'R1','content_hash':'a'*64}}}
+    old=artwork.source(row)
+    row['data']['staff_full_restart']='clicked-full-reset'
+    fresh=artwork.source(row)
+    assert fresh!=old
+    assert fresh['restart_attempt']=='clicked-full-reset'
+    assert all(fresh[key]==value for key,value in old.items())
+
+
 def test_background_queue_is_bounded():
     jobs=Jobs();gate=threading.Event()
     for number in range(16):jobs.submit(str(number),'actor','prepare',{},lambda p:gate.wait(2))

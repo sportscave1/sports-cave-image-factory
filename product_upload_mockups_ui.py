@@ -57,6 +57,11 @@ def render_page(app):
                 advance(staff_key, user['id'], 7, 'Could not open the original PSD. Check Dropbox and Design Studio.', allowed=[1])
                 return
         requested = str(staff_job['intake_id'])
+        if staff_job.get('dispatch_id'):
+            from product_upload_jobs import JOBS
+            attempt_row=Intakes(connect).read(requested,user['id'])
+            JOBS.begin_staff_attempt(requested, user['id'], str(staff_job['dispatch_id']),
+                                    full=bool((attempt_row or {}).get('data',{}).get('staff_full_restart')))
         if st.session_state.get('_product_upload_active') != requested:
             review_launch = requested
         desktop_progress(staff_key, requested, user['id'])
@@ -237,6 +242,8 @@ def render_design(app,row,user):
     result=app._mockups_result()
     if result and result.get('_product_upload_intake')!=key:
         app._set_mockups_result(None);result=None
+    if result and result.get('_staff_full_restart') != row['data'].get('staff_full_restart'):
+        app._set_mockups_result(None);result=None
     st.subheader('Prepare product images')
     from product_upload_sport import render_selector,selected,rebind_result
     active_jobs=[JOBS.snapshot(key,user['id'],operation) for operation in ('generate','save')]
@@ -301,7 +308,7 @@ def render_design(app,row,user):
             st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],reused=True)
             st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
             return
-        if row['data'].get('product_gid'):
+        if row['data'].get('product_gid') and not row['data'].get('staff_full_restart'):
             st.session_state['product-upload-job-error-'+key]='This PSD is already linked to Shopify. Start a separate design workflow.';return
         if result:
             from product_upload_mockups import release_transient
@@ -320,7 +327,7 @@ def render_design(app,row,user):
             st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],failed=True)
             st.session_state['product-upload-job-error-'+key]=str(error)
     if (from_review and choice and name.strip() and not row['data'].get('mockups_exported')
-            and not row['data'].get('product_gid') and not result and not pending and not running
+            and (not row['data'].get('product_gid') or row['data'].get('staff_full_restart')) and not result and not pending and not running
             and not st.session_state.get(acknowledgement)):
         queue_generation(automatic=True)
         pending=JOBS.snapshot(key,user['id'],'generate')

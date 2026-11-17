@@ -139,7 +139,10 @@ def log_failure(error, stage, reference, row):
 
 def source(row):
     m = row['data']['source']
-    return dict(template_id='product-upload:'+m['id'],file_id=m['id'],revision=m['rev'],content_hash=m['content_hash'])
+    identity = dict(template_id='product-upload:'+m['id'],file_id=m['id'],revision=m['rev'],content_hash=m['content_hash'])
+    if row['data'].get('staff_full_restart'):
+        identity['restart_attempt'] = row['data']['staff_full_restart']
+    return identity
 
 
 def settings(connect):

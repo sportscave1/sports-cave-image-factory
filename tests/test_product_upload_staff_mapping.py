@@ -1,6 +1,7 @@
 """Publish Now through the real mapping transaction with synthetic Shopify and Dropbox."""
 from pathlib import Path
 from uuid import uuid4
+from contextlib import contextmanager
 
 import pytest
 
@@ -17,12 +18,32 @@ from tests.test_product_upload_mapping import (
 )
 
 
+def test_reset_rearms_mapping_version_without_losing_moved_psd(monkeypatch):
+    import product_upload_staff_mapping as mapping
+    attempt = str(uuid4())
+    source = {'id': 'id:original', 'rev': 'r1'}
+    task = {'staff_job': attempt, 'state': 'Mapped', 'source_version': 'old', 'moved': source}
+    row = {'data': {'source': source, 'staff_upload_attempt': attempt,
+                    'upload_operation': {'sync_map': task}}, 'mode': 'LIVE'}
+    @contextmanager
+    def locked(*args):
+        yield row, None
+    monkeypatch.setattr(mapping.Intakes, 'locked', locked)
+    monkeypatch.setattr(mapping, 'require_job', lambda *a, **kw: {'stage': 1})
+    handoff = {'job': attempt, 'version': 'fresh', 'source': source, 'mode': 'LIVE'}
+    assert mapping.arm(lambda: None, 'upload', 'actor', handoff)
+    assert task['source_version'] == 'fresh'
+    assert task['state'] == 'Mapped' and task['moved'] == source
+
+
 @pytest.mark.parametrize('lost_move_response', [False, True])
 def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response):
     service, intake_id, original, listing = setup(env, arrived=False)
     store, sql, provider = env
     sql.execute((Path(__file__).resolve().parents[1] /
                  'migrations/20261117110000_product_upload_staff_queue.sql').read_text(encoding='utf-8'))
+    sql.execute((Path(__file__).resolve().parents[1] /
+                 'migrations/20261118070000_product_upload_manual_restart.sql').read_text(encoding='utf-8'))
     monkeypatch.setattr(queue, 'connect', store.connect)
     monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: provider)
     monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: ADMIN if key == ADMIN['id'] else None)

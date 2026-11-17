@@ -8,9 +8,9 @@ from urllib.parse import urlencode
 
 from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
-    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
+    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS,
 )
-from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
@@ -103,24 +103,24 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 {COMPLETE_COMPOSITION}{_CREATE_DESIGN_BORDER_RULES}{_CREATE_DESIGN_TYPOGRAPHY}
 
-{_CREATE_DESIGN_COLLECTOR_BACKGROUND}Lock the verified subjects and exact title. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Plan how the hero, supporting photograph if useful, authentic setting, styling, text, framing-safe border and plaque footprint work together at print and thumbnail sizes. Confirm the story is recognisable with the title hidden. Briefly state the chosen direction and record the layout and source decisions in REVIEW NOTES.
+{BADGE_FOOTPRINT}
+
+{_CREATE_DESIGN_COLLECTOR_BACKGROUND}Lock the verified subjects and exact title. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Plan how the hero, selected supporting photograph, authentic setting, styling, text, framing-safe border and plaque footprint work together at print and thumbnail sizes. Confirm the story is recognisable with the title hidden. Briefly state the chosen direction and record the layout and source decisions in REVIEW NOTES.
 
 **3. Generate the complete flat artwork once**
 
-Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins and visible collector treatment. Generate the full artwork with subject, venue, abstract depth, typography and border. Leave the official plaque and edition number for PSD assembly. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
+Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins, the reserved badge footprint and visible collector treatment. Include the hero and selected secondary source with its distinct story role, crop, position and background transition alongside the venue references. Generate the full artwork with subject, supporting moment where sourced, venue, abstract depth, typography and border. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
 
-Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. After any completed generation, use original photo pixels and PSD adjustments for corrections. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
+Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
 **4. Inspect and finish at 100% and thumbnail size**
 
 {CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
-Verify the intended collector transformation is visible, with recognisable venue features where used, authentic colours, integrated title and plaque placement, adequate framing clearance and truthful sporting details. Use source-pixel finishing, masks, typography and PSD adjustments to correct defects. Preserve the strongest verified source material. Mark unresolved quality or identity as needs_attention and retain the strongest inspected result for Review when technically valid.
-
 **5. Assemble, save and verify one final Review PSD**
 
 On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
 
-{BADGE_PLACEMENT_VERIFICATION}{COLLECTOR_ASSET_PLACEMENT}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
+{BADGE_PLACEMENT_VERIFICATION}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 
 **6. Write the Smart Upload JSON and deliver**
 
@@ -134,7 +134,7 @@ def _template():
     return TEMPLATE.read_text(encoding="utf-8")
 
 
-def article_html(item, *, heading=None, allow_ads=False, legend=False, design_status=None):
+def article_html(item, *, heading=None, allow_ads=False, legend=False, design_status=None, design_key=None):
     title = " ".join(item["title"].split())
     label = heading or title
     markets = display_markets(item)
@@ -143,11 +143,14 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
     elif not legend and markets:
         label += f' ({", ".join(markets)})'
-    prompt = escape(_prompt(title, item["recommendation"], primary_market=markets[0] if markets else ""),
-                    quote=True).replace("\n", "&#10;")
+    enabled = bool(design_key) and design_status == 'Needs attention'
+    reason = ('Add this design to the Design Companion queue' if enabled else
+              'Already in the Design Companion queue' if design_status in ('Pending', 'Opening ChatGPT', 'Generating') else
+              'This design has already been made or uploaded' if design_status else
+              'Queue status unavailable. Refresh Home.')
     actions = (
-        f'<a href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
-        f'data-prompt="{prompt}" title="Open Sports Cave Designs and copy the prompt">Create Design</a>'
+        f'<button type="button" data-design-key="{escape(design_key or "", quote=True)}" '
+        f'title="{reason}"{ "" if enabled else " disabled"}>Add to Queue</button>'
     )
     status_label = ''
     if design_status:
@@ -254,9 +257,11 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
     def status(section, item):
         if design_statuses is None or not edition:
             return None
-        return design_statuses.get(identity(edition['date'], section, item), 'Pending')
+        return design_statuses.get(identity(edition['date'], section, item), 'Needs attention')
+    def key(section, item):
+        return identity(edition['date'], section, item)
     rows = "".join(
-        article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads, design_status=status("recommendations", item))
+        article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads, design_status=status("recommendations", item), design_key=key("recommendations", item))
         for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
     )
     full_brief = (edition or {}).get("full_brief")
@@ -276,7 +281,7 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
         )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
-    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True, design_status=status("legends", item))
+    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True, design_status=status("legends", item), design_key=key("legends", item))
                           for label, item in legends)
     if not legend_rows:
         legend_rows = '<p class="sc-legends-empty">No Legends Brief entries for this edition.</p>'

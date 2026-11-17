@@ -1,6 +1,20 @@
 # Meta CRM Morning Brief
 
-ChatGPT runs a private analysis at 06:30 Australia/Sydney after the 06:00 Sports Morning Brief. The OS publisher checks for the completed edition at 06:45 and 08:45 using the signed-in Edge owner session and the existing subscription.
+ChatGPT cloud runs Sports Updates at 04:45, Meta CRM at 05:00 and Designs to
+Refresh at 05:15, all in Australia/Sydney (including daylight saving). Each
+producer submits its validated Home JSON directly to the Sports Cave CRM
+connector. Target: all editions verified on Home by 06:15, recovery until
+06:30. Publishing does not require Edge, a desktop session, a Companion or
+OpenAI API credits.
+
+The cloud scheduler permits runs no more frequently than hourly. The single
+cloud recovery task therefore runs at 05:30 and 06:30 Sydney. The existing
+server worker independently reconciles queue state and Home every ten minutes
+from 05:30 through the 06:30 slot, recording
+`hosted_daily_brief_health:YYYY-MM-DD`. A completed job whose Home record is
+missing is restored from its accepted payload within the retry budget. Missing
+research is recovered by the cloud task; the worker does not invent reports.
+Only unresolved failures at the final cloud check should notify the owner.
 
 ## Hosted handoff rollout
 
@@ -25,17 +39,30 @@ cannot submit. Use this instruction in the relevant source task:
 Sports must include the full brief and its recommendations. Meta sends null
 ROAS, empty actions, and the complete review. Designs to Refresh sends up to
 three verified candidates, or an empty list after a completed review.
-`get_daily_home_brief_status` returns today's state and attempt count. The
-worker retries transient failures up to three publication attempts. It
+`get_daily_home_brief_status` reads the actual Home record and returns today's
+state, attempt count, verified flag, publication date and canonical content
+SHA-256. `matches_submission` distinguishes a preserved same-day edition from
+an exact submission match. Missing research/submission, authorization,
+validation and publication failures remain distinguishable. A completed queue
+row alone is not verification. The worker retries transient failures up to
+thirty publication attempts, two minutes apart, recovering interrupted leases
+after ten minutes. It
 recognizes an edition already published for the same day so a fallback
 publication can take precedence without a second write.
 
-Keep the current source schedules and local publishers during acceptance.
-Verify a live cloud-run submission reaches Home with Edge closed and without
-an action confirmation for each scheduled task. Then disable the overlapping
-local publisher schedules. If the cloud task requires interactive approval
-for the write, keep the fallbacks active and choose a supported server-side
-generation provider before migrating off the existing subscription workflow.
+The owner must allow unattended brief submissions in the cloud connector.
+An interactive approval can pause a producer; a healthy server worker cannot
+publish a report it has never received. Keep the completed report and final
+JSON in each source conversation for recovery. Read status after an unknown
+submission result before retrying the same payload. Never submit yesterday's
+edition or an incomplete review to clear a pending state. Disable the three
+legacy local browser publishers after cloud acceptance to avoid races.
+
+Designs to Refresh uses the performance/artwork schema, not the obsolete
+six-month/lifetime-zero-sales screen. The queue shortens an over-limit
+suggestion at a word boundary; it never changes product IDs, dates, counts or
+evidence. Other invalid fields return actionable errors for the producer to
+correct. Research stays independent of Sports if that edition is delayed.
 
 ## Daily ChatGPT prompt
 
@@ -47,4 +74,11 @@ Finish with one JSON code block for OS Home. Use date (today in Sydney), report_
 
 ## Publishing to Home
 
-Submit the JSON to `/ops/meta-morning-brief/publish`. The OS fetches Meta's account-level purchase ROAS and GA4 purchase events by device for the submitted date. Missing or qualified device counts show Unavailable. GA4 counts use the property's reporting timezone. Home shows the three cards, three ad recommendations inline, further recommendations in a Home dialog, and optional analysis sections. After deployment, refresh the ChatGPT connector and approve the new read-only scopes, then switch the scheduled task and publisher to the expanded payload.
+Submit using `submit_daily_home_brief` with kind `meta`. The legacy form remains
+available for owner troubleshooting. The OS fetches Meta's account-level
+purchase ROAS and GA4 purchase events by device for the submitted date. Missing
+or qualified device counts show Unavailable. These independently enriched
+metrics are excluded from the editorial-content verification hash. GA4 counts
+use the property's reporting timezone. Home shows the three cards, three ad
+recommendations inline, further recommendations in a Home dialog, and optional
+analysis sections.

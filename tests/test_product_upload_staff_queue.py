@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from uuid import uuid4
 
 import pytest
@@ -12,6 +13,7 @@ def store(database, monkeypatch):
     jobs, cursor = database
     sql = Path(__file__).resolve().parents[1] / 'migrations' / '20261117110000_product_upload_staff_queue.sql'
     cursor.execute(sql.read_text(encoding='utf8'))
+    cursor.execute(sql.with_name('20261118070000_product_upload_manual_restart.sql').read_text(encoding='utf8'))
     cursor.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     monkeypatch.setattr(queue, 'connect', jobs.connect)
     monkeypatch.setattr('design_review_page.final_psd', lambda source: True)
@@ -168,3 +170,108 @@ def test_pause_before_pairing_holds_first_upload(store):
     assert queue.tick(token, {}) == {}
     queue.settings(True)
     assert queue.tick(token, {})['job']['id'] == str(key)
+
+
+def test_manual_reset_preserves_upload_and_rejects_old_events(store, monkeypatch):
+    key = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    assert queue.tick(token, {})['job']['id'] == str(key)
+    queue.advance(key, 'desktop', 7, 'Generation failed', allowed=[1])
+    stopped = queue.list_jobs('staff')['jobs'][0]
+    assert stopped['restartable']
+    # Polling and re-enqueue do not reset a failed job.
+    assert submit('staff') == key
+    assert queue.tick(token, {}) == {}
+    with pytest.raises(PermissionError):
+        queue.restart(key, {'id': 'unrelated'}, stopped['updated_at'])
+    queue.settings(False)
+    restarted = queue.restart(key, {'id': 'staff'}, stopped['updated_at'])
+    assert restarted['id'] == str(key) and restarted['stage'] == 0
+    assert queue.tick(token, {}) == {}  # reset honours Pause
+    with pytest.raises(ValueError):
+        queue.restart(key, {'id': 'staff'}, stopped['updated_at'])
+    queue.settings(True)
+    new = queue.tick(token, {'id': str(key), 'state': 'blocked'})['job']
+    assert new['id'] != str(key) and new['stage'] == 1
+    assert queue.worker_job(str(key), 'desktop') is None
+    assert queue.worker_job(new['id'], 'desktop')
+    queue.advance(key, 'desktop', 7, 'Stale tab')
+    assert queue.worker_job(new['id'], 'desktop')['stage'] == 1
+    queue.advance(new['id'], 'desktop', 6, allowed=[1])
+    done = queue.list_jobs('staff')['jobs'][0]
+    assert not done['restartable']
+    with pytest.raises(ValueError):
+        queue.restart(key, {'id': 'staff'}, done['updated_at'])
+
+
+def test_reset_retains_intake_product_files_and_records_prior_error(store):
+    key = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    intake = uuid4()
+    data = dict(source={'id': 'id:original', 'rev': 'A'}, product_gid='gid://shopify/Product/100',
+                mockup_saves={'receipt': 'verified-files'}, staff_mapping={'job': str(key)},
+                server_artwork={'state':'Ready'}, mockups_exported=True, copied=True,
+                upload_operation={'output':{'folder':'/Old output'}, 'sync_map': {'staff_job': str(key), 'lease': 'old',
+                                              'moved': {'id': 'id:original'}, 'completed': ['moved']}})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('CREATE TABLE product_upload_intakes(id uuid PRIMARY KEY,data jsonb,updated_at timestamptz DEFAULT now())')
+        cur.execute('INSERT INTO product_upload_intakes(id,data) VALUES (%s,%s::jsonb)', (intake, json.dumps(data)))
+    queue.advance(key, 'desktop', 1, intake=intake)
+    queue.advance(key, 'desktop', 7, 'Image generation rejected', allowed=[1])
+    stopped = queue.list_jobs('staff')['jobs'][0]
+    queue.restart(key, {'id': 'staff'}, stopped['updated_at'])
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT * FROM product_upload_intakes WHERE id=%s', (intake,))
+        saved = cur.fetchone()['data']
+        cur.execute('SELECT * FROM product_upload_staff_jobs WHERE id=%s', (key,))
+        job = cur.fetchone()
+    assert str(job['intake_id']) == str(intake)
+    assert saved['source'] == data['source']
+    assert saved['product_gid'] == data['product_gid']
+    assert 'mockup_saves' not in saved
+    assert saved['staff_upload_restarts'][0]['retired_outputs']['mockup_saves'] == data['mockup_saves']
+    assert saved['staff_upload_restarts'][0]['retired_outputs']['output'] == data['upload_operation']['output']
+    assert 'server_artwork' not in saved and 'output' not in saved['upload_operation']
+    assert not saved['mockups_exported'] and not saved['copied']
+    assert saved['staff_full_restart'] == str(job['dispatch_id'])
+    assert saved['design_review']['decision'] == 'approved'
+    assert saved['staff_upload_attempt'] == str(job['dispatch_id'])
+    assert saved['staff_upload_restarts'][0]['reason'] == 'Image generation rejected'
+    assert 'staff_mapping' not in saved  # re-armed for the new delivery only
+    task = saved['upload_operation']['sync_map']
+    assert task['staff_job'] == str(job['dispatch_id'])
+    assert task['moved'] == {'id': 'id:original'} and task['completed'] == ['moved']
+    assert 'lease' not in task
+
+
+def test_clicked_attempt_clears_only_old_errors_once():
+    from product_upload_jobs import Jobs
+    jobs = Jobs()
+    try:
+        failed = ('desktop', 'upload', 'prepare')
+        ready = ('desktop', 'upload', 'generate')
+        jobs.jobs[failed] = {'state': 'Failed'}
+        jobs.jobs[ready] = {'state': 'Ready'}
+        jobs.begin_staff_attempt('upload', 'desktop', 'clicked-attempt')
+        assert failed not in jobs.jobs and ready in jobs.jobs
+        jobs.jobs[failed] = {'state': 'Failed'}
+        jobs.begin_staff_attempt('upload', 'desktop', 'clicked-attempt')
+        assert failed in jobs.jobs  # rerun/poll cannot retry this new failure
+    finally:
+        jobs.pool.shutdown(wait=False)
+
+
+def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
+    from product_upload_jobs import Jobs
+    jobs=Jobs()
+    try:
+        ready=('desktop','upload','generate')
+        jobs.jobs[ready]={'state':'Ready'}
+        jobs.begin_staff_attempt('upload','desktop','full-click',full=True)
+        assert ready not in jobs.jobs
+        jobs.jobs[ready]={'state':'Failed'}
+        jobs.begin_staff_attempt('upload','desktop','full-click',full=True)
+        assert ready in jobs.jobs
+    finally:
+        jobs.pool.shutdown(wait=False)

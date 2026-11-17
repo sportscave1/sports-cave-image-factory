@@ -27,6 +27,10 @@ const context={state, URLSearchParams, icon:name=>name,
    if (options?.method === 'POST') {
      const body=JSON.parse(options.body);
      writes.push({url,body});
+     if(url.endsWith('/restart')) {
+       payload.jobs[0]={...payload.jobs[0],stage:0,restartable:false,label:'Restart requested'};
+       return {ok:true,json:async()=>({job:payload.jobs[0]})};
+     }
      if (queueResponse) return queueResponse;
      payload.queues[body.queue].enabled=body.enabled;
      return {ok:true,json:async()=>({enabled:body.enabled})};
@@ -57,7 +61,23 @@ install();
  await context.refresh();
  assert.equal(status.open,false);
  assert.equal(region.children.length,0);
- assert.match(nodes.get('#sc-os-staff-upload-list').children[0].children[2].textContent,/Dropbox unavailable/);
+ assert.match(nodes.get('#sc-os-staff-upload-list').children[0].children[3].textContent,/Dropbox unavailable/);
+ assert.equal(writes.length,0,'status polling never restarts a failed upload');
+ const summaryReset=nodes.get('#sc-os-staff-upload-reset');
+ assert.equal(summaryReset.hidden,false);
+ const reset=nodes.get('#sc-os-staff-upload-list').children[0].children[0];
+ assert.equal(reset['aria-label'],'Restart upload: Real title');
+ await reset.onclick({preventDefault(){},stopPropagation(){}});
+ assert.deepEqual(writes[0],{url:'/api/staff-product-uploads/restart',body:{id:'queued',updated_at:'now'}});
+ assert.equal(summaryReset.hidden,true);
+ writes.length=0;
+ payload.jobs[0]={...payload.jobs[0],stage:7,restartable:true};
+ await context.refresh();
+ await summaryReset.onclick({preventDefault(){},stopPropagation(){}});
+ assert.equal(writes.length,1);
+ writes.length=0;
+ payload.jobs[0]={...payload.jobs[0],stage:7,restartable:true};
+ await context.refresh();
  status.open=true;   // Native summary activation.
  payload.jobs[0].detail='Dropbox still unavailable';
  await context.refresh();

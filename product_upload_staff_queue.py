@@ -1,5 +1,6 @@
 """Durable staff requests, restricted to the paired desktop and exact artwork."""
 import hashlib
+import json
 import logging
 import re
 import secrets
@@ -74,7 +75,70 @@ def public(row):
         label, percent = 'Shopify published · Upload Companion handling PSD', 96
     return dict(id=str(row['id']), title=row['title'], stage=stage, label=label,
                 percent=percent, detail=row['message'], storefront=row['storefront'],
-                updated_at=row['updated_at'].isoformat())
+                updated_at=row['updated_at'].isoformat(), restartable=stage == 7)
+
+
+def delivery(row):
+    """Existing installed companions see a new job ID only after an explicit reset."""
+    return dict(row, id=row.get('dispatch_id') or row['id']) if row else None
+
+
+def restart(key, user, expected):
+    """Restart Publish now for this failed snapshot, regenerating its web-image package."""
+    key = UUID(str(key))
+    if not isinstance(expected, str) or not expected:
+        raise ValueError('Refresh the upload status before restarting.')
+    administrator = can_control_queues(user)
+    with connect() as conn, conn.cursor() as cur:
+        # Match claim locking and intake -> job ordering used by mapping.
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        cur.execute('SELECT intake_id FROM product_upload_staff_jobs WHERE id=%s', (key,))
+        selected = cur.fetchone()
+        if not selected:
+            raise ValueError('This upload is unavailable. Refresh its status.')
+        intake = None
+        if selected['intake_id']:
+            cur.execute('SELECT data FROM product_upload_intakes WHERE id=%s FOR UPDATE', (selected['intake_id'],))
+            intake = cur.fetchone()
+        cur.execute('''SELECT j.* FROM product_upload_staff_jobs j WHERE j.id=%s AND
+            (%s OR EXISTS(SELECT 1 FROM product_upload_staff_requests r
+                          WHERE r.job_id=j.id AND r.requester=%s)) FOR UPDATE''',
+                    (key, administrator, user['id']))
+        job = cur.fetchone()
+        if not job:
+            raise PermissionError('This upload is unavailable to this account.')
+        if job['stage'] != 7 or job['updated_at'] != datetime.fromisoformat(expected):
+            raise ValueError('This upload changed or is no longer failed. Refresh its status.')
+        attempt = uuid4()
+        if intake:
+            data = dict(intake['data'])
+            history = list(data.get('staff_upload_restarts') or [])
+            history.append(dict(previous_dispatch=str(job.get('dispatch_id') or job['id']),
+                                reason=job['message'], at=datetime.now(timezone.utc).isoformat(),
+                                retired_outputs=dict(mockup_saves=data.get('mockup_saves'),
+                                    output=(data.get('upload_operation') or {}).get('output'))))
+            data['staff_upload_restarts'] = history[-20:]
+            data['staff_upload_attempt'] = str(attempt)
+            data['staff_full_restart'] = str(attempt)
+            from product_upload_source import invalidate
+            invalidate({'data': data})
+            data.pop('mockup_saves', None)
+            data.pop('server_artwork', None)
+            data.update(state='Uploaded', reason='')
+            data['design_review'] = dict(decision='approved', at=datetime.now(timezone.utc).isoformat())
+            task = (data.get('upload_operation') or {}).get('sync_map') or {}
+            if task.get('staff_job') == str(job.get('dispatch_id') or job['id']):
+                task['staff_job'] = str(attempt)
+                task.pop('lease', None)
+                task.pop('lease_until', None)
+            # Keep source, product identity and completed PSD mapping; the previous
+            # output package is audit history only, never a new handoff source.
+            data.pop('staff_mapping', None)
+            cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb,updated_at=now() WHERE id=%s',
+                        (json.dumps(data), job['intake_id']))
+        cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,dispatch_id=%s,
+            message='Restart requested · regenerating mockups',updated_at=now() WHERE id=%s RETURNING *''', (attempt, key))
+        return public(cur.fetchone())
 
 
 def digest(token):
@@ -146,15 +210,15 @@ def desktop_tick(token):
                 WHERE id=(SELECT id FROM product_upload_staff_jobs WHERE stage=0 ORDER BY created_at,id LIMIT 1)
                 RETURNING *''', (device['actor_id'],))
             job = cur.fetchone()
-    return job
+    return delivery(job)
 
 
 def worker_job(key, actor):
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT j.* FROM product_upload_staff_jobs j
             JOIN product_upload_desktop d ON d.actor_id=j.worker_actor
-            WHERE j.id=%s AND j.worker_actor=%s AND j.stage BETWEEN 1 AND 5''', (UUID(key), actor))
-        return cur.fetchone()
+            WHERE COALESCE(j.dispatch_id,j.id)=%s AND j.worker_actor=%s AND j.stage BETWEEN 1 AND 5''', (UUID(key), actor))
+        return delivery(cur.fetchone())
 
 
 def advance(key, actor, stage, message='', *, intake=None, storefront='', allowed=None):
@@ -163,7 +227,7 @@ def advance(key, actor, stage, message='', *, intake=None, storefront='', allowe
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''UPDATE product_upload_staff_jobs SET stage=%s, message=%s, storefront=%s,
             intake_id=COALESCE(intake_id,%s),updated_at=now()
-            WHERE id=%s AND worker_actor=%s AND stage BETWEEN 1 AND 5 AND stage<=%s
+            WHERE COALESCE(dispatch_id,id)=%s AND worker_actor=%s AND stage BETWEEN 1 AND 5 AND stage<=%s
             AND (stage<>%s OR message<>%s OR storefront<>%s OR (intake_id IS NULL AND %s::uuid IS NOT NULL))
             AND (%s::smallint[] IS NULL OR stage=ANY(%s::smallint[]))''',
             (stage, message[:1600], storefront, intake, key, actor, stage, stage, message[:1600], storefront, intake,
@@ -264,6 +328,24 @@ async def queue_control_route(request):
         return failure(error)
 
 
+async def restart_route(request):
+    from files_upload_api import _request_user, _same_origin
+    from product_upload_api import HEADERS, failure
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import JSONResponse
+    try:
+        if not request.headers.get('origin') or not _same_origin(request):
+            raise PermissionError('Request origin rejected.')
+        user = await run_in_threadpool(_request_user, request, required_page='Design Studio')
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError('Choose a failed upload to restart.')
+        result = await run_in_threadpool(restart, body.get('id'), user, body.get('updated_at'))
+        return JSONResponse({'job': result}, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
 async def pair_route(request):
     from product_upload_api import HEADERS, actor, failure
     from starlette.concurrency import run_in_threadpool
@@ -331,6 +413,7 @@ async def ad_tick_route(request):
 
 ROUTES = (
     ('/api/staff-product-uploads/ad-tick', ad_tick_route, ('POST',)),
+    ('/api/staff-product-uploads/restart', restart_route, ('POST',)),
     ('/api/staff-product-uploads/status', status_route, ('GET',)),
     ('/api/staff-product-uploads/queue-control', queue_control_route, ('POST',)),
     ('/api/staff-product-uploads/pair', pair_route, ('POST',)),

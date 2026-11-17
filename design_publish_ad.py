@@ -444,4 +444,3 @@ async def tick_route(request):
         return JSONResponse(await run_in_threadpool(tick, authorization[7:], event), headers=HEADERS)
     except Exception as error:
         return failure(error)
-

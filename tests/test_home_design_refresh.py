@@ -6,7 +6,7 @@ import re
 from unittest.mock import Mock
 
 import crm_growth_reporting
-from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
 from design_motorsport import MOTORSPORT_ARTWORK
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from home_design_refresh import RECOMMENDATION_GUIDANCE, _render_candidate
@@ -32,8 +32,8 @@ def test_home_handoff_commissions_two_new_artwork_passes():
     assert prompt.index(MOTORSPORT_ARTWORK) < prompt.index('Run a fresh web image search')
     assert 'Reuse a photo from the existing PSD only when' in prompt
     assert 'Do not revert to the old layout' in prompt
-    assert 'original editable edition-number layer' in prompt
-    assert COLLECTOR_ASSET_PLACEMENT in prompt
+    assert prompt.index(BADGE_FOOTPRINT) < prompt.index('3. Generate and inspect')
+    assert prompt.index('5. Use a separate working copy') < prompt.index(BADGE_PLACEMENT_VERIFICATION) < prompt.index('unique staging path')
     assert REVIEW_REPLACEMENT_RULE in prompt
     assert 'Missing or stale JSON alone must not block replacement.' in prompt
     assert 'Pending cleanup alone does not change an otherwise verified artwork' in prompt

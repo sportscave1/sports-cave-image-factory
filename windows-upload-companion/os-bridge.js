@@ -17,7 +17,7 @@
     try {
       result = await chrome.runtime.sendMessage({
         type: 'os:' + message.action, receipt: message.receipt, prompt: message.prompt,
-        staffJob: message.staffJob, token: message.token,
+        staffJob: message.staffJob, token: message.token, reference:message.reference,
       });
     } catch { return; }
     window.postMessage({channel, direction: 'response', id: message.id, result}, location.origin);

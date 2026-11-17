@@ -55,4 +55,3 @@ async function adQueueTick() {
 chrome.alarms.onAlarm.addListener(alarm => {if (alarm.name === staffAlarm) void adQueueTick();});
 chrome.runtime.onStartup.addListener(() => {void adQueueTick();});
 chrome.runtime.onInstalled.addListener(() => {void adQueueTick();});
-

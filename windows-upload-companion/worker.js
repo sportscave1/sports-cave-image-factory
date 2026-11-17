@@ -43,7 +43,8 @@ async function run(id, prompt, job) {
       await save(id, 'failed', 'Open the project in this Edge profile and make sure ChatGPT is signed in.');
       return;
     }
-    const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt}, {frameId:0});
+    const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
+      freshUpload:!job.designJob && !job.adJob, reference:job.reference}, {frameId:0});
     if (result?.sent && job.sending) {
       await save(id, 'submitted');
     } else if (job.sending) {
@@ -60,12 +61,13 @@ async function run(id, prompt, job) {
   }
 }
 async function start(message) {
-  const {receipt, prompt, staffJob} = message;
+  const {receipt, prompt, staffJob, reference} = message;
   if (!suppliedReceipt.test(receipt || '') || !promptIsValid(prompt)) return {accepted:false};
+  if(reference && !await verifiedReference(reference))return {accepted:false};
   if (staffJob && !await rememberStaffReceipt(staffJob, receipt, message.senderTab)) return {accepted:false};
   if (pending.has(receipt)) return {accepted:true};
   if (pending.size >= 4) return {accepted:true, busy:true};
-  const job = {tab:null, sending:false, staffJob};
+  const job = {tab:null, sending:false, staffJob, reference};
   pending.set(receipt, job);
   try {
     const key = keyFor(receipt);
@@ -81,6 +83,18 @@ async function start(message) {
     pending.delete(receipt);
     return {accepted:false};
   }
+}
+async function verifiedReference(reference){
+  if(reference.type!=='image/webp' || typeof reference.name!=='string' ||
+     !reference.name.endsWith('.webp') || /[/\\]/.test(reference.name) ||
+     !Number.isInteger(reference.size) || reference.size<1 || reference.size>16*1024*1024 ||
+     typeof reference.data!=='string' || reference.data.length>24*1024*1024 ||
+     !/^[A-Za-z0-9+/]*={0,2}$/.test(reference.data) || !suppliedReceipt.test(reference.sha256||''))return false;
+  try{
+    const bytes=Uint8Array.from(atob(reference.data),c=>c.charCodeAt(0));
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+    return bytes.length===reference.size && hash===reference.sha256;
+  }catch{return false;}
 }
 async function health(receipt) {
   const exact = suppliedReceipt.test(receipt || '');
@@ -107,6 +121,14 @@ async function permit(message, sender) {
   await save(message.id, 'sending');
   return {ok:true};
 }
+async function backupDraft(message, sender) {
+  const job=pending.get(message.id);
+  if (!job || job.designJob || job.sending || sender.frameId!==0 || sender.tab?.id!==job.tab ||
+      sender.url!==project || typeof message.text!=='string' || !message.text.trim() ||
+      message.text.length>1048576) return {ok:false};
+  await chrome.storage.local.set({['draft:'+message.id]:{text:message.text, time:Date.now(), project}});
+  return {ok:true};
+}
 function isOsComponent(address) {
   try {
     const url = new URL(address);
@@ -120,6 +142,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let action;
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
+  } else if (message?.type === 'project:backup-draft') {
+    action = backupDraft(message, sender);
   } else if (message?.type === 'project:blocked' && sender.frameId === 0) {
     action = recordChatBlock(sender, message.code);
   } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {

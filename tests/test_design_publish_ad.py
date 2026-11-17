@@ -206,7 +206,7 @@ def test_developer_companion_shows_ads_queue(monkeypatch):
 
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda user, route: True)
     monkeypatch.setattr(page, 'render_design_queue', lambda: None)
-    monkeypatch.setattr(page, 'render_queue', lambda: None)
+    monkeypatch.setattr(page, 'render_queue', lambda *_: None)
     monkeypatch.setattr(ads, 'dashboard', lambda: {'online': True, 'enabled': False, 'jobs': [
         dict(stage='waiting', active=True, title='Fixture', country='USA', sport='Baseball',
              label='Ready · queue paused')

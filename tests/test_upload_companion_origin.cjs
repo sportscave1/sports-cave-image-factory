@@ -13,9 +13,16 @@ async function main() {
     storage: {local: {get: async key => ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
     alarms:{get:async()=>alarm,create:async name=>{alarm={name};},onAlarm:{addListener(){}}},
   };
-  const context = vm.createContext({chrome, URL, AbortSignal, fetch:(...args)=>fetchQueue(...args)});
+  const context = vm.createContext({chrome, URL, AbortSignal, crypto:require('node:crypto').webcrypto, atob, Uint8Array, fetch:(...args)=>fetchQueue(...args)});
   context.importScripts = file => vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
+  const raw=Buffer.from('original reference bytes');
+  const reference={name:'fixture-black.webp',type:'image/webp',size:raw.length,data:raw.toString('base64'),
+    sha256:require('node:crypto').createHash('sha256').update(raw).digest('hex')};
+  assert.equal(await context.verifiedReference(reference),true);
+  assert.equal(await context.verifiedReference({...reference,data:Buffer.from('damaged reference bytes').toString('base64')}),false);
+  assert.equal(await context.verifiedReference({...reference,size:raw.length+1}),false);
+  assert.equal(await context.verifiedReference({...reference,name:'../fixture.webp'}),false);
 
   function health(url, frameId = 1) {
     return new Promise(resolve => {
@@ -56,13 +63,22 @@ async function main() {
     create: async ({url}) => { opened.push(url); return {id: tabId}; },
     sendMessage: async (_tab, message) => {
       if (message.type === 'project:ready') return {ready: true};
+      assert.equal(message.freshUpload,true);
+      assert.deepEqual(message.reference,reference);
+      assert.equal((await invoke({type:'project:backup-draft',id:message.id,text:'Preserved unsent draft'},
+        {url:opened[0],frameId:0,tab:{id:tabId+999}})).ok,false);
+      assert.equal((await invoke({type:'project:backup-draft',id:message.id,text:'Preserved unsent draft'},
+        {url:opened[0],frameId:0,tab:{id:tabId}})).ok,true);
+      assert.equal(records.get('draft:'+message.id).text,'Preserved unsent draft');
       const approved = await invoke({type:'project:permit',id:message.id}, {url:opened[0],frameId:0,tab:{id:tabId}});
       assert.equal(approved.ok,true);
       sent.push(message.prompt);
       return {sent:true};
     },
   };
-  const request = {type:'os:start',receipt:'b'.repeat(64),prompt:longPrompt};
+  const request = {type:'os:start',receipt:'b'.repeat(64),prompt:longPrompt,reference};
+  assert.equal((await invoke({...request,reference:{...reference,sha256:'0'.repeat(64)}},bridge)).accepted,false);
+  assert.equal(opened.length,0);
   assert.equal((await invoke(request,bridge)).accepted,true);
   assert.equal((await invoke(request,bridge)).accepted,true);
   await submitted;
@@ -105,6 +121,15 @@ async function main() {
   await context.staffQueueTick();
   assert.equal(requests.at(-1).state,'submitted');
   assert.equal(tabs.length,1);
+  // A server-authorised manual reset has a fresh delivery ID. The installed
+  // companion opens it despite the previous tab and submitted receipt.
+  const retryJob='8a89bf11-c607-4995-9361-acd988272cbc';
+  claim={id:retryJob,stage:1};
+  await context.staffQueueTick();
+  assert.equal(tabs.length,2);
+  assert.equal(new URL(tabs[1].url).searchParams.get('staff_upload_job'),retryJob);
+  assert.equal(await context.rememberStaffReceipt(queued,'d'.repeat(64),tabId+1),false);
+  assert.equal(await context.rememberStaffReceipt(retryJob,'d'.repeat(64),tabId+2),true);
   console.log('Upload Companion accepts the live Streamlit iframe URL and rejects other origins, paths and top-level frames.');
 }
 main().catch(error => {
