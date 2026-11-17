@@ -20,7 +20,10 @@ def connect():
     return upload_connect()
 
 
-def enqueue(user, source, title, sport):
+def enqueue(user, source, title, sport, *, ad_country=None):
+    if ad_country is not None:
+        import design_publish_ad as ad
+        sport, ad_country = ad.check_request(user, sport, ad_country)
     from design_review_page import final_psd
     if not final_psd(source) or not source.get('id') or not source.get('rev'):
         raise ValueError('Choose a current PSD from Design Studio Review.')
@@ -32,10 +35,13 @@ def enqueue(user, source, title, sport):
         key = cur.fetchone()['id']
         cur.execute('''INSERT INTO product_upload_staff_requests(requester,job_id)
             VALUES (%s,%s) ON CONFLICT DO NOTHING''', (user['id'], key))
+        if ad_country is not None:
+            ad.enqueue(cur, key, user['id'], sport, ad_country)
     return key
 
 
 def list_jobs(actor=None):
+    from design_publish_ad import PREFIX, public as ad_public
     with connect() as conn, conn.cursor() as cur:
         if actor is None:
             cur.execute('''SELECT * FROM product_upload_staff_jobs
@@ -46,6 +52,14 @@ def list_jobs(actor=None):
                 ORDER BY (j.stage BETWEEN 1 AND 5) DESC, (j.stage = 0) DESC,
                 j.updated_at DESC LIMIT 20''', (actor,))
         jobs = [public(row) for row in cur.fetchall()]
+        if jobs:
+            cur.execute('SELECT value FROM app_settings WHERE key=ANY(%s)',
+                        ([PREFIX + job['id'] for job in jobs],))
+            ads = {row['value']['upload']: ad_public(row['value']) for row in cur.fetchall()}
+            for job in jobs:
+                if job['id'] in ads:
+                    job['ad'] = ads[job['id']]
+            jobs.sort(key=lambda job: job['stage'] >= 6 and not (job.get('ad') or {}).get('active'))
         cur.execute('SELECT seen_at FROM product_upload_desktop WHERE singleton')
         desktop = cur.fetchone()
     online = bool(desktop and desktop['seen_at'] and
@@ -310,7 +324,13 @@ async def tick_route(request):
         return failure(error)
 
 
+async def ad_tick_route(request):
+    from design_publish_ad import tick_route
+    return await tick_route(request)
+
+
 ROUTES = (
+    ('/api/staff-product-uploads/ad-tick', ad_tick_route, ('POST',)),
     ('/api/staff-product-uploads/status', status_route, ('GET',)),
     ('/api/staff-product-uploads/queue-control', queue_control_route, ('POST',)),
     ('/api/staff-product-uploads/pair', pair_route, ('POST',)),

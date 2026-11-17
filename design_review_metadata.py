@@ -77,6 +77,8 @@ def _handoff_details(value, source):
     ready = checks_passed and bool(sport)
     return dict(design_name=title, product_context=_text(value.get('design_story'), 3000),
                 sport=sport, athletes=_strings(value.get('athletes')),
+                morning_design_job_id=_text(value.get('morning_design_job_id'), 36),
+                primary_market=_text(value.get('primary_market'), 30),
                 verified_collection_facts=dict(sport=sport, league=_text(value.get('league')),
                                                teams=_strings(value.get('teams'))),
                 intended_collections=collections, upload_intent=intent,

@@ -1195,11 +1195,13 @@
         }
         const label = job => job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
+        const adLabel = job => "Ad · " + job.ad.label;
         const job = jobs[0];
         staffProgress.dataset.stage = job.stage;
-        uploadSummary.title = job.title + " · " + label(job);
+        const currentLabel = job.ad ? label(job) + " · " + adLabel(job) : label(job);
+        uploadSummary.title = job.title + " · " + currentLabel;
         root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
-        root.querySelector("#sc-os-staff-upload-stage").textContent = label(job);
+        root.querySelector("#sc-os-staff-upload-stage").textContent = currentLabel;
         const meter = root.querySelector("#sc-os-staff-upload-meter");
         if (job.stage === 0) meter.removeAttribute("value");
         else meter.value = job.percent;
@@ -1215,6 +1217,17 @@
             const detail = doc.createElement("p");
             detail.textContent = item.detail;
             entry.append(detail);
+          }
+          if (item.ad) {
+            const ad = doc.createElement("p");
+            ad.textContent = adLabel(item) + (item.ad.detail ? " · " + item.ad.detail : "");
+            entry.append(ad);
+            if (/^[a-f0-9-]{36}$/.test(item.ad.posting_id || "")) {
+              const posting = doc.createElement("a");
+              posting.href = "/?" + new URLSearchParams({page:"ads_posting", meta_posting_job:item.ad.posting_id});
+              posting.textContent = "See in Posting";
+              entry.append(posting);
+            }
           }
           if (/^https:\/\//.test(item.storefront)) {
             const links = doc.createElement("div");

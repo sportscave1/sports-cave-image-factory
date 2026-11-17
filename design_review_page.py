@@ -320,27 +320,57 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 _edit_link(source, title)
         sport_picker = st.empty() if needs_sport else None
         clicked = False
+        ad_clicked = False
+        ad_mode = key+'-publish-ad-options'
         if published and row['data'].get('product_url'):
             publish.link_button('Open listing', row['data']['product_url'], key=key+'-shopify')
         else:
             clicked = publish.button('Publish now', key=key+'-approved', type='primary',
                                      disabled=published or editing or staged, help=f'Publish {title}')
-        if clicked and needs_sport:
+            from os_accounts import can_access_page
+            if all(can_access_page(user, page) for page in ('Ads', 'Posting', 'Files')):
+                ad_clicked = publish.button('Publish + ad', key=key+'-approved-ad',
+                                             disabled=published or editing or staged,
+                                             help='Publish the design and create a paused Meta Instant Experience campaign.')
+        if ad_clicked:
+            st.session_state[ad_mode] = True
+        if (clicked or ad_clicked) and needs_sport:
             st.session_state[key+'-needs-sport'] = True
         if sport_picker is not None and st.session_state.get(key+'-needs-sport'):
             from sports_categories import CANONICAL_SPORT_CATEGORIES
             chosen_sport = sport_picker.selectbox('Sport for ' + title, CANONICAL_SPORT_CATEGORIES,
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
-        if clicked and (not needs_sport or chosen_sport):
+        ad_country = None
+        if st.session_state.get(ad_mode) and not clicked and not (published or editing or staged):
+            from design_publish_ad import COUNTRIES, primary_country
+            ad_country = primary_country(details)
+            if not ad_country:
+                ad_country = st.selectbox('Ad country for '+title, tuple(COUNTRIES), index=None,
+                                          placeholder='Choose a country', key=key+'-ad-country')
+                ad_clicked = st.button('Queue publish + ad', key=key+'-confirm-ad',
+                                       disabled=not ad_country or (needs_sport and not chosen_sport))
+            elif needs_sport and ad_country:
+                st.caption(f'Ad country: {ad_country}')
+                ad_clicked = st.button('Queue publish + ad', key=key+'-confirm-ad',
+                                       disabled=not chosen_sport)
+        if (clicked or (ad_clicked and ad_country)) and (not needs_sport or chosen_sport):
             from product_upload_staff_queue import enqueue
             try:
-                job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
-                notice = dict(id=str(job_id), kind='success', text=f'Added to upload queue · {title}')
+                if clicked:
+                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
+                    text = f'Added to upload queue · {title}'
+                else:
+                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), ad_country=ad_country)
+                    text = f'Added to upload and ad queue · {title}'
+                st.session_state.pop(ad_mode, None)
+                notice = dict(id=str(job_id), kind='success', text=text)
             except ValueError as exc:
                 notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:
                 logging.getLogger(__name__).exception('Smart Upload could not start')
-                notice = dict(id=uuid.uuid4().hex, kind='error', text='Upload could not start. Your PSD is retained. Try Publish now again.')
+                action = 'Publish now' if clicked else 'Publish + ad'
+                notice = dict(id=uuid.uuid4().hex, kind='error',
+                              text=f'Upload could not start. Your PSD is retained. Try {action} again.')
             st.session_state['_product_upload_notice'] = notice
             st.rerun()
         if show_replacement and editing and not resumable and not staged:

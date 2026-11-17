@@ -1,15 +1,16 @@
 (() => {
   'use strict';
   const design = /^https:\/\/chatgpt\.com\/g\/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?\//.test(location.href);
-  const project = design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
-  const conversation = design ? /^https:\/\/chatgpt\.com\/g\/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/ : /^https:\/\/chatgpt\.com\/g\/g-p-6a387a17627081918e1700ec2783a12b(?:-sc-mockups-uploads)?\/c\/[a-f0-9-]{36}$/;
+  const ad = /^https:\/\/chatgpt\.com\/g\/g-p-6a6bd98cd6f081918788b544dcdecfc2(?:-[a-z0-9-]+)?\//.test(location.href);
+  const project = ad ? 'https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/project' : design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
+  const conversation = ad ? /^https:\/\/chatgpt\.com\/g\/g-p-6a6bd98cd6f081918788b544dcdecfc2(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/ : design ? /^https:\/\/chatgpt\.com\/g\/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/ : /^https:\/\/chatgpt\.com\/g\/g-p-6a387a17627081918e1700ec2783a12b(?:-sc-mockups-uploads)?\/c\/[a-f0-9-]{36}$/;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   // Block wrappers created by Edge can add a visual blank line to innerText.
   const normalize = text => text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
     .replace(/\n{3,}/g, '\n\n').trimEnd();
   let busy = false;
   const inProject = () => location.href === project;
-  const workEditor = design ? '[role="textbox"][contenteditable="true"][aria-label^="New chat in "]' : '[role="textbox"][contenteditable="true"][aria-label="New chat in SC Mockups/Uploads"]';
+  const workEditor = ad ? '[role="textbox"][contenteditable="true"][aria-label="New chat in Sports Cave Meta Ads"]' : design ? '[role="textbox"][contenteditable="true"][aria-label^="New chat in "]' : '[role="textbox"][contenteditable="true"][aria-label="New chat in SC Mockups/Uploads"]';
   const input = () => document.querySelector(workEditor) || document.querySelector('#prompt-textarea[contenteditable="true"]');
   const formFor = node => node?.closest('form');
   const sendButton = form => form?.querySelector('button[data-testid="send-button"], button[type="submit"][aria-label="Send"]');
@@ -181,12 +182,13 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (sender.id !== chrome.runtime.id) return;
-    if (message?.type === 'project:progress' && design && conversation.test(location.href)) {
+    if (message?.type === 'project:progress' && (ad || design) && conversation.test(location.href)) {
       const turns = document.querySelectorAll('[data-message-author-role="assistant"], h4[data-conversation-role="assistant"]');
       const last = turns[turns.length - 1];
       const body = last?.matches('h4') ? last.nextElementSibling : last;
       const generating = document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"]');
-      const match = !generating && body?.innerText.match(/(?:^|\n)SC_DESIGN_BLOCKED: ([^\n]+)\s*$/);
+      const blocked = ad ? /(?:^|\n)SC_AD_BLOCKED:\s*([^\n]+)\s*$/ : /(?:^|\n)SC_DESIGN_BLOCKED: ([^\n]+)\s*$/;
+      const match = !generating && body?.innerText.match(blocked);
       reply({blocked:Boolean(match), reason:match?.[1]?.slice(0, 1600) || '', chat_url:location.href});
       return;
     }

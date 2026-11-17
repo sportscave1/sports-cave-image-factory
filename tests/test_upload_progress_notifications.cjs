@@ -105,6 +105,15 @@ install();
  const links=nodes.get('#sc-os-staff-upload-list').children[0].children[2].children;
  assert.deepEqual(links.map(link=>link.textContent),['View live listing','See in Edition Ops']);
  assert.equal(links[1].href,'/?page=edition_ops&edition_handle=exact-handle');
+ const postingId='8a8925ad-9a54-4243-9948-62889bd5c1ca';
+ payload.jobs[0].ad={label:'Creating the Meta campaign',posting_id:postingId};
+ await context.refresh();
+ assert.match(nodes.get('#sc-os-staff-upload-stage').textContent,/Published and PSD mapped.*Creating the Meta campaign/);
+ assert.equal(nodes.get('#sc-os-staff-upload-meter').value,100);
+ assert.equal(nodes.get('#sc-os-staff-upload-list').children[0].children.find(child=>child.textContent==='See in Posting').href,
+              '/?page=ads_posting&meta_posting_job='+postingId);
+ assert.equal(status.open,false);
+
  nodes.get('#sc-os-staff-uploads').open=true;
  nodes.get('#sc-os-staff-upload-close').events.click();
  assert.equal(nodes.get('#sc-os-staff-uploads').open,false);
