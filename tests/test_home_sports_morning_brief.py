@@ -534,7 +534,18 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "up to the three strongest accessible references per featured person" not in result
     assert "search beyond the first three sources" not in result
     assert "Source-pixel finishing is outside that allowance." in result
+    recovery = result[result.index("**Failure handling"):result.index("Track delivery separately")]
+    for rule in (
+        "**Technical:**", "**Access:**", "**Moderation:**",
+        "Record the exact error and any stated reason",
+        "Never disguise it or switch tools to bypass moderation",
+        "Otherwise mark that generation pending",
+        "preserve verified sources, master inspection, composition plan and REVIEW NOTES",
+        "Never save an empty PSD or count a photo fallback as generation",
+    ):
+        assert rule in recovery
     assert "attempt the second pass independently" in result[second_pass:second_generation]
+    assert "only if the failure rules permit it" in result[second_pass:second_generation]
     assert "display the strongest available result as provisional" in result
     assert "as a review draft" in result[first_save:second_pass]
     assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[first_save:second_pass]
