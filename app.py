@@ -7458,7 +7458,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         if 'Worker Health' in allowed_routes:
             child_button(children,'Worker Health','Editions Companion',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
         if 'Upload Companion' in allowed_routes:
-            child_button(children,'Upload Companion','Upload Companion',icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
+            child_button(children,'Upload Companion','Companion Queues',icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
         if 'Task Recorder' in allowed_routes:
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Image Protection' in history_routes:

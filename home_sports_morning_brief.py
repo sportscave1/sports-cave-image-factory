@@ -243,5 +243,14 @@ def render(st, user, today):
         st.caption("No Morning Brief has been published yet.")
     from home_morning_brief_actions import brief_html
 
-    st.html(brief_html(edition, editions=editions, today=today,
-                       allow_ads=os_accounts.can_access_page(user, "ads")), unsafe_allow_javascript=True)
+    @st.fragment(run_every=15)
+    def live_brief():
+        from morning_design_queue import list_jobs
+        statuses = None
+        try:
+            statuses = {job['id']: job['label'] for job in list_jobs(edition['date'])} if edition else {}
+        except Exception:
+            pass
+        st.html(brief_html(edition, editions=editions, today=today, design_statuses=statuses,
+                          allow_ads=os_accounts.can_access_page(user, "ads")), unsafe_allow_javascript=True)
+    live_brief()

@@ -8,6 +8,7 @@ const pending = new Map();
 const latest = 'uploadCompanionLast';
 let queue = Promise.resolve();
 importScripts('staff-queue.js');
+importScripts('design-queue.js');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const keyFor = id => 'upload:' + id;
 
@@ -23,10 +24,11 @@ function promptIsValid(prompt) {
 }
 async function run(id, prompt, job) {
   try {
-    const tab = await chrome.tabs.create({url: project, active: true});
+    const tab = await chrome.tabs.create({url: job.project || project, active: true});
     job.tab = tab.id;
     if (!Number.isInteger(job.tab)) throw new Error();
     if (job.staffJob) await rememberChatTab(job.staffJob, job.tab);
+    if (job.designJob) await rememberDesignTab(job.designJob, job.tab);
     const deadline = Date.now() + 18000;
     let ready;
     do {
@@ -94,7 +96,7 @@ async function health(receipt) {
 }
 async function permit(message, sender) {
   const job = pending.get(message.id);
-  if (!job || sender.frameId !== 0 || sender.tab?.id !== job.tab || sender.url !== project || job.sending) {
+  if (!job || sender.frameId !== 0 || sender.tab?.id !== job.tab || sender.url !== (job.project || project) || job.sending) {
     return {ok:false};
   }
   // Persist the send boundary before returning permission to click. No retry can

@@ -8,8 +8,8 @@ const source = fs.readFileSync(path.join(__dirname, '../windows-upload-companion
 const project = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
 const conversation = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b-sc-mockups-uploads/c/01234567-0123-0123-0123-0123456789ab';
 
-function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '', initialFiles = []} = {}) {
-  const location = {href:project};
+function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '', initialFiles = [], design = false} = {}) {
+  const location = {href:design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : project};
   const files = [...initialFiles];
   const sent = [];
   let inserted = '', current = false, listener, permitted = 0;
@@ -17,7 +17,7 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
   const button = {isConnected:true, get disabled() {return now < attachmentReadyAfter;}, getAttribute:() => null, click() {
     sent.push(inserted);
     current = true;
-    location.href = conversation;
+    location.href = design ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a1e449948e881919c1e345006d63654-sports-cave-designs') : conversation;
   }};
   const form = {querySelector:() => button, querySelectorAll:() => []};
   const replacementForm = {querySelector:() => button, querySelectorAll:() => files};
@@ -93,5 +93,17 @@ test('Work and Chat submit intact inline text and leave existing drafts alone', 
     assert.equal((await browser.invoke({type:'project:send',id:'receipt',prompt:'New job'})).sent,false);
     assert.equal(browser.permitted(),0);
     assert.deepEqual(browser.sent,[]);
+  }
+});
+
+
+test('Design project uses the same verified paste and submit flow for inline and attached prompts', async () => {
+  for (const asAttachment of [false, true]) {
+    const app = fixture({design:true, asAttachment});
+    const prompt = 'Create a complete collector artwork. '.repeat(100);
+    const result = await app.invoke({type:'project:send', id:'design-job', prompt});
+    assert.equal(result.sent, true);
+    assert.deepEqual(app.sent, [prompt]);
+    assert.equal(app.permitted(), 1);
   }
 });

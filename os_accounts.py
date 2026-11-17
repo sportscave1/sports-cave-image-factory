@@ -50,7 +50,7 @@ REPORTING_OWNER_ENV_KEYS = (
 PAGE_REGISTRY = (
     {"key": "task_recorder", "route": "Task Recorder", "label": "Task Recorder", "worker_assignable": False, "top_level": True},
     {"key": "worker_health", "route": "Worker Health", "label": "Editions Companion", "worker_assignable": False, "top_level": True},
-    {"key": "upload_companion", "route": "Upload Companion", "label": "Upload Companion", "worker_assignable": False, "top_level": True},
+    {"key": "upload_companion", "route": "Upload Companion", "label": "Companion Queues", "worker_assignable": False, "top_level": True},
     {"key": "developer_studio", "route": "Developer Studio", "label": "Dev Mode", "worker_assignable": False, "top_level": True},
     {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": False, "parent_key": "developer", "navigation_child": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},

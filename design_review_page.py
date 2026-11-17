@@ -333,7 +333,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             from product_upload_staff_queue import enqueue
             try:
                 job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
-                notice = dict(id=str(job_id), kind='success', text=f'Upload started · {title}')
+                notice = dict(id=str(job_id), kind='success', text=f'Added to upload queue · {title}')
             except ValueError as exc:
                 notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:

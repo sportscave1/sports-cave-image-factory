@@ -104,3 +104,21 @@ def test_success_requires_live_product_and_exact_mapped_master(store, monkeypatc
     done = queue.list_jobs('staff')['jobs'][0]
     assert done['stage'] == 6
     assert done['storefront'] == listing['online_store_url']
+
+
+def test_many_publish_requests_wait_and_advance_after_failure_or_verified_success(store, monkeypatch):
+    import design_review_page
+    monkeypatch.setattr(design_review_page, 'final_psd', lambda source: True)
+    keys = [queue.enqueue({'id':'staff'}, {'id':f'id:art-{n}','rev':'R1'}, f'Artwork {n}', 'Basketball') for n in range(5)]
+    token = queue.pair({'id':'desktop'})
+    first = queue.tick(token, {})['job']['id']
+    assert first == str(keys[0])
+    assert len(queue.list_jobs('staff')['jobs']) == 5
+    assert queue.tick(token, {})['job']['id'] == first
+    queue.advance(keys[0], 'desktop', 7, 'Fixture failure', allowed=[1])
+    second = queue.tick(token, {})['job']['id']
+    assert second == str(keys[1])
+    queue.advance(keys[1], 'desktop', 5, allowed=[1])
+    monkeypatch.setattr(queue, 'verify', lambda job: queue.advance(job['id'], 'desktop', 6, allowed=[5]))
+    queue.tick(token, {})
+    assert queue.tick(token, {})['job']['id'] == str(keys[2])

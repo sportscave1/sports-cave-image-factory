@@ -226,6 +226,8 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     monkeypatch.setattr(brief, "get_app_setting", Mock(return_value=previous))
     monkeypatch.setattr(brief, "archive_page", Mock(return_value=([], None)))
     st = Mock()
+    st.fragment.side_effect = lambda **kwargs: lambda fn: fn
+    monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     brief.render(st, OWNER, TODAY)
     assert "Today's brief is pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
@@ -351,6 +353,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     live_roas.assert_called_once_with(date(2026, 11, 12))
 
     st = Mock()
+    st.fragment.side_effect = lambda **kwargs: lambda fn: fn
+    monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     meta.render(st, OWNER, TODAY)
     st.html.assert_not_called()
     meta.render(st, get_user.return_value, date(2026, 11, 14))
@@ -461,6 +465,8 @@ def test_calendar_still_renders_when_brief_storage_is_unavailable(monkeypatch):
     monkeypatch.setattr(brief, "get_app_setting", Mock(side_effect=RuntimeError))
     monkeypatch.setattr(brief, "archive_page", Mock(side_effect=RuntimeError))
     st = Mock()
+    st.fragment.side_effect = lambda **kwargs: lambda fn: fn
+    monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     brief.render(st, OWNER, TODAY)
     assert "Big Bash League" in st.html.call_args.args[0]
 
@@ -575,6 +581,8 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     monkeypatch.setattr(brief, "get_app_setting", Mock(return_value=parsed))
     monkeypatch.setattr(brief, "archive_page", Mock(return_value=([], None)))
     st = Mock()
+    st.fragment.side_effect = lambda **kwargs: lambda fn: fn
+    monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     brief.render(st, OWNER, TODAY)
     markup = st.html.call_args.args[0]
     assert "Read the full Morning Brief" in markup and "Other sports and updates" in markup
