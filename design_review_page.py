@@ -203,6 +203,7 @@ def _confirm_delete(user, selected):
     st.text('\n'.join(title for _, title in selected))
     cancel, confirm = st.columns(2)
     if cancel.button('Cancel', key='design-review-delete-cancel'):
+        st.session_state.pop('_review_delete_selection', None)
         st.rerun()
     if not confirm.button('Delete from Dropbox', type='primary', key='design-review-delete-confirm'):
         return
@@ -232,6 +233,7 @@ def _confirm_delete(user, selected):
     invalidate_directory_cache(REVIEW, REVIEW_METADATA_FOLDER)
     invalidate_thumbnail_cache(*deleted)
     st.session_state['_review_delete_result'] = (len(deleted), warnings)
+    st.session_state.pop('_review_delete_selection', None)
     st.rerun()
 
 
@@ -301,7 +303,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         needs_sport = not (published or editing or staged or resumable or chosen_sport or details.get('sport'))
         if selectable and not staged:
             check, name, edit_button, publish = st.columns((1, 4, 1, 2), vertical_alignment='center', gap='small')
-            check.checkbox(f'Select {title} for deletion', key=_selection_key(source), label_visibility='collapsed')
+            check.checkbox(f'Select {title}', key=_selection_key(source), label_visibility='collapsed')
         else:
             name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
@@ -453,19 +455,85 @@ def _folder(actor_id):
     return designs, datetime.now(timezone.utc)
 
 
+def _enqueue_selected(user, selected, fallback_sport=None):
+    from product_upload_api import Dropbox
+    from product_upload_staff_queue import enqueue
+    from os_accounts import can_access_page, can_attach_missing_psd
+    if not can_attach_missing_psd(user) or not all(can_access_page(user, page) for page in ('Files', 'Product Uploads')):
+        raise PermissionError('Files and Product Uploads access is required to queue designs.')
+    provider = Dropbox()
+    queued, warnings = [], []
+    for source, details in selected:
+        title = details.get('design_name') or PurePosixPath(source['name']).stem
+        try:
+            actual = provider.metadata_if_present(source['id'])
+            if not final_psd(source) or not actual or any(actual.get(field) != source.get(field) for field in ('id', 'rev', 'path_display')):
+                raise ValueError('The PSD changed in Dropbox. Refresh before queueing it.')
+            sport = details.get('sport') or fallback_sport
+            if not sport:
+                raise ValueError('Choose a sport before queueing this design.')
+            queued.append((source, enqueue(user, actual, title, sport)))
+        except ValueError as error:
+            warnings.append(f'{title}: {error}')
+        except Exception:
+            logging.getLogger(__name__).exception('Could not queue selected Review PSD %s', source['id'])
+            warnings.append(f'{title}: Upload queue unavailable. The PSD is retained.')
+    return queued, warnings
+
+
+def _selection_actions(user, selected):
+    from os_accounts import can_delete_files
+    from sports_categories import CANONICAL_SPORT_CATEGORIES
+    with st.container(key='design-review-selection'):
+        count, queue, trash = st.columns((8, 1, 1), vertical_alignment='center')
+        count.caption(f'{len(selected)} selected')
+        fallback = None
+        if any(not details.get('sport') for _, details in selected):
+            fallback = st.selectbox('Sport for designs without a sport', CANONICAL_SPORT_CATEGORIES,
+                                    index=None, placeholder='Choose a sport', key='design-review-bulk-sport')
+        missing_sport = any(not details.get('sport') for _, details in selected) and not fallback
+        if queue.button('', icon=':material/playlist_add:', key='design-review-enqueue',
+                        help=f'Add {len(selected)} selected designs to the Upload Companion queue',
+                        disabled=missing_sport):
+            try:
+                with st.spinner('Adding selected designs to the upload queue'):
+                    queued, warnings = _enqueue_selected(user, selected, fallback)
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+            except Exception:
+                logging.getLogger(__name__).exception('Selected upload queue unavailable')
+                st.error('Upload queue unavailable. Your designs are retained.')
+            else:
+                for source, _ in queued:
+                    st.session_state.pop(_selection_key(source), None)
+                st.session_state['_review_queue_result'] = (len(queued), warnings)
+                st.rerun()
+        if can_delete_files(user) and trash.button('', icon=':material/delete:', key='design-review-trash',
+                                                  help=f'Delete {len(selected)} selected designs from Dropbox Review'):
+            st.session_state['_review_delete_selection'] = [
+                (source, details.get('design_name') or PurePosixPath(source['name']).stem)
+                for source, details in selected]
+
+
 @st.fragment
 def _gallery(app, user):
-    from os_accounts import can_delete_files
     from product_upload_api import connect
     actor = str(user['id'])
     with st.container(key='design-review-header'):
-        heading, sync, trash, refresh = st.columns((5, 1.5, .5, 1), vertical_alignment='center')
+        heading, sync, refresh = st.columns((5, 1.5, 1), vertical_alignment='center')
         heading.title('Design Studio')
     removed = st.session_state.pop('_review_delete_result', None)
     if removed:
         count, warnings = removed
         if count:
             st.toast(f'Moved {count} design{"s" if count != 1 else ""} to Dropbox Deleted Files.')
+        for warning in warnings:
+            st.warning(warning)
+    queued = st.session_state.pop('_review_queue_result', None)
+    if queued:
+        count, warnings = queued
+        if count:
+            st.toast(f'{count} selected design{"s" if count != 1 else ""} submitted to Upload Companion. Existing requests are reused.')
         for warning in warnings:
             st.warning(warning)
     result = st.session_state.pop('_review_replace_result', None)
@@ -513,14 +581,16 @@ def _gallery(app, user):
     if not matched:
         st.info('No PSDs match this view.')
         return
-    selectable = view == 'Review' and can_delete_files(user)
+    selectable = view == 'Review'
     if selectable:
-        selected = [(entry, details.get('design_name') or PurePosixPath(entry['name']).stem)
+        selected = [(entry, details)
                     for entry, details, _, _ in matched
                     if final_psd(entry) and st.session_state.get(_selection_key(entry))]
-        if selected and trash.button('Delete selected', icon=':material/delete:', key='design-review-trash',
-                                     help=f'Delete {len(selected)} selected from Dropbox Review'):
-            _confirm_delete(user, selected)
+        if selected:
+            _selection_actions(user, selected)
+        pending_delete = st.session_state.get('_review_delete_selection')
+        if pending_delete:
+            _confirm_delete(user, pending_delete)
     sources = {review_key(entry): entry for entry, *_ in matched}
     rows = Intakes(connect).read_review_gallery(actor, sources)
     keys = list(sources)
