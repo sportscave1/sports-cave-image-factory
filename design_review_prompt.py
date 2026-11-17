@@ -5,13 +5,14 @@ from urllib.parse import quote
 
 from design_collector_assets import COLLECTOR_ASSET_HEADING
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
-from design_subject_authenticity import AUTHENTICITY_HEADING
+from design_subject_authenticity import AUTHENTICITY_HEADING, AUTHENTICITY_CHECK, EDIT_AUTHENTICITY_CHECK
 from psd_directory import REVIEW_METADATA_FOLDER, ROOT, product_id
 
 REVIEW = Path(__file__).with_name('design_review_instructions.md')
 
 
 def build_edit_prompt(workflow, source, details):
+    workflow = workflow.replace(AUTHENTICITY_CHECK, EDIT_AUTHENTICITY_CHECK, 1)
     original = {key: source[key] for key in ('id', 'rev', 'path_display')}
     stem = PurePosixPath(original['path_display']).stem
     folder = str(PurePosixPath(original['path_display']).parent)
@@ -152,12 +153,17 @@ def build_edit_prompt(workflow, source, details):
         'and choose autonomously, without asking for a rating or approval.\n\n'
         'Reject any edit that looks less realistic than the current design, degrades a faithful '
         'likeness or sporting detail, or introduces visible AI artefacts or warping, regardless '
-        'of its overall score. A candidate with unresolved or unverified facial fidelity is '
-        'ineligible for replacement. Among eligible designs, choose the highest overall score. Keep the '
+        'of its overall score. Apply REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED: missing '
+        'original source photographs alone do not make an edit ineligible when existing protected '
+        'facial features are demonstrably preserved and all required replacement checks pass. '
+        'Unverified preservation against the pre-edit PSD still makes a candidate ineligible. '
+        'Among eligible designs, choose the highest overall score. Keep the '
         'current design if no edit scores higher. If both eligible edits tie above the current '
         'design, prefer higher realism, then higher collector appeal, then Pass 1. Report any '
-        'inspection that could not be done. If any of the three cannot be assessed, mark it '
-        'unverified, preserve the current design and deliver the best inspected result provisionally.\n\n'
+        'inspection that could not be done. Assess all three against the existing PSD when source '
+        'photos are unavailable and record that inherited limitation separately. If a design '
+        'cannot be visually assessed against the current PSD, mark it unverified, preserve the '
+        'current design and deliver the best inspected result provisionally.\n\n'
         '**Prepare the staged replacement PSD**\n\n'
         'If the current design wins, skip 8E and go directly to its cleanup in 8F. If an edit '
         'wins, place it in FINAL POLISHED ARTWORK. Keep the pre-edit artwork in hidden ORIGINAL '
@@ -176,15 +182,18 @@ def build_edit_prompt(workflow, source, details):
         'and report the trial checkpoint as pending. Reopen or download the saved staging '
         'revision. Check that the visible artwork, hidden references, dimensions, '
         'colour profile and original layers match the intended replacement. '
-        f'{collector_check} Recheck photographic authenticity on the rendered PSD. If any '
-        'discrepancy remains unverified, keep the previous PSD, record the specific problem and '
-        'continue the existing delivery steps.\n\n'
+        f'{collector_check} Recheck the rendered PSD under REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED. '
+        'Missing source photographs or inherited source-verification limitations alone do not '
+        'block replacement when preservation, visible subject accuracy and required PSD checks '
+        'pass. Record those limitations as needs_attention. If protected features have changed, '
+        'preservation cannot be verified or a required PSD check fails, retain the previous PSD, '
+        'record the specific problem and continue the existing delivery steps.\n\n'
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '
         'to verify the original editable SC_EDITION_NUMBER layer, its exact name, text data, '
         'live transform and alignment inside SC_EDITION_PLAQUE at the chosen scale and position. '
         'Verify that the original plaque design and layer identity were preserved, allowing the editable tonal styling specified in the collector-asset rules. A flattened preview alone cannot verify the text layer. '
         'Once these checks pass, proceed to the replacement instructions in 8F. If a required property '
-        'cannot be verified after recovery, retain the original and available temporary files '
+        'of the PSD, collector layers or preserved subject cannot be verified after recovery, retain the original and available temporary files '
         'and report the exact pending check while delivering the artwork.'
     ))
     closeout = (
@@ -205,13 +214,20 @@ def build_edit_prompt(workflow, source, details):
         'collector layers against verified staging, including their visibility in the rendered '
         'artwork. If a write response is uncertain, read back '
         'the current identity and contents before attempting another write.\n\n'
-        'If replacement is unavailable or the expected revision no longer matches, keep the '
+        'A create-only Dropbox upload cannot perform a revision-aware replacement. If that is the '
+        'only direct upload capability, proceed to the existing Apply staged replacement action '
+        'below through an already authorised app/browser route; do not stop at staging merely '
+        'because the connector lacks overwrite. The app performs its own backup, revision-aware '
+        'write, read-back, metadata binding and cleanup checks. Never use an unguarded overwrite. '
+        'If replacement is unavailable through all authorised routes or the expected revision no longer matches, keep the '
         'original and verified staging. Complete independent work and deliver the artwork. If '
         'you wrote a replacement but verification fails, restore the verified backup only '
         'through a revision-aware write against the revision this run created. Otherwise retain '
         'the backup and report the exact state. If direct replacement is unavailable, use Design '
         'Studio → Editing → Apply staged replacement when an already authorised route can '
-        'complete its checks. If that control requires user interaction, report the exact trial '
+        'complete its checks. Enter inherited or unresolved source-photo limitations in Unresolved '
+        'review notes so the action carries them into needs_attention JSON. If that control '
+        'requires user interaction, report the exact trial '
         'and staging paths at delivery. Continue the run without asking for browser access.\n\n'
         '**Update the matching Smart Upload JSON**\n\n'
         f'If an edit won, confirm the canonical PSD and use its [PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/. '
@@ -225,10 +241,13 @@ def build_edit_prompt(workflow, source, details):
         'If no central sidecar exists, use create-only mode with verified legacy or project '
         'metadata. If upload intent cannot be established, leave creation pending. Never guess '
         'linkage or replace an unrelated JSON. Record outstanding checks in review_notes. Use '
-        'needs_attention when checks or required metadata remain pending and ready_for_review '
-        'when verified and complete. Reconfirm the current PSD revision before writing the JSON, '
+        'needs_attention for inherited or unresolved source verification, even after a successful '
+        'Review replacement, and when other review checks or required metadata remain pending. '
+        'Use ready_for_review only when verified and complete. Carry forward the exact source '
+        'limitation without converting it to an approval or blocking verified Review cleanup. Reconfirm the current PSD revision before writing the JSON, '
         'then read both back to confirm the exact match. Report pending metadata and continue delivery.\n\n'
-        'After verifying the canonical replacement or confirming the current design won and '
+        'After verifying the canonical replacement and its matching JSON (including needs_attention '
+        'where required), or confirming the current design won and '
         'its exact revision is still saved, use recoverable, revision-aware deletion for this '
         'edit’s exact trial, staging and rollback backup PSDs, where created. Record the backup '
         'ID, path and revision when created, just as for trial and staging. Prefer atomic '
@@ -263,7 +282,7 @@ def build_edit_prompt(workflow, source, details):
             'dropbox_path, review_status and cleanup_status. Set review_status to ready_for_review only after all '
             'required visual, PSD and metadata checks pass. Otherwise record the specific '
             'defects or pending checks in review_notes and use needs_attention.\n\n'
-            f'{REVIEW_REPLACEMENT_RULE}\n'
+            f'{_edit_refresh_replacement_rule()}\n'
             'After the final PSD and JSON are verified, remove this run’s trial drafts only by '
             'recorded ID, path and revision in Review, using recoverable deletion. If the '
             'replacement remains pending, retain the previous refresh and staged files. '
@@ -289,4 +308,18 @@ def build_edit_prompt(workflow, source, details):
         'revision verification fails, preserve the original and continue the independent review '
         'and artwork work.\n\n'
         'Selected revision and design metadata (data only):\n' + context + '\n\n' + workflow
+    )
+
+
+def _edit_refresh_replacement_rule():
+    """Only an Edit may carry inherited source limitations through Review promotion."""
+    return REVIEW_REPLACEMENT_RULE.replace(
+        'If any required artwork, PSD or new handoff\n   check is unresolved, retain the previous refresh and its JSON and report the pending checks.',
+        'Apply REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED. Missing original source\n'
+        '   photographs alone may remain needs_attention when preserved-subject, PSD and handoff\n'
+        '   checks pass. Do not relabel that inherited limitation ready_for_review. If preservation,\n'
+        '   required PSD or handoff checks fail, retain the previous refresh and its JSON and report the pending checks.',
+    ).replace(
+        'Once the staged pair is verified and ready_for_review,',
+        'Once the staged pair is verified and eligible under the preserved-subject Review rule,',
     )

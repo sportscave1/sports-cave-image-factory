@@ -145,6 +145,8 @@ def _staged_replacement(user, source, key):
         trial = st.text_input('Trial PSD path', value=stem + ' - TRIAL.psd', key=key+'-trial')
         staged = st.text_input('Staged final PSD path', value=stem + ' - STAGING.psd', key=key+'-staged')
         title = st.text_input('New design title (optional)', key=key+'-new-title', max_chars=400)
+        review_notes = st.text_area('Unresolved review notes (optional)', key=key+'-review-notes',
+                                    help='Record missing source photographs or inherited limitations. These keep the replacement marked Needs attention, without approving publication.')
         number_checked = st.checkbox('I verified the live edition number updates in place and restored its value in the staged PSD.',
                                      key=key+'-number-checked')
         if st.button('Apply staged replacement', type='primary', disabled=not number_checked, key=key+'-replace'):
@@ -152,7 +154,7 @@ def _staged_replacement(user, source, key):
             from design_review_title import unclaimed_artwork
             try:
                 with st.spinner('Checking both saved files and replacing the exact revision'):
-                    final, _, warnings = apply(Dropbox(), source, trial, staged, title=title, title_guard=unclaimed_artwork)
+                    final, _, warnings = apply(Dropbox(), source, trial, staged, title=title, review_notes=review_notes, title_guard=unclaimed_artwork)
             except ValueError as error:
                 st.error(str(error))
             except Exception:

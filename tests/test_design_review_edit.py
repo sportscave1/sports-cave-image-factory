@@ -9,7 +9,7 @@ from auto_editions import file_hash
 from design_collector_assets import COLLECTOR_ASSET_HEADING, COLLECTOR_ASSET_PLACEMENT
 from design_review_metadata import is_working_file
 from design_review_replace import apply, keep_original
-from design_subject_authenticity import AUTHENTICITY_CHECK, AUTHENTICITY_HEADING, CREATE_DESIGN_AUTHENTICITY_CHECK
+from design_subject_authenticity import EDIT_AUTHENTICITY_CHECK, AUTHENTICITY_CHECK, AUTHENTICITY_HEADING, CREATE_DESIGN_AUTHENTICITY_CHECK
 from home_morning_brief_actions import _prompt
 from product_upload_dropbox import REVIEW
 from psd_directory import REVIEW_METADATA_FOLDER
@@ -78,7 +78,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
         assert prompt.count(AUTHENTICITY_HEADING) == 1
         assert 'MANDATORY SUBJECT AUTHENTICITY CHECK' not in prompt
     assert CREATE_DESIGN_AUTHENTICITY_CHECK in standard
-    assert AUTHENTICITY_CHECK in edit
+    assert EDIT_AUTHENTICITY_CHECK in edit
     assert 'TARGETED AUTHENTICITY RESTORATION' not in edit
 
 
@@ -102,7 +102,8 @@ def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
         assert prompt.index('Recoverably delete only') < prompt.index('Rename the staged PSD')
         assert prompt.index('Rename the staged PSD') < prompt.index('Update the moved JSON')
         assert 'exact Shopify product' in prompt and 'its Product GID as the same ID' in prompt
-        assert AUTHENTICITY_CHECK in prompt and prompt.count(AUTHENTICITY_HEADING) == 1
+        assert (EDIT_AUTHENTICITY_CHECK if prompt is edit else AUTHENTICITY_CHECK) in prompt
+        assert prompt.count(AUTHENTICITY_HEADING) == 1
         assert prompt.index(AUTHENTICITY_HEADING) < prompt.index('**FALLBACK COLLECTOR FINISH**')
         assert 'AI warping' in prompt and 'needs_attention' in prompt
 
@@ -290,3 +291,67 @@ def test_layer_verification_requires_original_number_id_and_alignment(monkeypatc
     staged[1] = layer('SC_EDITION_NUMBER', kind='type', ident=11, bbox=(110, 20, 160, 40))
     with pytest.raises(ValueError, match='aligned'):
         _inspect('original', 'trial', 'staging')
+
+
+@pytest.mark.parametrize('refresh', [False, True])
+def test_edit_review_replacement_allows_preserved_subject_with_inherited_limitations(refresh):
+    metadata = {'upload_intent': 'existing_product_refresh', 'shopify_product_id': '123'} if refresh else {}
+    prompt = _prompt('Collector', 'Verified story', edit={
+        'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH},
+        'metadata': metadata,
+    })
+    assert EDIT_AUTHENTICITY_CHECK in prompt
+    assert 'comparison with the exact pre-edit PSD' in prompt
+    assert 'Missing original source photographs alone must not prevent' in prompt
+    assert 'does not certify photographic authenticity, print readiness or permission to publish' in prompt
+    assert 'unresolved or unverified facial fidelity is ineligible' not in prompt
+    assert 'If any discrepancy remains unverified' not in prompt
+    assert 'preserve any verified PSD it was meant to replace' not in prompt
+    assert 'Visible deterioration, altered protected facial features' in prompt
+    assert 'needs_attention' in prompt
+    if refresh:
+        assert 'Once the staged pair is verified and ready_for_review' not in prompt
+        assert 'Do not relabel that inherited limitation ready_for_review' in prompt
+    else:
+        assert 'Never delete the canonical PSD to clear the path.' in prompt
+        assert 'A create-only Dropbox upload cannot perform a revision-aware replacement' in prompt
+        assert 'Unresolved review notes' in prompt
+        assert 'After verifying the canonical replacement and its matching JSON' in prompt
+
+
+def test_replace_carries_missing_source_notes_and_cleans_verified_drafts(files, monkeypatch):
+    import json
+    provider, original, trial, staged, current, _ = files
+    data = {'review_status': 'ready_for_review', 'review_notes': 'Existing note',
+            'dropbox_file_id': original['id'], 'dropbox_revision': original['rev'],
+            'dropbox_path': original['path_display'], 'sport': 'Hockey'}
+    sidecar = {'id': 'id:JSON', 'rev': 'json1', 'path_display': '/Review/JSON/Collector.upload.json'}
+    monkeypatch.setattr('design_review_replace.read_handoff_record', lambda *args: (dict(data), dict(sidecar)))
+    upload_psd = provider.api.upload_revision.side_effect
+    def upload(token, path, file, revision):
+        if path == sidecar['path_display']:
+            assert revision == sidecar['rev']
+            data.update(json.loads(file.read_text(encoding='utf8')))
+            sidecar['rev'] = 'json2'
+            return dict(sidecar)
+        return upload_psd(token, path, file, revision)
+    provider.api.upload_revision.side_effect = upload
+    final, _, warnings = apply(provider, original, trial['path_display'], staged['path_display'],
+                               review_notes='Original photograph unavailable; existing facial features preserved against pre-edit PSD.')
+    assert not warnings
+    assert data['review_status'] == 'needs_attention'
+    assert data['review_notes'].startswith('Existing note\nOriginal photograph unavailable')
+    assert data['dropbox_revision'] == final['rev']
+    assert data['sport'] == 'Hockey'
+    assert provider.api.delete_path_recoverable.call_count == 3
+    assert current[original['id']]['content_hash'] == staged['content_hash']
+
+
+def test_unresolved_notes_require_matching_json_before_replacement(files, monkeypatch):
+    provider, original, trial, staged, _, _ = files
+    monkeypatch.setattr('design_review_replace.read_handoff_record', lambda *args: None)
+    with pytest.raises(ValueError, match='matching upload JSON'):
+        apply(provider, original, trial['path_display'], staged['path_display'], review_notes='Source unavailable')
+    provider.api.upload_revision.assert_not_called()
+    provider.api.copy_path.assert_not_called()
+    provider.api.delete_path_recoverable.assert_not_called()

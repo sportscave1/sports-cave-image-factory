@@ -131,7 +131,7 @@ def _inspect(original, trial, staged):
             raise ValueError(f'The staged PSD must contain one {name} layer or group with the required visibility.')
 
 
-def apply(provider, original, trial_path, staged_path, *, title='', title_guard=nullcontext):
+def apply(provider, original, trial_path, staged_path, *, title='', review_notes='', title_guard=nullcontext):
     """Replace the exact verified revision and keep its ID even if the title changes."""
     if not approved(original) or not within(original['path_display'], REVIEW):
         raise ValueError('Only originals inside the Review folder can be replaced here.')
@@ -147,6 +147,9 @@ def apply(provider, original, trial_path, staged_path, *, title='', title_guard=
     path = original['path_display']
     record = read_handoff_record(provider, original)
     title = title.strip()
+    review_notes = review_notes.strip()
+    if review_notes and not record:
+        raise ValueError('A matching upload JSON is required to retain unresolved review notes during replacement.')
     if title:
         from design_review_title import title_destination
         title_destination(original, title)
@@ -201,6 +204,10 @@ def apply(provider, original, trial_path, staged_path, *, title='', title_guard=
                         dropbox_path=final['path_display'])
             if title:
                 data.update(design_title=title, product_name=title)
+            if review_notes:
+                previous_notes = str(data.get('review_notes') or '').strip()
+                data.update(review_status='needs_attention',
+                            review_notes='\n'.join(note for note in (previous_notes, review_notes) if note))
             handoff = Path(directory) / 'handoff.json'
             handoff.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
             try:

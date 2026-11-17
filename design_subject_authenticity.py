@@ -107,3 +107,54 @@ CREATE_DESIGN_AUTHENTICITY_CHECK = (
     "proofing is separate from digital artwork inspection.\n\n"
     f"{_UNRESOLVED_REVIEW}"
 )
+
+
+REVIEW_SUBJECT_PRESERVATION = (
+    "**REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED**\n\n"
+    "Missing original source photographs alone must not prevent an improved revision from "
+    "replacing the current Review artwork when comparison with the exact pre-edit PSD "
+    "demonstrates that the existing protected facial features, identity and expression are "
+    "preserved, there is no visible deterioration in subject accuracy, and the PSD and "
+    "collector-layer checks pass. Inspect the existing face pixels and the assembled revision "
+    "side by side at 100% and normal viewing size, accounting for authorised placement and "
+    "proportional scale. Preserve existing facial features; do not regenerate or approximate "
+    "them to satisfy this condition. Record the comparison evidence in REVIEW NOTES.\n\n"
+    "The pre-edit PSD is evidence of preservation, not proof of original photographic "
+    "authenticity. Carry inherited or unresolved source-verification limitations into the "
+    "matching JSON as needs_attention with specific review_notes. Replacing a Review draft "
+    "does not certify photographic authenticity, print readiness or permission to publish. "
+    "If the improved revision wins under these conditions, complete verified replacement, "
+    "update and verify the matching JSON, and clean up this edit’s temporary files without "
+    "waiting for publication approval or missing source photographs. Preserve the original "
+    "recoverably until replacement verification succeeds.\n\n"
+    "Visible deterioration, altered protected facial features, inability to verify preservation "
+    "against the current PSD, failed required PSD/collector checks or a revision conflict "
+    "still require correction or retention of the original. Continue independent work under "
+    "the existing recovery limits and report the exact unresolved operation.\n\n"
+)
+
+EDIT_AUTHENTICITY_CHECK = (
+    _SOURCE_COMPARISON.replace(
+        "Use the verified original photograph as the authority.",
+        "Use verified original photographs when available. If they remain unavailable after "
+        "the existing recovery attempts, use the exact pre-edit PSD as the preservation "
+        "baseline under REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED. In that case, "
+        "perform the comparisons below against the retained pre-edit pixels and report "
+        "source-photo authenticity separately as unverified.",
+    )
+    + REVIEW_SUBJECT_PRESERVATION
+    + _SOURCE_RESTORATION.replace(
+        "Restore visible discrepancies with original photograph pixels and a precise mask.",
+        "Restore visible discrepancies with original photograph pixels and a precise mask "
+        "when available. For the preserved-subject Review path, restore protected regions "
+        "from the exact pre-edit PSD pixels instead; do not claim this establishes source-photo authenticity.",
+    )
+    + _MASK_FINISH + _RESTORATION_RECOVERY + _FALLBACK_FINISH
+    + "Give visible masking and blending defects a focused finishing pass within the existing "
+      "limits. Apply the preserved-subject Review eligibility rule above rather than treating "
+      "missing source-photo evidence alone as a replacement veto. Record inherited or "
+      "unresolved source verification in REVIEW NOTES and needs_attention metadata. If "
+      "protected-subject preservation or the required PSD checks fail, retain the current "
+      "PSD and staged work. Report what was compared and what remains uncertain. Never "
+      "claim photographic authenticity or print readiness without supporting verification.\n\n"
+)
