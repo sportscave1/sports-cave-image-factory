@@ -24,6 +24,7 @@ function promptIsValid(prompt) {
 }
 async function run(id, prompt, job) {
   try {
+    if (job.cancelled) return;
     const tab = await chrome.tabs.create({url: job.project || project, active: true});
     job.tab = tab.id;
     if (!Number.isInteger(job.tab)) throw new Error();
@@ -34,6 +35,7 @@ async function run(id, prompt, job) {
     do {
       try { ready = await chrome.tabs.sendMessage(job.tab, {type:'project:ready'}, {frameId:0}); }
       catch { /* Edge has not loaded the project content script yet. */ }
+      if (job.cancelled) return;
       if (ready?.ready) break;
       await delay(300);
     } while (Date.now() < deadline);
@@ -41,8 +43,10 @@ async function run(id, prompt, job) {
       await save(id, 'failed', 'Open the project in this Edge profile and make sure ChatGPT is signed in.');
       return;
     }
+    if (job.cancelled) return;
     const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
       freshUpload:!job.designJob, reference:job.reference}, {frameId:0});
+    if (job.cancelled) return;
     if (result?.sent && job.sending) {
       await save(id, 'submitted');
     } else if (job.sending) {
@@ -51,6 +55,7 @@ async function run(id, prompt, job) {
       await save(id, 'failed', result?.reason || 'ChatGPT did not provide an empty project composer and a ready Send button.');
     }
   } catch {
+    if (job.cancelled) return;
     await save(id, job.sending ? 'uncertain' : 'failed', job.sending
       ? 'Check the new ChatGPT tab for the sent prompt before retrying.'
       : 'Edge could not complete the project handoff.');
@@ -70,7 +75,7 @@ async function start(message) {
   try {
     const key = keyFor(receipt);
     const state = (await chrome.storage.local.get(key))[key];
-    if (state?.state === 'submitted' || state?.state === 'uncertain' || state?.state === 'sending') {
+    if (['submitted', 'uncertain', 'sending', 'cancelled'].includes(state?.state)) {
       pending.delete(receipt);
       return {accepted:true};
     }
@@ -110,7 +115,7 @@ async function health(receipt) {
 }
 async function permit(message, sender) {
   const job = pending.get(message.id);
-  if (!job || sender.frameId !== 0 || sender.tab?.id !== job.tab || sender.url !== (job.project || project) || job.sending) {
+  if (!job || job.cancelled || sender.frameId !== 0 || sender.tab?.id !== job.tab || sender.url !== (job.project || project) || job.sending) {
     return {ok:false};
   }
   // Persist the send boundary before returning permission to click. No retry can

@@ -103,6 +103,8 @@ class Intakes:
             if not row:
                 raise ValueError('This saved upload is unavailable to this account.')
             row = dict(row)
+            if row['data'].get('staff_upload_cancelled'):
+                raise ValueError('This upload was cancelled. Restart it explicitly before continuing.')
             before = (row['mode'], json.dumps(row['data'], sort_keys=True))
             yield row, cur
             if before != (row['mode'], json.dumps(row['data'], sort_keys=True)):

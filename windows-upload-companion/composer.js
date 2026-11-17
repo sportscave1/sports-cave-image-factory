@@ -8,6 +8,7 @@
   const normalize = text => text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
     .replace(/\n{3,}/g, '\n\n').trimEnd();
   let busy = false;
+  let cancelled = false;
   const inProject = () => location.href === project;
   const workEditor = design ? '[role="textbox"][contenteditable="true"][aria-label^="New chat in "]' : '[role="textbox"][contenteditable="true"][aria-label="New chat in SC Mockups/Uploads"]';
   const input = () => document.querySelector(workEditor) || document.querySelector('#prompt-textarea[contenteditable="true"]');
@@ -225,10 +226,10 @@
       }
       // Work may replace the composer when it attaches a long paste.
       if (!await setThinkingLevel()) return thinkingUnavailable();
-      if (!ready()) return {sent:false};
+      if (cancelled || !ready()) return {sent:false};
       const permission = await chrome.runtime.sendMessage({type:'project:permit', id});
       const current = ready();
-      if (!permission?.ok || !current) return {sent:false};
+      if (cancelled || !permission?.ok || !current) return {sent:false};
       const {button, asAttachment:sentAsAttachment} = current;
       button.click();
       const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment,reference), 12000);
@@ -238,14 +239,27 @@
       busy = false;
     }
   }
+  function projectProgress() {
+    const turns = document.querySelectorAll('[data-message-author-role="assistant"], h4[data-conversation-role="assistant"]');
+    const last = turns[turns.length - 1];
+    const body = last?.matches('h4') ? last.nextElementSibling : last;
+    const text = body?.innerText || '';
+    const generating = Boolean(document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"]'));
+    const clean = text.replace(/[*`]/g, '');
+    const marker = !generating && clean.match(design ? /(?:^|\n)\s*SC_DESIGN_BLOCKED:\s*([^\n]+)/ : /(?:^|\n)\s*SC_UPLOAD_BLOCKED:\s*([A-Z_]+)/);
+    const alert = [...document.querySelectorAll('[role="alert"]')].find(node =>
+      node.getClientRects?.().length && /something went wrong|network error|failed to|unable to|error generating|conversation not found|try again/i.test(node.innerText || ''));
+    const reason = marker ? (design ? marker[1] : 'ChatGPT reported an upload failure: ' + marker[1]) :
+      alert ? 'ChatGPT error: ' + alert.innerText : '';
+    let activity = 0;
+    for (let i = 0; i < text.length; i++) activity = ((activity << 5) - activity + text.charCodeAt(i)) | 0;
+    return {blocked:Boolean(reason), reason:reason.slice(0,1600), generating,
+      finished:!generating && Boolean(text.trim()), activity:String(activity), chat_url:location.href};
+  }
   function watchStaffResponse() {
     const timer = setInterval(() => {
       if (!conversation.test(location.href)) return;
-      const turns = document.querySelectorAll('[data-message-author-role="assistant"], h4[data-conversation-role="assistant"]');
-      const last = turns[turns.length - 1];
-      const body = last?.matches('h4') ? last.nextElementSibling : last;
-      if (!body || document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"]')) return;
-      const status = body.innerText.trim().match(/(?:^|\n)SC_UPLOAD_BLOCKED: ([A-Z_]+)\s*$/);
+      const status = projectProgress().reason.match(/ChatGPT reported an upload failure: ([A-Z_]+)/);
       if (!status) return;
       clearInterval(timer);
       void chrome.runtime.sendMessage({type:'project:blocked', code:status[1]}).catch(() => {});
@@ -254,13 +268,15 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (sender.id !== chrome.runtime.id) return;
-    if (message?.type === 'project:progress' && design && conversation.test(location.href)) {
-      const turns = document.querySelectorAll('[data-message-author-role="assistant"], h4[data-conversation-role="assistant"]');
-      const last = turns[turns.length - 1];
-      const body = last?.matches('h4') ? last.nextElementSibling : last;
-      const generating = document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"]');
-      const match = !generating && body?.innerText.match(/(?:^|\n)SC_DESIGN_BLOCKED: ([^\n]+)\s*$/);
-      reply({blocked:Boolean(match), reason:match?.[1]?.slice(0, 1600) || '', chat_url:location.href});
+    if (message?.type === 'project:cancel' && (inProject() || conversation.test(location.href))) {
+      cancelled = true;
+      const stop = document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"]');
+      stop?.click();
+      reply({stopped:true});
+      return;
+    }
+    if (message?.type === 'project:progress' && conversation.test(location.href)) {
+      reply(projectProgress());
       return;
     }
     if (!inProject()) return;

@@ -262,6 +262,81 @@ def test_clicked_attempt_clears_only_old_errors_once():
         jobs.pool.shutdown(wait=False)
 
 
+def test_manual_cancel_is_private_durable_and_releases_next_job(store):
+    first, second = submit('staff', 'A'), submit('staff', 'B')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    before = next(j for j in queue.list_jobs('staff')['jobs'] if j['id'] == str(first))
+    with pytest.raises(PermissionError):
+        queue.cancel(first, {'id': 'unrelated'}, before['updated_at'])
+    with pytest.raises(ValueError):
+        queue.cancel(first, {'id': 'staff'}, '2000-01-01T00:00:00+00:00')
+    stopped = queue.cancel(first, {'id': 'staff'}, before['updated_at'])
+    assert stopped['cancelled'] and not stopped['cancellable'] and stopped['label'] == 'Cancelled'
+    assert queue.cancel(first, {'id': 'staff'}, before['updated_at'])['cancelled']
+    assert queue.worker_job(str(first), 'desktop') is None
+    queue.advance(first, 'desktop', 5, 'Late old report')
+    result = queue.tick(token, {'id': str(first), 'state': 'submitted'})
+    assert result['stop'] == {'id': str(first)}
+    assert result['job']['id'] == str(second)
+    queue.advance(second, 'desktop', 6)
+    done = next(j for j in queue.list_jobs('staff')['jobs'] if j['id'] == str(second))
+    with pytest.raises(ValueError):
+        queue.cancel(second, {'id':'staff'}, done['updated_at'])
+
+
+def test_cancel_blocks_persisted_intake_writes_and_explicit_restart_clears_it(store):
+    from product_upload_intake import Intakes
+    key = submit('staff')
+    token = queue.pair({'id':'desktop'})
+    queue.tick(token, {})
+    intake = uuid4()
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('''CREATE TABLE product_upload_intakes(id uuid PRIMARY KEY,actor_id text,
+            mode text DEFAULT 'NEW',data jsonb,updated_at timestamptz DEFAULT now())''')
+        cur.execute('INSERT INTO product_upload_intakes(id,actor_id,data) VALUES(%s,%s,%s::jsonb)',
+                    (intake, 'desktop', json.dumps({'source':{'id':'id:original','rev':'A'}})))
+    queue.advance(key, 'desktop', 1, intake=intake)
+    before = queue.list_jobs('staff')['jobs'][0]
+    stopped = queue.cancel(key, {'id':'staff'}, before['updated_at'])
+    with pytest.raises(ValueError, match='cancelled'):
+        with Intakes(store).locked(str(intake), 'desktop'):
+            pytest.fail('Cancelled work must not acquire a writable intake')
+    queue.restart(key, {'id':'staff'}, stopped['updated_at'])
+    with Intakes(store).locked(str(intake), 'desktop') as (row, _):
+        assert not row['data'].get('staff_upload_cancelled')
+
+
+def test_stall_visible_without_desktop_and_expires_without_false_success(store):
+    key = submit('staff')
+    queue.pair({'id':'desktop'})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=5,updated_at=now()-interval '11 minutes' WHERE id=%s", (key,))
+    warning = queue.list_jobs('staff')['jobs'][0]
+    assert warning['stalled'] and warning['cancellable'] and warning['stage'] == 5
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (key,))
+    expired = queue.list_jobs('staff')['jobs'][0]
+    assert expired['stage'] == 7 and 'No verified progress' in expired['detail']
+
+
+def test_verification_failure_is_visible_and_does_not_extend_timeout(store, monkeypatch):
+    key = submit('staff')
+    token = queue.pair({'id':'desktop'})
+    queue.tick(token, {})
+    queue.advance(key, 'desktop', 5)
+    before = queue.list_jobs('staff')['jobs'][0]['updated_at']
+    def unavailable(job):
+        raise RuntimeError('synthetic provider failure')
+    monkeypatch.setattr(queue, 'verify', unavailable)
+    queue.tick(token, {})
+    after = queue.list_jobs('staff')['jobs'][0]
+    assert 'Could not verify' in after['detail'] and after['updated_at'] == before
+    monkeypatch.setattr(queue, 'verify', lambda job: queue.advance(job['id'], 'desktop', 6))
+    assert queue.tick(token, {'id':str(key), 'state':'blocked', 'reason':'late error'}) == {}
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 6
+
+
 def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
     from product_upload_jobs import Jobs
     jobs=Jobs()

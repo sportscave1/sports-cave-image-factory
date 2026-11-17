@@ -28,7 +28,7 @@ COLLECTOR_TYPOGRAPHY = """STORY-SPECIFIC COLLECTOR TYPOGRAPHY
 
 Design the title as an integral visual element of this artwork. Within the established collector style, choose refined heritage, restrained monumental or contemporary sporting letterforms suited to the subject and story. Create distinction through word emphasis, line breaks, spacing and proportion, using a coherent type palette and clear hierarchy between title, subject identification and collector information.
 
-Give the most meaningful words the strongest emphasis and subordinate connective words where this improves reading. Assess shorter title candidates under the existing title rules when wording spreads across the composition without adding emotional meaning.
+Emphasise meaningful words and subordinate connective words. Preserve the chosen headline’s meaning through scale, line breaks and spacing. Shorten only while retaining the same supporter story, repeating the title check before generation; layout convenience must not override meaning.
 
 Relate the text arrangement to the photograph's silhouette, movement and available space. Use compatible alignment, colour and restrained material treatment to connect it with the environment and original plaque. Texture, metallic finish and dimensional effects should preserve clear letterforms and clean print reproduction.
 
@@ -36,10 +36,14 @@ Assess the title, subject name and plaque together at full size and thumbnail si
 
 PURPOSEFUL_ABSTRACT = """VISIBLE COLLECTOR TRANSFORMATION
 
-Make the collector treatment visible at thumbnail size. Use charcoal tonal shapes, fine material texture and selective accents to build depth around the authentic subject. Let movement, venue geometry or team colours guide the overlay. Keep effects clear of skin and protected sporting details.
+Always include a distinct abstract art layer in every new design, visible at thumbnail size. Grain, darkening or a colour wash alone is insufficient. Use story-specific charcoal shapes, fractured geometry, material marks or restrained directional accents.
+
+Let the title’s emotion and photographic movement guide a continuous visual flow between hero, secondary image, headline and edition badge. Connect them through overlapping tones and edge transitions, keeping quiet text areas, hero dominance and a distinct supporting moment. Integrate the layer into the full generation, rather than isolating effects behind the player.
+
+Protect faces, hands, gestures, kit numbers, equipment, vehicle details and the official badge. Preserve truthful sporting colours; vary the treatment by story.
 
 Keep a verified venue recognisable through defining features. Blend it into the composition instead of isolating it in a blurred strip or inset. Use tonal transitions to distinguish separate photographic moments. Connect the premium title to the planned plaque position through alignment, scale, spacing and surrounding tones. Add the official plaque during assembly."""
 
-REVIEW_RELATIONSHIPS = """Review can end with no creative changes. Preserve successful composition, typography, lighting and fades. Check that the collector treatment is visible, the venue is recognisable where used, and the colours and sporting details are authentic. At thumbnail size, the hero must read first, title and plaque clearly, and the supporting moment reward a second look. Check balance beneath the title and across the canvas. At 100%, verify the supporting likeness, crop and transition into the venue. If pasted-on or competing, refine its mask, crop, scale or local contrast with verified source pixels. Make only targeted PSD corrections that improve the result. Measure the border on the master and correct only the border if clearance fails. Keep the strongest inspected artwork and mark unresolved quality or identity as needs_attention.
+REVIEW_RELATIONSHIPS = """Review can end with no creative changes. Preserve successful composition, typography, lighting and fades. Check that the distinct abstract art layer is visible at thumbnail size and carries the title's emotional direction through the hero, supporting image and edition badge, rather than sitting behind one element. If missing or disconnected, integrate or refine it during the existing PSD finishing pass while protecting photographic details and quiet text areas. Check that the venue is recognisable where used, and the colours and sporting details are authentic. At thumbnail size, the hero must read first, title and plaque clearly, and the supporting moment reward a second look. Check balance beneath the title and across the canvas. At 100%, verify the supporting likeness, crop and transition into the venue. If pasted-on or competing, refine its mask, crop, scale or local contrast with verified source pixels. Make only targeted PSD corrections that improve the result. Measure the border on the master and correct only the border if clearance fails. Keep the strongest inspected artwork and mark unresolved quality or identity as needs_attention.
 
 """

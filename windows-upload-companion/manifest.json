@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sports Cave Companion",
   "description": "Processes Product Uploads and morning designs through the paired Edge desktop.",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "permissions": [
     "storage",
     "alarms"
@@ -26,7 +26,7 @@
     },
     {
       "matches": [
-        "https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project*",
+        "https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b*",
         "https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654*"
       ],
       "js": [

@@ -240,6 +240,9 @@
     .sc-os-upload-reset:hover {background:#3b3020;}
     .sc-os-upload-reset:disabled {opacity:.5;cursor:wait;}
     #sc-os-staff-upload-list .sc-os-upload-reset {float:right;margin:0 0 4px 6px;}
+    .sc-os-upload-cancel {padding:4px 10px;margin:4px 0 8px;border:1px solid #8f7440;border-radius:5px;background:transparent;color:#f3ce7e;font:inherit;font-size:12px;cursor:pointer;}
+    .sc-os-upload-cancel:hover {background:#3b3020;}
+    .sc-os-upload-cancel:disabled {opacity:.5;cursor:wait;}
     #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-search-wrap {justify-self:start;max-width:500px;}
     #${ROOT_ID}.sc-has-staff-upload.sc-has-posting {
       grid-template-columns:var(--sc-sidebar-width) auto auto minmax(0,1fr) auto auto auto;
@@ -1103,6 +1106,36 @@
     const pendingQueues = new Set();
     let lastStaffStatus = "";
     const pendingRestarts = new Set();
+    const pendingCancels = new Set();
+    const bindCancel = (button, item) => {
+      button.disabled = pendingCancels.has(item.id);
+      button.onclick = async event => {
+        event?.preventDefault(); event?.stopPropagation();
+        if (pendingCancels.has(item.id)) return;
+        pendingCancels.add(item.id); button.disabled = true;
+        const scope = state.config.uploadScope;
+        try {
+          const response = await parentWindow.fetch('/api/staff-product-uploads/cancel', {
+            method:'POST', credentials:'same-origin', signal:listenerController.signal,
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({id:item.id, updated_at:item.updated_at}),
+          });
+          if (!response.ok) {
+            const result = await response.json();
+            throw new Error(result.error || 'Could not cancel this upload. Refresh its status and try again.');
+          }
+          if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
+          lastStaffStatus = '';
+          await refreshStaffProgress();
+        } catch (error) {
+          if (!listenerController.signal.aborted && scope === state.config.uploadScope) {
+            showUploadNotice({id:`cancel-${item.id}-${item.updated_at}`,kind:'error',text:error.message});
+          }
+        } finally {
+          pendingCancels.delete(item.id); button.disabled = false;
+        }
+      };
+    };
     const summaryReset = root.querySelector("#sc-os-staff-upload-reset");
     const bindRestart = (button, item) => {
       button.hidden = item?.stage !== 7 || item?.restartable === false;
@@ -1262,6 +1295,18 @@
           const progress = doc.createElement("p");
           progress.textContent = label(item);
           entry.append(title, progress);
+          if (item.cancellable) {
+            const cancel = doc.createElement('button');
+            cancel.type = 'button'; cancel.textContent = 'Cancel';
+            cancel.className = 'sc-os-upload-cancel';
+            cancel.setAttribute('aria-label', 'Cancel upload: ' + item.title);
+            bindCancel(cancel, item);
+            entry.append(cancel);
+          }
+          if (item.stalled || (item.stage === 7 && !item.cancelled)) {
+            showUploadNotice({id:`stalled-${item.id}-${item.updated_at}`,kind:'error',
+              text:item.title + ' · ' + (item.detail || item.label)});
+          }
           if (item.detail) {
             const detail = doc.createElement("p");
             detail.textContent = item.detail;

@@ -59,7 +59,18 @@ def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
-        return prompt
+        from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+        from design_new_composition import PURPOSEFUL_ABSTRACT
+        if NEW_DESIGN_TITLE_GUIDANCE in prompt and PURPOSEFUL_ABSTRACT in prompt:
+            return prompt
+        _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
+        _, _, body = body.partition('\n\n')  # Existing workflow introduction.
+        brief, found, _ = body.partition('\n\n**1. Research the story, sources and master**')
+        if found:
+            upgraded = _job_prompt(str(job['id']), job['title'], brief)
+            retry = re.search(r'\nQueue retry receipt: [a-f0-9-]{36}\n', prompt)
+            return upgraded + (retry[0] if retry else '')
+        return prompt  # Preserve unfamiliar snapshots rather than guessing at their brief.
     # Both legacy versions put the selected brief between these fixed sections.
     for boundary in (
         'Report PSD and JSON delivery separately from successful visual checks.',

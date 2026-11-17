@@ -119,6 +119,24 @@ def test_claim_upgrades_waiting_legacy_prompt_without_replacing_active_prompt(st
     assert 'Old rules' not in claim['prompt']
 
 
+def test_waiting_creative_upgrade_preserves_original_story_and_retry_receipt():
+    from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+    from design_new_composition import PURPOSEFUL_ABSTRACT
+    story = 'A verified club transition.\n\nSuggested title: New Chapter.\nKeep the original sporting context.'
+    key = queue.identity('2026-11-18', 'recommendations', {'title': 'A Champion'})
+    prompt = queue._job_prompt(key, 'A Champion', story)
+    old = prompt.replace(NEW_DESIGN_TITLE_GUIDANCE, 'Previous title selection rules.\n\n')
+    old = old.replace(PURPOSEFUL_ABSTRACT, 'Previous abstract treatment.')
+    old += '\nQueue retry receipt: 00000000-0000-0000-0000-000000000001\n'
+    job = dict(id=key, title='A Champion', prompt=old)
+    receipt = queue._receipt(job)
+    upgraded = queue._waiting_prompt(job)
+    assert story in upgraded and NEW_DESIGN_TITLE_GUIDANCE in upgraded and PURPOSEFUL_ABSTRACT in upgraded
+    assert f'morning_design_job_id = "{key}"' in upgraded
+    assert queue._receipt(dict(job, prompt=upgraded)) == receipt
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+
+
 def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     cur, token = store
     publish(cur)

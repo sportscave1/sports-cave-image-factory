@@ -47,3 +47,39 @@ def test_failed_upload_icons_are_small_and_click_only(tmp_path):
             assert page.get_by_role('button', name='Restart upload:', exact=False).count() == 0
         finally:
             browser.close()
+
+
+def test_active_upload_can_be_cancelled_from_popup_without_restarting():
+    source = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
+    markup = source[source.index('    <div id="sc-upload-notices"'):source.index('    <div class="sc-os-topbar-actions"')]
+    logic = source[source.index('    const uploadNotices ='):source.index('    const state =')]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge', headless=True)
+        try:
+            page = browser.new_page()
+            page.set_content('<div id="root"></div>')
+            page.evaluate('''({markup,logic}) => {
+                const root=document.querySelector('#root');root.innerHTML=eval('`'+markup+'`');
+                const doc=document,parentWindow=window,listenerController=new AbortController(),listenerOptions={signal:listenerController.signal};
+                const state={config:{uploadScope:'fixture',staffUploadProgress:true}},icon=()=>'',later=()=>{};
+                window.requests=[];
+                let job={id:'fixture-id',title:'Forever Panda',stage:5,cancellable:true,label:'Waiting for publication',
+                    detail:'',percent:93,updated_at:'fixture-stamp'};
+                parentWindow.fetch=async(url,options)=>{
+                    if(options?.method==='POST') {
+                        requests.push({url,body:JSON.parse(options.body)});
+                        job={...job,stage:7,cancelled:true,cancellable:false,label:'Cancelled'};
+                    }
+                    return {ok:true,json:async()=>({online:true,jobs:[job]})};
+                };
+                eval(logic+';window.refreshFixture=refreshStaffProgress;');return refreshFixture();
+            }''', dict(markup=markup,logic=logic))
+            page.locator('#sc-os-staff-upload-summary').click()
+            assert page.evaluate('requests') == []
+            page.get_by_role('button',name='Cancel upload: Forever Panda',exact=True).click()
+            assert page.evaluate('requests') == [dict(url='/api/staff-product-uploads/cancel',
+                body=dict(id='fixture-id',updated_at='fixture-stamp'))]
+            assert page.get_by_role('button',name='Cancel upload: Forever Panda',exact=True).count() == 0
+            assert 'Cancelled' in page.locator('#sc-os-staff-upload-list').inner_text()
+        finally:
+            browser.close()
