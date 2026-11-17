@@ -164,7 +164,7 @@ def render_top_bar(components, user, *, logo_src, current_route, navigation_epoc
         navigation_epoch=navigation_epoch,
     )
     import streamlit as st
-    config['uploadNotice'] = st.session_state.get('_product_upload_notice')
+    config['uploadNotice'] = st.session_state.pop('_product_upload_notice', None)
     config['uploadScope'] = str(user.get('id', ''))
     components.html(component_html(config), height=0, width=0)
 

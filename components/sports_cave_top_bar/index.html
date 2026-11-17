@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "navigation-controls-v3";
+  const CONTROLLER_VERSION = "navigation-controls-v4";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1068,6 +1068,7 @@
       if (shownUploadNotices.has(key)) return;
       try { if (parentWindow.sessionStorage.getItem(key)) return; } catch (_) {}
       shownUploadNotices.add(key);
+      try { parentWindow.sessionStorage.setItem(key, "shown"); } catch (_) {}
       const toast = doc.createElement("div");
       toast.className = "sc-upload-notice";
       toast.dataset.kind = notice.kind;
@@ -1077,10 +1078,7 @@
       const close = doc.createElement("button");
       close.type = "button"; close.textContent = "×";
       close.setAttribute("aria-label", "Dismiss upload notification");
-      const dismiss = () => {
-        toast.remove();
-        try { parentWindow.sessionStorage.setItem(key, "dismissed"); } catch (_) {}
-      };
+      const dismiss = () => toast.remove();
       close.addEventListener("click", dismiss);
       toast.append(message, close); uploadNotices.append(toast);
       if (notice.kind !== "error") later(() => {
@@ -1098,6 +1096,22 @@
     let queueRevision = 0;
     const pendingQueues = new Set();
     let lastStaffStatus = "";
+    let uploadOverlayRevision = 0;
+    const dismissUploadOverlays = () => {
+      uploadOverlayRevision++;
+      staffProgress.open = false;
+      uploadNotices.replaceChildren();
+    };
+    // The shell can outlive its controller during Streamlit reruns.
+    dismissUploadOverlays();
+    parentWindow.addEventListener("pagehide", dismissUploadOverlays, listenerOptions);
+    parentWindow.addEventListener("pageshow", event => {
+      if (event.persisted) dismissUploadOverlays();
+    }, listenerOptions);
+    parentWindow.addEventListener("popstate", dismissUploadOverlays, listenerOptions);
+    doc.addEventListener("click", event => {
+      if (staffProgress.open && !staffProgress.contains(event.target)) staffProgress.open = false;
+    }, listenerOptions);
     const closeUploadStatus = () => {
       staffProgress.open = false;
       uploadSummary.focus();
@@ -1129,6 +1143,7 @@
       button.addEventListener("click", async () => {
         if (!queues[queue]?.waiting || pendingQueues.has(queue)) return;
         const scope = state.config.uploadScope;
+        const overlayRevision = uploadOverlayRevision;
         pendingQueues.add(queue);
         queueRevision++;
         renderQueueButtons();
@@ -1144,7 +1159,8 @@
             queues[queue].enabled = control.enabled;
           }
         } catch (_error) {
-          if (!listenerController.signal.aborted && scope === state.config.uploadScope) {
+          if (!listenerController.signal.aborted && scope === state.config.uploadScope
+              && overlayRevision === uploadOverlayRevision) {
             showUploadNotice({id:`queue-${queue}-${queueRevision}`, kind:"error",
               text:`Could not update the ${queue} queue. Try again.`});
           }
@@ -1222,19 +1238,6 @@
           }
           return entry;
         }));
-        for (const item of jobs.filter(item => item.stage === 7)) {
-          showUploadNotice({id:item.id + ":" + item.updated_at, kind:"error", text:item.title + " · " + (item.detail || item.label)});
-        }
-        const stopped = jobs.find(item => item.stage === 7);
-        if (stopped) {
-          const errorKey = "sc-staff-upload-error:" + stopped.id;
-          try {
-            if (!parentWindow.sessionStorage.getItem(errorKey)) {
-              staffProgress.open = true;
-              parentWindow.sessionStorage.setItem(errorKey, "seen");
-            }
-          } catch (_error) {}
-        }
       } catch (_error) {
         // The next refresh keeps the latest confirmed state visible during connection loss.
       } finally {
@@ -1526,6 +1529,7 @@
       }
       const pending = routeKey ? rememberPendingNavigation(routeKey) : {};
       if (routeKey && !pending.route_key) return false;
+      dismissUploadOverlays();
       clearNavigationPending();
       sourceElement?.classList?.add("sc-route-loading");
       sourceElement?.setAttribute?.("aria-busy", "true");
@@ -3295,6 +3299,7 @@
         root.dataset.installStage = "config";
         const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
+        if (state.config.currentRouteKey !== nextConfig.currentRouteKey) dismissUploadOverlays();
         state.config = {...nextConfig};
         state.searchIndex = prepareSearchIndex(state.config.searchIndex);
         root.dataset.configRevision = state.config.revision || "none";
@@ -3321,6 +3326,7 @@
           staffProgressStarted = true;
           void refreshStaffProgress();
         } else if (!state.config.staffUploadProgress) {
+          staffProgress.open = false;
           staffProgress.hidden = true;
           queues = {};
           renderQueueButtons();
