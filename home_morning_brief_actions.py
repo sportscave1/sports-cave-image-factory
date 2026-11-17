@@ -132,7 +132,7 @@ def _template():
     return TEMPLATE.read_text(encoding="utf-8")
 
 
-def article_html(item, *, heading=None, allow_ads=False, legend=False, design_status=None):
+def article_html(item, *, heading=None, allow_ads=False, legend=False, design_status=None, design_key=None):
     title = " ".join(item["title"].split())
     label = heading or title
     markets = display_markets(item)
@@ -141,10 +141,14 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
     elif not legend and markets:
         label += f' ({", ".join(markets)})'
-    prompt = escape(_prompt(title, item["recommendation"]), quote=True).replace("\n", "&#10;")
+    enabled = bool(design_key) and design_status == 'Needs attention'
+    reason = ('Add this design to the Design Companion queue' if enabled else
+              'Already in the Design Companion queue' if design_status in ('Pending', 'Opening ChatGPT', 'Generating') else
+              'This design has already been made or uploaded' if design_status else
+              'Queue status unavailable. Refresh Home.')
     actions = (
-        f'<a href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
-        f'data-prompt="{prompt}" title="Open Sports Cave Designs and copy the prompt">Create Design</a>'
+        f'<button type="button" data-design-key="{escape(design_key or "", quote=True)}" '
+        f'title="{reason}"{ "" if enabled else " disabled"}>Add to Queue</button>'
     )
     status_label = ''
     if design_status:
@@ -251,9 +255,11 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
     def status(section, item):
         if design_statuses is None or not edition:
             return None
-        return design_statuses.get(identity(edition['date'], section, item), 'Pending')
+        return design_statuses.get(identity(edition['date'], section, item), 'Needs attention')
+    def key(section, item):
+        return identity(edition['date'], section, item)
     rows = "".join(
-        article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads, design_status=status("recommendations", item))
+        article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads, design_status=status("recommendations", item), design_key=key("recommendations", item))
         for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
     )
     full_brief = (edition or {}).get("full_brief")
@@ -273,7 +279,7 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
         )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
-    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True, design_status=status("legends", item))
+    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True, design_status=status("legends", item), design_key=key("legends", item))
                           for label, item in legends)
     if not legend_rows:
         legend_rows = '<p class="sc-legends-empty">No Legends Brief entries for this edition.</p>'

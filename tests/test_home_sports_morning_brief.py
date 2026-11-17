@@ -49,7 +49,7 @@ def test_legends_has_its_own_rows_and_uses_existing_actions_before_calendar():
     assert html.index('<section class="sc-sports-stories"') < html.index('aria-label="Legends Brief"') < html.index('<section class="sc-cal">')
     rows = html.split('aria-label="Legends Brief"', 1)[1].split('</section>', 1)[0]
     assert 'USA 1. A hall of fame tribute' in rows
-    assert 'data-prompt=' in rows and 'Create Design' in rows and 'Create Ad' in rows
+    assert 'data-design-key=' in rows and 'Add to Queue' in rows and 'Create Ad' in rows
     assert 'brief_product=tribute-edition' in rows
     assert 'Fixture release' not in rows
     invalid = {**payload, "legends": [legend()] * 7}
@@ -231,15 +231,9 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     brief.render(st, OWNER, TODAY)
     assert "Today's brief is pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
-    assert "Create Design" in markup and "Create Ad" in markup
-    assert "Sports Cave event: Fixture release" in markup
-    assert "Use web image search to show" in markup
-    assert "the named subject must dominate at thumbnail size" in markup
-    assert "designs-canvas.psd" in markup
-    assert "**Compose the complete collector artwork." in markup
-    assert "Defer dependent steps and finish independent work" in markup
+    assert "Add to Queue" in markup and "Create Ad" in markup
+    assert 'data-design-key=' in markup
     assert "<h4>Fixture release</h4>" not in markup
-    assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
     assert "Morning Brief JSON" not in markup
     assert "Sports calendar" in markup and "News / updates" in markup
@@ -279,6 +273,36 @@ def test_publisher_route_rejects_cross_origin_and_nonowners(monkeypatch):
     assert response.status_code == 200
     assert "Published the 2026-11-13 Morning Brief." in response.text
     publish.assert_called_once_with(edition(), OWNER)
+
+
+def test_home_enqueue_requires_owner_same_origin_and_current_eligible_job(monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import home_morning_brief_publish as route
+    import morning_design_queue as queue
+    user = Mock(return_value=OWNER)
+    enqueue = Mock(return_value=True)
+    monkeypatch.setattr(route, '_request_user', user)
+    monkeypatch.setattr(queue, 'enqueue_selected', enqueue)
+    client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
+                                         for path, endpoint, methods in route.ROUTES]))
+    key = queue.identity('2026-11-13', 'recommendations', {'title': 'Champion'})
+    path = f'/ops/morning-brief/designs/{key}/enqueue'
+    origin = {'Origin': 'http://testserver'}
+    assert client.get(path).status_code == 405
+    assert client.post(path).status_code == 403
+    assert client.post(path, headers={'Origin': 'https://other.test'}).status_code == 403
+    user.return_value = {**OWNER, 'role': 'worker'}
+    assert client.post(path, headers=origin).status_code == 403
+    enqueue.assert_not_called()
+    user.return_value = OWNER
+    assert client.post(path, headers=origin).json() == {'added': True}
+    enqueue.assert_called_once_with(key)
+    enqueue.return_value = False
+    assert client.post(path, headers=origin).json() == {'added': False}
+    enqueue.side_effect = ValueError('The suggestion changed.')
+    assert client.post(path, headers=origin).status_code == 409
 
 
 

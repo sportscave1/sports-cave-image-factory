@@ -3,13 +3,20 @@ import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
-from uuid import UUID, uuid5, NAMESPACE_URL
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
 from product_upload_staff_queue import connect, digest
 
 LABELS = ('Pending', 'Opening ChatGPT', 'Generating', 'Uploaded · checking review metadata',
           'Ready for review', 'Needs attention')
 CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?/c/[a-f0-9-]{36}')
+
+
+def _receipt(job):
+    # Keep existing send journals valid; explicit retries get a fresh journal.
+    retry = re.search(r'\nQueue retry receipt: ([a-f0-9-]{36})\n', job['prompt'])
+    suffix = ':' + retry[1] if retry else ''
+    return hashlib.sha256(('design:' + str(job['id']) + suffix).encode()).hexdigest()
 
 
 def identity(day, section, item):
@@ -147,7 +154,7 @@ def list_jobs(day=None):
         published = _published_designs(cur, jobs)
         return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
-                            else 'Uploaded · needs review' if r['stage'] == 5 and r['file_path'] else LABELS[r['stage']]), stage=r['stage'],
+                            else 'Uploaded · needs review' if r['stage'] == 5 and (r['file_id'] or r['file_path']) else LABELS[r['stage']]), stage=r['stage'],
                      chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path'],
                      updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in jobs]
 
@@ -271,7 +278,7 @@ def tick(token, events):
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL
     return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], project=PROJECT_URL,
-        prompt=r['prompt'], receipt=hashlib.sha256(('design:'+str(r['id'])).encode()).hexdigest()) for r in jobs])
+        prompt=r['prompt'], receipt=_receipt(r)) for r in jobs])
 
 
 async def tick_route(request):
@@ -309,4 +316,20 @@ def enqueue_selected(key):
     if not suggestion:
         raise ValueError('The suggestion changed. Refresh the current Morning Brief.')
     with connect() as conn, conn.cursor() as cur:
+        # Serialize with desktop claims and competing homepage clicks.
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        cur.execute('SELECT * FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
+        job = cur.fetchone()
+        if job:
+            if job['stage'] != 5 or job['file_id'] or job['file_path']:
+                return False
+            # Catch a late delivery before explicitly restarting failed work.
+            if verify_outputs([job]):
+                raise ValueError('This design has already been uploaded. Wait for its status to refresh.')
+            prompt = _job_prompt(key, suggestion['item']['title'], suggestion['item']['recommendation'])
+            prompt += f'\nQueue retry receipt: {uuid4()}\n'
+            cur.execute('''UPDATE morning_design_jobs SET stage=0,prompt=%s,message='',
+                chat_url='',updated_at=now() WHERE id=%s''', (prompt, key))
+            return True
         insert_suggestion(cur, suggestion['date'], suggestion['section'], suggestion['item'])
+        return True

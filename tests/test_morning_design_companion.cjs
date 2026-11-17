@@ -95,3 +95,17 @@ test('a second queued design starts only when the server advances after completi
   assert.equal(f.sent.length,2);
   assert.deepEqual(Object.keys(f.records.get('morningDesignJobs')),[job(2).id]);
 });
+
+test('an explicitly requeued design uses a fresh receipt and submits exactly once',async()=>{
+  const f=fixture(), original=job(1);
+  f.respond({jobs:[original]});
+  await f.run('designQueueTick()'); await f.run('queue');
+  f.respond({jobs:[]});
+  await f.run('designQueueTick()');
+  const retry={...original,receipt:'a'.repeat(64)};
+  f.respond({jobs:[retry]});
+  await f.run('designQueueTick()'); await f.run('queue');
+  assert.equal(f.sent.length,2);
+  await f.run('designQueueTick()'); await f.run('queue');
+  assert.equal(f.sent.length,2);
+});

@@ -187,12 +187,57 @@ def test_current_suggestion_can_be_queued_once_without_backfill(store):
                 (SETTING_KEY, json.dumps(edition)))
     cur.execute("UPDATE app_settings SET updated_at='2026-11-16T00:00:00Z'")
     suggestion = queue.current_suggestions()[0]
-    queue.enqueue_selected(suggestion['id'])
-    queue.enqueue_selected(suggestion['id'])
+    assert queue.enqueue_selected(suggestion['id']) is True
+    assert queue.enqueue_selected(suggestion['id']) is False
     assert len(queue.list_jobs()) == 1
     assert queue.tick(token, [])['jobs'][0]['id'] == suggestion['id']
     with pytest.raises(ValueError):
         queue.enqueue_selected('not-current')
+
+
+def test_explicit_retry_only_for_failed_jobs_without_saved_artwork(store):
+    from home_sports_morning_brief import SETTING_KEY
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    assert queue.enqueue_selected(first['id']) is False
+    queue.tick(token, [dict(id=first['id'], state='failed')])
+    assert queue.enqueue_selected(first['id']) is True
+    assert queue.enqueue_selected(first['id']) is False
+    retry = queue.tick(token, [])['jobs'][0]
+    assert retry['id'] == first['id'] and retry['receipt'] != first['receipt']
+    assert queue.tick(token, [])['jobs'][0]['receipt'] == retry['receipt']
+    for stage, file_id, path in ((5, 'id:made', '/Review/Made.psd'), (5, 'id:made', ''),
+                                 (3, '', ''), (4, '', ''), (2, '', ''), (0, '', '')):
+        cur.execute('UPDATE morning_design_jobs SET stage=%s,file_id=%s,file_path=%s WHERE id=%s',
+                    (stage, file_id, path, first['id']))
+        assert queue.enqueue_selected(first['id']) is False
+
+
+def test_late_verified_artwork_blocks_explicit_retry(store, monkeypatch):
+    from home_sports_morning_brief import SETTING_KEY
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    queue.tick(token, [dict(id=first['id'], state='failed')])
+    monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {first['id']: {'stage': 4}})
+    with pytest.raises(ValueError, match='already been uploaded'):
+        queue.enqueue_selected(first['id'])
+    assert queue.list_jobs()[0]['stage'] == 5
+
+
+@pytest.mark.parametrize('status', [None, 'Pending', 'Generating', 'Opening ChatGPT',
+    'Ready for review', 'Completed · uploaded', 'Uploaded · needs review', 'Uploaded · checking review metadata'])
+def test_home_queue_button_disabled_unless_attention(status):
+    from home_morning_brief_actions import article_html
+    item = dict(title='Champion', recommendation='Brief', links=[])
+    markup = article_html(item, design_key='fixture', design_status=status)
+    assert ' disabled>Add to Queue</button>' in markup
+    assert 'data-prompt=' not in markup
+    enabled = article_html(item, design_key='fixture', design_status='Needs attention')
+    assert ' disabled' not in enabled and 'Add to Queue</button>' in enabled
 
 
 def test_timeout_preserves_chat_and_late_verified_upload_can_finish(store, monkeypatch):
