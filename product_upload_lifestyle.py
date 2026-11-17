@@ -1454,9 +1454,21 @@ def compose(instructions, texts):
     texts = list(texts)
     if len(texts) != len(LABELS) or any(not str(text).strip() for text in texts):
         raise ValueError('The three Product Uploads scene briefs are required before copying.')
-    # Saved scene briefs may carry old execution rules, but their room/camera
-    # settings remain intact. PER_IMAGE supplies the contract once per card.
+    # Keep standalone exports intact. Share only byte-identical rules in the
+    # three-card handoff, preserving any per-card physical or scene overrides.
+    from sports_cave_physical_realism import BLOCK
+
     texts = [individual_prompt(text).removeprefix(FINISHED_MOCKUPS + '\n\n') for text in texts]
+    shared = ('SHARED REQUIREMENTS FOR ALL THREE IMAGE GENERATION CALLS\n'
+              'For each separate call, include the full applicable master and shared requirements '
+              'together with that card’s saved brief and the original product image.\n\n'
+              + PER_IMAGE.removeprefix(FINISHED_MOCKUPS + '\n\n'))
+    physical = [BLOCK.findall(text) for text in texts]
+    if len(physical[0]) == 1 and all(blocks == physical[0] for blocks in physical):
+        block = physical[0][0]
+        shared += '\n\nSHARED PHYSICAL SCALE AND FRAME REALISM\n' + block
+        texts = [text.replace(block, 'Include the full shared physical scale and frame realism block here.', 1)
+                 for text in texts]
     selections = [selected_details(text, index) for index, text in enumerate(texts, 1)]
     summary = READ_FIRST + '\n' + '\n'.join(
         f'- Image {index}: {label}. {selection}'
@@ -1469,6 +1481,6 @@ def compose(instructions, texts):
         f'## IMAGE {index} — {label.upper()}\nAssigned room category: {label}\n{selection}\n'
         'Use this image’s saved scene details below and the shared detailed requirements above. '
         'Keep its room layout and furniture arrangement visibly different from the other two images.\n\n'
-        f'{PER_IMAGE}\n\nSaved scene/composition/output requirements:\n{text}'
+        f'Saved scene/composition/output requirements:\n{text}'
         for index, (label, text, selection) in enumerate(zip(LABELS, texts, selections), 1))
-    return summary + '\n\n' + sequential_instructions(instructions) + '\n\n' + briefs + '\n\n' + OUTPUT_MANIFEST + '\n\n' + FINAL_CHECK
+    return '\n\n'.join((summary, sequential_instructions(instructions), shared, briefs, OUTPUT_MANIFEST, FINAL_CHECK))

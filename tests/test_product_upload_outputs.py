@@ -7,7 +7,7 @@ from PIL import Image
 from tests.test_product_upload_intake import database,env,saved,ADMIN
 from tests.fixtures.product_upload_outputs_provider import Outputs
 from product_upload_export import transfer,product_folder,collection_root
-from product_upload_lifestyle import compose,scene_texts,INSTRUCTIONS,PER_IMAGE,FILENAMES,ROOMS
+from product_upload_lifestyle import compose,scene_texts,FINISHED_MOCKUPS,INSTRUCTIONS,PER_IMAGE,FILENAMES,ROOMS
 
 
 def test_master_each_scene_complete_and_custom_selections_stable():
@@ -23,8 +23,8 @@ def test_master_each_scene_complete_and_custom_selections_stable():
     loaded=lambda filename,default:custom[FILENAMES.index(filename)]
     assert scene_texts(result,loaded,lambda *a:'saved custom')==custom
     master=compose(INSTRUCTIONS,first)
-    assert master.count(PER_IMAGE)==3
-    for text in ('THREE complete','Immediately generate Card 1','Immediately continue to Card 2 without waiting for approval or another message','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','841 × 594 mm','594 × 841 mm','acrylic rather than glass','Reflections match the room lighting','1024 × 1024'):
+    assert master.count(PER_IMAGE.removeprefix(FINISHED_MOCKUPS + '\n\n')) == 1
+    for text in ('THREE complete','Immediately generate Card 1','Immediately continue to Card 2 without waiting for approval or another message','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','87 cm wide × 62 cm high for landscape','62 cm wide × 87 cm high for portrait','premium clear glass','Reflections match the room lighting','1024 × 1024'):
         assert text in master
     assert all(filename in factory.PRODUCT_PAGE_PROMPT_FILENAMES for filename in FILENAMES)
 
