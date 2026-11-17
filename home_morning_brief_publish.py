@@ -34,7 +34,8 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
         if meta_brief else
         "Use the Sydney edition date and recommendations with title, recommendation, links, sport, "
         "markets, and confirmed start_date and end_date when available. Include the complete Sports Updates as full_brief. "
-        "Optional legends contains up to four ranked entries in the same format. Submit only date and legends "
+        "Optional legends contains up to six ranked entries in the same format, two per primary_market "
+        "of AUS, USA or UK. Submit only date and legends "
         "to add the section to today's published edition without changing Sports Updates."
     )
     if refresh_brief:

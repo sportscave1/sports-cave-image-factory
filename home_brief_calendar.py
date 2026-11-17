@@ -38,8 +38,13 @@ def article_fields(item):
         not isinstance(value, str) or value.upper() not in MARKET_CODES for value in raw_markets
     ):
         raise ValueError("Use recognised market codes for each story.")
-    markets = sorted({MARKET_CODES[value.upper()] for value in raw_markets})
+    markets = list(dict.fromkeys(MARKET_CODES[value.upper()] for value in raw_markets))
     fields = {"sport": sport, "markets": markets}
+    primary = item.get("primary_market")
+    if isinstance(primary, str):
+        primary = MARKET_CODES.get(primary.strip().upper())
+        if primary in markets and primary != "ALL":
+            fields["primary_market"] = primary
     if "start_date" in item or "end_date" in item:
         start = iso_day(item.get("start_date"))
         end = iso_day(item.get("end_date", item["start_date"]))
@@ -78,6 +83,19 @@ MARKET_FOCUS = {
     "UK": {"Football", "Darts", "Rugby Union", "Rugby League", "Cricket", "Formula One",
            "Horse Racing", "Road Racing", "Golf", "Tennis"},
 }
+
+
+def display_markets(item):
+    """Put the editorial primary first, using sport relevance for older entries."""
+    markets = item.get("markets") or ()
+    declared = item.get("primary_market")
+    if declared in markets:
+        return [declared, *(market for market in markets if market != declared)]
+    relevant = [market for market in markets if item.get("sport") in MARKET_FOCUS.get(market, ())]
+    if len(relevant) == 1:
+        primary = relevant[0]
+        return [primary, *(market for market in markets if market != primary)]
+    return list(markets)
 
 
 @dataclass(frozen=True)

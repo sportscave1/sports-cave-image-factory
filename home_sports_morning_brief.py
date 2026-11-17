@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlsplit
 
 import os_accounts
-from home_brief_calendar import HISTORY_PREFIX, article_fields, shop_product_handle
+from home_brief_calendar import HISTORY_PREFIX, MARKETS, article_fields, shop_product_handle
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -46,7 +46,7 @@ def _link(item):
 def _recommendations(items):
     recommendations = []
     for item in items:
-        if not isinstance(item, dict) or set(item) - {"title", "recommendation", "links", "sport", "markets", "start_date", "end_date", "product_url"}:
+        if not isinstance(item, dict) or set(item) - {"title", "recommendation", "links", "sport", "markets", "primary_market", "start_date", "end_date", "product_url"}:
             raise ValueError("Each item needs a title and recommendation, with optional links.")
         links = item.get("links", [])
         if not isinstance(links, list) or len(links) > 5:
@@ -71,12 +71,17 @@ def _recommendations(items):
 
 
 def _legends(items):
-    if not isinstance(items, list) or len(items) > 4:
-        raise ValueError("Include up to four ranked Legends Brief entries.")
+    if not isinstance(items, list) or len(items) > 6:
+        raise ValueError("Include up to six ranked Legends Brief entries.")
     articles = _recommendations(items)
     if any(not raw.get("links") or not article["sport"] or not article["markets"]
            for raw, article in zip(items, articles)):
         raise ValueError("Each legend needs a source link, sport and market.")
+    # Earlier editions had only a list of applicable markets and remain readable.
+    if len(items) > 4 or any("primary_market" in item for item in items):
+        primaries = [article.get("primary_market") for article in articles]
+        if any(market not in MARKETS for market in primaries) or any(primaries.count(market) > 2 for market in MARKETS):
+            raise ValueError("Assign each legend a primary market and use up to two entries per AUS, USA or UK.")
     return articles
 
 

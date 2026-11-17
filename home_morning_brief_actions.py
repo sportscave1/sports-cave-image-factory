@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_subject_authenticity import AUTHENTICITY_CHECK, CREATE_DESIGN_AUTHENTICITY_CHECK
-from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, product_handle
+from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, display_markets, product_handle
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
 
 PROJECT_URL = "https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project"
@@ -637,8 +637,15 @@ def _template():
     return TEMPLATE.read_text(encoding="utf-8")
 
 
-def article_html(item, *, heading=None, allow_ads=False):
+def article_html(item, *, heading=None, allow_ads=False, legend=False):
     title = " ".join(item["title"].split())
+    label = heading or title
+    markets = display_markets(item)
+    market_label = ""
+    if legend and len(markets) > 1:
+        market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
+    elif not legend and markets:
+        label += f' ({", ".join(markets)})'
     prompt = escape(_prompt(title, item["recommendation"]), quote=True).replace("\n", "&#10;")
     actions = (
         f'<a href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
@@ -660,13 +667,13 @@ def article_html(item, *, heading=None, allow_ads=False):
             continue
         lead, colon, detail = line.partition(": ")
         if (colon and len(lead) < 42) or (line.strip().endswith(":") and len(line.strip()) < 42):
-            label = lead if colon else line.strip()[:-1]
-            paragraphs.append(f'<p class="sc-brief-key"><strong>{escape(label)}:</strong> {escape(detail)}</p>')
+            copy_label = lead if colon else line.strip()[:-1]
+            paragraphs.append(f'<p class="sc-brief-key"><strong>{escape(copy_label)}:</strong> {escape(detail)}</p>')
         else:
             paragraphs.append(f"<p>{escape(line)}</p>")
     return (
         '<article class="sc-brief-row"><details>'
-        f'<summary title="{escape(title, quote=True)}"><span>{escape(heading or title)}</span></summary>'
+        f'<summary title="{escape(label, quote=True)}"><span>{escape(label)}{market_label}</span></summary>'
         '<div class="sc-brief-body">'
         f'<div class="sc-brief-copy">{"".join(paragraphs)}</div>'
         f'<div class="sc-brief-links">{links}</div></div></details>'
@@ -716,19 +723,33 @@ def _market_table(editions, market, today):
     )
 
 
+def _ranked_legends(items):
+    grouped = {market: [] for market in MARKETS}
+    other = []
+    for item in items:
+        markets = display_markets(item)
+        if markets and markets[0] in grouped:
+            grouped[markets[0]].append(item)
+        else:
+            other.append(item)
+    ranked = [(f"{market} {rank}.", item) for market, group in grouped.items()
+              for rank, item in enumerate(group, 1)]
+    return ranked + [(f"{rank}.", item) for rank, item in enumerate(other, 1)]
+
+
 def brief_html(edition, *, editions, today, allow_ads=False):
     rows = "".join(
         article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads)
         for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
     )
     full_brief = (edition or {}).get("full_brief")
-    legends = (edition or {}).get("legends", ())
+    legends = _ranked_legends((edition or {}).get("legends", ()))
     if full_brief:
         if legends:
             full_brief += '\n\nLegends Brief\n\n' + '\n\n'.join(
-                f'{rank}. {item["title"]}\n{item["recommendation"]}\n' + '\n'.join(
+                f'{label} {item["title"]}\n{item["recommendation"]}\n' + '\n'.join(
                     f'{link["label"]}: {link["url"]}' for link in item['links'])
-                for rank, item in enumerate(legends, 1)
+                for label, item in legends
             )
         rows += (
             '<button type="button" class="sc-full-brief" aria-haspopup="dialog">Read the full Morning Brief</button>'
@@ -738,8 +759,8 @@ def brief_html(edition, *, editions, today, allow_ads=False):
         )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
-    legend_rows = "".join(article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads)
-                          for rank, item in enumerate(legends, 1))
+    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True)
+                          for label, item in legends)
     if not legend_rows:
         legend_rows = '<p class="sc-legends-empty">No Legends Brief entries for this edition.</p>'
     legend_section = ('<section class="sc-sports-stories sc-legends" aria-label="Legends Brief">'

@@ -48,12 +48,31 @@ def test_legends_has_its_own_rows_and_uses_existing_actions_before_calendar():
     html = brief_html(parsed, editions=[parsed], today=TODAY, allow_ads=True)
     assert html.index('<section class="sc-sports-stories"') < html.index('aria-label="Legends Brief"') < html.index('<section class="sc-cal">')
     rows = html.split('aria-label="Legends Brief"', 1)[1].split('</section>', 1)[0]
-    assert '1. A hall of fame tribute' in rows
+    assert 'USA 1. A hall of fame tribute' in rows
     assert 'data-prompt=' in rows and 'Create Design' in rows and 'Create Ad' in rows
     assert 'brief_product=tribute-edition' in rows
     assert 'Fixture release' not in rows
-    invalid = {**payload, "legends": [legend()] * 5}
+    invalid = {**payload, "legends": [legend()] * 7}
     assert brief.parse_edition(json.dumps(invalid), TODAY) == {k: v for k, v in parsed.items() if k != "legends"}
+
+
+def test_six_legends_group_by_primary_and_keep_secondary_markets_in_order():
+    from home_morning_brief_actions import brief_html
+
+    payload = json.loads(edition())
+    payload["recommendations"][0].update(markets=["AUS", "USA", "UK"], primary_market="USA")
+    payload["legends"] = [dict(legend(), title=f"{market} pick {number}", primary_market=market,
+                               markets=[market, *(other for other in ("AUS", "USA", "UK") if other != market)])
+                          for market in ("UK", "AUS", "USA") for number in (1, 2)]
+    parsed = brief.parse_edition(json.dumps(payload), TODAY)
+    assert len(parsed["legends"]) == 6
+    html = brief_html(parsed, editions=[parsed], today=TODAY)
+    assert '1. Fixture release (USA, AUS, UK)' in html
+    labels = [f'{market} {number}. {market} pick {number}' for market in ("AUS", "USA", "UK") for number in (1, 2)]
+    assert [html.index(label) for label in labels] == sorted(html.index(label) for label in labels)
+    assert '<small class="sc-brief-secondary">Secondary: AUS, USA</small>' in html
+    payload["legends"][0].update(primary_market="AUS")
+    assert "legends" not in brief.parse_edition(json.dumps(payload), TODAY)
 
 
 def test_legends_can_be_added_today_and_survives_a_sports_only_repeat(database, monkeypatch):
