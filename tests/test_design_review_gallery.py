@@ -200,7 +200,10 @@ def test_edit_endpoint_returns_full_prompt_for_exact_dropbox_source(monkeypatch)
     prompt = response.json()['prompt']
     assert 'https://www.dropbox.com/home' in prompt and '?preview=Design%20%26%20Story.psd' in prompt
     assert record['path_display'] in prompt and record['id'] in prompt
-    assert '"rev": "exact"' in prompt and '**8F. Replace the original and return it to review**' in prompt
+    assert '"rev": "exact"' in prompt
+    assert '**4. Return the winner to Review**' in prompt
+    assert 'user-requested design changes as the primary brief' in prompt
+    assert 'Search online for the exact photograph' in prompt
     assert stale.status_code == 409
 
 
@@ -342,6 +345,7 @@ else:
     import product_upload_staff_queue as queue
     cursor = env[1]
     cursor.execute((Path(gallery.__file__).parent / 'migrations/20261117110000_product_upload_staff_queue.sql').read_text(encoding='utf-8'))
+    cursor.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     monkeypatch.setattr(queue, 'connect', store.connect)
     next(button for button in ui.button if button.label == 'Publish now').click().run()
     assert not ui.exception and not ui.error, [error.value for error in (*ui.exception, *ui.error)]

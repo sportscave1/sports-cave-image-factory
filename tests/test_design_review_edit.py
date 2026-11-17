@@ -20,66 +20,62 @@ ORIGINAL_REV = 'abcdef123'
 PREFIX = REVIEW + '/Collector - EDIT-' + ORIGINAL_REV
 
 
-def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
+def test_edit_prioritises_the_request_and_preserves_review_checkpoints():
     standard = _prompt('Collector', 'Verified story')
     edit = _prompt('Collector', 'Verified story', edit={
         'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH},
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
     })
-    assert edit.count('**MANDATORY EXECUTION ORDER**') == 1
-    for start, end in ((COLLECTOR_ASSET_HEADING, '**8E.'),
-                       ('**Recover from tool failures.**', 'Verified story')):
-        assert edit[edit.index(start):edit.index(end)] == standard[standard.index(start):standard.index(end)]
-    assert '12. **Final improvement.**' in edit and 'PASS, CHANGE or UNVERIFIED' in edit
-    assert edit.index('Step 7.') < edit.index('Make a **new image-generation call**') < edit.index('Save a separate create-only file')
-    assert 'ORIGINAL REVIEW SOURCE' in edit and 'expected revision' in edit
-    assert 'gid://shopify/Product/123' in edit and ORIGINAL_PATH in edit
+    checkpoints = (
+        'user-requested design changes as the primary brief',
+        'Search online for the exact photograph',
+        'Generate two separate full artwork revisions',
+        'Save the trial in create-only mode',
+        'Compare the current design, Pass 1 and Pass 2',
+        'Save the replacement separately in create-only mode',
+        'Create a separate recoverable backup',
+        'Reopen the saved canonical PSD',
+        '**Update the matching Smart Upload JSON**',
+        'recoverably delete only this run’s exact trial, staging and rollback backup PSDs',
+        'Display the winner and the three-design scorecard',
+    )
+    offsets = [edit.index(checkpoint) for checkpoint in checkpoints]
+    assert offsets == sorted(offsets)
+    assert len(edit.split()) < 2600
+    assert ORIGINAL_PATH in edit and 'gid://shopify/Product/123' in edit
+    assert PREFIX + ' - TRIAL.psd' in edit and PREFIX + ' - STAGING.psd' in edit
+    for safeguard in (
+        'Continue immediately to Pass 2', 'at most two additional image-generation attempts',
+        'skip it without prompting and use an authorised alternative', 'PASS, CHANGE or UNVERIFIED',
+        'Confirm each edit delivers the explicit request before ranking it',
+        'Keep the current design if no eligible edit scores higher',
+        'higher realism, then collector appeal, then Pass 1',
+        'Keep original and finish edit', 'Apply staged replacement',
+        'Never delete the canonical PSD', 'revision-aware update',
+        'ORIGINAL REVIEW SOURCE', 'ORIGINAL EDITABLE ARTWORK', 'FINAL POLISHED ARTWORK',
+        'capable PSD parser plus a rendered preview', 'Target an even border inset of 2%',
+        'design_title at the canonical PSD path',
+        'Preserve the design’s confirmed sport, upload intent, Shopify product ID and collection linkage',
+        'recorded ID, path and unchanged revision',
+    ):
+        assert safeguard.casefold() in edit.casefold(), safeguard
+    assert REVIEW_METADATA_FOLDER in edit
     assert '[Product Title] - TRIAL.psd' not in edit
     assert 'upload_intent (new_product)' not in edit
-    assert 'Photoshop is optional' in edit
-    assert 'capable PSD parser plus a rendered preview' in edit
-    assert 'Photoshop live-number check pending' not in edit
-    assert 'at most two additional image-generation attempts total across both passes' in edit
-    assert 'skip it without prompting and use an authorised alternative' in edit
-    assert 'Target an even border inset of 2%' in edit
-    assert edit.index('Create a separate recoverable backup') < edit.index('Reopen the saved canonical PSD')
-    assert edit.index('Reopen the saved canonical PSD') < edit.index('**Update the matching Smart Upload JSON**')
-    assert REVIEW_METADATA_FOLDER in edit
-    assert 'Preserve the design’s confirmed sport, upload intent, Shopify product ID and collection linkage' in edit
-    assert edit.index('compare the rendered current design') < edit.index('Save a separate create-only file')
-    assert 'Pass 1 and Pass 2 side by side at 100% and at thumbnail size' in edit
-    assert 'collector appeal' in edit and 'Sports Cave style' in edit and 'mean of those three scores' in edit
-    assert 'Reject any edit that looks less realistic than the current design' in edit
-    assert 'Keep the current design if no edit scores higher' in edit
-    assert 'If the current design wins, skip 8E and go directly to its cleanup in 8F' in edit
-    assert 'exact trial, staging and rollback backup PSDs' in edit
-    assert 'Display the winner and the three-design scorecard' in edit
-    assert 'eyes and gaze, eyelids, eyebrows, nose, mouth and teeth' in edit
-    assert 'background, border, headline wording and hierarchy, typography, layout' in edit
-    assert '8. **Title and placement.**' in edit
-    assert 'headline longevity and placement' in edit.replace('\n', ' ')
-    assert 'design_title at the canonical PSD path' in edit
-    assert edit.index('use the authorised Shopify connection in read-only mode') < edit.index('**STORY-LED COLLECTOR TITLES**')
-    assert 'remove an existing signature only when requested' in edit
-    assert 'Transform its mask and linked components together' not in edit
-    assert edit.count('Inspect the rendered, assembled PSD') == 2
-    assert 'or text, dates or statistics are removed, reassess the whole layout' in edit
-    assert 'A new layout is optional' in standard and 'A new layout is optional' not in edit
-    assert 'Preserve successful typography and layout during source-based restoration.' in edit
-    assert 'before recoverably deleting that exact file by ID' in edit
-    assert 'Keep original and finish edit' in edit and 'Keep original and finish edit' not in standard
-    assert 'three-design scorecard' not in standard
     assert 'REVIEW REPLACEMENT RULE' not in edit
-    assert 'Never delete the canonical PSD' in edit
-    for prompt in (standard, edit):
-        assert COLLECTOR_ASSET_PLACEMENT in prompt
-        assert 'reserve quiet space along the bottom' not in prompt
-        assert 'reserved bottom space' not in prompt
-        assert prompt.count(AUTHENTICITY_HEADING) == 1
-        assert 'MANDATORY SUBJECT AUTHENTICITY CHECK' not in prompt
+    assert 'Search online for the exact photograph' not in standard
     assert CREATE_DESIGN_AUTHENTICITY_CHECK in standard
     assert EDIT_AUTHENTICITY_CHECK in edit
-    assert 'TARGETED AUTHENTICITY RESTORATION' not in edit
+    for requirement in (
+        'A similar pose or a different frame cannot verify the original',
+        'Keep AI-generated skin, plastic smoothing, beauty retouching',
+        'original facial pixels and a precise mask',
+        'body and positioning changes within the requested scope',
+    ):
+        assert requirement in edit
+    for prompt in (standard, edit):
+        assert COLLECTOR_ASSET_PLACEMENT in prompt
+        assert prompt.count(AUTHENTICITY_HEADING) == 1
 
 
 def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
@@ -105,7 +101,8 @@ def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
         assert (EDIT_AUTHENTICITY_CHECK if prompt is edit else AUTHENTICITY_CHECK) in prompt
         assert prompt.count(AUTHENTICITY_HEADING) == 1
         assert prompt.index('**IDENTITY OVERRIDES GENERATION CONTINUITY**') < prompt.index(AUTHENTICITY_HEADING)
-        assert 'AI warping' in prompt and 'needs_attention' in prompt
+        assert ('AI-generated skin' if prompt is edit else 'AI warping') in prompt
+        assert 'needs_attention' in prompt
 
 
 @pytest.fixture
@@ -314,9 +311,9 @@ def test_edit_review_replacement_allows_preserved_subject_with_inherited_limitat
         assert 'Do not relabel that inherited limitation ready_for_review' in prompt
     else:
         assert 'Never delete the canonical PSD to clear the path.' in prompt
-        assert 'A create-only Dropbox upload cannot perform a revision-aware replacement' in prompt
+        assert 'If direct revision-aware update is unavailable' in prompt
         assert 'Unresolved review notes' in prompt
-        assert 'After verifying the canonical replacement and its matching JSON' in prompt
+        assert 'After verifying the replacement and matching JSON' in prompt
 
 
 def test_replace_carries_missing_source_notes_and_cleans_verified_drafts(files, monkeypatch):

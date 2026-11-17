@@ -29,8 +29,8 @@ function fixture({denied = false, failed = false} = {}) {
   f.click();f.latest('textarea').value='  Improve the headline <b>without HTML</b>  ';
   const submit=f.latest('form').events.submit;submit({preventDefault(){}});submit({preventDefault(){}});await settle();
   assert.equal(f.requests.length,1);assert.equal(f.tabs.length,1);assert.equal(f.tabs[0].url,f.action.href);
-  assert(f.writes[0].startsWith('ORIGINAL PROMPT\nKeep all existing instructions.\n\n'));
-  assert(f.writes[0].includes('Improve the headline <b>without HTML</b>'));assert(f.writes[0].includes('FACIAL FEATURES MUST NEVER CHANGE'));
+  assert.equal(f.writes[0], '**USER-REQUESTED DESIGN CHANGES**\nImprove the headline <b>without HTML</b>\n\n'
+    + 'ORIGINAL PROMPT\nKeep all existing instructions.');
   assert.equal(f.action.getAttribute('aria-busy'),undefined);
   f.click();assert.equal(f.latest('textarea').value,'');f.latest('form').events.submit({preventDefault(){}});await settle();assert(f.writes[1].includes('No additional changes specified.'));
   for(const options of [{denied:true},{failed:true}]) {
@@ -39,5 +39,5 @@ function fixture({denied = false, failed = false} = {}) {
     if(options.denied){assert(g.latest('textarea').readOnly);assert(g.latest('textarea').value.includes('Fix spacing'));}
     else assert(g.elements.some(e=>e.textContent==='Fetch failed'));
   }
-  console.log('PASS: immediate popup, cancel, Apply, duplicate submission, unchanged base prompt, comments, face protection, blank comments, clipboard fallback and fetch failure.');
+  console.log('PASS: immediate popup, cancel, Apply, duplicate submission, comments first, unchanged server prompt, blank comments, clipboard fallback and fetch failure.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

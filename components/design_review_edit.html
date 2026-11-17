@@ -31,12 +31,9 @@
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok || !data.prompt) throw new Error(data.error || 'Could not load the edit prompt.');
-        return data.prompt + '\n\n**USER-REQUESTED DESIGN CHANGES**\n'
-          + (comments || 'No additional changes specified. Follow the existing edit instructions.')
-          + '\n\nAddress the requested changes alongside all existing edit instructions.'
-          + '\n\n**FACIAL FEATURES MUST NEVER CHANGE**\n'
-          + 'Preserve every person’s existing facial features, identity, expression, eyes, gaze, nose, mouth, teeth and facial proportions exactly. '
-          + 'Do not regenerate, reshape, beautify or otherwise alter any face. This constraint takes precedence over any conflicting requested change or edit instruction.';
+        return '**USER-REQUESTED DESIGN CHANGES**\n'
+          + (comments || 'No additional changes specified.')
+          + '\n\n' + data.prompt;
       });
     // Start clipboard access during the click. The prompt is fetched only for this design.
     const copied = window.ClipboardItem && navigator.clipboard?.write

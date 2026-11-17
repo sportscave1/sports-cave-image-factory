@@ -15,7 +15,7 @@ from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_subject_authenticity import (
-    AUTHENTICITY_CHECK, CREATE_DESIGN_AUTHENTICITY_CHECK, IDENTITY_OVERRIDES_CONTINUITY,
+    CREATE_DESIGN_AUTHENTICITY_CHECK, IDENTITY_OVERRIDES_CONTINUITY,
 )
 from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, display_markets, product_handle
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
@@ -45,23 +45,6 @@ _CREATE_DESIGN_BORDER_RULES = (
     "This is a framing-safe margin. Apply any printer-required bleed separately.\n\n"
 )
 
-_EDIT_DESIGN_BORDER_RULES = (
-    "**Border and print safety for both artwork passes and the final layout**\n\n"
-    "Target an even border inset of 2% of the canvas’s shorter dimension. Calculate it once "
-    "and use the same pixel distance on all four sides. Keep the margin modest so the subject "
-    "stays large and impactful. Extend the background fully to the canvas edges. Keep the "
-    "decorative border and all important subject details, text and the official "
-    "badge inside the framing-safe area. Use only expendable background in the outer margin.\n\n"
-    f"{_BORDER_STYLE_GUIDANCE} "
-    "Preserve the existing composition and subject scale wherever possible. Make only the "
-    "minimum adjustments needed for safe spacing.\n\n"
-    "Treat the inset as a framing safety margin. Determine print bleed separately. Follow "
-    "the printer’s actual bleed, trim and frame-overlap requirements when available. Those "
-    "requirements override the default inset. If they cannot be checked, use the default, "
-    "record print safety as unverified in REVIEW NOTES and continue the workflow. Claim "
-    "verified print safety only after checking the artwork against those requirements.\n\n"
-)
-
 _CREATE_DESIGN_COLLECTOR_BACKGROUND = COLLECTOR_BACKGROUND + PURPOSEFUL_ABSTRACT + "\n\n"
 
 _CREATE_DESIGN_TYPOGRAPHY = SIGNATURE_FREE_COMPOSITION.replace(
@@ -89,30 +72,11 @@ def _story_without_meta_ad(text):
 
 def _prompt(title, story, *, edit=None):
     context = _story_without_meta_ad(story)
-    if edit is None:
-        background_guide = _CREATE_DESIGN_COLLECTOR_BACKGROUND
-        first_background = "Use the collector background treatment above. "
-        second_background = (
-            "Carry forward the collector background treatment from Step 5. Refine it only where the "
-            "artwork benefits. Use the same guidance if the first pass was unavailable.\n\n"
-        )
-        background_effects = (
-            "Use contact shadows only at actual points of contact. Keep supporting effects within "
-            "the collector background guidance above. "
-        )
-    else:
-        background_guide = COLLECTOR_BACKGROUND
-        second_background = ""
-        first_background = (
-            "Apply the collector background guidance only within the authorised edit scope. "
-            "Preserve locked backgrounds and all other approved elements. "
-        )
-        background_effects = "Use natural contact shadows and keep glow, sparks, smoke and haze restrained. "
-    composition_guide = (COMPLETE_COMPOSITION if edit is None else
-         "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
-         "a strong focal point and clear visual hierarchy. Plan a readable position and scale for "
-         "the official badge and its editable number within the safe border. Plan their relationship to the subject and typography before generation using the shared collector-asset rules.\n\n")
-    workflow = (
+    if edit is not None:
+        from design_review_prompt import build_edit_prompt
+        return build_edit_prompt(title, context, edit["source"], edit["metadata"])
+
+    return (
         f"Sports Cave event: {title}\n\n"
         f"{IDENTITY_OVERRIDES_CONTINUITY}"
         "**EXECUTION AUTHORITY — START NOW**\n\n"
@@ -197,7 +161,7 @@ def _prompt(title, story, *, edit=None):
         "wave, walk away or embrace and give the gesture breathing room. When a genuine photo "
         "captures the relationship, preserve the interaction. These are optional directions.\n"
         "\n"
-        f"{COMPLEMENTARY_IMAGES if edit is None else ''}"
+        f"{COMPLEMENTARY_IMAGES}"
         "Use evidence relevant to this sport: readable action or celebration, the genuine trophy or "
         "equipment, and period-correct uniforms, silks, vehicles and livery. Use accurate context for "
         "heritage or paired designs and a gesture that serves the verified story.\n\n"
@@ -231,12 +195,12 @@ def _prompt(title, story, *, edit=None):
         "reasonable recovery attempts, keep the master-dependent PSD work pending. Use verified "
         "master dimensions if available. Otherwise keep the layout provisional and reserve space "
         "for the original badge and editable number to be restored from the master.\n\n"
-        f"{composition_guide}"
-        f"{_CREATE_DESIGN_BORDER_RULES if edit is None else _EDIT_DESIGN_BORDER_RULES}"
-        f"Step 4. {_CREATE_DESIGN_TYPOGRAPHY if edit is None else SIGNATURE_FREE_COMPOSITION}\n\n"
-        f"{background_guide}"
+        f"{COMPLETE_COMPOSITION}"
+        f"{_CREATE_DESIGN_BORDER_RULES}"
+        f"Step 4. {_CREATE_DESIGN_TYPOGRAPHY}\n\n"
+        f"{_CREATE_DESIGN_COLLECTOR_BACKGROUND}"
         "Step 5. Use the image generation tool to generate the first complete Sports Cave Collector Series artwork. "
-        f"{first_background}"
+        "Use the collector background treatment above. "
         "Use the verified source photos and show the complete artwork in chat.\n\n"
         "Step 6. Inspect the generated artwork using the photographic review in Step 8C. "
         "Apply it at 100% magnification to this first generation and record remaining concerns for Pass 2.\n\n"
@@ -264,14 +228,16 @@ def _prompt(title, story, *, edit=None):
         "and explicitly lock the effective composition and styling before generating again. Review "
         "title and placement at thumbnail size. Follow the identity rule when deciding what to carry forward. "
         "Use style references only where they address a weakness.\n\n"
-        f"{REVIEW_RELATIONSHIPS if edit is None else ''}"
+        f"{REVIEW_RELATIONSHIPS}"
         "**8B. Second full generation — preserve what works**\n"
         "\n"
-        f"{second_background}"
+        "Carry forward the collector background treatment from Step 5. Refine it only where the "
+        "artwork benefits. Use the same guidance if the first pass was unavailable.\n\n"
         "Use the same collector specifications, verified canvas and safe area for both passes. Keep "
         "meaningful sporting colours and original camera angles. Set type and accents in the established "
         "charcoal, warm-white and restrained-gold collector palette. "
-        f"{background_effects}"
+        "Use contact shadows only at actual points of contact. Keep supporting effects within "
+        "the collector background guidance above. "
         "Keep this flat artwork free of mockup framing, walls and rooms.\n\n"
         "Make a **new image-generation call** using both:\n"
         "\n"
@@ -299,7 +265,7 @@ def _prompt(title, story, *, edit=None):
         "design without weakening facial fidelity. If the first artwork still wins, use it. "
         "A failed or unverified identity never wins as an accepted final design. If no pass qualifies, "
         "save the strongest inspected candidate for Review with needs_attention.\n\n"
-        f"{CREATE_DESIGN_AUTHENTICITY_CHECK if edit is None else AUTHENTICITY_CHECK}"
+        f"{CREATE_DESIGN_AUTHENTICITY_CHECK}"
         "**8D. Prepare the separate final PSD**\n"
         "\n"
         "If the master is still unavailable, retain both finished artworks and review notes. Mark master-dependent assembly, saves, verification and "
@@ -314,7 +280,7 @@ def _prompt(title, story, *, edit=None):
         "\n"
         "Preserve the master dimensions "
         "and colour profile.\n\n"
-        f"{BADGE_PLACEMENT_VERIFICATION if edit is None else ''}"
+        f"{BADGE_PLACEMENT_VERIFICATION}"
         f"{COLLECTOR_ASSET_PLACEMENT}"
         "**8E. Save and verify the final PSD**\n"
         "\n"
@@ -363,11 +329,6 @@ def _prompt(title, story, *, edit=None):
         "and layer verification, matching JSON, confirmed trial deletion and final display. "
         "Recovery can change when independent steps run."
     )
-    if edit is None:
-        return workflow
-    from design_review_prompt import build_edit_prompt
-    return build_edit_prompt(workflow, edit["source"], edit["metadata"])
-
 
 
 @lru_cache(maxsize=1)

@@ -14,7 +14,10 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
     })
     refresh = _refresh_prompt(dict(title='Collector', product_id='123', sessions=40,
                                    suggestion='Improve hierarchy'), 'https://example.com/product')
-    for prompt in (new, edit, refresh):
+    assert 'Keep established signature-free treatment. Remove an existing signature only when requested.' in edit
+    assert 'Honour requested wording, existing locks' in edit
+    assert 'Look for a better verified hero or venue only when useful to the authorised change.' in edit
+    for prompt in (new, refresh):
         assert prompt.count(_CREATE_DESIGN_TYPOGRAPHY if prompt is new else SIGNATURE_FREE_COMPOSITION) == 1
         assert 'remove an existing signature only when requested' in prompt
         assert 'Preserve all other approved elements.' in prompt
@@ -53,5 +56,4 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'Apply the treatment only to the background.' not in prompt
         assert 'Build a cohesive vintage background' not in prompt
     assert new.index(BACKGROUND_RESEARCH) < new.index('Step 3. **Compose the complete collector artwork.')
-    assert edit.index(BACKGROUND_RESEARCH) < edit.index('Step 3. Define the composition')
     assert refresh.index(BACKGROUND_RESEARCH) < refresh.index('3. Generate and inspect two complete designs')

@@ -58,6 +58,20 @@ REVIEW_SUBJECT_PRESERVATION = (
 )
 
 EDIT_AUTHENTICITY_CHECK = (
+    f"{IDENTITY_HEADING}\n\n"
+    "Search online for the exact photograph used for each visible subject in the current artwork. Use PSD or project "
+    "references and match the visible pose, crop, kit and event on the original source page. "
+    "Prefer the highest-resolution verified copy of that same frame and record its source. "
+    "A similar pose or a different frame cannot verify the original.\n\n"
     f"{AUTHENTICITY_HEADING}\n\n"
-    f"{_SOURCE_COMPARISON}{_SOURCE_FINISH}{REVIEW_SUBJECT_PRESERVATION}{_REVIEW_STATUS}"
+    "Compare the current artwork and every new pass, correction and assembled render with the "
+    "verified photograph at 100% and thumbnail size. Match the eyes and gaze, eyelids, eyebrows, nose, "
+    "mouth, teeth, jaw, hairline, proportions, expression and authentic skin texture. Preserve "
+    "real pores and marks. Keep AI-generated skin, plastic smoothing, beauty retouching, "
+    "invented detail and artificial sharpening off the face. Restore any drift with the "
+    "original facial pixels and a precise mask. Match lighting and edges without repainting "
+    "the face. If repair fails, use a clearer copy or adjust the crop and scale. Allow slight "
+    "body and positioning changes within the requested scope while preserving believable anatomy, "
+    "sporting details and the original face.\n\n"
+    f"{REVIEW_SUBJECT_PRESERVATION}{_REVIEW_STATUS}"
 )
