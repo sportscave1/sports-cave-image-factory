@@ -1,5 +1,6 @@
 """Morning design jobs, using the existing paired Edge desktop credential."""
 import hashlib
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
@@ -10,6 +11,7 @@ from product_upload_staff_queue import connect, digest
 LABELS = ('Pending', 'Opening ChatGPT', 'Generating', 'Uploaded · checking review metadata',
           'Ready for review', 'Needs attention')
 CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?/c/[a-f0-9-]{36}')
+LOG = logging.getLogger(__name__)
 
 
 def _receipt(job):
@@ -162,8 +164,19 @@ def _published_designs(cur, jobs):
     return published
 
 
+def _release_delivered(cur):
+    """Legacy stage 3 already holds a verified PSD/receipt, not ongoing generation."""
+    cur.execute("""UPDATE morning_design_jobs SET stage=5,
+        message=concat_ws(' ', NULLIF(message,''),
+            'PSD delivered to Design Studio Review. Upload metadata needs review; generation is complete and the queue continues.'),
+        updated_at=now()
+        WHERE stage=3 AND file_id<>'' AND file_rev<>'' AND file_path<>'' """)
+
+
 def list_jobs(day=None):
     with connect() as conn, conn.cursor() as cur:
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        _release_delivered(cur)
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
             ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
         jobs = cur.fetchall()
@@ -180,16 +193,26 @@ def verify_outputs(jobs):
     from product_upload_services import Dropbox
     from design_review_page import _folder_entries, final_psd
     from design_review_metadata import _read_sidecar, _handoff_details, handoff_paths
-    from psd_directory import REVIEW_METADATA_FOLDER
+    from psd_directory import REVIEW_METADATA_FOLDER, REVIEW_FOLDER
     if not jobs:
         return {}
     wanted = {str(job['id']) for job in jobs}
     created = [job['created_at'] for job in jobs if isinstance(job.get('created_at'), datetime)]
     cutoff = min(created) - timedelta(minutes=5) if created else None
-    provider, results = Dropbox(), {}
-    for metadata in _folder_entries(provider, REVIEW_METADATA_FOLDER):
+    provider, results, candidates = Dropbox(), {}, []
+    for folder in (REVIEW_METADATA_FOLDER, REVIEW_FOLDER):
+        try:
+            candidates.extend(_folder_entries(provider, folder))
+        except Exception as error:
+            LOG.warning('design_receipt_folder_unavailable type=%s', type(error).__name__)
+    seen = set()
+    for metadata in candidates:
         if not metadata.get('name', '').endswith('.upload.json'):
             continue
+        stamp = tuple(metadata.get(field) for field in ('id', 'rev', 'path_display', 'name'))
+        if stamp in seen:
+            continue
+        seen.add(stamp)
         # Old sidecars cannot contain a newly allocated job receipt. Listing is
         # paginated, but only recent candidates need file-content downloads.
         modified = metadata.get('server_modified')
@@ -210,19 +233,31 @@ def verify_outputs(jobs):
                 continue
             if actual.get('path_display') not in handoff_paths(source['path_display']):
                 continue
-            details = _handoff_details(value, source)
-            stage = 4 if details['review_status'] == 'ready_for_review' else 3
-            # A completed handoff can honestly flag artwork quality for review.
-            # It must release the generation slot without claiming visual approval.
-            if (value.get('review_status') == 'needs_attention' and details['design_name']
-                    and details['intended_collections'] and details['sport']):
+            if any(value.get(field) != source.get(key) for field, key in (
+                    ('dropbox_file_id', 'id'), ('dropbox_revision', 'rev'), ('dropbox_path', 'path_display'))):
+                continue
+            # Delivery completes generation. Publication metadata and artwork
+            # quality remain review concerns, never a reason to occupy this slot.
+            try:
+                details = _handoff_details(value, source)
+                stage = 4 if details['review_status'] == 'ready_for_review' else 5
+                message = details.get('review_notes', '')
+                if stage == 5:
+                    message = ('PSD delivered to Design Studio Review. Generation is complete; '
+                               'check artwork and upload metadata before publishing. ' + message).strip()
+            except ValueError as error:
                 stage = 5
-            result = dict(stage=stage, source=source, message=details.get('review_notes', ''))
-            if key in results and (results[key]['stage'] == 5 or results[key]['source']['id'] != source['id']):
+                message = 'PSD delivered to Design Studio Review. Upload metadata needs review: ' + str(error)
+            result = dict(stage=stage, source=source, message=message)
+            if key in results and results[key]['source']['id'] != source['id']:
                 result = dict(stage=5, source=source, message='Multiple final PSDs claim this job. Review them manually.')
+            elif key in results and results[key]['stage'] == 5:
+                result = results[key]
             results[key] = result
         except ValueError:
             continue
+        except Exception as error:
+            LOG.warning('design_receipt_unavailable type=%s', type(error).__name__)
     return results
 
 
@@ -235,6 +270,7 @@ def tick(token, events):
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
         if not cur.fetchone():
             raise PermissionError('Pair the existing Upload Companion first.')
+        _release_delivered(cur)
         cur.execute("SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 OR (stage=5 AND updated_at>now()-interval '1 day')")
         active = cur.fetchall()
     # Provider calls are deliberately outside the claim transaction.

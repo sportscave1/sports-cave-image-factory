@@ -8,6 +8,7 @@ import product_upload_staff_queue as uploads
 from test_auto_editions_jobs import database
 
 ROOT = Path(__file__).resolve().parents[1]
+VERIFY_OUTPUTS = queue.verify_outputs
 
 
 @pytest.fixture
@@ -319,7 +320,10 @@ def test_real_file_verification_rejects_wrong_revision_and_missing_metadata(monk
     assert queue.verify_outputs([{'id': key}]) == {}
     value['dropbox_revision'] = 'R1'
     value['intended_collections'] = []
-    assert queue.verify_outputs([{'id': key}])[key]['stage'] == 3
+    result = queue.verify_outputs([{'id': key}])[key]
+    assert result['stage'] == 5 and 'Generation is complete' in result['message']
+    value['upload_intent'] = 'invalid'
+    assert queue.verify_outputs([{'id': key}])[key]['stage'] == 5
     value['morning_design_job_id'] = 'some-other-job'
     assert queue.verify_outputs([{'id': key}]) == {}
 
@@ -335,6 +339,73 @@ def test_saved_artwork_with_review_concerns_releases_slot(store, monkeypatch):
     saved = next(j for j in queue.list_jobs() if j['id'] == first['id'])
     assert saved['label'] == 'Uploaded · needs review'
     assert saved['file_path'] == '/Review/Final.psd'
+
+
+def test_legacy_delivered_job_releases_slot_even_if_desktop_verification_is_offline(store, monkeypatch):
+    cur, token = store
+    publish(cur, count=2)
+    first = queue.tick(token, [])['jobs'][0]
+    cur.execute('''UPDATE morning_design_jobs SET stage=3,file_id='id:delivered',file_rev='R1',
+        file_path='/Review/Completed.psd',message='Collections missing' WHERE id=%s''', (first['id'],))
+    def offline(jobs):
+        raise OSError('Synthetic offline provider')
+    monkeypatch.setattr(queue, 'verify_outputs', offline)
+    # Merely opening the queue fixes the obsolete active state without a desktop.
+    saved = next(job for job in queue.list_jobs() if job['id'] == first['id'])
+    assert saved['stage'] == 5 and 'generation is complete' in saved['detail']
+    assert saved['file_path'] == '/Review/Completed.psd'
+    following = queue.tick(token, [])['jobs']
+    assert len(following) == 1 and following[0]['id'] != first['id']
+    queue.tick(token, [dict(id=first['id'], state='submitted')])
+    assert next(job for job in queue.list_jobs() if job['id'] == first['id'])['stage'] == 5
+
+
+def test_tick_repairs_delivered_legacy_job_but_respects_pause(store):
+    cur, token = store
+    publish(cur, count=2)
+    first = queue.tick(token, [])['jobs'][0]
+    cur.execute('''UPDATE morning_design_jobs SET stage=3,file_id='id:saved',file_rev='R1',
+        file_path='/Review/Completed.psd' WHERE id=%s''', (first['id'],))
+    queue.settings(False)
+    assert queue.tick(token, [])['jobs'] == []
+    assert next(job for job in queue.list_jobs() if job['id'] == first['id'])['stage'] == 5
+    assert sum(job['stage'] == 0 for job in queue.list_jobs()) == 1
+
+
+@pytest.mark.parametrize('metadata', [
+    {'intended_collections': []},
+    {'upload_intent': 'incomplete'},
+])
+def test_verified_review_delivery_advances_next_job_even_with_incomplete_metadata(store, monkeypatch, metadata):
+    import product_upload_services
+    import design_review_page
+    import design_review_metadata
+    from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
+    cur, token = store
+    publish(cur, count=2)
+    first = queue.tick(token, [])['jobs'][0]
+    source = dict(id='id:delivered', rev='R1', path_display=REVIEW_FOLDER+'/Final.psd',
+                  size=100, name='Final.psd', **{'.tag':'file'})
+    sidecar = dict(id='id:receipt', rev='J1', name='Final.upload.json',
+                   path_display=REVIEW_FOLDER+'/Final.upload.json')
+    value = dict(morning_design_job_id=first['id'], dropbox_file_id=source['id'], dropbox_revision='R1',
+                 dropbox_path=source['path_display'], upload_intent='new_product', design_title='Final',
+                 sport='NBA', intended_collections=['nba'], review_status='ready_for_review')
+    value.update(metadata)
+    provider = type('Provider', (), {'metadata_if_present': lambda self, key: source})()
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: provider)
+    def entries(provider, path):
+        if path == REVIEW_METADATA_FOLDER:
+            raise OSError('Synthetic central folder outage')
+        return [sidecar]
+    monkeypatch.setattr(design_review_page, '_folder_entries', entries)
+    monkeypatch.setattr(design_review_metadata, '_read_sidecar', lambda *args: (value, sidecar))
+    monkeypatch.setattr(queue, 'verify_outputs', VERIFY_OUTPUTS)
+    following = queue.tick(token, [])['jobs']
+    assert len(following) == 1 and following[0]['id'] != first['id']
+    completed = next(job for job in queue.list_jobs() if job['id'] == first['id'])
+    assert completed['stage'] == 5 and completed['file_path'] == source['path_display']
+    assert 'PSD delivered to Design Studio Review' in completed['detail']
 
 def test_pause_keeps_current_chat_and_holds_next_until_play(store, monkeypatch):
     cur, token = store
