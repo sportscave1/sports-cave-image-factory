@@ -29,6 +29,7 @@ RULES=(
  ('PROFILE_MISSING','Photoshop',('colour profile is unavailable','source_profile_requires_review','colour settings require owner review'), 'Original PSD has no verified colour profile.','Ask the owner to review the source colour settings.'),
  ('NUMBER_LAYER','Photoshop',('exactly one visible, editable edition-number','nested, locked or not independently editable','pinned number evidence changed','pinned number identity changed'), 'PSD does not have one unambiguous editable edition-number layer.','Verify the intended editable number and plaque in the source PSD. If there are obsolete visible copies, hide them before retrying.'),
  ('PLAQUE_AMBIGUOUS','Photoshop',('unique recognised collector plaque','ambiguous_roles','pinned plaque evidence changed','pinned plaque identity changed'), 'PSD plaque identity is ambiguous.','Review the plaque role; retain the original geometry.'),
+ ('RESIZE_EXPORT_ALPHA','Photoshop',('resized artwork contains unverified transparency','resized artwork edge transparency differs'), 'Photoshop introduced transparency that did not match a verified resize edge.', 'Review the PSD background and export before retrying. The original artwork was kept.'),
  ('ARTWORK_ALPHA','Photoshop',('non-opaque alpha','approved opaque composition'), 'The saved artwork contains transparency.','Provide the approved opaque composition or confirm its existing background treatment; no background is guessed.'),
  ('NUMBER_FORMAT','Photoshop',('formatting cannot hold','number_width_requires_review'), 'Existing number formatting cannot hold the edition range.','Review the number format without changing issued editions.'),
  ('UPLOAD_INTERRUPTED','Dropbox',('upload/checkpoint failed','upload recovery exhausted','upload interrupted'), 'Dropbox upload interrupted — package retained for recovery.','Check connectivity and recovery receipts; do not rerender verified packages.'),
@@ -74,7 +75,7 @@ def operator_details(reason,stage='Unknown',code=None):
     if code:
         try:value=accepted(dict(code=code,stage=stage))
         except ValueError:pass
-    repair=value['code'] in {'FONT_MISSING','EDITION_GEOMETRY','NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','PROFILE_MISSING','COLOUR_POLICY_PENDING','COLOUR_INCOMPATIBLE','ICC_MISMATCH','SOURCE_CHANGED','PSD_MISSING','VALIDATION_FAILED','ARTWORK_ALPHA'}
+    repair=value['code'] in {'FONT_MISSING','EDITION_GEOMETRY','NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','PROFILE_MISSING','COLOUR_POLICY_PENDING','COLOUR_INCOMPATIBLE','ICC_MISMATCH','SOURCE_CHANGED','PSD_MISSING','VALIDATION_FAILED','ARTWORK_ALPHA','RESIZE_EXPORT_ALPHA'}
     transient=value['code'] in {'DOWNLOAD_INTERRUPTED','UPLOAD_INTERRUPTED','CONNECTION_INTERRUPTED'}
     return {**value,'stage':stage if stage in STAGES and stage!='Unknown' else 'Stage unavailable',
         'manual_repair':repair,'retry_may_help':transient,

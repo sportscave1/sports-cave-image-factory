@@ -141,7 +141,8 @@ def classify(row, config, *, runtime=None):
         or reason=='Preparation failed: HTTPError. Existing PSD and mapping are preserved.')
     isolated_alpha = code=='ARTWORK_ALPHA' and 'preflight-artwork.png: non-opaque alpha' in lower
     rounding_alpha = code=='ARTWORK_ALPHA' and 'non-opaque alpha (254-255)' in lower
-    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED' or isolated_alpha or rounding_alpha
+    legacy_edge = 'resized artwork contains transparency outside the one-level corner rounding allowance.' in lower
+    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED' or isolated_alpha or rounding_alpha or legacy_edge
                 else ACTIVATION if code=='PHOTOSHOP_ACTIVATION' or reason==LEGACY_INSPECTION_OSERROR
                 else 'Photoshop busy' if code=='PHOTOSHOP_BUSY'
                 else 'Native inspection' if 'cannot open the file because the open options are incorrect' in lower or reason=='Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.'
@@ -175,7 +176,8 @@ def classify(row, config, *, runtime=None):
         return {**result, 'reason':reason+' Waiting for an idle Companion with the Photoshop activation fix.'}
     if category=='Resize background' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
-                'reason':('The isolated resize candidate was transparent. A fixed idle Companion can preserve the full layered composition and verify its output.' if isolated_alpha else
+                'reason':('The previous Companion rejected edge alpha after resizing. Waiting for an idle Companion with the verified edge fix.' if legacy_edge else
+                          'The isolated resize candidate was transparent. A fixed idle Companion can preserve the full layered composition and verify its output.' if isolated_alpha else
                           'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.')}
     if category=='Photoshop busy' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,

@@ -154,6 +154,54 @@ def test_resize_corner_rounding_rejects_other_transparency(tmp_path, pixel, alph
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize('level', [193, 222])
+def test_matched_resize_edge_keeps_all_rgb_and_colour_profile(tmp_path, level):
+    from auto_editions_preflight import normalize_resize_corners
+
+    Image.new('RGB', (14, 10)).save(tmp_path / 'preflight-original.png')
+    size = (56, 40)
+    names = ['original.png', 'master.png', 'reference-1.png', 'reference-100.png']
+    expected = {}
+    for index, name in enumerate(names):
+        with Image.new('RGBA', size, (31, 72 + index, 111, level)) as proof:
+            proof.paste((15, 85, 145, 255), (2, 2, 54, 38))
+            proof.save(tmp_path / name, icc_profile=b'fixture profile')
+            expected[name] = proof.convert('RGB').tobytes()
+    assert normalize_resize_corners(tmp_path, names, size, matched_edges=True) == dict.fromkeys(names, 368)
+    for name in names:
+        with Image.open(tmp_path / name) as proof:
+            assert proof.mode == 'RGB'
+            assert proof.tobytes() == expected[name]
+            assert proof.info['icc_profile'] == b'fixture profile'
+
+
+@pytest.mark.parametrize('fault', ['interior', 'different_proof', 'transparent_edge', 'transparent_source'])
+def test_matched_resize_edge_rejects_unproven_alpha_before_writing(tmp_path, fault):
+    from auto_editions_preflight import normalize_resize_corners, NonOpaqueArtwork
+
+    native = Image.new('RGBA', (14, 10), (15, 85, 145, 255))
+    if fault == 'transparent_source':
+        native.putpixel((0, 0), (15, 85, 145, 254))
+    native.save(tmp_path / 'preflight-original.png')
+    size = (56, 40)
+    names = ['original.png', 'master.png', 'reference-1.png']
+    for name in names:
+        proof = Image.new('RGBA', size, (31, 72, 111, 193))
+        proof.paste((15, 85, 145, 255), (2, 2, 54, 38))
+        if name == 'reference-1.png':
+            if fault == 'interior':
+                proof.putpixel((10, 10), (15, 85, 145, 254))
+            elif fault == 'different_proof':
+                proof.putpixel((0, 0), (15, 85, 145, 222))
+            elif fault == 'transparent_edge':
+                proof.putpixel((0, 0), (15, 85, 145, 0))
+        proof.save(tmp_path / name)
+    before = [(tmp_path / name).read_bytes() for name in names]
+    with pytest.raises(NonOpaqueArtwork):
+        normalize_resize_corners(tmp_path, names, size, matched_edges=True)
+    assert [(tmp_path / name).read_bytes() for name in names] == before
+
+
 def test_resize_proof_rejects_painting_and_the_demonstrated_222_alpha(tmp_path):
     native(tmp_path)
     for name in ('resize-original.png','original.png','master.png'):

@@ -153,12 +153,12 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
         restored=restore_export_profiles(output,report,names,source_icc=icc)
     if scale != 1 and not background and not (reviewed and reviewed.get('opaque_backing')):
         from auto_editions_preflight import normalize_resize_corners
-        # Only the full-canvas proofs can contain edge rounding. Number patches
-        # still have to pass the existing exact RGB and composition checks.
+        # Only the full-canvas proofs can contain the verified resize edge.
+        # Number patches still pass the existing exact RGB and composition checks.
         canvas = [name for name in names if not name.startswith('number-')]
-        normalized = normalize_resize_corners(output, canvas, report['dimensions'])
+        normalized = normalize_resize_corners(output, canvas, report['dimensions'], matched_edges=True)
         if normalized:
-            report['resize_evidence'] = dict(method='opaque_resize_corner_rounding_v1', pixels=normalized)
+            report['resize_evidence'] = dict(method='verified_opaque_resize_alpha_v2', pixels=normalized)
     from auto_editions_artwork_recovery import verify_exports
     correction=verify_exports(output,report,identity,names)
     if correction:report['artwork_recovery']=correction
