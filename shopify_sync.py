@@ -13,6 +13,7 @@ import requests
 
 from certificate_logging import certificate_stage_log
 import edition_ledger
+from shopify_order_financials import graphql_financial_fields
 
 
 DEFAULT_API_VERSION = "2026-04"
@@ -1640,6 +1641,12 @@ query SportsCaveOrdersLight($first: Int!, $after: String, $query: String, $sortK
       test
       cancelledAt
       displayFinancialStatus
+      totalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
       transactions(first: 250) { kind status }
       displayFulfillmentStatus
       email
@@ -3539,7 +3546,6 @@ def normalize_order(node, store_domain):
     shipping_lines = ((node.get("shippingLines") or {}).get("nodes") or [])
     shipping_line = node.get("shippingLine") or (shipping_lines[0] if shipping_lines else {})
     billing_address = node.get("billingAddress") or {}
-    total_price = ((node.get("totalPriceSet") or {}).get("shopMoney") or {})
     customer_full_name = " ".join(
         part for part in (customer.get("firstName"), customer.get("lastName")) if part
     ).strip()
@@ -3630,8 +3636,7 @@ def normalize_order(node, store_domain):
         "shipping_method": shipping_line.get("title") or shipping_line.get("code") or "",
         "shipping_line": shipping_line,
         "billing_address": billing_address,
-        "total_price": str(total_price.get("amount") or ""),
-        "currency": total_price.get("currencyCode") or "",
+        **graphql_financial_fields(node),
         "cancelled_at": node.get("cancelledAt") or "",
         "note": node.get("note") or "",
         "custom_attributes": node.get("customAttributes") or [],

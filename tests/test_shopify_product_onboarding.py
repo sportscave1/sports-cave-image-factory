@@ -85,6 +85,68 @@ def test_brock_targeted_import_duplicates_out_of_order_and_first_order(state):
     assert not rows(sql,'certificates')
 
 
+def test_disabled_new_product_resumes_same_receipt_after_explicit_enable(state):
+    sql, product, history = state
+    product['metafields'] = [dict(namespace='sports_cave', key='edition_enabled', value='false')]
+    deliver('disabled-new-product')
+    assert not rows(sql, 'edition_products')
+    receipt = rows(sql, 'webhook_events')[0]
+    assert receipt['status'] == 'pending'
+    assert receipt['error_message'] == 'explicitly_disabled_mirror_requires_review'
+    history.assert_not_called()
+
+    # The operator corrects Shopify metadata; retry must refetch current state.
+    product['metafields'][0]['value'] = 'true'
+    sql.execute("UPDATE webhook_events SET processed_at=now()-interval '2 hours'")
+    onboarding.drain(db)
+    edition = rows(sql, 'edition_products')[0]
+    assert (edition['edition_total'], edition['next_edition_number'],
+            edition['sold_count'], edition['remaining_count']) == (100, 1, 0, 100)
+    assert len(rows(sql, 'edition_runs')) == 1
+    assert rows(sql, 'webhook_events')[0]['status'] == 'processed'
+    assert deliver('disabled-new-product')['duplicate']
+    assert len(rows(sql, 'edition_products')) == 1
+    assert not rows(sql, 'edition_orders')
+
+
+def test_bulk_scan_retains_new_webhook_priority_without_processing_inside_scan(state, monkeypatch):
+    sql, product, api = state
+    db.claim_product_create_webhook_receipt(
+        {'id': PID.rsplit('/', 1)[-1]}, 'urgent-upload', 'products/create',
+        shop_domain='fixture.myshopify.com')
+    scan_product = 'gid://shopify/Product/999'
+    original = onboarding.process_receipt
+    observed = []
+
+    def process(row, database, config=None):
+        observed.append(row['webhook_id'])
+        if row['payload']['id'] == '999':
+            # A queued upload must already be registered before scan work runs.
+            assert len(rows(sql, 'edition_products')) == 1
+            assert rows(sql, 'webhook_events')[0]['status'] == 'processed'
+            database._update_webhook_event_status(row['webhook_id'], 'processed')
+            return {}
+        return original(row, database, config)
+
+    def graphql(query, variables=None, **kwargs):
+        if query == onboarding.PRODUCT_PAGE:
+            return {'products': {'nodes': [dict(id=scan_product, updatedAt='2026-11-04T00:00:00Z')],
+                                 'pageInfo': {'hasNextPage': False}}}, '2026-04'
+        return {'orders': {'nodes': [], 'pageInfo': {'hasNextPage': False}}}, '2026-04'
+
+    monkeypatch.setattr(onboarding, 'process_receipt', process)
+    api.side_effect = graphql
+    renew = Mock()
+    onboarding.reconcile(db, renew=renew)
+    assert observed == []
+    onboarding.drain(db, renew=renew)
+    assert observed[0] == 'urgent-upload'
+    assert observed[1].startswith('edition-recovery-')
+    assert len(rows(sql, 'edition_runs')) == 1
+    assert renew.called
+    assert db.get_app_setting(onboarding.CHECKPOINT, {}, ensure_schema_first=False)['checkpoint']
+
+
 def test_late_metadata_and_retry_survive_worker_recreation(state):
     sql,p,history=state
     p['tags'].append('sc-edition-limit-75')
@@ -104,6 +166,35 @@ def test_late_metadata_and_retry_survive_worker_recreation(state):
     assert rows(sql,'webhook_events')[0]['status']=='processed'
 
 
+def test_new_edition_and_allocations_feed_quiz_catalogue(state):
+    from product_quiz_publish import compile_catalogue
+    from product_quiz_store import QuizStore
+
+    sql,product,_=state
+    product['tags'].append('Sport: V8 Supercars')
+    sql.execute('CREATE TABLE crm_runtime_state(key text PRIMARY KEY,value jsonb)')
+
+    class LocalQuizStore(QuizStore):
+        def q(self, statement, args=(), one=False):
+            sql.execute(statement,args)
+            return sql.fetchone() if one else sql.fetchall()
+
+    store=LocalQuizStore()
+    token=db._ACTIVE_DATABASE_READ_CURSOR.set(sql)
+    try:
+        assert store.catalogue_rows()==[]
+        deliver()
+        eligible,_=compile_catalogue(store.catalogue_rows(),{},{})
+        assert [(p['id'],p['sports'],p['next_number'],p['edition_total']) for p in eligible]==[
+            (PID,['V8 Supercars'],1,100)]
+        sql.execute('SELECT allocate_edition_line_units_atomic(%s,%s,%s,%s,%s,%s,%s,%s)',
+                    ('shopify','local-order','local-line',PID,1,'local-order','#LOCAL','local-line'))
+        eligible,_=compile_catalogue(store.catalogue_rows(),{},{})
+        assert eligible[0]['next_number']==2
+    finally:
+        db._ACTIVE_DATABASE_READ_CURSOR.reset(token)
+
+
 def test_recovery_checkpoint_and_pagination_only_after_success(state):
     sql,p,history=state
     def api(query,variables=None,**kwargs):
@@ -114,6 +205,8 @@ def test_recovery_checkpoint_and_pagination_only_after_success(state):
         return {'orders':{'nodes':[],'pageInfo':{'hasNextPage':False}}},'2026-04'
     history.side_effect=api
     onboarding.reconcile(db)
+    assert not rows(sql,'edition_products')
+    onboarding.drain(db)
     assert len(rows(sql,'edition_products'))==1
     checkpoint=db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)
     assert checkpoint.get('checkpoint')
@@ -346,3 +439,50 @@ def test_invalid_or_conflicting_explicit_limit_never_falls_back(state,tags):
     deliver()
     assert not rows(sql,'edition_products')
     assert rows(sql,'webhook_events')[0]['status']=='pending'
+
+
+def test_scan_persists_all_receipts_without_processing_poison_product(state,monkeypatch):
+    sql,p,api=state
+    api.return_value=({'products':{'nodes':[{'id':PID,'updatedAt':'2026-11-11T00:00:00Z'},
+        {'id':'gid://shopify/Product/999','updatedAt':'2026-11-11T00:00:01Z'}],
+        'pageInfo':{'hasNextPage':False}}},'2026-04')
+    process=Mock(side_effect=RuntimeError('Throttled'))
+    monkeypatch.setattr(onboarding,'process_receipt',process)
+    onboarding.reconcile(db)
+    process.assert_not_called()
+    assert len(rows(sql,'webhook_events'))==2
+    assert db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)['checkpoint']
+    onboarding.drain(db)
+    assert process.call_count==2
+    assert all(r['status']=='failed' for r in rows(sql,'webhook_events'))
+
+
+def test_new_delivery_priority_with_reserved_retry_capacity(state,monkeypatch):
+    sql,p,api=state
+    for i in range(12):
+        sql.execute("INSERT INTO webhook_events(webhook_id,topic,status,payload,received_at) VALUES(%s,'products/update','received','{}',now())",('fresh-'+str(i),))
+    sql.execute("INSERT INTO webhook_events(webhook_id,topic,status,payload,received_at) VALUES('old-retry','products/update','pending','{}',now()-interval '1 day')")
+    processed=[]
+    monkeypatch.setattr(onboarding,'process_receipt',lambda row,*a:processed.append(row['webhook_id']))
+    onboarding.drain(db,limit=5)
+    assert all(e.startswith('fresh-') for e in processed[:4])
+    assert processed[4]=='old-retry'
+
+
+def test_scan_receipt_failure_retains_checkpoint_and_replay_is_idempotent(state,monkeypatch):
+    sql,p,api=state
+    api.return_value=({'products':{'nodes':[{'id':PID,'updatedAt':'2026-11-11T00:00:00Z'},
+        {'id':'gid://shopify/Product/999','updatedAt':'2026-11-11T00:00:01Z'}],
+        'pageInfo':{'hasNextPage':False}}},'2026-04')
+    claim=db.claim_product_create_webhook_receipt
+    def interrupted(payload,*args,**kwargs):
+        if payload['id']=='999':raise ConnectionError('receipt storage unavailable')
+        return claim(payload,*args,**kwargs)
+    monkeypatch.setattr(db,'claim_product_create_webhook_receipt',interrupted)
+    with pytest.raises(ConnectionError):onboarding.reconcile(db)
+    assert len(rows(sql,'webhook_events'))==1
+    assert not db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)
+    monkeypatch.setattr(db,'claim_product_create_webhook_receipt',claim)
+    onboarding.reconcile(db)
+    assert len(rows(sql,'webhook_events'))==2
+    assert db.get_app_setting(onboarding.CHECKPOINT,{},ensure_schema_first=False)['checkpoint']

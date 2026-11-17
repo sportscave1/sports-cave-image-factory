@@ -30,11 +30,13 @@ def destination(row, connect):
                 'The product has not been found in Edition Ops yet. Automatic sync may still be pending. No PSD was attached.')
 
 
-def selection(rows, product_id='', title=''):
-    """Stable identity takes precedence; a title is only a search hint."""
+def selection(rows, product_id='', title='', handle=''):
+    """Stable identity takes precedence over a title search."""
     if product_id:
         number = str(product_id).rsplit('/', 1)[-1]
         return [r for r in rows if any(str(r.get(k) or '').rsplit('/', 1)[-1] == number
                 for k in ('shopify_product_id', 'shopify_product_gid'))]
+    if handle:
+        return [r for r in rows if handle == (r.get('handle') or r.get('shopify_handle'))]
     query = str(title).strip().casefold()
     return [r for r in rows if query and query in str(r.get('product_title') or '').casefold()]

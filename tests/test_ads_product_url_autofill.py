@@ -3,7 +3,52 @@ import unittest
 from unittest.mock import patch
 
 import ads_page as ads
-from tests.test_ads_page import run_ads_page_with_product_rows
+from ads_product_catalog import recommend_new_ads_category
+from tests.test_ads_page import run_ads_page_with_product_rows, select_option
+
+
+class NewAdsDefaultsTests(unittest.TestCase):
+    def test_collection_and_specific_motorsport_evidence(self):
+        cases = (
+            ({"collections": ["NBA Wall Art"]}, "A Cricket Title", "NBA"),
+            ({"collections": ["Motor Racing Wall Art", "V8 Supercars Wall Art"]}, "Tribute", "V8 Supercars"),
+            ({"collections": [{"handle": "nascar-wall-art", "title": "Stock Cars"}]}, "Tribute", "NASCAR"),
+            ({"collections": ["Motor Racing Wall Art"], "tags": ["SC_SPORT_FORMULA_ONE"]}, "Tribute", "Formula One"),
+            ({"collections": ["Motor Racing Wall Art"]}, "Jett Lawrence Tribute", "Motocross"),
+            ({"collections": ["Motor Racing Wall Art"]}, "VW Golf", ""),
+            ({"collections": ["Motor Racing Wall Art"]}, "Unknown Racing Tribute", ""),
+            ({"collections": ["NASCAR Wall Art", "Formula One Wall Art"]}, "Tribute", ""),
+        )
+        for row, title, expected in cases:
+            with self.subTest(row=row, title=title):
+                self.assertEqual(recommend_new_ads_category(row, title), expected)
+
+    def test_new_meta_product_selection_sets_defaults_and_allows_override(self):
+        rows = [
+            {"shopify_product_id": "a", "product_title": "Race Tribute", "collections": ["NASCAR Wall Art"]},
+            {"shopify_product_id": "b", "product_title": "Unknown Tribute", "collections": ["Motor Racing Wall Art"]},
+        ]
+        app = run_ads_page_with_product_rows(rows)
+        self.assertEqual(app.selectbox(key="ads_campaign_type").value, "Instant Experience")
+        select_option(app, "Product name", "Race Tribute")
+        self.assertEqual(app.selectbox(key="ads_category").value, "NASCAR")
+        select_option(app, "Category", "V8 Supercars")
+        select_option(app, "Campaign type", "Carousel")
+        self.assertEqual(app.selectbox(key="ads_category").value, "V8 Supercars")
+        self.assertEqual(app.selectbox(key="ads_campaign_type").value, "Carousel")
+        select_option(app, "Product name", "Unknown Tribute")
+        self.assertEqual(app.selectbox(key="ads_category").value, "Select category")
+        self.assertEqual(app.selectbox(key="ads_campaign_type").value, "Instant Experience")
+        self.assertEqual(len(app.exception), 0)
+
+    def test_google_keeps_demand_gen_when_product_is_selected(self):
+        rows = [{"product_title": "Race Tribute", "collections": ["NASCAR Wall Art"]}]
+        app = run_ads_page_with_product_rows(rows)
+        select_option(app, "Platform", "Google")
+        select_option(app, "Product name", "Race Tribute")
+        self.assertEqual(app.selectbox(key="ads_category").value, "NASCAR")
+        self.assertEqual(app.selectbox(key="ads_google_campaign_type").value, "Demand Gen")
+        self.assertEqual(len(app.exception), 0)
 
 
 class ProductURLAutofillTests(unittest.TestCase):

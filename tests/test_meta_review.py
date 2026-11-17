@@ -192,11 +192,11 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(len(result['warnings']),6); self.assertEqual(save.call_args.args[0]['assets'],[])
     def test_pagination_uses_cursors_not_next_url(self):
         reader=sync.Reader(self.config)
-        with patch.object(client,'_request',side_effect=[{'data':[1],'paging':{'next':'https://evil.test/?access_token=secret','cursors':{'after':'a'}}},{'data':[2]}]) as request:
-            self.assertEqual(reader.pages('act_123/ads',{}),[1,2]); self.assertEqual(request.call_args.kwargs['params']['after'],'a')
+        with patch.object(client,'_request',side_effect=[{'data':[{'id':'1'}],'paging':{'next':'https://evil.test/?access_token=secret','cursors':{'after':'a'}}},{'data':[{'id':'2'}]}]) as request:
+            self.assertEqual(reader.pages('act_123/ads',{}),[{'id':'1'},{'id':'2'}]); self.assertEqual(request.call_args.kwargs['params']['after'],'a')
     def test_page_limit_is_failure_not_truncation(self):
         reader=sync.Reader(self.config,max_pages=1)
-        with patch.object(client,'_request',return_value={'data':[1],'paging':{'next':'url','cursors':{'after':'a'}}}):
+        with patch.object(client,'_request',return_value={'data':[{'id':'1'}],'paging':{'next':'url','cursors':{'after':'a'}}}):
             with self.assertRaises(ValueError): reader.pages('ads',{})
     def test_timeout_is_finite(self):
         reader=sync.Reader(self.config,seconds=-1)

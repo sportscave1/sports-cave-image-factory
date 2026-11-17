@@ -19,6 +19,22 @@ def test_changed_source_after_render_blocks_and_discards_unapproved_output():
     assets.discard_cache.assert_called_once_with('first',{'file_id':'generated'})
 
 
+def test_output_size_failure_is_not_reported_as_changed_source():
+    jobs=Mock();jobs.claim.return_value=dict(id='first',lease_token='lease',attempts=1,payload={'identity':{'allocation_id':7}})
+    resolver=Mock(return_value=({'id':'first'},Mock()))
+    with patch.object(runtime,'execute',side_effect=runtime.PreparationBlocked('Too large',code='output_too_large')):
+        assert runtime.run_one(jobs,resolver)
+    jobs.finish.assert_called_once_with('first','lease',error_code='output_too_large')
+    jobs.retry.assert_not_called()
+
+
+def test_preparation_failure_keeps_its_own_error_category():
+    jobs=Mock();jobs.claim.return_value=dict(id='first',lease_token='lease',attempts=1,payload={'identity':{'allocation_id':7}})
+    with patch.object(runtime,'execute',side_effect=runtime.PreparationBlocked('Review required')):
+        runtime.run_one(jobs,Mock(return_value=({'id':'first'},Mock())))
+    jobs.finish.assert_called_once_with('first','lease',error_code='preparation_blocked')
+
+
 def test_scoped_rollout_links_only_verified_units():
     registry=Mock();registry.index.return_value={('gid://shopify/Product/123','gid://shopify/ProductVariant/456'):[7]}
     rows=[dict(edition_order_id=i,shopify_product_id=123,variant_id=456) for i in (7,8)]

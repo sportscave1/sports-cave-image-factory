@@ -1,0 +1,221 @@
+<style>
+.sc-sports-stories,.sc-cal {background:var(--background-color,#fff);border:1px solid rgba(128,114,82,.24);border-radius:16px;box-shadow:0 2px 8px #20190c0d;padding:.55rem .85rem}
+.sc-brief-row {position:relative;margin:0;border-bottom:1px solid rgba(128,114,82,.2);color:var(--text-color,#212121)}
+.sc-brief-row:last-child {border-bottom:0}
+.sc-brief-row summary {display:flex;align-items:center;gap:.55rem;min-height:42px;padding:.35rem 10.5rem .35rem .15rem;cursor:pointer;list-style:none}
+.sc-brief-row summary::-webkit-details-marker {display:none}
+.sc-brief-row summary::before {content:"›";flex:none;font-size:1.15rem;line-height:1}
+.sc-brief-row details[open] summary::before {transform:rotate(90deg)}
+.sc-brief-row summary span {min-width:0;overflow-wrap:anywhere;font-size:.875rem;font-weight:600;line-height:1.3}
+.sc-brief-secondary {display:block;font-size:.72rem;font-weight:400;opacity:.76;margin-top:.1rem}
+.sc-brief-status {opacity:1}
+.sc-brief-status-icon {display:inline-block;width:.9rem;font-style:normal;font-weight:700;text-align:center}
+.sc-brief-status.complete .sc-brief-status-icon {color:#28734b}
+.sc-brief-status.attention .sc-brief-status-icon {color:#9b680d}
+.sc-brief-status.running .sc-brief-status-icon {color:#376da5}
+.sc-brief-status.pending .sc-brief-status-icon {color:#777}
+.sc-brief-actions {position:absolute;top:0;right:.15rem;height:42px;display:flex;align-items:center;gap:.28rem}
+.sc-brief-actions a,.sc-brief-actions span,.sc-brief-actions button {text-decoration:none;color:inherit;border:1px solid #b8aa8a;border-radius:6px;padding:.16rem .42rem;font:inherit;font-size:.72rem;font-weight:600;white-space:nowrap;background:transparent}
+.sc-brief-actions button {cursor:pointer}
+.sc-brief-actions span,.sc-brief-actions button:disabled {opacity:.48;cursor:default}
+.sc-brief-actions button:enabled:hover {background:#c29a43;color:#17130c}
+.sc-brief-actions a:hover {background:#c29a43;color:#17130c}
+.sc-brief-row :focus-visible {outline:2px solid #956810;outline-offset:2px}
+.sc-brief-body {padding:.55rem .9rem .8rem;font-size:.875rem;line-height:1.5;overflow-wrap:anywhere;border-top:1px solid #d6cdbb}
+.sc-full-brief {margin:.45rem 0;padding:.3rem .55rem;border:1px solid #b8aa8a;border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:.85rem;font-weight:600}
+.sc-full-brief-text {margin:.65rem 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.875rem;line-height:1.55}
+.sc-brief-copy {column-width:32rem;column-gap:1.8rem}
+.sc-brief-copy p {break-inside:avoid}
+.sc-cal-wrap td a {color:inherit;text-decoration-color:#a58847;text-underline-offset:.13rem}
+.sc-cal-state[data-state="ended"],.sc-cal-state[data-state="tbc"] {opacity:.75}
+.sc-brief-links a {font-size:.76rem;text-underline-offset:.15rem}
+.sc-brief-body .sc-brief-copy p {white-space:pre-wrap;margin:0 0 .28rem;font-size:.8rem;line-height:1.42}
+.sc-brief-copy strong {font-weight:700;color:var(--text-color,#24211a)}
+.sc-brief-body .sc-brief-copy .sc-brief-key {margin-top:.5rem;border-left:2px solid #b49048;padding-left:.5rem}
+.sc-brief-links {display:flex;flex-wrap:wrap;gap:.35rem .85rem}
+.sc-brief-toast {position:fixed;z-index:9999;bottom:1rem;right:1rem;max-width:calc(100vw - 2rem);padding:.6rem .85rem;border-radius:6px;background:#202020;color:white;font-size:.85rem}
+@media(max-width:560px){.sc-brief-row summary{min-height:0;padding:.65rem .15rem}.sc-brief-actions{position:static;height:auto;justify-content:flex-end;padding:0 .15rem .4rem}.sc-brief-actions a{padding:.25rem .4rem}}
+
+.sc-cal {margin:.85rem 0 .2rem}
+.sc-legends {margin-top:.85rem}
+.sc-legends h3 {font-size:1rem;margin:.28rem 0 .4rem}
+.sc-legends-empty {font-size:.85rem;margin:.4rem 0}
+.sc-cal-header {display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.55rem;margin-bottom:.5rem}
+.sc-cal-header h3 {font-size:1rem;margin:0}
+.sc-cal-markets {display:flex;gap:.24rem}
+.sc-cal button,.sc-cal-dialog button {cursor:pointer;color:inherit;font:inherit;font-size:.73rem;border:1px solid #b8aa8a;border-radius:6px;padding:.13rem .45rem;background:transparent;white-space:nowrap}
+.sc-cal button[aria-pressed="true"] {background:#c29a43;color:#17130c;border-color:#c29a43}
+.sc-cal-wrap {max-height:15rem;overflow:auto;border:1px solid rgba(128,114,82,.24);border-radius:10px}
+.sc-calendar-full .sc-cal-wrap {max-height:60dvh;margin-top:.65rem}
+.sc-cal .sc-cal-expand {margin-top:.5rem;padding:.3rem .6rem;font-weight:600}
+.sc-cal-wrap table {border-collapse:separate;border-spacing:0;width:100%;margin:0;font-size:.79rem}
+.sc-cal-wrap :is(th,td) {padding:.34rem .5rem;border-bottom:1px solid rgba(128,114,82,.2);text-align:left;vertical-align:middle}
+.sc-cal-wrap thead th {position:sticky;top:0;z-index:1;background:var(--secondary-background-color,#f8f6ef);white-space:nowrap}
+.sc-cal-wrap td small {display:block;opacity:.78}
+.sc-cal-state {display:inline-block;white-space:nowrap;font-weight:600;padding:.1rem .38rem;border-radius:99px}
+.sc-cal-state[data-state="live"] {background:#e9f4e8;color:#23664d}
+.sc-cal-state[data-state="upcoming"] {background:#fff3d7;color:#805414}
+.sc-cal-dialog {width:min(48rem,calc(100vw - 1.5rem));max-height:80dvh;padding:.9rem;border:1px solid #b8aa8a;border-radius:12px;background:var(--background-color,#fff);color:var(--text-color,#222)}
+.sc-cal-dialog::backdrop {background:#181512a0}
+.sc-cal-dialog header {display:flex;justify-content:space-between;gap:.5rem;align-items:center;position:sticky;top:0;z-index:2;background:inherit}
+.sc-cal-dialog h3 {margin:0;font-size:1rem}
+.sc-cal-dialog h4 {font-size:.83rem;margin:.6rem 0 .3rem}
+</style>
+<div class="sc-brief-recommendations">
+<!-- RECOMMENDATIONS -->
+<!-- LEGENDS -->
+<section class="sc-cal">
+<div class="sc-calendar-preview">
+<div class="sc-calendar-content">
+<header class="sc-cal-header"><h3>Sports calendar</h3><div class="sc-cal-markets" aria-label="Market">
+<button type="button" data-market-tab="AUS" aria-pressed="true">AUS</button>
+<button type="button" data-market-tab="USA" aria-pressed="false">USA</button>
+<button type="button" data-market-tab="UK" aria-pressed="false">UK</button>
+</div></header>
+<!-- CALENDARS -->
+</div></div>
+<button type="button" class="sc-cal-expand" aria-haspopup="dialog">Show full calendar</button>
+<dialog class="sc-cal-dialog sc-calendar-full" aria-label="Full sports calendar">
+<form method="dialog"><button>Close</button></form>
+</dialog>
+</section>
+<dialog class="sc-cal-dialog" aria-labelledby="sc-cal-history-title">
+<header><h3 id="sc-cal-history-title">News / updates</h3>
+<form method="dialog"><button>Close</button></form></header>
+<div class="sc-cal-stories"></div>
+<p class="sc-cal-status" role="status"></p>
+<button type="button" class="sc-cal-older" hidden>Older editions</button>
+</dialog>
+<div class="sc-brief-toast" role="status" hidden></div>
+</div>
+<script>
+{
+  const panel = document.currentScript?.previousElementSibling ||
+    [...document.querySelectorAll(".sc-brief-recommendations")].at(-1);
+  if (panel && !panel.dataset.actionsReady) {
+    panel.dataset.actionsReady = "true";
+    const dialog = panel.querySelector(".sc-cal-dialog[aria-labelledby]");
+    const calendar = panel.querySelector(".sc-calendar-full");
+    const preview = panel.querySelector(".sc-calendar-preview");
+    const calendarContent = preview.querySelector(".sc-calendar-content");
+    const calendarTrigger = panel.querySelector(".sc-cal-expand");
+    calendar.addEventListener("close", () => {
+      preview.append(calendarContent);
+      calendarTrigger.focus({preventScroll:true});
+    });
+    const stories = dialog.querySelector(".sc-cal-stories");
+    const status = dialog.querySelector(".sc-cal-status");
+    const older = dialog.querySelector(".sc-cal-older");
+    let cursor, current, pending;
+    async function loadHistory() {
+      pending?.abort();
+      const request = new AbortController();
+      pending = request;
+      const query = new URLSearchParams(current);
+      if (cursor) query.set("before", cursor);
+      older.hidden = true;
+      status.textContent = "Loading updates…";
+      try {
+        const response = await fetch("/ops/morning-brief/history?" + query, {signal:request.signal});
+        if (!response.ok) throw Error("History unavailable");
+        const result = await response.json();
+        if (pending !== request) return;
+        stories.insertAdjacentHTML("beforeend", result.html);
+        cursor = result.before;
+        older.hidden = !cursor;
+        status.textContent = stories.childElementCount ? "" : "No briefings for this market in these editions.";
+      } catch (error) {
+        if (error.name === "AbortError" || pending !== request) return;
+        status.textContent = "Briefing history is unavailable.";
+      }
+    }
+    older.addEventListener("click", loadHistory);
+    dialog.addEventListener("close", () => pending?.abort());
+    const toast = panel.querySelector(".sc-brief-toast");
+    let hideToast;
+    panel.addEventListener("click", async event => {
+      const enqueue = event.target.closest('button[data-design-key]');
+      if (enqueue) {
+        if (enqueue.disabled) return;
+        enqueue.disabled = true;
+        try {
+          const response = await fetch('/ops/morning-brief/designs/' + encodeURIComponent(enqueue.dataset.designKey) + '/enqueue', {
+            method:'POST', credentials:'same-origin', signal:AbortSignal.timeout(20000),
+          });
+          const result = await response.json();
+          if (!response.ok) throw Error(result.error || 'Could not add this design.');
+          enqueue.title = 'Already queued or made';
+          toast.textContent = result.added ? 'Added to the Design Companion queue.' : 'This design is already queued or made.';
+          if (result.added) {
+            const label = enqueue.closest('.sc-brief-row').querySelector('.sc-brief-status');
+            if (label) {
+              label.className = 'sc-brief-secondary sc-brief-status pending';
+              label.textContent = '○ Pending';
+            }
+          }
+        } catch (error) {
+          // A lost response may follow a successful enqueue. Refresh before retrying.
+          toast.textContent = (error.name === 'TimeoutError' ? 'Queue request timed out.' : error.message) + ' Refresh Home to check its status.';
+        }
+        toast.hidden = false;
+        clearTimeout(hideToast);
+        hideToast = setTimeout(() => { toast.hidden = true; }, 6000);
+        return;
+      }
+      const fullBrief = event.target.closest(".sc-full-brief");
+      if (fullBrief) {
+        panel.querySelector(".sc-sports-full").showModal();
+        return;
+      }
+      const expand = event.target.closest(".sc-cal-expand");
+      if (expand) {
+        calendar.append(calendarContent);
+        calendar.showModal();
+        return;
+      }
+      const market = event.target.closest("button[data-market-tab]");
+      if (market) {
+        panel.querySelectorAll("[data-market-tab]").forEach(button =>
+          button.setAttribute("aria-pressed", String(button === market)));
+        panel.querySelectorAll("[data-calendar]").forEach(table =>
+          table.hidden = table.dataset.calendar !== market.dataset.marketTab);
+        return;
+      }
+      const news = event.target.closest("button.sc-cal-news");
+      if (news) {
+        current = {sport:news.dataset.sport, market:news.dataset.market};
+        cursor = null;
+        stories.replaceChildren();
+        dialog.querySelector("h3").textContent = current.sport + " · " + current.market;
+        dialog.showModal();
+        loadHistory();
+        return;
+      }
+      const action = event.target.closest("a[data-prompt]");
+      if (!action) return;
+      const prompt = action.dataset.prompt;
+      const fallback = () => {
+        const field = document.createElement("textarea");
+        field.value = prompt;
+        field.style.cssText = "position:fixed;left:-9999px";
+        panel.append(field);
+        field.select();
+        let copied = false;
+        try { copied = document.execCommand("copy"); } catch {}
+        field.remove();
+        action.focus({preventScroll:true});
+        if (!copied) window.prompt("Copy this prompt, then paste it into Sports Cave Designs.", prompt);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(prompt).catch(fallback);
+      } else {
+        fallback();
+      }
+      toast.textContent = "Paste the prompt into Sports Cave Designs and send it.";
+      toast.hidden = false;
+      clearTimeout(hideToast);
+      hideToast = setTimeout(() => { toast.hidden = true; }, 4500);
+    });
+  }
+}
+</script>

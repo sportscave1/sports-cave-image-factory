@@ -312,6 +312,56 @@ class MetaCollectionTemplateCopyVerificationTests(unittest.TestCase):
         self.assertEqual(client.source_ad["creative"]["id"], "source-creative")
         self.assertEqual(client.ad_reads.count(SOURCE_AD_ID), 2)
 
+    def test_fresh_post_copies_even_if_an_old_ad_matches_every_creative_field(self):
+        client = FakeTemplateCopyClient()
+        old_ad = {**client.copied_ad, "id": "old-ad", "name": "Original name"}
+        original_read = client.ad
+        client.ad = mock.Mock(side_effect=lambda ad_id: (
+            dict(old_ad) if ad_id == "old-ad" else original_read(ad_id)
+        ))
+        client.ad_copies = mock.Mock(return_value=(old_ad,))
+        service = MetaCollectionTemplateCopyService(client)
+
+        result = service.create_or_reconcile_paused_route_copy(
+            source_ad_id=SOURCE_AD_ID, target_adset_id=TARGET_ADSET_ID,
+            creative_parameters=target_creative(), expected_ad_name="New ad",
+        )
+
+        self.assertEqual(result["copied_ad_id"], "copied-ad-1")
+        self.assertTrue(result["created_now"])
+        self.assertEqual(len(client.copy_calls), 1)
+        client.ad_copies.assert_not_called()
+        self.assertEqual(client.rename_calls, [("copied-ad-1", "New ad", SOURCE_AD_ID)])
+        self.assertEqual(old_ad["name"], "Original name")
+
+    def test_unknown_copy_response_never_adopts_or_renames_a_matching_old_ad(self):
+        from meta_ads_client import MetaAdsAmbiguousResultError
+        client = FakeTemplateCopyClient()
+        client.copy_exists = True
+        client.copy_paused_ad_from_template = mock.Mock(
+            side_effect=MetaAdsAmbiguousResultError("Lost response")
+        )
+        client.ad_copies = mock.Mock(return_value=(dict(client.copied_ad),))
+        with self.assertRaises(MetaAdsAmbiguousResultError):
+            MetaCollectionTemplateCopyService(client).create_or_reconcile_paused_route_copy(
+                source_ad_id=SOURCE_AD_ID, target_adset_id=TARGET_ADSET_ID,
+                creative_parameters=target_creative(), expected_ad_name="New ad",
+            )
+        client.copy_paused_ad_from_template.assert_called_once()
+        client.ad_copies.assert_not_called()
+        self.assertEqual(client.rename_calls, [])
+
+    def test_source_id_returned_by_meta_cannot_be_renamed(self):
+        client = FakeTemplateCopyClient()
+        client.source_ad["adset_id"] = TARGET_ADSET_ID
+        client.copy_paused_ad_from_template = mock.Mock(return_value=SOURCE_AD_ID)
+        with self.assertRaises(MetaCollectionTemplateCopySafetyError):
+            MetaCollectionTemplateCopyService(client).create_or_reconcile_paused_route_copy(
+                source_ad_id=SOURCE_AD_ID, target_adset_id=TARGET_ADSET_ID,
+                creative_parameters=target_creative(), expected_ad_name="New ad",
+            )
+        self.assertEqual(client.rename_calls, [])
+
     def test_existing_single_copy_is_reconciled_without_a_second_post(self):
         client = FakeTemplateCopyClient()
         client.copy_exists = True

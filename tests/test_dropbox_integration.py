@@ -73,6 +73,20 @@ class DropboxIntegrationTests(unittest.TestCase):
                     dropbox_integration.get_file_metadata('token', target)
             provider.assert_not_called()
 
+    def test_strict_missing_metadata_distinguishes_absence_from_denied_access(self):
+        from dropbox.exceptions import ApiError
+        from dropbox.files import GetMetadataError, LookupError
+
+        client = MagicMock()
+        with patch.object(dropbox_integration, 'team_space_client', return_value=client):
+            client.files_get_metadata.side_effect = ApiError(
+                'request', GetMetadataError.path(LookupError.not_found), None, None)
+            self.assertIsNone(dropbox_integration.get_metadata_if_exists('token', 'id:folder', missing_only=True))
+            client.files_get_metadata.side_effect = ApiError(
+                'request', GetMetadataError.path(LookupError.restricted_content), None, None)
+            with self.assertRaises(dropbox_integration.DropboxApiError):
+                dropbox_integration.get_metadata_if_exists('token', 'id:folder', missing_only=True)
+
     def test_product_upload_adapter_resolves_real_folder_id(self):
         from product_upload_services import Dropbox
         folder={'.tag':'folder','id':'id:AbCd-_12','path_display':'/Sportscave Team Folder/04_OUTPUT/product-images'}

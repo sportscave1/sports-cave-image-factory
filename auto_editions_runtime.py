@@ -65,21 +65,22 @@ def run_one(jobs,resolver=job_for):
         phase=time.monotonic()
         current,assets=resolver(record['payload']['identity']['allocation_id'])
         timings['worker_identity_ms']=round((time.monotonic()-phase)*1000,3)
-        if current['id']!=record['id']:raise PreparationBlocked('source_changed')
+        if current['id']!=record['id']:raise PreparationBlocked('source_changed',code='source_changed')
         current['archive_labels']=record['payload'].get('archive_labels',current.get('archive_labels',{}))
         result=execute(current,assets)
         # Fence changes made while image transfer/rendering was in progress.
         phase=time.monotonic();verified,_=resolver(current['identity']['allocation_id'])
         timings['final_identity_ms']=round((time.monotonic()-phase)*1000,3)
-        if verified['id']!=current['id']:raise PreparationBlocked('source_changed')
+        if verified['id']!=current['id']:raise PreparationBlocked('source_changed',code='source_changed')
         result['timings'].update(timings)
         result['timings'].update(record['payload'].get('request_timings',{}))
         phase=time.monotonic();jobs.finish(record['id'],record['lease_token'],result=result)
         LOG.info('AUTO_EDITIONS_TIMINGS job=%s finish_database_ms=%.3f elapsed_ms=%.3f stages=%s',
                  record['id'],(time.monotonic()-phase)*1000,(time.monotonic()-started)*1000,result['timings'])
         saved=True
-    except PreparationBlocked:
-        jobs.finish(record['id'],record['lease_token'],error_code='source_changed')
+    except PreparationBlocked as error:
+        jobs.finish(record['id'],record['lease_token'],error_code=error.code)
+        LOG.warning('AUTO_EDITIONS blocked job=%s code=%s',record['id'],error.code)
     except (ValueError,KeyError):
         jobs.finish(record['id'],record['lease_token'],error_code='asset_invalid')
     except Exception:

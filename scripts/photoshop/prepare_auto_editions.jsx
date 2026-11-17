@@ -42,6 +42,13 @@ var SCAutoEditionsPreparation = (function () {
         var target = new File(path).fsName.toLowerCase();
         return target.indexOf(base + "\\") === 0 || target.indexOf(base + "/") === 0;
     }
+    function canvasPixels(value) {
+        var pixels = value.as("px"), rounded = Math.round(pixels);
+        // UnitValue can return floating-point noise for integral PSD pixels.
+        if (!isFinite(pixels) || Math.abs(pixels-rounded)>0.00001)
+            throw Error("nonintegral_preparation_canvas");
+        return rounded;
+    }
     function run(r) {
         if (!r || !inside(r.stage_root, r.input) || !inside(r.output_root, r.report)
             || !r.icc_path || !inside(r.stage_root,r.icc_path)
@@ -61,6 +68,20 @@ var SCAutoEditionsPreparation = (function () {
                 if (l.name === name) found.push(l);
                 if (l.typename === "LayerSet") named(l, name, found);
             }
+        }
+        function visibleRole(container, name) {
+            var matches = [];
+            named(container, name, matches);
+            if (matches.length === 1) return matches[0];
+            // Retain hidden same-name layers in the PSD. The live role must
+            // still be unique and top-level, as in the Python preflight.
+            var visible = [];
+            for (var i = 0; i < matches.length; i++) {
+                if (matches[i].visible) visible.push(matches[i]);
+            }
+            if (visible.length !== 1 || visible[0].parent !== container)
+                throw Error("ambiguous_roles");
+            return visible[0];
         }
         function box(l) {
             var b = l.bounds;
@@ -98,10 +119,8 @@ var SCAutoEditionsPreparation = (function () {
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }
             if (doc.mode !== DocumentMode.RGB || doc.bitsPerChannel !== BitsPerChannelType.EIGHT)
                 throw Error("colour_conversion_requires_approval");
-            var numbers = [], plaques = [];
-            named(doc, r.number_layer_name, numbers); named(doc, r.plaque_layer_name, plaques);
-            if (numbers.length !== 1 || plaques.length !== 1) throw Error("ambiguous_roles");
-            layer = numbers[0]; plaque = plaques[0];
+            layer = visibleRole(doc, r.number_layer_name);
+            plaque = visibleRole(doc, r.plaque_layer_name);
             if (layer.kind !== LayerKind.TEXT || !layer.visible || layer.allLocked || !plaque.visible)
                 throw Error("uneditable_or_hidden_role");
             if (layer.parent !== doc || plaque.parent !== doc)
@@ -109,7 +128,7 @@ var SCAutoEditionsPreparation = (function () {
             var inspection = timed("psd_inspection_ms",function(){return SCPSDInspector.inspect(doc, {smart_object_depth:0,smart_object_limit:0});});
             if (inspection.document.profile_state !== "tagged") throw Error("profile_inspector_failure");
             timed("icc_witness_ms",function(){profileWitness(doc,r.output_root,r.icc_path);});
-            var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
+            var sourceDimensions = [canvasPixels(doc.width), canvasPixels(doc.height)];
             var hidden = null, approvedHidden = r.approved_hidden_number;
             if (approvedHidden) {
                 var hiddenMatches=[];named(doc,approvedHidden.name,hiddenMatches);
@@ -171,21 +190,25 @@ var SCAutoEditionsPreparation = (function () {
             // Photoshop rerenders editable text/shapes; raster layers use bicubic smoother.
             if (scale !== 1) timed("layered_resize_ms",function(){doc.resizeImage(UnitValue(target[0],"px"),
                 r.preparation_plan && scale!==Math.floor(scale) ? null : UnitValue(target[1],"px"), null, ResampleMethod.BICUBICSMOOTHER);});
-            if(doc.width.as("px")!==target[0] || doc.height.as("px")!==target[1])throw Error("preparation_target_rounding_changed");
+            if(canvasPixels(doc.width)!==target[0] || canvasPixels(doc.height)!==target[1])throw Error("preparation_target_rounding_changed");
             // Keep the untouched composite as an independent outside-number proof.
             if(hidden){savePNG(doc,"uncorrected.png");hidden.visible=false;}
             timed("original_export_ms",function(){savePNG(doc, "original.png");});
             app.fonts.getByName(layer.textItem.font);
             var text = layer.textItem.contents;
-            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
+            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})((?:[ \t]*(?:\r\n|[\r\n])[ \t]*LIMITED[ \t]+(?:EDITION|EDTION))?\s*)$/i.exec(text);
             if (!m || parseInt(m[4], 10) !== r.edition_total || r.edition_total < 1 || r.edition_total > 1000)
                 throw Error("edition_total_mismatch");
-            var total = r.edition_total, w = doc.width.as("px"), h = doc.height.as("px");
+            var total = r.edition_total, w = canvasPixels(doc.width), h = canvasPixels(doc.height);
             if (w * h > 110000000) throw Error("canvas_exceeds_worker_limit");
             var originalBounds = box(layer), plaqueBounds = box(plaque), region = originalBounds.slice(0);
+            var width = m[2].length, totalWidth = String(total).length;
+            // Keep the source padding. A naturally wider final number still
+            // has to fit the same plaque during the full-range bounds scan.
+            var growsByOne = totalWidth === width + 1 && m[2].charAt(0) !== "0";
+            if (totalWidth > width && !growsByOne) throw Error("number_width_requires_review");
             function replace(n) {
-                var digits = String(n); while (digits.length < m[2].length) digits = "0" + digits;
-                if (digits.length !== m[2].length) throw Error("number_width_requires_review");
+                var digits = String(n); while (digits.length < width) digits = "0" + digits;
                 timed("number_text_update_ms",function(){layer.textItem.contents = m[1] + digits + m[3] + m[4] + m[5];});
             }
             // Measure every actual rendering; no assumed template badge position.
@@ -237,7 +260,7 @@ var SCAutoEditionsPreparation = (function () {
                         if (restored.length !== 1 || restored[0].kind !== LayerKind.TEXT || restored[0].parent !== doc)
                             throw Error("preparation_history_restore_failed");
                         layer = restored[0];
-                        if (doc.width.as("px") !== w || doc.height.as("px") !== h)
+                        if (canvasPixels(doc.width) !== w || canvasPixels(doc.height) !== h)
                             throw Error("preparation_history_restore_failed");
                     }
                 }

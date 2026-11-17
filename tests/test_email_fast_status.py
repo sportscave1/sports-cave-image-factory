@@ -45,13 +45,13 @@ class FastStatusTests(unittest.TestCase):
             result=notifications.status(configuration=CONFIG)
         self.assertEqual(result['unread_count'],3);self.assertTrue(result['stale'])
 
-    def test_wall_count_request_does_not_load_activity(self):
+    def test_legacy_count_request_does_not_load_wall_or_activity(self):
         import top_bar_api
         request=Request({'type':'http','method':'GET','path':'/','headers':[], 'query_string':b'counts_only=1'})
         with patch.object(top_bar_api,'_claims',return_value={'sub':'fixture'}),patch.object(top_bar_api,'load_notification_sources') as history,patch('wall_preview_notifications.status',return_value={'unread_count':4,'notifications':[]}) as count:
             response=asyncio.run(top_bar_api.top_bar_notifications(request))
-        history.assert_not_called();count.assert_called_once_with({'sub':'fixture'},count_only=True)
-        self.assertIn(b'"wall_unread_count":4',response.body)
+        history.assert_not_called();count.assert_not_called()
+        self.assertNotIn(b'"wall_unread_count"',response.body)
 
     def test_orders_unavailable_is_not_zero(self):
         import top_bar_api

@@ -7,7 +7,10 @@ from streamlit.web.server.starlette import App
 import app_branding
 import collector_vault
 from collector_vault_api import COLLECTOR_VAULT_ROUTES
+from chatgpt_crm_api import ROUTES as CHATGPT_CRM_ROUTES
+from chatgpt_crm_mcp import ROUTES as CHATGPT_CRM_MCP_ROUTES
 from daily_planner import DAILY_PLANNER_ROUTE_HANDLERS
+from home_morning_brief_publish import ROUTES as MORNING_BRIEF_ROUTES
 from files_upload_api import FILES_UPLOAD_ROUTES
 import google_seo
 from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
@@ -28,6 +31,7 @@ from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
 from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
 from auto_editions_status import ROUTES as AUTO_EDITIONS_STATUS_ROUTES
 from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
+from website_recommendation_analytics import ROUTES as WEBSITE_RECOMMENDATION_ROUTES
 from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
 from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
 from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
@@ -44,12 +48,16 @@ routes = [
         *AUTO_EDITIONS_ONBOARDING_ROUTES,
         *AUTO_EDITIONS_STATUS_ROUTES,
         *PRODUCT_QUIZ_ROUTES,
+        *WEBSITE_RECOMMENDATION_ROUTES,
         *AUTO_EDITIONS_BULK_ROUTES,
         *WORKER_HEALTH_ROUTES,
         *PRODUCT_UPLOAD_ROUTES,
         *TASK_RECORDER_ROUTES,
 
         *COLLECTOR_VAULT_ROUTES,
+        *CHATGPT_CRM_ROUTES,
+        *CHATGPT_CRM_MCP_ROUTES,
+        *MORNING_BRIEF_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
         *GOOGLE_SEO_ROUTE_HANDLERS,
@@ -105,7 +113,8 @@ class ConstantTimeHealthMiddleware:
 
 class _GoogleOAuthAccessLogFilter(logging.Filter):
     def filter(self, record):
-        return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in record.getMessage()
+        message = record.getMessage()
+        return google_seo.GOOGLE_OAUTH_CALLBACK_PATH not in message and "/api/chatgpt/crm/oauth/" not in message
 
 logging.getLogger("uvicorn.access").addFilter(_GoogleOAuthAccessLogFilter())
 

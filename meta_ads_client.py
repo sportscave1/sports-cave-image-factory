@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import re
 from contextvars import ContextVar
@@ -38,6 +39,7 @@ class MetaAdsApiError(RuntimeError):
         request_path="",
         is_transient=None,
         retry_after=None,
+        regain_access_seconds=0,
     ):
         super().__init__(sanitize_meta_error(message))
         self.status_code = status_code
@@ -50,6 +52,7 @@ class MetaAdsApiError(RuntimeError):
         self.request_path = str(request_path or "")
         self.is_transient = is_transient
         self.retry_after = retry_after
+        self.regain_access_seconds = regain_access_seconds
 
 
 class MetaAdsAmbiguousResultError(MetaAdsApiError):
@@ -234,6 +237,37 @@ def safe_meta_config_status():
     }
 
 
+def is_ads_rate_limit(error):
+    return (
+        str(error.error_subcode) == "2446079"
+        or str(error.error_code) in {"4", "17", "613", "80000", "80003", "80004"}
+        or error.status_code == 429
+    )
+
+
+def _regain_access_seconds(headers):
+    """Read the largest reported Marketing API cooldown, in seconds."""
+    try:
+        usage = json.loads(headers.get("X-Business-Use-Case-Usage", "{}"))
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(usage, dict):
+        return 0
+    seconds = 0
+    for entries in usage.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("type") not in {
+                "ads_insights", "ads_management", "custom_audience",
+            }:
+                continue
+            minutes = entry.get("estimated_time_to_regain_access")
+            if type(minutes) in (int, float) and 0 < minutes < math.inf:
+                seconds = max(seconds, minutes * 60)
+    return seconds
+
+
 def _raise_for_meta_error(response, *, request_path="", secrets=()):
     if response.ok:
         return
@@ -277,6 +311,7 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
             message = f"{message} (fbtrace_id {fbtrace_id})"
     except Exception:
         pass
+    headers = getattr(response, "headers", {}) or {}
     raise MetaAdsApiError(
         sanitize_meta_error(message, extra_secrets=secrets),
         status_code=getattr(response, "status_code", None),
@@ -288,7 +323,8 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
         error_user_msg=error_user_msg,
         request_path=request_path,
         is_transient=is_transient,
-        retry_after=(getattr(response, 'headers', {}) or {}).get('Retry-After'),
+        retry_after=headers.get("Retry-After"),
+        regain_access_seconds=_regain_access_seconds(headers),
     )
 
 

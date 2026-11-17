@@ -17,6 +17,8 @@ from support_email_workspace import Workspace
 LOGGER = logging.getLogger(__name__)
 _COMPONENT = None
 _LOCK = Lock()
+_COMPONENT_KEY = "support-email-desktop"
+_READER_EVENTS = {"open_thread", "open_message", "load_visible_body"}
 
 
 def get_component():
@@ -90,6 +92,22 @@ def _complete_loaded_navigation(state, epoch):
     st.session_state["navigation_last_ready_page"] = "Email"
 
 
+def _handle_reader_event(workspace, epoch):
+    """Apply a selection before the fragment builds its next component model."""
+    event = st.session_state.get(_COMPONENT_KEY)
+    if (not isinstance(event, dict) or event.get("action") not in _READER_EVENTS
+            or st.session_state.get("current_page", "Email") != "Email"
+            or st.session_state.get("navigation_epoch", 0) != epoch
+            or st.session_state.get("support_email_workspace") is not workspace.state):
+        return
+    try:
+        if workspace.handle(event):
+            workspace.state["navigation_epoch"] = epoch
+    except Exception as error:
+        # The normal fragment path retains its existing safe error handling.
+        LOGGER.warning("Email reader callback unavailable (%s)", type(error).__name__)
+
+
 @st.fragment
 def _render_workspace(user):
     started = time.monotonic()
@@ -124,7 +142,8 @@ def _render_workspace(user):
         LOGGER.info("Email shell/list ready duration_ms=%.1f", (time.monotonic()-started)*1000)
         model = workspace.model()
         model["navigation_epoch"] = epoch
-        event = get_component()(model=model, key="support-email-desktop", default=None)
+        event = get_component()(model=model, key=_COMPONENT_KEY, default=None,
+                                on_change=lambda: _handle_reader_event(workspace, epoch))
         if event and workspace.handle(event):
             state["navigation_epoch"] = epoch
             rerun_email()

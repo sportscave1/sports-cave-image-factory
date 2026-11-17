@@ -1,4 +1,9 @@
+import re
+
 import streamlit as st
+
+from product_sport_tags import OTHER_MOTOR, TAGS, collection_sports, identities, text_sports
+from sports_categories import MOTORSPORT_DISCIPLINES, detect_sport_in_text, normalize_sport_category
 
 
 ADS_PRODUCT_CATALOG_CACHE_SECONDS = 300
@@ -23,6 +28,7 @@ def load_live_edition_product_rows():
                         COALESCE(sp.online_store_url, '') AS online_store_url,
                         COALESCE(sp.image_url, '') AS image_url,
                         COALESCE(sp.product_type, '') AS product_type,
+                        sp.raw_json->'tags' AS tags,
                         ep.edition_total AS edition_limit,
                         CASE
                             WHEN ep.edition_total IS NOT NULL
@@ -55,6 +61,54 @@ def load_live_edition_product_rows():
                 return list(cur.fetchall() or ())
     except Exception:
         return []
+
+
+def recommend_new_ads_category(row, product_name):
+    """Prefer storefront collections, then sport metadata and product identity."""
+    row = row or {}
+    collections = row.get("collections") or ()
+    if isinstance(collections, str):
+        collections = re.split(r"[,;|]", collections)
+    collection_categories = set()
+    collection_subjects = set()
+    for collection in collections:
+        if not isinstance(collection, dict):
+            collection = {"title": collection}
+        sports, subjects = collection_sports(collection)
+        collection_categories.update(sports)
+        collection_categories.update(normalize_sport_category(collection.get(field)) for field in ("title", "handle"))
+        collection_subjects.update(subjects)
+
+    tags = row.get("tags") or ()
+    if isinstance(tags, str):
+        tags = re.split(r"[,;|]", tags)
+    if not isinstance(tags, (list, tuple)):
+        tags = ()
+    sport_by_tag = {tag: sport for sport, tag in TAGS.items()}
+    metadata = {normalize_sport_category(row.get(field)) for field in (
+        "category", "sport", "sport_category", "product_sport", "product_type",
+    )}
+    for tag in tags:
+        tag = str(tag).strip()
+        metadata.add(sport_by_tag.get(tag.upper()) or normalize_sport_category(tag))
+
+    title = row.get("product_title") or row.get("title") or product_name
+    explicit_title = text_sports(title) | {detect_sport_in_text(title)}
+    aliases = {"Motorcycle Road Racing": "Road Racing", "Rally Raid": "Rally"}
+    motorsport = False
+    for evidence in (collection_categories, metadata, explicit_title, collection_subjects | identities(title)):
+        matches = {aliases.get(sport, normalize_sport_category(sport) or sport) for sport in evidence}
+        matches -= {"", "Other", "Apparel"}
+        if motorsport:
+            matches &= MOTORSPORT_DISCIPLINES | OTHER_MOTOR | {"Motorsport"}
+        motorsport = motorsport or "Motorsport" in matches
+        if "Motorsport" in matches and matches & MOTORSPORT_DISCIPLINES:
+            matches.remove("Motorsport")
+        if matches == {"Motorsport"}:
+            continue
+        if matches:
+            return normalize_sport_category(next(iter(matches))) if len(matches) == 1 else ""
+    return ""
 
 
 def product_reference_image_url(row):

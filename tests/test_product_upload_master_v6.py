@@ -24,7 +24,7 @@ class ProductUploadMasterV6Tests(unittest.TestCase):
         prompt = compose('Custom saved master: protect all artwork.', [scene] * 3)
         self.assertTrue(prompt.startswith(READ_FIRST))
         self.assertIn(AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n', prompt)
-        self.assertEqual(prompt.count(FINISHED_MOCKUPS), 4)  # master + three independent briefs
+        self.assertEqual(prompt.count(FINISHED_MOCKUPS), 1)
         self.assertNotIn('stop and wait', prompt)
         self.assertEqual(prompt.count('Selected camera angle: low three-quarter'), 9)
         self.assertTrue(INSTRUCTIONS.startswith(AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS))
@@ -81,12 +81,14 @@ Do not regenerate already approved cards.'''
         prompt = compose(INSTRUCTIONS, ['saved lounge', 'saved office', 'saved living room'])
         self.assertTrue(prompt.startswith(READ_FIRST))
         self.assertIn(INSTRUCTIONS, prompt)
-        self.assertEqual(prompt.count(PER_IMAGE), 3)
+        shared = PER_IMAGE.removeprefix(FINISHED_MOCKUPS + '\n\n')
+        self.assertEqual(prompt.count(shared), 1)
+        self.assertIn('into one focused visual brief for that card', prompt)
         for label, brief in zip(LABELS, ['saved lounge', 'saved office', 'saved living room']):
             self.assertIn(label, prompt)
             self.assertIn(brief, prompt)
         for requirement in ('Generate each COMPLETE mockup in one image-generation call', 'not guaranteed pixel-identical reproduction',
-                            'owner-confirmed large 87 × 62 cm landscape edition', 'premium glass; never ask for size or glazing confirmation',
+                            '87 cm wide × 62 cm high for landscape', 'No size confirmation is required',
                             '1024 × 1024', 'Inspect each actual result against the reference'):
             self.assertIn(requirement, PER_IMAGE)
         self.assertIn('Immediately generate Card 1 as one standalone image', INSTRUCTIONS)
@@ -223,3 +225,25 @@ def test_complete_set_requests_downloadable_role_manifest_without_renaming_asset
     assert 'do not claim completion' in prompt
     assert prompt.index(OUTPUT_MANIFEST) > prompt.index('## IMAGE 3')
     assert prompt.endswith(FINAL_CHECK)
+
+
+def test_combined_handoff_shares_only_identical_physical_requirements():
+    from sports_cave_physical_realism import BLOCK, build
+
+    block = build()
+    scenes = [f'Saved room, lighting and camera for {label}.\n\n{block}' for label in LABELS]
+    normalized = BLOCK.search(individual_prompt(scenes[0])).group()
+    prompt = compose(INSTRUCTIONS, scenes)
+    assert prompt.count(normalized) == 1
+    assert prompt.count('Include the full shared physical scale and frame realism block here.') == 3
+    assert all(f'Saved room, lighting and camera for {label}.' in prompt for label in LABELS)
+    assert all(normalized in individual_prompt(scene) for scene in scenes)
+
+    # A saved card can have its own physical requirement. Keep its entire
+    # block in place and leave the other cards individually scoped as well.
+    custom = block.replace('PHYSICAL QUALITY CHECK:', 'Retain the Office custom mounting specification.\nPHYSICAL QUALITY CHECK:')
+    scenes[1] = scenes[1].replace(block, custom)
+    prompt = compose(INSTRUCTIONS, scenes)
+    assert prompt.count(normalized) == 2
+    assert BLOCK.search(individual_prompt(scenes[1])).group() in prompt
+    assert 'SHARED PHYSICAL SCALE AND FRAME REALISM' not in prompt

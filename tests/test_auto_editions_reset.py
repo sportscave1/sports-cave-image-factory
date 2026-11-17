@@ -526,3 +526,67 @@ def test_reset_pending_status_overrides_current_v16_certificate(monkeypatch,stag
 def test_combined_release_retains_reset_and_quality_routes():
     paths={route[0] for route in status.ROUTES}
     assert {'/api/auto-editions/status/reset','/api/auto-editions/status/recheck'} <= paths
+
+
+def test_updated_mapped_source_prepares_once_preserving_generation(design,tmp_path):
+    d,sql,reset,old=design
+    sql.execute("UPDATE edition_products SET product_title='New marketing title'")
+    before=protected(sql);active=snapshot(selected(sql))
+    fresh=asset(rev='b2',content_hash='b'*64)
+    sql.execute("UPDATE auto_edition_discovery SET next_check_at=now()+interval '15 minutes'")
+    tick((d,sql),[fresh],metadata=fresh)
+    pending=selected(sql)['replacement']
+    assert pending['stage']=='Queued' and pending['source']==ae.source_identity(PID,fresh)
+    assert snapshot(selected(sql))==active and protected(sql)==before
+    sql.execute("UPDATE auto_edition_discovery SET next_check_at=now()")
+    tick((d,sql),[fresh],metadata=fresh)
+    assert selected(sql)['replacement']==pending
+    job=d.queue.claim('host')
+    with patch.object(api,'queue',return_value=d.queue),patch.object(api.runtime,'storage',return_value=SimpleNamespace(
+            integration=SimpleNamespace(psd_open_metadata=lambda *a,**kw:fresh),token='synthetic')):
+        context=api.product_context(PID,str(job['lease_token']))
+    assert context['source']==ae.source_identity(PID,fresh)
+    complete(design,job['lease_token'],tmp_path)
+    assert selected(sql)['replacement']['stage']=='Complete'
+    assert selected(sql)['source']==ae.source_identity(PID,fresh)
+    assert protected(sql)==before
+
+
+def test_activation_recovery_requeues_replacement_and_preserves_ready_generation(design, monkeypatch):
+    import auto_editions_recovery as recovery
+    from tests.test_auto_editions_backlog_recovery import CONFIG, resize_runtime
+
+    d, sql, _, _ = design
+    sql.execute((ROOT/'supabase/migrations/20261017001547_auto_editions_technical_completion.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    monkeypatch.delenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED',raising=False)
+    before = protected(sql)
+    active = snapshot(selected(sql))
+    fresh = asset(rev='b2',content_hash='b'*64)
+    tick((d,sql),[fresh],metadata=fresh)
+    claimed = d.queue.claim('host')
+    reason = 'Photoshop inspection failed: OSError'
+    d.queue.checkpoint(PID,str(claimed['lease_token']),'host','Blocked',reason)
+    assert selected(sql)['replacement']['stage'] == 'Failed'
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG), patch.object(
+            recovery,'native_runtime',return_value=resize_runtime()):
+        assert recovery.scan(d.connect,lambda _:fresh) == []
+        sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()-interval '1 minute' WHERE product_gid=%s",(PID,))
+        assert recovery.scan(d.connect,lambda _:fresh) == [PID]
+        assert recovery.scan(d.connect,lambda _:fresh) == []
+    assert selected(sql)['replacement']['stage'] == 'Queued'
+    assert snapshot(selected(sql)) == active
+    assert protected(sql) == before
+
+
+@pytest.mark.parametrize('kind',['deferred','busy','manual','changed_again'])
+def test_updated_source_respects_holds_and_freshness(design,kind):
+    d,sql,reset,old=design
+    if kind=='deferred':sql.execute('UPDATE auto_edition_onboarding SET priority=0 WHERE product_gid=%s',(PID,))
+    if kind=='busy':sql.execute("UPDATE auto_edition_onboarding SET status='Preparing' WHERE product_gid=%s",(PID,))
+    if kind=='manual':sql.execute("UPDATE auto_edition_onboarding SET replacement='{\"manual_required\":true}' WHERE product_gid=%s",(PID,))
+    before=selected(sql)
+    fresh=asset(rev='b2',content_hash='b'*64)
+    sql.execute('UPDATE auto_edition_discovery SET next_check_at=now()')
+    tick((d,sql),[fresh],metadata=asset(rev='c3',content_hash='c'*64) if kind=='changed_again' else fresh)
+    assert selected(sql)==before

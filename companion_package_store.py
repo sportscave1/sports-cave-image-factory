@@ -139,10 +139,12 @@ class Sessions:
                     ('Blocked' if terminal else 'Queued',json.dumps(dict(error='Package verification rejected.' if terminal else 'Durable processing retry pending.',error_type=type(error).__name__)),row['id']))
             return True
 
-    def cleanup(self,limit=2):
+    def cleanup(self,limit=2,*,acceptance_run=None):
         # Retain small tombstones so an expired ID cannot silently start over.
         with self.connect() as conn,conn.cursor() as cur:
-            cur.execute("SELECT * FROM companion_package_uploads WHERE expires_at<=now() AND state<>'Expired' ORDER BY expires_at FOR UPDATE SKIP LOCKED LIMIT %s",(limit,))
+            cur.execute("""SELECT * FROM companion_package_uploads WHERE expires_at<=now() AND state<>'Expired'
+                AND (%s::text IS NULL OR (context->>'acceptance_run'=%s AND context->>'cleanup_probe'='true'))
+                ORDER BY expires_at FOR UPDATE SKIP LOCKED LIMIT %s""",(acceptance_run,acceptance_run,limit))
             rows=cur.fetchall()
             for row in rows:
                 d=row['data'];receipt=d.get('receipt')

@@ -1,4 +1,4 @@
-﻿"""Offline direct-report contracts. Network and production stores are never used."""
+"""Offline direct-report contracts. Network and production stores are never used."""
 from datetime import date, datetime
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +34,39 @@ class MemoryTests(unittest.TestCase):
         cache.read('same', 20, fetch)
         self.assertEqual(len(calls), 2)
 
+    def test_distinct_cache_misses_can_overlap(self):
+        cache = direct.MemoryReports()
+        ready = threading.Barrier(2)
+
+        def load(key):
+            def fetch():
+                ready.wait(timeout=2)
+                return key
+            return cache.read(key, 60, fetch)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(list(pool.map(load, ('GSC', 'GA4'))), ['GSC', 'GA4'])
+
+    def test_clear_does_not_repopulate_with_in_flight_results(self):
+        cache = direct.MemoryReports()
+        started, release = threading.Event(), threading.Event()
+
+        def old_read():
+            started.set()
+            release.wait(timeout=2)
+            return 'old'
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(cache.read, 'key', 60, old_read)
+            try:
+                self.assertTrue(started.wait(timeout=2))
+                cache.clear()
+                self.assertEqual(cache.read('key', 60, lambda: 'new'), 'new')
+            finally:
+                release.set()
+            self.assertEqual(pending.result(), 'old')
+        self.assertEqual(cache.read('key', 60, lambda: 'unexpected'), 'new')
+
     def test_capacity_and_failure_not_cached(self):
         cache = direct.MemoryReports(max_bytes=100)
         for i in range(50):
@@ -63,6 +96,20 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(client.request_post.call_count, 1)
         self.assertEqual(cache.cooldowns['property'], 220)
 
+    def test_compatibility_reuses_only_the_exact_property_request(self):
+        cache = direct.MemoryReports()
+        client = direct.DirectTransport('fake', 'scope', cache=cache)
+        response = Mock(status_code=200)
+        response.json.return_value = {}
+        client.request_post = Mock(return_value=response)
+        endpoint = 'https://fixture.invalid/properties/1:checkCompatibility'
+        client._post(endpoint, {'metrics': []}, stage='compatibility')
+        client._post(endpoint, {'metrics': []}, stage='compatibility')
+        self.assertEqual(client.request_post.call_count, 1)
+        client._post(endpoint, {'metrics': [{'name': 'sessions'}]}, stage='compatibility')
+        client._post(endpoint.replace('/1:', '/2:'), {'metrics': []}, stage='compatibility')
+        self.assertEqual(client.request_post.call_count, 3)
+
     def test_low_ga4_quota_blocks_following_requests(self):
         cache = direct.MemoryReports(clock=lambda: 100)
         client = direct.DirectTransport('fake', 'p', cache=cache)
@@ -76,6 +123,15 @@ class TransportTests(unittest.TestCase):
 
 
 class ReportTests(unittest.TestCase):
+    def test_request_snapshot_reuses_connection_reads(self):
+        snapshot = self.reports.for_request(self.reports.connection())
+        self.assertEqual(snapshot.connection(), self.connection)
+        self.assertEqual(snapshot.connection(), self.connection)
+        self.store.get_connection.assert_called_once()
+        self.store.get_connection.return_value = {**self.connection, 'ga4_property_id': 'properties/2'}
+        self.assertEqual(self.reports.connection()['ga4_property_id'], 'properties/2')
+        self.assertEqual(snapshot.connection()['ga4_property_id'], 'properties/1')
+
     def setUp(self):
         self.connection = {'id': 'c', 'gsc_site_url': 'sc-domain:example.test', 'ga4_property_id': 'properties/1', 'updated_at': '2026-10-01T00:00:00Z'}
         self.store = Mock()

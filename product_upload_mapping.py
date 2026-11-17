@@ -147,6 +147,14 @@ class Mapping:
             raise ValueError('The captured PSD changed or is inaccessible. Restore that revision or start a new upload; no replacement was made.')
         return meta
 
+    @staticmethod
+    def _saved_package(row, expected=None, staff_job=None):
+        if staff_job:
+            from product_upload_staff_mapping import verified_package
+            return verified_package(row, staff_job, expected)
+        from product_upload_source import current_source
+        return current_source(row, expected)
+
     def _guard(self, key, actor, lease):
         """Fence side effects under the durable intake lock, including expired leases.
 
@@ -154,7 +162,6 @@ class Mapping:
         lease again before it can mutate anything. No process-local lock is authority.
         """
         from contextlib import contextmanager
-        from product_upload_source import current_source
         @contextmanager
         def locked():
             with self.store.locked(key, actor['id'], provider_io=True) as (row, cur):
@@ -164,7 +171,11 @@ class Mapping:
                     raise ValueError('This attempt was retired by manual PSD mapping. Use the Edition Ops link.')
                 if task.get('lease') != lease:
                     raise ValueError('Another attempt owns Map. Refresh its progress.')
-                current_source(row, task['source_version'])
+                staff_job = task.get('staff_job')
+                self._saved_package(row, task['source_version'], staff_job)
+                if staff_job:
+                    from product_upload_staff_mapping import require_job
+                    require_job(cur, staff_job, row, stages=(5,))
                 if row['mode'] != task['mode']:
                     raise ValueError('The upload mode changed. Retry with the current saved operation.')
                 task['lease_until'] = (now()+timedelta(minutes=5)).isoformat()
@@ -284,11 +295,13 @@ class Mapping:
             source = op['source']
             verify(cur, key, product['shopify_product_id'], source['id'])
             live_path = roots['live']['path']
-            # Preserve a pre-existing master name; Review masters use the existing
-            # Edition Ops display name and existing filename sanitiser. The intent
-            # never changes on retry; edition_name is a run label, not this name.
-            target = (source['path_display'] if source['path_display'].rsplit('/',1)[0].casefold() == live_path.casefold()
-                      else live_path+'/'+filename(task['edition_title']))
+            # Publish Now preserves the selected filename as before. Manual Map
+            # retains its Edition Ops display-name convention for Review masters.
+            parent, original_name = source['path_display'].rsplit('/', 1)
+            target = source['path_display']
+            if parent.casefold() != live_path.casefold():
+                name = original_name if task.get('staff_job') else filename(task['edition_title'])
+                target = live_path + '/' + name
             task.setdefault('move_intent', dict(source=deepcopy(source), to=target, folder=roots['live']))
             if task['move_intent']['folder'] != roots['live']:
                 raise ValueError('The configured live-designs destination changed. Review the saved move intent.')
@@ -318,10 +331,9 @@ class Mapping:
             task['moved'] = deepcopy(fresh)
             return fresh
 
-    def map(self, key, actor, *, product_id=None, confirmed_limit=None, source_version=None, confirm_product=False):
+    def map(self, key, actor, *, product_id=None, confirmed_limit=None, source_version=None, confirm_product=False, staff_job=None):
         import os_accounts
         from time import monotonic
-        from product_upload_source import current_source
         from product_upload_mapping_hold import acquire, verify
         if not os_accounts.can_attach_missing_psd(actor):
             raise PermissionError('Your account needs permission to attach a product PSD.')
@@ -330,7 +342,9 @@ class Mapping:
         if prior_task.get('manual_takeover'):
             raise ValueError('This attempt was retired by manual PSD mapping. Use the Edition Ops link.')
         if prior_task.get('state') == 'Mapped':
-            current_source(prior, source_version)
+            if staff_job and product_id != prior['data']['upload_operation'].get('product_id'):
+                raise ValueError('This PSD was mapped to a different product. The existing mapping was preserved.')
+            self._saved_package(prior, source_version, staff_job or prior_task.get('staff_job'))
             result = self.status(key, actor)
             meta = self.provider.metadata_if_present(prior_task['moved']['id'])
             if result['state']=='Mapped' and meta and all(meta.get(k)==prior_task['moved'].get(k) for k in ('id','rev','content_hash','path_display','size')):
@@ -338,8 +352,13 @@ class Mapping:
             raise ValueError('The mapped PSD or edition run changed. Use the existing replacement workflow.')
         lease = str(uuid.uuid4()); started = monotonic()
         with self.store.locked(key, actor['id']) as (row, cur):
-            source = current_source(row, source_version)
+            source = self._saved_package(row, source_version, staff_job)
+            if staff_job:
+                from product_upload_staff_mapping import require_job
+                require_job(cur, staff_job, row, stages=(5,))
             op = operation(row); task = op.setdefault('sync_map', {})
+            if task.get('staff_job') and task['staff_job'] != staff_job:
+                raise ValueError('The Publish Now companion owns this saved mapping attempt.')
             if task.get('manual_takeover'):
                 raise ValueError('This attempt was retired by manual PSD mapping. Use the Edition Ops link.')
             if row['data'].get('lifecycle'):
@@ -350,6 +369,8 @@ class Mapping:
                 return self._status_row(row)
             task.update(lease=lease, lease_until=(now()+timedelta(minutes=5)).isoformat(), state='Mapping…', error='',
                         stage='Finding product in Edition Ops', source_version=source['version'], mode=row['mode'], needs_limit=False, needs_product=False, candidates=[], resume_upload_id=None)
+            if staff_job:
+                task['staff_job'] = staff_job
             task.setdefault('completed', [])
             captured = deepcopy(row)
         stage = 'Finding product in Edition Ops'; phase = monotonic()
@@ -367,7 +388,12 @@ class Mapping:
             original = operation(captured)['source']
             existing=self._mapping_conflicts(pid, original)
             reuse=bool(existing and existing.get('verified') and existing['file_path']==original['path_display'])
-            if reuse:self._verify_existing_revision(pid,original)
+            if reuse:
+                if staff_job:
+                    from psd_directory import ROOT
+                    if original['path_display'].rsplit('/', 1)[0].casefold() != ROOT.casefold():
+                        raise ValueError('The existing mapping points outside the live folder. Review it before continuing.')
+                self._verify_existing_revision(pid,original)
             # Reject a changed initial source before registration or any movement.
             if not captured['data']['upload_operation']['sync_map'].get('move_intent'):
                 self.source(captured)
@@ -421,6 +447,8 @@ class Mapping:
                     raise ValueError('The PSD mapping changed before finalisation. Nothing was replaced.')
                 task.update(state='Mapped', error='', verified_at=now().isoformat(), preparation_held=False,
                             elapsed_ms=round((monotonic()-started)*1000,2))
+                if staff_job:
+                    row['data']['shopify_completion'] = 'Listing updated' if row['mode'] == 'UPDATE' else 'Published live'
                 if stage not in task['completed']: task['completed'].append(stage)
                 task.setdefault('timings_ms', {})[stage] = round((monotonic()-phase)*1000,2)
                 # Publish readiness and admit the existing preparation queue in
@@ -429,11 +457,16 @@ class Mapping:
                 cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb WHERE id=%s',(json.dumps(row['data']),key))
                 from auto_editions_onboarding_store import Queue
                 import auto_editions as ae
-                if not reuse:
+                if not reuse or staff_job:
                     expected_source=ae.source_identity(pid,moved)
                     Queue(self.connect).enqueue_cursor(cur,pid,moved['id'],str(actor['id']),expected_source=expected_source)
                     cur.execute('UPDATE auto_edition_onboarding SET source=%s::jsonb WHERE product_gid=%s AND file_id=%s AND source IS NULL',
                                 (json.dumps(expected_source),pid,moved['id']))
+                if staff_job:
+                    cur.execute('SELECT 1 FROM auto_edition_onboarding WHERE product_gid=%s AND file_id=%s',
+                                (pid, moved['id']))
+                    if not cur.fetchone():
+                        raise ValueError('Auto Editions did not confirm the exact PSD handoff.')
                 self.mappings._audit(cur,pid,'attach',str(actor['id']),None,dict(product_id=pid,run_id=task['run_id'],ready=True,source=moved))
         except Exception as error:
             import logging
@@ -480,12 +513,11 @@ class Mapping:
     def status(self, key, actor):
         """Small DB reads only: polling must never contact Shopify or Dropbox."""
         try:
-            from product_upload_source import current_source
             row = self.store.read(key, actor['id'])
             if not row: raise ValueError('Saved upload unavailable to this account.')
             op = row['data'].get('upload_operation') or {}; task = op.get('sync_map') or {}
             if task:
-                current_source(row, task.get('source_version'))
+                self._saved_package(row, task.get('source_version'), task.get('staff_job'))
                 if task.get('mode') != row['mode']: raise ValueError('Upload mode changed. Retry Map.')
             result = self._status_row(row)
             if result['state']=='Mapped':

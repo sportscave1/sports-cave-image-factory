@@ -763,6 +763,8 @@ def build_notifications(claims, *, activity_rows=(), alerts=()):
     items = []
     seen = set()
     for row in activity_rows or ():
+        if row.get("event_type") == "wall_inbox_image_received":
+            continue
         if row.get("event_type") == "new_email_received":
             if "Email" not in set(claims.get("allowed_routes") or ()):
                 continue
@@ -835,6 +837,7 @@ def load_notification_sources(claims):
                             SELECT event_type, entity_type, entity_id, source,
                                    created_at, new_value
                             FROM audit_logs
+                            WHERE event_type IS DISTINCT FROM 'wall_inbox_image_received'
                             ORDER BY created_at DESC
                             LIMIT 24
                             """
@@ -864,25 +867,12 @@ async def top_bar_notifications(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    counts_only = request.query_params.get('counts_only') == '1'
-    activity_rows, alerts = ((), ()) if counts_only else await run_in_threadpool(load_notification_sources, claims)
-    from wall_preview_notifications import status as wall_status
-    try:
-        wall = await run_in_threadpool(wall_status, claims, count_only=True) if counts_only else await run_in_threadpool(wall_status, claims)
-    except Exception:
-        wall = {"unread_count": None, "notifications": []}
 
-    return _json(
-        {
-            "ok": True,
-            "wall_unread_count": wall["unread_count"],
-            "notifications": wall["notifications"] + build_notifications(
-                claims,
-                activity_rows=activity_rows,
-                alerts=alerts,
-            ),
-        }
-    )
+    activity_rows, alerts = ((), ()) if request.query_params.get("counts_only") == "1" else await run_in_threadpool(load_notification_sources, claims)
+    return _json({
+        "ok": True,
+        "notifications": build_notifications(claims, activity_rows=activity_rows, alerts=alerts),
+    })
 
 
 def load_order_status(claims):

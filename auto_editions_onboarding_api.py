@@ -296,11 +296,12 @@ def product_context(pid, token):
                 raise ValueError('Mapped source is not an approved original PSD.')
     if reset_id:
         import psd_directory as psd
-        if pending.get('expected_source'):
+        pinned_source=pending.get('updated_source') or pending.get('expected_source')
+        if pinned_source:
             from auto_editions_reset import repair_candidate
             with store.connect() as conn,conn.cursor() as cur:
                 chosen,_,why=repair_candidate(cur,pid,pending)
-            if not chosen or not psd.approved_file(meta) or ae.source_identity(pid,meta)!=pending['expected_source']:
+            if not chosen or not psd.approved_file(meta) or ae.source_identity(pid,meta)!=pinned_source:
                 raise ValueError(why or 'Pinned repair source changed before preparation.')
         elif not psd.approved_file(meta) or psd.filename_key(meta['name'][:-4]) not in psd.title_filename_keys(row['product_title']):
             raise ValueError('Reset original PSD no longer matches the product.')

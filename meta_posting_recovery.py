@@ -105,15 +105,6 @@ class RecoveryStore:
         return result
 
     def update_stage(self, submission_id, status, **fields):
-        # The template-copy service can resolve a lost POST response by reading
-        # and verifying the route copy. Preserve that authoritative recovery.
-        for row in fields.get('ad_results') or []:
-            if row.get('status') == 'CREATED' and row.get('meta_ad_configured_status') == 'PAUSED' and row.get('meta_ad_id'):
-                for operation in self.journal.values():
-                    if (operation.get('state') == 'pending'
-                            and operation.get('operation') == 'copy_paused_ad_from_template'
-                            and operation.get('route') == row.get('index')):
-                        operation.update(state='complete', result=row['meta_ad_id'])
         if self.journal:
             rows = deepcopy(fields.get('ad_results', self.record.get('ad_results')) or [{'index': 1}])
             rows[0][KEY] = deepcopy(self.journal)
@@ -122,6 +113,15 @@ class RecoveryStore:
         result = self.raw.update_stage(submission_id, status, **fields)
         self.record = deepcopy(result or {**self.record, **fields, 'status': status})
         return result
+
+    def completed_route_copy_id(self):
+        return next((
+            str(entry["result"]) for entry in self.journal.values()
+            if entry.get("operation") == "copy_paused_ad_from_template"
+            and entry.get("route") == self.route
+            and entry.get("state") == "complete"
+            and entry.get("result")
+        ), "")
 
     def persist(self):
         self.update_stage(self.record['submission_id'], self.record['status'])

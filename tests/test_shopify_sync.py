@@ -2888,7 +2888,9 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertIn("lineItems(first: 100)", shopify_sync.ORDERS_LIGHT_QUERY)
         self.assertNotIn("metafields(first: 20", shopify_sync.ORDERS_LIGHT_QUERY)
         self.assertNotIn("billingAddress", shopify_sync.ORDERS_LIGHT_QUERY)
-        self.assertNotIn("totalPriceSet", shopify_sync.ORDERS_LIGHT_QUERY)
+        # Required financial pair is small and must survive reconciliation.
+        self.assertIn("totalPriceSet", shopify_sync.ORDERS_LIGHT_QUERY)
+        self.assertIn("currencyCode", shopify_sync.ORDERS_LIGHT_QUERY)
         # Paid-but-cancelled orders must be rejected before allocation, so the
         # bounded reconciliation payload deliberately retains this small field.
         self.assertIn("cancelledAt", shopify_sync.ORDERS_LIGHT_QUERY)

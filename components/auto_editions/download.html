@@ -4,7 +4,7 @@
 <details id="resolution" hidden><summary id="resolution-summary"></summary><p id="resolution-details"></p><small id="resolution-notes"></small></details>
 <script>
 const state=document.getElementById('state'),link=document.getElementById('download'),retry=document.getElementById('retry');
-const id=new URLSearchParams(location.search).get('allocation_id');let stopped=false,busy=false,job=null,ready=null,cancelDelivery=null;
+const id=new URLSearchParams(location.search).get('allocation_id');let stopped=false,busy=false,job=null,ready=null,cancelDelivery=null,retryJob=false,canRetry=true;
 const requests=new Set();
 addEventListener('pagehide',()=>{stopped=true;for(const c of requests)c.abort();cancelDelivery?.();});
 function progress(text,spinning=true){state.className=spinning?'spin':'';state.textContent=text;}
@@ -31,20 +31,23 @@ async function transfer(){
  if(!stopped)progress('Download started',false);
 }
 async function begin(){
- if(busy||stopped)return;busy=true;retry.hidden=true;link.setAttribute('aria-disabled','true');
+ if(busy||stopped)return;busy=true;retry.hidden=true;canRetry=true;link.setAttribute('aria-disabled','true');
  try{
   if(!ready){progress('Preparing JPG\u2026');const query='?allocation_id='+encodeURIComponent(id);
-   job ||= await request('/api/auto-editions/start'+query,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+   if(!job||retryJob){
+    job=await request('/api/auto-editions/'+(retryJob?'retry':'start')+query,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    retryJob=false;
+   }
    const suffix=query+'&job_id='+encodeURIComponent(job.job_id),deadline=performance.now()+360000;
    while(!stopped&&performance.now()<deadline){const r=await request('/api/auto-editions/state'+suffix);
-    if(r.status==='Blocked')throw Error('JPG preparation is blocked. Ask an administrator to review this design.');
+    if(r.status==='Blocked'){retryJob=true;canRetry=r.retryable!==false;throw Error(r.error_message||'JPG preparation is blocked. Ask an administrator to review this design.');}
     if(r.status==='Ready'){ready=r;resolutionInfo(r.resolution_info);document.getElementById('certification').textContent=r.resolution_info?.output_status==='TEST / NOT PRINT READY'?'TEST / NOT PRINT READY. Archived original download; supplier validation remains required.':r.test_only===false?'Supplier-validated output. Order fulfilment requires separate authorisation.':'TEST / NOT PRINT READY. Archived original download; supplier validation remains required.';link.href='/api/auto-editions/file'+suffix;link.download=r.filename;link.hidden=false;break;}
     await new Promise(resolve=>setTimeout(resolve,750));
    }
    if(stopped)return;if(!ready)throw Error('JPG preparation is taking longer than expected. Retry to check the same job.');
   }
   await transfer();
- }catch(error){if(!stopped){progress(error.message,false);retry.hidden=false;}}
+ }catch(error){if(!stopped){progress(error.message,false);retry.hidden=!canRetry;}}
  finally{busy=false;link.setAttribute('aria-disabled','false');}
 }
 retry.onclick=begin;link.onclick=event=>{event.preventDefault();begin();};begin();

@@ -64,14 +64,11 @@ def render_panel(st_module, components, user):
 
 def render_status(st_module, user, local_now):
     """Render only local markup; the shell supplies its existing timer mirror."""
-    from html import escape
-
-    hour = local_now.hour
-    greeting = "Good morning" if 5 <= hour < 12 else "Good afternoon" if 12 <= hour < 17 else "Good night"
-    name = str((user or {}).get("display_name") or "").strip()
-    markup = f'<div id="sc-home-greeting" class="sc-home-greeting">{escape(greeting + ", " + name) if name else ""}</div>'
-    if os_accounts.is_admin(user):
-        markup += ('<button id="sc-home-active-planner" class="sc-home-active-planner" type="button" hidden>'
-                   '<span class="sc-home-active-task"></span><span class="sc-home-active-time"></span>'
-                   '<span>Open Planner</span></button>')
-    st_module.markdown(markup, unsafe_allow_html=True)
+    if not os_accounts.is_admin(user):
+        return
+    st_module.markdown(
+        '<button id="sc-home-active-planner" class="sc-home-active-planner" type="button" hidden>'
+        '<span class="sc-home-active-task"></span><span class="sc-home-active-time"></span>'
+        '<span>Open Planner</span></button>',
+        unsafe_allow_html=True,
+    )

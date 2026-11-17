@@ -75,9 +75,9 @@ def campaign_image_slots(campaign_type, *, carousel_count=5):
             {
                 "id": concept["slot_id"],
                 "concept_id": concept["id"],
-                "label": f"{concept['display_name']} Cover",
-                "display_name": concept["display_name"],
-                "supporting_label": concept["supporting_label"],
+                "label": f"{concept['scene_name']} Cover",
+                "display_name": concept["scene_name"],
+                "supporting_label": concept["scene_label"],
                 "folder": concept["folder"],
                 "filename_prefix": concept["filename_prefix"],
                 "position": concept["position"],

@@ -66,8 +66,19 @@ def test_private_schema_real_transactions_lost_ack_and_safe_cleanup(database,tmp
         assert client.post('/api/auto-editions/acceptance/finalize?id='+key,headers=headers,json={}).json()['state']=='Queued'
     with acceptance.connect() as conn,conn.cursor() as cursor:
         cursor.execute('SELECT * FROM companion_package_uploads WHERE id=%s',(key,));row=cursor.fetchone()
+    # A prior expired run must not be handled with this run's scoped provider.
+    previous_run = 'c' * 32
+    with acceptance.connect() as conn, conn.cursor() as cursor:
+        cursor.execute("""INSERT INTO companion_package_uploads
+            (id,owner_id,host_hash,shop_origin,context,descriptor,state,data,expires_at)
+            SELECT %s,owner_id,host_hash,shop_origin,%s::jsonb,descriptor,state,data,now()-interval '1 day'
+            FROM companion_package_uploads WHERE id=%s""",
+            ('d'*64,json.dumps({'acceptance_run':previous_run,'cleanup_probe':True}),key))
     result=acceptance.cleanup_probe(acceptance.service(),'fixture-admin',digest,row['context'],d)
     assert result['expired_sessions']==1
+    with acceptance.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT state FROM companion_package_uploads WHERE id=%s', ('d'*64,))
+        assert cursor.fetchone()['state']=='Queued'
     assert acceptance.service().status(key,'fixture-admin',digest)['state']=='Queued'
     # Same real validation/publication code, with a private file adapter locally.
     import auto_editions as ae,dropbox_integration as integration,files_upload_api

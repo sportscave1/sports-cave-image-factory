@@ -778,6 +778,19 @@ def consume_saved_posting_package(product_records, *, state=None):
     if package["ad_type"] == "Instant Experience":
         for key, ad in zip(DESCRIPTION_KEYS, batch["ads"]):
             staging[key] = str(ad.get("description") or "")
+    settings = package.get('posting_settings') or {}
+    if settings:
+        if settings.get('submission_id'):
+            from uuid import UUID
+            try:
+                staging[SUBMISSION_ID_KEY] = str(UUID(str(settings['submission_id'])))
+            except ValueError as error:
+                raise posting_handoff.SavedPackageError('The saved posting job reference is invalid.') from error
+        staging[PRODUCT_SET_KEY] = str(settings.get('product_set_id') or '')
+        staging[AUDIENCE_KEY] = str((settings.get('audience') or {}).get('key') or 'broad')
+        staging[POSTING_MODE_KEY] = POSTING_MODE_LABELS.get(settings.get('posting_mode'), POSTING_MODE_LABELS[POSTING_MODE_NEW])
+        staging[EXISTING_CAMPAIGN_KEY] = str(settings.get('target_campaign_id') or '')
+        staging[EXISTING_ADSET_KEY] = str(settings.get('target_adset_id') or '')
     staging[AD_TYPE_KEY] = package["ad_type"]
     staging[SAVED_PRODUCT_URL_KEY] = {
         "product_identity": staging[PRODUCT_KEY], "url": batch["product_url"],
@@ -1730,6 +1743,8 @@ def render_page():
     with st.container(key="post-ad-workspace"):
         _render_post_ad()
     render_current(compact=True)
+    from ads_auto_post import scroll_to_top
+    scroll_to_top(st)
 
 
 def _render_post_ad():
@@ -2037,9 +2052,6 @@ def _render_post_ad():
             else ""
         )
         catalog_label = str(catalog_resolution.get("name") or EXPECTED_CATALOG_NAME)
-        meta_cols[0].text_input(
-            "Catalog", value=catalog_label if catalog_id else "Not resolved", disabled=True
-        )
         if not catalog_id:
             message = str(
                 catalog_resolution.get("error")
@@ -2085,7 +2097,7 @@ def _render_post_ad():
             "URL and does not use or modify a Catalog or Product Set."
         )
 
-    audience_cols = st.columns(2)
+    audience_cols = (meta_cols[0], meta_cols[1])
     if posting_mode == POSTING_MODE_EXISTING:
         audience_cols[0].text_input(
             "Audience",
@@ -2111,16 +2123,6 @@ def _render_post_ad():
         inherited_lifecycle_label = str(inherited_lifecycle.get("label") or "")
         if inherited_lifecycle.get("strategy") == CUSTOMER_LIFECYCLE_UNKNOWN:
             inherited_lifecycle_label = ""
-        audience_cols[1].text_input(
-            "Customer Lifecycle Strategy",
-            value=(
-                f"Inherited: {inherited_lifecycle_label}"
-                if inherited_lifecycle_label
-                else "Inherited from selected Ad Set"
-            ),
-            disabled=True,
-        )
-        st.caption("Customer lifecycle settings will not be changed.")
         customer_lifecycle_strategy = ""
     else:
         audiences = _audience_options(references)
@@ -2140,24 +2142,10 @@ def _render_post_ad():
             key=AUDIENCE_KEY,
         )
         audience = audience_by_key[audience_key]
-        customer_lifecycle_strategy = audience_cols[1].selectbox(
-            "Customer Lifecycle Strategy",
-            (
-                CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
-                CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
-            ),
-            format_func=lambda value: CUSTOMER_LIFECYCLE_LABELS[value],
-            key=CUSTOMER_LIFECYCLE_KEY,
-            disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
-        )
-        if customer_lifecycle_strategy == CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS:
-            st.info(
-                "Acquire new customers is not available yet because Meta's complete "
-                "existing-customer audience contract has not been verified."
-            )
+        customer_lifecycle_strategy = CUSTOMER_LIFECYCLE_ALL_AUDIENCES
+        st.session_state[CUSTOMER_LIFECYCLE_KEY] = customer_lifecycle_strategy
     dataset_id = str(dataset_resolution.get("id") or "") if dataset_resolution.get("resolved") else ""
     dataset_label = str(dataset_resolution.get("name") or EXPECTED_PIXEL_NAME) if dataset_id else "Unresolved"
-    st.text_input("Dataset", value=dataset_label, disabled=True)
     if not dataset_id:
         dataset_error = str(dataset_resolution.get("error") or "Meta references have not been refreshed yet.")
         if references or references_error:

@@ -11,6 +11,7 @@ import meta_review_retry as retry
 
 import meta_ads_client as meta
 import meta_review_benchmarks as benchmarks
+from meta_reporting_contract import REPORTABLE_CAMPAIGN_STATUSES
 
 CAMPAIGN_FIELDS = 'id,name,status,effective_status,objective,created_time,updated_time,start_time,stop_time'
 AD_FIELDS = ('id,name,status,effective_status,adset_id,creative{id,name,thumbnail_url,'
@@ -46,7 +47,6 @@ def singleflight(key, loader):
     finally:
         with _flight_lock:
             _flights.pop(key, None)
-REPORTABLE_CAMPAIGN_STATUSES = ('ACTIVE', 'PAUSED', 'ARCHIVED')
 LOGGER = logging.getLogger(__name__)
 
 

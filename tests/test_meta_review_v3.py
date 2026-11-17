@@ -1,4 +1,5 @@
 """Offline reliability contracts. Never contacts Meta or writes advertising data."""
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 import time
@@ -11,6 +12,11 @@ import meta_review_retry as retry
 from tests.test_meta_review_live import CONFIG
 
 class RetryTests(unittest.TestCase):
+    def setUp(self):
+        cooldowns = patch.object(retry, '_cooldowns', {})
+        cooldowns.start()
+        self.addCleanup(cooldowns.stop)
+
     def run_read(self, responses):
         sleeps=[]
         with patch.object(meta,'_request',side_effect=responses) as request:
@@ -20,7 +26,7 @@ class RetryTests(unittest.TestCase):
 
     def test_transient_matrix_recovers(self):
         for status,code,subcode in [(400,2,1504044),(500,None,None),(502,None,None),
-                                    (503,None,None),(504,None,None),(429,None,None),(400,4,None),(400,613,None)]:
+                                    (503,None,None),(504,None,None)]:
             with self.subTest(status=status,code=code):
                 result,count,sleeps=self.run_read([meta.MetaAdsApiError('temporary',status_code=status,error_code=code,error_subcode=subcode),{'data':[]}])
                 self.assertEqual((result,count,sleeps),({'data':[]},2,[1]))
@@ -42,14 +48,51 @@ class RetryTests(unittest.TestCase):
             error=meta.MetaAdsApiError('transport'); error.__cause__=cause
             self.assertEqual(self.run_read([error,{'data':[]}])[1],2)
 
-    def test_exhaustion_and_retry_after_budget(self):
-        for wait,expected in [(None,3),('90',1)]:
-            error=meta.MetaAdsApiError('limited',status_code=429,retry_after=wait)
-            with patch.object(meta,'_request',side_effect=error) as request:
-                with self.assertRaises(meta.MetaAdsApiError):
-                    retry.get('x',{},CONFIG,35,clock=lambda:0,sleep=lambda _:None,jitter=lambda a,b:0)
-                self.assertEqual(request.call_count,expected)
-        self.assertEqual(self.run_read([meta.MetaAdsApiError('limited',status_code=429,retry_after='5'),{}])[2],[5])
+    def test_transient_retry_budget(self):
+        error = meta.MetaAdsApiError('unavailable', status_code=503)
+        with patch.object(meta, '_request', side_effect=error) as request:
+            with self.assertRaises(meta.MetaAdsApiError):
+                retry.get('x', {}, CONFIG, 35, clock=lambda: 0,
+                          sleep=lambda _: None, jitter=lambda a, b: 0)
+            self.assertEqual(request.call_count, 3)
+        self.assertEqual(self.run_read([
+            meta.MetaAdsApiError('unavailable', status_code=503, retry_after='5'), {}
+        ])[2], [5])
+
+    def test_rate_limits_stop_reporting_across_endpoints_for_the_account(self):
+        for status, code, subcode in ((400, 17, 2446079), (429, None, None),
+                                      (400, 80000, None), (400, 80004, None)):
+            with self.subTest(code=code), patch.object(retry, '_cooldowns', {}):
+                throttled = meta.MetaAdsApiError(
+                    'limited', status_code=status, error_code=code, error_subcode=subcode
+                )
+                other = {**CONFIG, 'ad_account_id': 'act_999'}
+                with patch.object(meta, '_request', side_effect=[throttled, {}, {}]) as request:
+                    with self.assertRaises(retry.ReportingCooldown) as first:
+                        retry.get('act_123', {}, CONFIG, 150, clock=lambda: 0)
+                    self.assertEqual(first.exception.retry_after, 120)
+                    with self.assertRaises(retry.ReportingCooldown) as blocked:
+                        retry.get('act_123/insights', {}, CONFIG, 150, clock=lambda: 1)
+                    self.assertEqual(blocked.exception.retry_after, 119)
+                    self.assertEqual(request.call_count, 1)
+                    retry.get('act_999/insights', {}, other, 150, clock=lambda: 1)
+                    retry.get('act_123/insights', {}, CONFIG, 150, clock=lambda: 120)
+                    self.assertEqual(request.call_count, 3)
+
+    def test_meta_usage_header_governs_reporting_cooldown(self):
+        response = Mock(ok=False, status_code=400, headers={
+            'Retry-After': '30',
+            'X-Business-Use-Case-Usage': json.dumps({'account': [
+                {'type': 'ads_management', 'estimated_time_to_regain_access': 4},
+                {'type': 'pages', 'estimated_time_to_regain_access': 8},
+            ]}),
+        })
+        response.json.return_value = {'error': {'code': 17, 'error_subcode': 2446079}}
+        with patch.object(meta.requests, 'get', return_value=response) as get:
+            with self.assertRaises(retry.ReportingCooldown) as caught:
+                retry.get('act_123', {}, CONFIG, 35, clock=lambda: 0)
+            self.assertEqual(caught.exception.retry_after, 240)
+            get.assert_called_once()
 
     def test_metadata_and_timeout_propagation_get_only(self):
         response=Mock(ok=False,status_code=400,headers={'Retry-After':'3'})

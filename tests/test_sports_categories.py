@@ -41,12 +41,27 @@ class SportRegistryTests(unittest.TestCase):
         self.assertTrue(audit['active_products_complete'])
         by_handle = {c['handle']: c for c in audit['collections']}
         for sport, handles in sports.SPORT_COLLECTION_HANDLES.items():
+            if sport == 'Darts':
+                continue  # Verified after the historical audit fixture.
             for handle in handles:
                 self.assertIn(handle, by_handle)
                 self.assertEqual(sports.normalize_sport_category(by_handle[handle]['title']), sport)
         for collection in audit['collections']:
             if collection['handle'] not in {h for hs in sports.SPORT_COLLECTION_HANDLES.values() for h in hs}:
                 self.assertEqual(sports.normalize_sport_category(collection['title']), '', collection['title'])
+
+    def test_darts_collection_is_recognized_across_workflows(self):
+        from product_upload_collections import preview_collections
+        from product_upload_compact import sport_requirements
+
+        collection = {'id': 'darts', 'title': 'Darts Wall Art', 'handle': 'darts-wall-art', 'ruleSet': None}
+        self.assertIn('Darts', sports.sport_category_options())
+        self.assertEqual(sports.normalize_sport_category(collection['handle']), 'Darts')
+        self.assertEqual(sports.detect_sport_in_text('Champion Darts Wall Art'), 'Darts')
+        self.assertEqual(preview_collections({'sport': 'Darts'}, [collection])['manual_ids'], ['darts'])
+        requirements = sport_requirements({'sport_category': 'Darts'})
+        self.assertEqual(requirements['collection_handles'], ['darts-wall-art'])
+        self.assertIn('SC_SPORT_DARTS', requirements['required_tags'])
 
     def test_hierarchy_does_not_guess_unrelated_sports(self):
         self.assertEqual(sports.infer_sport_category(['Formula One Wall Art', 'Motor Racing Wall Art']), 'Formula One')
@@ -217,9 +232,9 @@ for label, options in providers.items():
         for widget in app.selectbox:
             self.assertEqual(widget.value, 'Rugby League')
             self.assertTrue(set(sports.CANONICAL_SPORT_CATEGORIES) <= set(widget.options))
-        app.selectbox[0].select('MotoGP').run()
+        app.selectbox[0].select('Darts').run()
         app.run()
-        self.assertEqual(app.selectbox[0].value, 'MotoGP')
+        self.assertEqual(app.selectbox[0].value, 'Darts')
         self.assertEqual(app.selectbox[1].value, 'Rugby League')
 
 

@@ -561,11 +561,11 @@ class PostingNavigationTests(unittest.TestCase):
 
     def test_lifecycle_ui_defaults_all_audiences_and_keeps_acquisition_fail_closed(self):
         source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
-        self.assertIn('"Customer Lifecycle Strategy"', source)
+        self.assertNotIn('"Customer Lifecycle Strategy"', source)
         self.assertIn("CUSTOMER_LIFECYCLE_ALL_AUDIENCES", source)
         self.assertIn("CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS", source)
-        self.assertIn("Acquire new customers is not available yet", source)
-        self.assertIn("Customer lifecycle settings will not be changed.", source)
+        self.assertIn("customer_lifecycle_strategy = CUSTOMER_LIFECYCLE_ALL_AUDIENCES", source)
+        self.assertIn('customer_lifecycle_strategy = ""', source)
 
     def test_existing_adset_options_are_filtered_by_campaign(self):
         targets = {
@@ -2809,8 +2809,9 @@ class PostingServiceTests(unittest.TestCase):
             all(row["duration_ms"] == 1000.0 for row in result["performance_trace"])
         )
         self.assertEqual(client.calls.count("read_instant_experience"), 3)
-        self.assertEqual(client.calls.count("read_ad"), 13)
-        self.assertEqual(client.calls.count("read_creative"), 7)
+        self.assertEqual(client.calls.count("read_template_copies"), 0)
+        self.assertEqual(client.calls.count("read_ad"), 10)
+        self.assertEqual(client.calls.count("read_creative"), 4)
         self.assertEqual(client.calls.count("read_product_set_health"), 0)
         self.assertEqual(store.claims, 1)
         # Original 28 checkpoints plus an intent/result pair for each of 29
@@ -3195,6 +3196,7 @@ class PostingServiceTests(unittest.TestCase):
                 "meta_canvas_button_element_id": "existing-button-element",
                 "meta_canvas_footer_element_id": "existing-footer-element",
                 "meta_instant_experience_id": "1390026833255926",
+                "meta_ad_id": "120249733966310554",
                 "status": "FAILED",
             }
         )
@@ -3404,7 +3406,7 @@ class PostingServiceTests(unittest.TestCase):
                     "meta_canvas_button_element_id": f"existing-button-element-{route}",
                     "meta_canvas_footer_element_id": f"existing-footer-element-{route}",
                     "meta_instant_experience_id": ia_ids[index],
-                    "meta_ad_id": ad_ids[index] if index == 0 else "",
+                    "meta_ad_id": ad_ids[index],
                     "meta_creative_id": f"existing-creative-{route}" if index == 0 else "",
                     "meta_ad_configured_status": "PAUSED" if index == 0 else "",
                     "status": "CREATED" if index == 0 else "VERIFICATION_PENDING",

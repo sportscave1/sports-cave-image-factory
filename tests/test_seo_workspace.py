@@ -31,7 +31,7 @@ class SEONavigationTests(unittest.TestCase):
         self.assertEqual(parent["route"], seo.SEO_OVERVIEW_ROUTE)
         self.assertEqual(parent["label"], "SEO")
         self.assertTrue(parent["worker_assignable"])
-        self.assertEqual(len(__import__("seo_navigation").SEO_MENU_ROUTES), 5)
+        self.assertEqual(len(seo_navigation.SEO_MENU_ROUTES), 4)
         self.assertEqual(
             seo.SEO_ROUTES[:7],
             (
@@ -51,8 +51,11 @@ class SEONavigationTests(unittest.TestCase):
         for route in seo.SEO_ROUTES[1:]:
             page = os_accounts.PAGE_BY_ROUTE[route]
             self.assertFalse(page["worker_assignable"])
-            self.assertEqual(page["parent_key"], seo.SEO_PAGE_KEY)
-            self.assertTrue(page["navigation_child"])
+            if route == seo_navigation.SEO_ANALYTICS_ROUTE:
+                self.assertTrue(page["top_level"])
+            else:
+                self.assertEqual(page["parent_key"], seo.SEO_PAGE_KEY)
+                self.assertTrue(page["navigation_child"])
 
     def test_parent_permission_grants_every_seo_route_and_nothing_unrelated(self):
         approved = user(permissions=[seo.SEO_PAGE_KEY])
@@ -76,8 +79,8 @@ class SEONavigationTests(unittest.TestCase):
             source.index('if any(route in allowed_routes for route in seo_nav.SEO_MENU_ROUTES):'),
         )
         self.assertLess(
+            source.index('key="sidebar-website-children"'),
             source.index('disclosure("email", "Email"'),
-            source.index('if "Files" in allowed_routes:'),
         )
         for label in seo.SEO_NAV_LABELS.values():
             self.assertIn(f'"{label}"', (ROOT / "seo_navigation.py").read_text(encoding="utf-8"))

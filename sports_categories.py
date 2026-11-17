@@ -1,6 +1,7 @@
 """Shared offline sport taxonomy; Shopify read-only audit: 2026-10-07.
 
 Evidence: docs/evidence/shopify-sport-audit-2026-10-07.json.
+Darts was verified separately at https://www.sportscaveshop.com/collections/darts-wall-art.
 Rugby Union is retained for existing saved workflows, not claimed as live stock.
 Collection handles are evidence/matching hints, never authority for Shopify writes.
 """
@@ -10,6 +11,7 @@ from ui_option_ordering import alphabetize_options
 SPORT_COLLECTION_HANDLES = {
     'AFL': ('afl-wall-art',), 'Baseball': ('baseball-wall-art',),
     'Combat': ('combat-art',), 'Cricket': ('cricket',), 'Football': ('soccer',),
+    'Darts': ('darts-wall-art',),
     'Formula One': ('formula-one-wall-art',), 'Horse Racing': ('horse-racing-wall-art',),
     'Ice Hockey': ('ice-hockey-wall-art',), 'MotoGP': ('motogp-wall-art',),
     'Motorsport': ('motor-racing-wall-art',), 'NASCAR': ('nascar-wall-art',),

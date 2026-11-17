@@ -13,6 +13,7 @@ from starlette.responses import HTMLResponse,JSONResponse,FileResponse,RedirectR
 import auto_editions as ae
 import auto_editions_cloud as cloud
 import auto_editions_runtime as runtime
+from auto_editions_jobs import failure_details
 
 HEADERS={'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer',
          'X-Content-Type-Options':'nosniff','X-Frame-Options':'SAMEORIGIN'}
@@ -81,6 +82,7 @@ async def status(request):
         job,_,row=await current(request)
         runtime.start_worker()
         return JSONResponse({'ok':True,'status':row['status'],'error_code':row['error_code'],
+                             **failure_details(row),
                              'filename':row['result']['filename'] if row['status']=='Ready' else None,
                              'resolution_info':resolution_information(job,row),
                              'test_only':row.get('result',{}).get('test_only',True) if row.get('result') else True},headers=HEADERS)
@@ -230,7 +232,8 @@ async def state(request):
         return JSONResponse(dict(ok=True,job_id=job['id'],status=row['status'] if row else 'Not generated',
             timings={'state_ms':round((time.monotonic()-began)*1000,3)},
             ready_at=str(row.get('updated_at')) if row and row['status']=='Ready' else None,
-            error_code=row.get('error_code') if row else None,filename=(row.get('result') or {}).get('filename') if row else None,
+            error_code=row.get('error_code') if row else None,**failure_details(row),
+            filename=(row.get('result') or {}).get('filename') if row else None,
             resolution_info=resolution_information(job,row)),headers=HEADERS)
     except Exception as error:return failure(error)
 
@@ -240,13 +243,15 @@ async def retry(request):
         user=await actor(request,write=True)
         job,_=await run_in_threadpool(runtime.job_for,allocation(request))
         _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
-        if row and row['status']=='Blocked' and row['error_code']=='worker_unavailable':
-            await run_in_threadpool(jobs.retry,job['id'],str(user['id']))
-        elif row and row['status']=='Blocked' and row['error_code']=='cache_expired':
-            await run_in_threadpool(jobs.enqueue,job,str(user['id']))
-        else:raise ValueError('This file needs artwork review before retrying.')
+        # job_for has just revalidated allocation, source revision and approval.
+        # A changed identity creates its own job; a retry keeps the same number.
+        if not row or (row['status']=='Blocked' and row['error_code']=='cache_expired'):
+            row=await run_in_threadpool(jobs.enqueue,job,str(user['id']))
+        else:
+            row=await run_in_threadpool(jobs.retry,job['id'],str(user['id']))
         runtime.start_worker()
-        return JSONResponse(dict(ok=True,job_id=job['id'],status='Queued'),headers=HEADERS)
+        return JSONResponse(dict(ok=True,job_id=job['id'],status=row['status'],
+                                 **failure_details(row)),headers=HEADERS)
     except Exception as error:return failure(error)
 
 

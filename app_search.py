@@ -23,6 +23,7 @@ ALIASES = {
     "analytics": ("ga4", "google analytics", "traffic"),
     "seo": ("search console", "gsc", "organic"),
     "email": ("mail", "inbox", "support email", "reply"),
+    "accounting": ("quickbooks", "gst", "bas", "payouts", "reconciliation"),
     "accounts_access": ("settings", "users", "staff", "permissions", "roles", "accounts"),
 }
 

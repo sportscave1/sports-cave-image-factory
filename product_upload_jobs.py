@@ -16,6 +16,20 @@ class Jobs:
     def __init__(self):
         self.pool=ThreadPoolExecutor(max_workers=2,thread_name_prefix='product-upload')
         self.lock=RLock();self.preparation=Lock();self.jobs={}
+        self.staff_attempts={}
+
+    def begin_staff_attempt(self,key,actor,attempt,*,full=False):
+        """A clicked reset clears terminal errors once; polling never clears a new failure."""
+        identity=(str(actor),str(key))
+        with self.lock:
+            if self.staff_attempts.get(identity)==attempt:return
+            self.staff_attempts[identity]=attempt
+            for task,job in list(self.jobs.items()):
+                if task[:2]==identity and (full or job['state'] in ('Failed','Cancelled')):
+                    if job['state'] in ('Queued','Running'):
+                        job['state']='Cancelled'
+                        job['future'].cancel()
+                    del self.jobs[task]
 
     def submit(self,key,actor,operation,fingerprint,work):
         identity=(str(actor),str(key),operation)
@@ -89,31 +103,49 @@ class Jobs:
 JOBS=Jobs()
 
 
+def _prepare_artwork(connect, key, actor, provider_factory, progress, *, retry_transient=False):
+    from product_upload_artwork import prepare as process, PreparationBusyError, PreparationError
+    from time import sleep
+    deadline = monotonic() + 300
+    with JOBS.preparation:
+        while True:
+            try:
+                row = process(connect, None, key, actor, provider_factory=provider_factory, progress=progress)
+                if row['data'].get('server_artwork', {}).get('state') == 'Preparing':
+                    raise PreparationBusyError('Waiting for the existing source preparation.', status_code=409)
+                return row
+            except PreparationBusyError:
+                progress('Waiting for source preparation')
+                if monotonic() >= deadline:
+                    raise ValueError('Source preparation is still active. Retry shortly; the selected PSD is retained.')
+                sleep(.5)
+            except PreparationError as error:
+                if not retry_transient or error.status_code not in (502, 503, 504):
+                    raise
+                retry_transient = False
+                progress('Retrying PSD preparation')
+
+
 def prepare(connect,key,actor,provider_factory):
     from product_upload_intake import Intakes
-    from product_upload_artwork import prepare as process,source,PreparationBusyError
+    from product_upload_artwork import source
     row=Intakes(connect).read(key,actor)
     if not row:raise ValueError('Select an exact Dropbox PSD first.')
     def work(progress):
-        with JOBS.preparation:
-            import time
-            deadline=monotonic()+300
-            while True:
-                progress('Checking prepared artwork')
-                try:return process(connect,None,key,actor,provider_factory=provider_factory,progress=progress)
-                except PreparationBusyError:
-                    progress('Waiting for source preparation')
-                    if monotonic()>deadline:raise ValueError('Source preparation is still active. Retry shortly; the selected PSD is retained.')
-                    time.sleep(.5)
+        progress('Checking prepared artwork')
+        return _prepare_artwork(connect, key, actor, provider_factory, progress)
     return JOBS.submit(key,actor,'prepare',source(row),work)
 
 
-def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,prompts,*,reset_exports=False,finalize=None):
+def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,prompts,*,reset_exports=False,finalize=None,prepare_first=False):
     from product_upload_artwork import source,prepared,current
     import image_factory as factory
     key=str(row['id']);identity=source(row)
     def work(progress):
         result=None;created_run=None
+        if prepare_first:
+            progress('Preparing the selected PSD revision')
+            _prepare_artwork(connect, key, actor, provider_factory, progress, retry_transient=True)
         progress('Waiting for renderer')
         with semaphore:
             try:
@@ -133,7 +165,7 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                     created_run=kwargs.get('run_dir')
                     completed+=1
                     progress('Generating mockups',completed,5,record['preview_path'])
-                with prepared(row,connect,provider) as (ready_row,folder):
+                with prepared(row,connect,provider,progress=progress) as (ready_row,folder):
                     progress('Generating mockups',0,5)
                     from product_upload_lifestyle import individual_prompt_items
                     result=factory.generate_product_images(name,sport,folder/'artwork.png',base_dir=base_dir,
@@ -148,7 +180,8 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                 latest=Intakes(connect).read(key,actor)
                 if not latest or source(latest)!=identity:raise ValueError('Selected PSD changed. Reselect it before generating mockups.')
                 if len(result['assets'])!=5 or any(not Path(a[field]).is_file() for a in result['assets'] for field in ('review_path','preview_path','webp_path')):raise ValueError('Mockup outputs are incomplete. Retry generation.')
-                result.update(_product_upload_intake=key,_product_upload_actor_id=str(actor),_product_upload_source_hash=row['data']['source']['content_hash'])
+                result.update(_product_upload_intake=key,_product_upload_actor_id=str(actor),_product_upload_source_hash=row['data']['source']['content_hash'],
+                              _staff_full_restart=row['data'].get('staff_full_restart'))
                 return result
             except BaseException:
                 if result or created_run:

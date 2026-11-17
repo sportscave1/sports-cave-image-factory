@@ -14,13 +14,14 @@ fs.mkdirSync(output,{recursive:true});
       await context.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort());
       const page=await context.newPage(),errors=[];
       page.on('pageerror',e=>errors.push(e.message));
-      await page.goto('http://127.0.0.1:8506/?scenario='+scenario+'&account=staff');
+      await page.goto('http://127.0.0.1:'+(process.env.EMAIL_SEND_FIXTURE_PORT||'8506')+'/?scenario='+scenario+'&account=staff');
       const mail=page.frameLocator('iframe[title="support_email_page.support_email_desktop"]');
       await mail.locator('[data-action="send"]').waitFor();
       assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'0');
       // A second physical click and keyboard shortcut must not create another send.
+      const started=performance.now();
       await mail.locator('[data-action="send"]').click();
-      await mail.locator('#send-status').filter({hasText:'Sending email…'}).waitFor();
+      await mail.locator('#send-status').filter({hasText:/Sending email/}).waitFor();
       assert.equal(await mail.locator('[data-action="send"]').isDisabled(),true);
       assert.equal(await mail.locator('.compose-footer progress').count(),0);
       const progressBox=await mail.locator('#send-status').boundingBox();
@@ -33,18 +34,25 @@ fs.mkdirSync(output,{recursive:true});
         assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),'0');
         assert.equal(await mail.locator('.sent-receipt').count(),0);
       }else{
-        await mail.locator('.sent-receipt').filter({hasText:'✓ Sent'}).waitFor();
-        await mail.locator('.folder.selected[data-folder="INBOX.Sent Items"]').waitFor();
-        assert.equal(await mail.locator('[aria-label="Compose mail"]').count(),0);
+        const receipt=mail.locator('.sent-receipt').filter({hasText:'Sent'});
+        await receipt.waitFor();
+        const sentMs=Math.round(performance.now()-started);
+        console.log(scenario,width,'click to Sent:',sentMs,'ms');
+        assert.equal(await mail.locator('.folder.selected[data-folder="INBOX.Sent Items"]').count(),1);
+        assert.equal(await mail.locator('#editor').count(),0);
+        assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),'0');
+        await receipt.getByText('View sent message').click();
+        await receipt.getByText('This is a fabricated send verification.').waitFor();
+        await receipt.getByText('To: john@example.test').waitFor();
+        if(scenario==='delayed')await page.waitForTimeout(7000); // Fake provider's Sent visibility delay.
+        await receipt.getByRole('button',{name:'Check Sent copy',exact:true}).click();
         if(scenario==='copy_failure'){
-          await mail.locator('.reading').filter({hasText:'This is a fabricated send verification.'}).waitFor();
-          assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),'2');
-        }else{
-          await mail.locator('.reading').filter({hasText:'This is a fabricated send verification.'}).waitFor({timeout:25000});
-          assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),scenario==='success'?'1':'0');
+          await receipt.getByRole('button',{name:'Retry saving Sent copy',exact:true}).click();
         }
-        assert.match(await mail.locator('.conversation.selected').innerText(),/Local .* send fixture/);
-        assert.match(await mail.locator('.reading').innerText(),/john@example.test/);
+        await receipt.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
+        assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),scenario==='copy_failure'?'2':scenario==='success'?'1':'0');
+        await mail.locator('.conversation.selected').filter({hasText:/Local .* send fixture/}).waitFor();
+        await mail.locator('.reading').filter({hasText:'This is a fabricated send verification.'}).waitFor();
         await mail.getByRole('button',{name:'↻ Refresh',exact:true}).click();
         await mail.locator('#mail:not(.busy)').waitFor();
         await mail.locator('.topbar [data-action="refresh"]:enabled').waitFor();
@@ -58,7 +66,7 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'1');
       if(scenario==='rejected'){
         await mail.locator('[data-action="send"]:enabled').click();
-        await mail.locator('#send-status').filter({hasText:'Sending email'}).waitFor();
+        await mail.locator('#send-status').filter({hasText:/Sending email/}).waitFor();
         await mail.locator('#send-status').filter({hasText:'Email not sent'}).waitFor();
         assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'2');
       }

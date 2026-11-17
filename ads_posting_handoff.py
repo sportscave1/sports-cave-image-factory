@@ -100,6 +100,7 @@ def build_saved_package(*, result, source_signature, source_copy, copy_csv, asse
         "workflow_type": result.get("workflow_type") or result.get("workflow_mode") or "new_ads",
         "creative_refresh": result.get("workflow_mode") == "creative_refresh",
         "source_provenance": result.get("creative_refresh_context") or {},
+        "posting_settings": deepcopy(result.get("posting_settings") or {}),
         "context_key": result.get("context_key"),
         "source_signature": source_signature,
         "saved_at": datetime.now(timezone.utc).isoformat(),

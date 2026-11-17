@@ -6,6 +6,7 @@ from pathlib import Path
 import unittest
 import ads_page as ads
 import ads_ie_usa as usa
+import ads_ie_visual_systems as words
 import ads_ie_copy as writing
 import ads_ie_legacy_description as legacy
 import ads_black_friday
@@ -40,7 +41,8 @@ class USAInstantExperienceTests(unittest.TestCase):
                 r = self.record(country=market, metadata=metadata)
                 fp = r['instant_experience_fingerprints']
                 self.assertEqual(len(fp),3)
-                self.assertEqual([v['headline_text'] for v in fp], [usa.HEADLINE]*3)
+                self.assertEqual(len({v['headline_text'] for v in fp}), 3)
+                self.assertTrue(all(v['headline_text'] in words.HEADLINES for v in fp))
                 self.assertEqual(len({v['supporting_line'] for v in fp}), 3)
                 self.assertTrue(all(v['supporting_line'] in usa.SUPPORT_LINES for v in fp))
                 self.assertEqual([v['cta_text'] for v in fp], ['CLAIM YOUR EDITION']*3)
@@ -56,11 +58,11 @@ class USAInstantExperienceTests(unittest.TestCase):
             prompts=[r['master_prompt']]+[ads.build_standard_instant_experience_image_prompt(i,v,product_name=name,category=sport,country='USA') for i,v in enumerate(visuals,1)]
             self.assertTrue(ads.validate_instant_experience_set_differentiation(visuals))
             for prompt in prompts:
-                for obsolete in ('Select three different approved headlines','Never repeat a headline or subline','AND visible depth arrangement','imperceptible surface reflections','thumbnail-visible glazing','reflections clearly visible at thumbnail','visible at a 256 × 256 preview','all signature and fixed template lines verbatim'):
+                for obsolete in ('fixed USA footer headline','identical exact USA footer headline','AND visible depth arrangement','imperceptible surface reflections','thumbnail-visible glazing','reflections clearly visible at thumbnail','visible at a 256 × 256 preview','all signature and fixed template lines verbatim', 'finishes may repeat', 'prioritise warm greige', 'not every environmental attribute needs to differ'):
                     self.assertNotIn(obsolete,prompt)
                 self.assertIn('Product recognition takes priority over excessive glare',prompt)
                 self.assertIn('never over visible glazing',prompt)
-                self.assertIn('Limited to 100 Worldwide',prompt)
+                self.assertTrue(any(h in prompt for h in words.HEADLINES))
                 self.assertNotIn('A limited run of 100 editions.',prompt)
                 self.assertTrue(any(s in prompt for s in usa.SUPPORT_LINES))
                 self.assertIn('18–20%',prompt)
@@ -80,14 +82,17 @@ class USAInstantExperienceTests(unittest.TestCase):
         self.assertNotIn('SUPPORTING LINE: EARLY BIRD BLACK FRIDAY',r['master_prompt'])
         self.assertEqual(ads_black_friday.build_black_friday_prompt(r['master_prompt']),r['master_prompt'])
 
-    def test_warm_neutrals_repeat_without_forced_slot_colours(self):
+    def test_fresh_scenes_differ_without_forced_slot_colours(self):
         palettes=[set(),set(),set()]
         previous=[]
         for n in range(8):
             v=ads.resolve_standard_instant_experience_visuals(product_name='Don Mattingly',category='Baseball',country='USA',variation_token=str(n),recent_fingerprints=previous)
-            self.assertEqual([row['camera_role'] for row in v],['RIGHT','FRONT','LEFT'])
+            self.assertEqual(v[1]['camera_role'], 'FRONT')
+            self.assertEqual({v[0]['camera_role'], v[2]['camera_role']}, {'RIGHT', 'LEFT'})
             self.assertEqual([row['room_profile_key'] for row in v],['hallway_gallery','minimal_art_wall','collector_interior'])
-            self.assertTrue(all(row['wall_visual_group']=='neutral' for row in v))
+            for field in ('home_setting', 'room_type', 'wall_finish', 'light_family'):
+                self.assertEqual(len({row[field] for row in v}), 3, field)
+            self.assertEqual(len({usa.colour_family(row) for row in v}), 3)
             self.assertTrue(all(row['scene_near_signature'] not in {x['scene_near_signature'] for x in previous} for row in v))
             for i,row in enumerate(v):palettes[i].add(row['wall_colour'])
             previous=list(v)+previous[:30]
@@ -95,6 +100,11 @@ class USAInstantExperienceTests(unittest.TestCase):
         # Other-product palette alone is not an image near-duplicate or a reason to reject a neutral.
         args=dict(product_name='Jordan × Kobe',category='NBA',country='USA',variation_token='same')
         self.assertEqual(ads.resolve_standard_instant_experience_visuals(**args),ads.resolve_standard_instant_experience_visuals(**args,recent_fingerprints=[{'wall_colour_family':'beige','wall_finish':'fine plaster','copy_product_key':'another product'}]))
+
+    def test_similar_warm_neutrals_count_as_one_family(self):
+        families = {usa.colour_family(dict(wall_colour=wall[0], wall_colour_family=wall[1],
+                                          wall_visual_group=wall[3])) for wall in usa.WALLS[:4]}
+        self.assertEqual(families, {'warm neutral'})
 
     def test_saved_old_and_new_packs_preserve_copy_and_resolved_choices(self):
         current=self.record(metadata={'no_reprint_verified':True})
@@ -105,7 +115,10 @@ class USAInstantExperienceTests(unittest.TestCase):
             self.assertIs(ads.ensure_current_ads_result_prompt(r),r)
             self.assertEqual(r,before)
         args=dict(product_name='Don Mattingly',category='Baseball',country='USA',product_metadata=current['product_metadata'])
-        self.assertEqual(ads.resolve_standard_instant_experience_visuals(**args,variation_token='new-token')[0]['scene_signature'],current['instant_experience_fingerprints'][0]['scene_signature'])
+        reopened = ads.resolve_standard_instant_experience_visuals(**args,variation_token='new-token')
+        for actual, saved in zip(reopened, current['instant_experience_fingerprints']):
+            for field in ('scene_signature', 'room_type', 'wall_colour', 'wall_finish', 'lighting', 'headline_text', 'supporting_line', 'assigned_camera_angle'):
+                self.assertEqual(actual[field], saved[field], field)
         # An explicitly supplied old specification must not opt into USA selection.
         original=ads.resolve_standard_instant_experience_visuals(product_name='Don Mattingly',category='Baseball',country='USA',usa_upgrade=False)
         meta={'instant_experience_scene_selections':[dict(v) for v in original],

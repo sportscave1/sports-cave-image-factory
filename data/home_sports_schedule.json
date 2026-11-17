@@ -1,0 +1,436 @@
+{
+  "reviewed_on": "2026-11-13",
+  "events": [
+    {
+      "sport": "AFL",
+      "markets": [
+        "AUS"
+      ],
+      "title": "AFLW finals",
+      "start": "2026-11-02",
+      "end": "2026-11-28",
+      "source": "https://www.afl.com.au/news/1442213/aflw-confirms-number-of-rounds-start-date-for-2026-season"
+    },
+    {
+      "sport": "AFL",
+      "markets": [
+        "AUS"
+      ],
+      "title": "AFL Premiership season",
+      "start": "2027-03-17",
+      "end": "2027-10-02",
+      "source": "https://www.afl.com.au/news/1636515/afl-2027-fixture-statement"
+    },
+    {
+      "sport": "Athletics",
+      "markets": [
+        "ALL"
+      ],
+      "title": "World Athletics Championships, Beijing",
+      "start": "2027-09-10",
+      "end": "2027-09-19",
+      "source": "https://worldathletics.org/competition/calendar-results?disciplineId=1&endDate=2027-12-31&startDate=2027-01-01"
+    },
+    {
+      "sport": "Baseball",
+      "markets": [
+        "USA"
+      ],
+      "title": "MLB regular season",
+      "start": "2027-03-24",
+      "end": "2027-09-26",
+      "source": "https://www.mlb.com/news/mlb-2027-schedule-released"
+    },
+    {
+      "sport": "Combat",
+      "markets": [
+        "ALL"
+      ],
+      "title": "UFC 334",
+      "start": "2026-11-14",
+      "end": "2026-11-14",
+      "source": "https://www.ufc.com/polymarket-ufc-334-fight-week-guide"
+    },
+    {
+      "sport": "Combat",
+      "markets": [
+        "ALL"
+      ],
+      "title": "UFC 335",
+      "start": "2026-12-12",
+      "end": "2026-12-12",
+      "source": "https://www.ufc.com/story/a9f2be51-0187-4915-840d-fa46514147b6"
+    },
+    {
+      "sport": "Cricket",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Women's Big Bash League",
+      "start": "2026-10-29",
+      "end": "2026-12-05",
+      "source": "https://www.cricket.com.au/news/4529622/wbbl12-schedule-fixture-announced-womens-big-bash-2026-where-are-scorchers-strikers-sixers-heat-renegades-stars-hurricanes-thunder-playing"
+    },
+    {
+      "sport": "Cricket",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Australia v New Zealand Tests",
+      "start": "2026-12-09",
+      "end": "2027-01-08",
+      "source": "https://www.cricket.com.au/matches/series"
+    },
+    {
+      "sport": "Cricket",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Big Bash League",
+      "start": "2026-12-12",
+      "end": "2027-01-26",
+      "source": "https://www.cricket.com.au/news/4534480/bbl16-big-bash-league-season-schedule-fixture-announced-dates-chennai-christmas-eve-canberra-melbourne-sydney-perth"
+    },
+    {
+      "sport": "Cricket",
+      "markets": [
+        "UK"
+      ],
+      "title": "South Africa v England Tests",
+      "start": "2026-12-17",
+      "end": "2027-01-07",
+      "source": "https://www.cricket.com.au/matches/series"
+    },
+    {
+      "sport": "Darts",
+      "markets": [
+        "ALL"
+      ],
+      "title": "PDC Grand Slam of Darts",
+      "start": "2026-11-14",
+      "end": "2026-11-22",
+      "source": "https://tickets.pdc.tv/news/2026/november/09/littler-drawn-greaves-zonneveld-at-mr-vegas-grand-slam/"
+    },
+    {
+      "sport": "Football",
+      "markets": [
+        "ALL"
+      ],
+      "title": "Premier League season",
+      "start": "2026-08-21",
+      "end": "2027-05-30",
+      "source": "https://www.premierleague.com/en/news/4675508/premier-league-fixture-schedulereleased-for-season-202627"
+    },
+    {
+      "sport": "Football",
+      "markets": [
+        "AUS"
+      ],
+      "title": "A-League Men season window",
+      "start": "2026-10-16",
+      "end": "2027-06-06",
+      "source": "https://aleagues.com.au/news/aleague-men-2026-2027-fixture-list-revealed-key-dates-fixture-information/"
+    },
+    {
+      "sport": "Formula One",
+      "markets": [
+        "ALL"
+      ],
+      "title": "Formula 1 season",
+      "start": "2026-03-06",
+      "end": "2026-12-06",
+      "source": "https://www.formula1.com/en/racing/2026"
+    },
+    {
+      "sport": "Formula One",
+      "markets": [
+        "ALL"
+      ],
+      "title": "Formula 1 season",
+      "start": "2027-03-12",
+      "end": "2027-12-12",
+      "source": "https://www.formula1.com/en/racing/2027"
+    },
+    {
+      "sport": "Golf",
+      "markets": [
+        "ALL"
+      ],
+      "title": "The Open, St Andrews",
+      "start": "2027-07-11",
+      "end": "2027-07-18",
+      "source": "https://www.theopen.com/latest/st-andrews-2027-all-you-need-to-know"
+    },
+    {
+      "sport": "Horse Racing",
+      "markets": [
+        "UK"
+      ],
+      "title": "Cheltenham Festival",
+      "start": "2027-03-16",
+      "end": "2027-03-19",
+      "source": "https://www.thejockeyclub.co.uk/cheltenham/events-tickets/the-festival/"
+    },
+    {
+      "sport": "Horse Racing",
+      "markets": [
+        "USA"
+      ],
+      "title": "Kentucky Derby",
+      "start": "2027-05-01",
+      "end": "2027-05-01",
+      "source": "https://www.churchilldowns.com/calendar/2027-05/"
+    },
+    {
+      "sport": "Horse Racing",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Melbourne Cup Day",
+      "start": "2027-11-02",
+      "end": "2027-11-02",
+      "source": "https://business.vic.gov.au/business-information/public-holidays/victorian-public-holidays-2027"
+    },
+    {
+      "sport": "Ice Hockey",
+      "markets": [
+        "ALL"
+      ],
+      "title": "NHL regular season",
+      "start": "2026-09-29",
+      "end": "2027-04-10",
+      "source": "https://www.nhl.com/news/nhl-releases-2026-27-regular-season-schedule"
+    },
+    {
+      "sport": "IndyCar",
+      "markets": [
+        "USA"
+      ],
+      "title": "IndyCar season opener, St Petersburg",
+      "start": "2027-03-07",
+      "end": "2027-03-07",
+      "source": "https://www.indycar.com/news/2026/10/10-23-2027-schedule-phase-two"
+    },
+    {
+      "sport": "Motocross",
+      "markets": [
+        "USA"
+      ],
+      "title": "AMA Pro Motocross season",
+      "start": "2027-05-29",
+      "end": "2027-08-28",
+      "source": "https://www.supercrosslive.com/news/2027-monster-energy-smx-world-championship-schedule-presented-by-iheartradio-revealed/"
+    },
+    {
+      "sport": "MotoGP",
+      "markets": [
+        "ALL"
+      ],
+      "title": "MotoGP season",
+      "start": "2026-02-27",
+      "end": "2026-11-29",
+      "source": "https://www.motogp.com/en/news/2026/03/12/motogp-confirms-new-date-for-the-qatar-grand-prix/1005668"
+    },
+    {
+      "sport": "MotoGP",
+      "markets": [
+        "ALL"
+      ],
+      "title": "MotoGP season",
+      "start": "2027-03-05",
+      "end": "2027-11-28",
+      "source": "https://www.motogp.com/en/news/2026/02/03/1009386"
+    },
+    {
+      "sport": "Motorsport",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Bathurst 12 Hour",
+      "start": "2027-02-12",
+      "end": "2027-02-14",
+      "source": "https://www.bathurst12hour.com.au/events/2027-bathurst-12-hour"
+    },
+    {
+      "sport": "NASCAR",
+      "markets": [
+        "USA"
+      ],
+      "title": "NASCAR Cup Series points season",
+      "start": "2027-02-21",
+      "end": "2027-11-07",
+      "source": "https://www.nascar.com/nascar-cup-series/2027/schedule/"
+    },
+    {
+      "sport": "NBA",
+      "markets": [
+        "ALL"
+      ],
+      "title": "NBA regular season",
+      "start": "2026-10-20",
+      "end": "2027-04-11",
+      "source": "https://www.nba.com/news/key-dates"
+    },
+    {
+      "sport": "NFL",
+      "markets": [
+        "ALL"
+      ],
+      "title": "NFL regular season",
+      "start": "2026-09-09",
+      "end": "2027-01-10",
+      "source": "https://media.nfl.com/football-information/2026/news/2026-nfl-schedule-announced"
+    },
+    {
+      "sport": "Olympics",
+      "markets": [
+        "ALL"
+      ],
+      "title": "LA28 Olympic Games",
+      "start": "2028-07-14",
+      "end": "2028-07-30",
+      "source": "https://www.olympics.com/ioc/accred2028"
+    },
+    {
+      "sport": "Rally",
+      "markets": [
+        "ALL"
+      ],
+      "title": "WRC season opener, Rallye Monte-Carlo",
+      "start": "2027-01-21",
+      "end": "2027-01-24",
+      "source": "https://www.fia.com/news/fia-world-rally-championship-set-landmark-expansion-us-and-uk-return-calendar-2027"
+    },
+    {
+      "sport": "Road Racing",
+      "markets": [
+        "UK"
+      ],
+      "title": "Isle of Man TT",
+      "start": "2027-05-31",
+      "end": "2027-06-12",
+      "source": "https://www.iomttraces.com/latest/news/tt-2027-dates-isle-of-man-tt-races/"
+    },
+    {
+      "sport": "Rugby League",
+      "markets": [
+        "AUS",
+        "UK"
+      ],
+      "title": "Rugby League World Cup finals",
+      "start": "2026-11-15",
+      "end": "2026-11-15",
+      "source": "https://suncorpstadium.com.au/events/rugby-league-world-cup-2026-mens-womens-finals"
+    },
+    {
+      "sport": "Rugby League",
+      "markets": [
+        "USA"
+      ],
+      "title": "NRL season opener, Las Vegas",
+      "start": "2027-02-27",
+      "end": "2027-02-27",
+      "source": "https://www.nrl.com/news/2026/05/20/exclusive-travel-packages-and-teams-launched-for-rugby-league-las-vegas-2027/"
+    },
+    {
+      "sport": "Rugby League",
+      "markets": [
+        "AUS"
+      ],
+      "title": "NRL season opener, Las Vegas",
+      "start": "2027-02-28",
+      "end": "2027-02-28",
+      "source": "https://www.nrl.com/news/2026/05/20/exclusive-travel-packages-and-teams-launched-for-rugby-league-las-vegas-2027/"
+    },
+    {
+      "sport": "Rugby Union",
+      "markets": [
+        "ALL"
+      ],
+      "title": "Men’s Rugby World Cup, Australia",
+      "start": "2027-10-01",
+      "end": "2027-11-13",
+      "source": "https://www.rugbyworldcup.com/2027/en/about"
+    },
+    {
+      "sport": "Surfing",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Australian Junior Surfing Titles",
+      "start": "2026-11-30",
+      "end": "2026-12-08",
+      "source": "https://surfingaustralia.com/surfing-australia-unveils-2026-national-events-calendar/"
+    },
+    {
+      "sport": "Swimming",
+      "markets": [
+        "ALL"
+      ],
+      "title": "World Aquatics Championships, swimming",
+      "start": "2027-07-10",
+      "end": "2027-07-18",
+      "source": "https://www.worldaquatics.com/news/4441229/world-aquatics-announces-competition-schedule-for-the-world-aquatics-championships-and-world-aquatics-masters-championships-budapest-2027"
+    },
+    {
+      "sport": "Tennis",
+      "markets": [
+        "ALL"
+      ],
+      "title": "ATP Finals, Turin",
+      "start": "2026-11-15",
+      "end": "2026-11-22",
+      "source": "https://www.atptour.com/en/tournaments?month=0"
+    },
+    {
+      "sport": "Tennis",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Australian Open",
+      "start": "2027-01-11",
+      "end": "2027-01-31",
+      "source": "https://ausopen.com/articles/news/australian-open-2027-dates-announced"
+    },
+    {
+      "sport": "Tennis",
+      "markets": [
+        "UK"
+      ],
+      "title": "Wimbledon",
+      "start": "2027-06-28",
+      "end": "2027-07-11",
+      "source": "https://www.wimbledon.com/en_GB/the_championships/dates"
+    },
+    {
+      "sport": "V8 Supercars",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Supercars season",
+      "start": "2026-02-20",
+      "end": "2026-11-29",
+      "source": "https://www.supercars.com/news/supercars-2026-calendar-announcement-release-date-rounds-printable-ticket-information-news"
+    },
+    {
+      "sport": "V8 Supercars",
+      "markets": [
+        "AUS"
+      ],
+      "title": "Supercars season",
+      "start": "2027-02-26",
+      "end": "2027-11-28",
+      "source": "https://www.supercars.com/news/supercars-news-2027-dates-championship-calendar-schedule-rounds-events"
+    },
+    {
+      "sport": "WWE",
+      "markets": [
+        "ALL"
+      ],
+      "title": "Survivor Series: WarGames",
+      "start": "2026-11-28",
+      "end": "2026-11-28",
+      "source": "https://corporate.wwe.com/about/news/2026/07-13-2026"
+    }
+  ]
+}

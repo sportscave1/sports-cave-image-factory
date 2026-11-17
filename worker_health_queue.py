@@ -51,12 +51,25 @@ def changes(service,category,known,scanned_to):
     return dict(summary=summary,jobs=updates+arrivals,removed=[pid for pid in known if pid not in current],total_rows=len(rows))
 
 
+# A reset audit can prove that a different revision is archived. Current
+# layouts, checkpoints and all other retained preparations still fence retries.
 PRODUCT_SQL="""SELECT COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id) AS pid,p.product_title,p.edition_total,
     (SELECT count(*) FROM edition_products other WHERE COALESCE(NULLIF(other.shopify_product_gid,''),other.shopify_product_id)=COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)) AS product_count,
     m.dropbox_file_id,m.file_path,q.status,q.file_id,q.preparation_hash,q.lease_until,q.attempts,q.priority,q.reason,q.source,
     to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS reset_cancellation,
     EXISTS(SELECT 1 FROM auto_edition_layouts l WHERE l.product_gid=m.shopify_product_gid) AS approved,
-    EXISTS(SELECT 1 FROM auto_edition_preparations prep WHERE prep.manifest->'source'->>'product_gid'=m.shopify_product_gid) AS retained,
+    EXISTS(SELECT 1 FROM auto_edition_preparations prep
+        WHERE prep.manifest->'source'->>'product_gid'=m.shopify_product_gid
+        AND NOT COALESCE(
+            q.source->>'file_id'=m.dropbox_file_id
+            AND prep.manifest->'source'->>'file_id'=m.dropbox_file_id
+            AND q.source->>'content_hash' ~ '^[0-9a-f]{64}$'
+            AND prep.manifest->'source'->>'content_hash' ~ '^[0-9a-f]{64}$'
+            AND prep.manifest->'source'->>'content_hash'<>q.source->>'content_hash'
+            AND EXISTS(SELECT 1 FROM auto_edition_onboarding_audit a
+                WHERE a.product_gid=q.product_gid AND a.event='reset_cleared'
+                AND a.detail->'previous'->>'preparation_hash'=prep.hash),
+            FALSE)) AS retained,
     EXISTS(SELECT 1 FROM auto_edition_review_jobs j WHERE j.product_gid=m.shopify_product_gid AND j.state IN ('Pending','Processing')) AS reviewing
     FROM edition_products p LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)
     LEFT JOIN auto_edition_onboarding q ON q.product_gid=m.shopify_product_gid"""

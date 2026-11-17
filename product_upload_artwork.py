@@ -15,7 +15,7 @@ import logging
 import traceback
 import uuid
 from contextlib import contextmanager,ExitStack
-from time import perf_counter
+from time import perf_counter, monotonic, sleep
 from datetime import datetime, timezone, timedelta
 
 from product_upload_intake import Intakes
@@ -61,11 +61,22 @@ def prune_cache(keep):
 
 
 @contextmanager
-def prepared(row,connect,provider):
+def prepared(row,connect,provider, *, progress=None):
+    deadline = monotonic() + 300
     with ExitStack() as stack:
-        with _cache_lock:
-            current_row,path=ensure_ready(row,connect,provider)
-            stack.enter_context(lease(path))
+        while True:
+            try:
+                with _cache_lock:
+                    current_row,path=ensure_ready(row,connect,provider)
+                    stack.enter_context(lease(path))
+                break
+            except PreparationBusyError:
+                # The active preparation needs this cache lock to finish. Never
+                # sleep holding it, and never retry errors from the renderer.
+                if progress:progress('Waiting for source preparation')
+                if monotonic() >= deadline:
+                    raise PreparationBusyError('Source preparation is still active. Retry shortly; the selected PSD is retained.', status_code=409)
+                sleep(.5)
         yield current_row,path
 
 
@@ -128,7 +139,10 @@ def log_failure(error, stage, reference, row):
 
 def source(row):
     m = row['data']['source']
-    return dict(template_id='product-upload:'+m['id'],file_id=m['id'],revision=m['rev'],content_hash=m['content_hash'])
+    identity = dict(template_id='product-upload:'+m['id'],file_id=m['id'],revision=m['rev'],content_hash=m['content_hash'])
+    if row['data'].get('staff_full_restart'):
+        identity['restart_attempt'] = row['data']['staff_full_restart']
+    return identity
 
 
 def settings(connect):
@@ -230,7 +244,7 @@ def prepare(connect, provider, key, actor, *, provider_factory=None, progress=No
     with _active_lock:
         if not _slots.acquire(blocking=False):
             if key in _active:return store.read(key, actor)
-            raise PreparationError('The server is preparing another artwork. Retry preparation when it finishes.', status_code=409)
+            raise PreparationBusyError('The server is preparing another artwork. Retry preparation when it finishes.', status_code=409)
         _active.add(key)
     started=perf_counter();stage='load processing settings';attempt=uuid.uuid4().hex
     previous_spec=row['data'].get('server_artwork',{})
@@ -363,4 +377,6 @@ def ensure_ready(row, connect, provider):
         # Disposable server caches can expire or be lost on restart. Rebuild
         # from the pinned source instead of requiring a new product workflow.
         row=prepare(connect,provider,str(row['id']),row['actor_id'])
+        if row['data'].get('server_artwork', {}).get('state') == 'Preparing':
+            raise PreparationBusyError('Waiting for the existing source preparation.', status_code=409)
         return row,ready(row,connect,provider,validated=True)

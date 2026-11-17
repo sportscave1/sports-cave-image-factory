@@ -162,7 +162,21 @@ async def action(request):
             record.validate = lambda: __import__('product_upload_package').package(store.read(key, uid), body.get('version'))
             return JSONResponse(dict(transfer=dict(base_url=str(request.base_url).rstrip('/'), ticket=record.ticket, secret=record.secret)), headers=HEADERS)
         elif op == 'mode':
-            row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
+            selected = body.get('mode')
+            metadata = None
+            if selected == 'SMART':
+                from design_review_metadata import is_working_file, legacy_metadata, read_handoff
+                current = await run_in_threadpool(store.read, key, uid)
+                if not current or current['data'].get('workflow_version') != 3:
+                    raise ValueError('Choose a Dropbox PSD for Smart Upload.')
+                source = current['data']['source']
+                if is_working_file(source['name']):
+                    raise ValueError('Select the final PSD instead of a trial for Smart Upload.')
+                provider = await run_in_threadpool(Dropbox)
+                metadata = await run_in_threadpool(read_handoff, provider, source, allow_stale_sport=True)
+                if metadata is None:
+                    metadata = legacy_metadata(source)
+            row = await run_in_threadpool(store.change_mode, key, uid, selected, metadata=metadata)
         elif op == 'copied':
             row = await run_in_threadpool(store.copied, key, uid, body.get('mode'), body.get('source_version', ''))
         elif op == 'prompt':
@@ -402,7 +416,113 @@ async def saved_image(request):
         return failure(error)
 
 
-ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+async def _review_user(request):
+    import files_upload_api as files
+    import os_accounts
+
+    user = await run_in_threadpool(files._request_user, request, required_page='Design Studio')
+    if not os_accounts.can_access_page(user, 'Files'):
+        raise PermissionError('Files access is required to view the review PSD.')
+    return user
+
+
+def _review_metadata(request, provider, *, allow_refresh_staging=False):
+    from product_upload_dropbox import REVIEW, approved, within
+    from design_review_metadata import is_refresh_staging, is_working_file
+
+    file_id, revision = (request.query_params.get(key, '') for key in ('id', 'rev'))
+    if not file_id.startswith('id:') or not revision:
+        raise ValueError('Select an exact Review PSD revision.')
+    metadata = provider.metadata_if_present(file_id)
+    if (not metadata or not approved(metadata) or metadata['id'] != file_id
+            or not within(metadata['path_display'], REVIEW) or metadata['rev'] != revision
+            or (is_working_file(metadata['name'])
+                and not (allow_refresh_staging and is_refresh_staging(metadata['name'])))):
+        raise ValueError('The selected Review PSD changed. Choose its current revision.')
+    return metadata
+
+
+async def _gallery_review_user(request):
+    import os_accounts
+
+    user = await _review_user(request)
+    if (not enabled() or not os_accounts.can_access_page(user, 'Product Uploads')
+            or not os_accounts.can_attach_missing_psd(user)):
+        raise PermissionError('Design Studio review access is required.')
+    return user
+
+
+async def review_thumbnail(request):
+    """Serve a browser-lazy preview of an exact, authorized Review revision."""
+    try:
+        await _gallery_review_user(request)
+
+        def thumbnail():
+            provider = Dropbox()
+            metadata = _review_metadata(request, provider, allow_refresh_staging=True)
+            return provider.api.get_psd_thumbnail_bytes(provider.token, metadata['id'], revision=metadata['rev'])
+
+        data = await run_in_threadpool(thumbnail)
+        return Response(data, media_type='image/jpeg',
+                        headers={**HEADERS, 'Cache-Control': 'private, max-age=120', 'Vary': 'Cookie'})
+    except Exception as error:
+        return failure(error)
+
+
+async def review_edit_prompt(request):
+    """Build only the clicked prompt and bind it to the current Review PSD."""
+    try:
+        await _gallery_review_user(request)
+
+        def prepare_prompt():
+            from pathlib import PurePosixPath
+            from design_review_metadata import legacy_metadata, read_handoff
+            from home_morning_brief_actions import _prompt
+
+            provider = Dropbox()
+            source = _review_metadata(request, provider)
+            try:
+                details = read_handoff(provider, source) or legacy_metadata(source)
+            except ValueError as error:
+                details = dict(legacy_metadata(source), review_notes=str(error))
+            title = details.get('design_name') or PurePosixPath(source['name']).stem
+            return _prompt(title, details.get('product_context') or 'Preserve the story in the original artwork.',
+                           edit=dict(source=source, metadata=details))
+
+        prompt = await run_in_threadpool(prepare_prompt)
+        return JSONResponse({'prompt': prompt}, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
+async def review_source(request):
+    """Download the selected, immutable Review PSD through the signed-in Files session."""
+    from starlette.responses import StreamingResponse
+    import files_upload_api as files
+
+    upstream = None
+    try:
+        await _review_user(request)
+        provider = await run_in_threadpool(Dropbox)
+        metadata = await run_in_threadpool(_review_metadata, request, provider)
+        actual, upstream = await run_in_threadpool(provider.api.get_psd_file_response, provider.token,
+                                                    metadata['id'], metadata['rev'])
+        if any(actual.get(key) != metadata.get(key) for key in ('id', 'rev', 'size', 'content_hash')):
+            raise ValueError('The selected Review PSD revision could not be verified.')
+        return StreamingResponse(files._stream_upstream_response(upstream), media_type='application/octet-stream',
+                                 headers={**HEADERS, 'Content-Length': str(metadata['size']),
+                                          'Content-Disposition': files._content_disposition('attachment', metadata['name'])})
+    except Exception as error:
+        if upstream is not None:
+            upstream.close()
+        return failure(error)
+
+
+from product_upload_staff_queue import ROUTES as STAFF_QUEUE_ROUTES
+
+from morning_design_queue import ROUTES as MORNING_DESIGN_ROUTES
+
+ROUTES = (*RENDER_ROUTES, *STAFF_QUEUE_ROUTES, *MORNING_DESIGN_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
           ('/product-upload-native', clipboard_page, ('GET',)),
           ('/product-upload-native.js', clipboard_page, ('GET',)),
           ('/api/product-uploads/clipboard-launch', clipboard_launch, ('POST',)),
@@ -413,6 +533,9 @@ ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploa
           ('/api/product-uploads/saved-image', saved_image, ('GET',)),
           ('/product-upload-mapping.js', mapping_script, ('GET',)),
           ('/api/product-uploads/asset', original_asset, ('GET',)),
+          ('/api/design-review/source', review_source, ('GET',)),
+          ('/api/design-review/thumbnail', review_thumbnail, ('GET',)),
+          ('/api/design-review/edit-prompt', review_edit_prompt, ('GET',)),
           ('/api/product-uploads/source-preview', source_preview, ('GET',)),
           ('/api/product-uploads/mapping-status', mapping_status, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),

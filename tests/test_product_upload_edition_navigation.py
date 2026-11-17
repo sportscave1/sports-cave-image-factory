@@ -15,6 +15,9 @@ def test_existing_picker_selects_id_and_reports_missing_without_attachment(monke
     visible,selected=ops._editor_visible_rows([row])
     assert visible==[row] and selected==ops._stable_row_key(row)
     st.info.assert_not_called()
+    st.query_params={'edition_handle':'tempted'}
+    similar={'shopify_product_gid':'gid://shopify/Product/777','product_title':'Tempted','handle':'tempted-v2'}
+    assert ops._editor_visible_rows([similar, row]) == ([row], selected)
     st.query_params={'edition_product':'456','edition_search':'Tempted'}
     ops._editor_visible_rows([row])
     assert 'pending / not found' in st.info.call_args.args[0]

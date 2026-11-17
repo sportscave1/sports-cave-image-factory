@@ -7,6 +7,8 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, quote
 
 ROOT = '/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED'
+REVIEW_FOLDER = ROOT + '/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE'
+REVIEW_METADATA_FOLDER = REVIEW_FOLDER + '/JSON'
 STORE = Path(__file__).resolve().parent / 'output' / 'psd_directory.json'
 
 

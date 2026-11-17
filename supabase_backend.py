@@ -14831,6 +14831,8 @@ def _upsert_customer(cur, customer):
 
 
 def _upsert_order(cur, order):
+    from shopify_order_financials import prepare_financial_fields
+    order = prepare_financial_fields(order)
     customer_name = _customer_name_for_storage(order) or "Customer not shown"
     customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
     order_name = order.get("order_name")
@@ -14865,10 +14867,10 @@ def _upsert_order(cur, order):
             email=EXCLUDED.email,
             financial_status=EXCLUDED.financial_status,
             fulfillment_status=EXCLUDED.fulfillment_status,
-            total_price=EXCLUDED.total_price,
-            currency=EXCLUDED.currency,
+            total_price=CASE WHEN EXCLUDED.total_price IS NOT NULL AND EXCLUDED.currency IS NOT NULL AND (EXCLUDED.remote_updated_at IS NULL OR shopify_orders.remote_updated_at IS NULL OR EXCLUDED.remote_updated_at >= shopify_orders.remote_updated_at) THEN EXCLUDED.total_price ELSE shopify_orders.total_price END,
+            currency=CASE WHEN EXCLUDED.total_price IS NOT NULL AND EXCLUDED.currency IS NOT NULL AND (EXCLUDED.remote_updated_at IS NULL OR shopify_orders.remote_updated_at IS NULL OR EXCLUDED.remote_updated_at >= shopify_orders.remote_updated_at) THEN EXCLUDED.currency ELSE shopify_orders.currency END,
             created_at=EXCLUDED.created_at,
-            remote_updated_at=EXCLUDED.remote_updated_at,
+            remote_updated_at=GREATEST(shopify_orders.remote_updated_at, EXCLUDED.remote_updated_at),
             processed_at=EXCLUDED.processed_at,
             cancelled_at=EXCLUDED.cancelled_at,
             raw_json=(CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
@@ -14876,13 +14878,13 @@ def _upsert_order(cur, order):
                     '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
                     'shipping_method', shopify_orders.raw_json->'shipping_method',
                     'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
-                ELSE EXCLUDED.raw_json END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')),
+                ELSE EXCLUDED.raw_json END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')) || jsonb_build_object('total_price', CASE WHEN EXCLUDED.total_price IS NOT NULL AND EXCLUDED.currency IS NOT NULL AND (EXCLUDED.remote_updated_at IS NULL OR shopify_orders.remote_updated_at IS NULL OR EXCLUDED.remote_updated_at >= shopify_orders.remote_updated_at) THEN EXCLUDED.total_price ELSE shopify_orders.total_price END, 'currency', CASE WHEN EXCLUDED.total_price IS NOT NULL AND EXCLUDED.currency IS NOT NULL AND (EXCLUDED.remote_updated_at IS NULL OR shopify_orders.remote_updated_at IS NULL OR EXCLUDED.remote_updated_at >= shopify_orders.remote_updated_at) THEN EXCLUDED.currency ELSE shopify_orders.currency END),
             raw=(CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
                 THEN EXCLUDED.raw || jsonb_build_object(
                     '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
                     'shipping_method', shopify_orders.raw_json->'shipping_method',
                     'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
-                ELSE EXCLUDED.raw END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')),
+                ELSE EXCLUDED.raw END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')) || jsonb_build_object('total_price', CASE WHEN EXCLUDED.total_price IS NOT NULL AND EXCLUDED.currency IS NOT NULL AND (EXCLUDED.remote_updated_at IS NULL OR shopify_orders.remote_updated_at IS NULL OR EXCLUDED.remote_updated_at >= shopify_orders.remote_updated_at) THEN EXCLUDED.total_price ELSE shopify_orders.total_price END, 'currency', CASE WHEN EXCLUDED.total_price IS NOT NULL AND EXCLUDED.currency IS NOT NULL AND (EXCLUDED.remote_updated_at IS NULL OR shopify_orders.remote_updated_at IS NULL OR EXCLUDED.remote_updated_at >= shopify_orders.remote_updated_at) THEN EXCLUDED.currency ELSE shopify_orders.currency END),
             synced_at=now(),
             updated_at=now()
         """,
@@ -24852,18 +24854,32 @@ def _extract_creative_fields(creative):
 
 
 def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insights=None, date_range_label="", account_id=""):
+    if not any((account, campaigns, adsets, ads, insights)):
+        # Failed fetch defaults are not a successful refresh or a metadata clear.
+        return {"campaigns": 0, "adsets": 0, "ads": 0, "creatives": 0, "insights": 0, "rows_upserted": 0}
     ensure_ads_schema()
-    account = account or {}
+    account = dict(account or {})
+    for field in ("currency", "timezone_name"):
+        value = account.get(field)
+        if isinstance(value, str) and value.strip():
+            account[field] = value.strip()
+        else:
+            account.pop(field, None)
     campaigns = campaigns or []
     adsets = adsets or []
     ads = ads or []
     insights = insights or []
+    expected_account_id = str(account_id or "").removeprefix("act_")
     account_id = str(account.get("account_id") or account.get("id") or account_id or "").replace("act_", "")
     creative_count = 0
     started = time.perf_counter()
     with connect() as conn:
         with conn.cursor() as cur:
-            if account_id:
+            # A failed account fetch is not an empty replacement account.
+            received_id = str(account.get("account_id") or account.get("id") or "").removeprefix("act_")
+            if account and received_id and expected_account_id and received_id != expected_account_id:
+                raise ValueError("Meta account identity mismatch; existing metadata retained.")
+            if account_id and received_id:
                 business = account.get("business") or {}
                 cur.execute(
                     """
@@ -24873,11 +24889,11 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                     VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
                     ON CONFLICT (account_id) DO UPDATE SET
                         name=EXCLUDED.name,
-                        currency=EXCLUDED.currency,
-                        timezone_name=EXCLUDED.timezone_name,
+                        currency=COALESCE(NULLIF(EXCLUDED.currency, ''), meta_ad_accounts.currency),
+                        timezone_name=COALESCE(NULLIF(EXCLUDED.timezone_name, ''), meta_ad_accounts.timezone_name),
                         account_status=EXCLUDED.account_status,
                         business_name=EXCLUDED.business_name,
-                        raw=EXCLUDED.raw,
+                        raw=COALESCE(meta_ad_accounts.raw, '{}'::jsonb) || jsonb_strip_nulls(EXCLUDED.raw),
                         synced_at=now(),
                         updated_at=now()
                     """,

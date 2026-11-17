@@ -9,7 +9,14 @@ function execute(strategy,options={}){
  function layer(doc,name,kind,b,text){let value=text;const item={font:'SyntheticFont'};const record={id:doc.id*100+(name==='number'?1:2),name,kind,visible:true,allLocked:false,parent:doc,typename:'ArtLayer',bounds:bounds(b),textItem:item};Object.defineProperty(item,'contents',{get:()=>value,set:v=>{value=v;stats.text++;if(options.autoRename)record.name=v;}});return record;}
  function doc(name='staged',merged=null){
   const d={id:next++,mode:'RGB',bitsPerChannel:'EIGHT',width:unit(200),height:unit(120),resolution:300,colorProfileType:1,colorProfileName:'Synthetic ICC',_merged:merged,_region:null};
-  d.layers=[layer(d,'number','TEXT',[130,95,170,105],'001 / 100'),layer(d,'plaque','PIXEL',[100,80,195,119],'')];
+  d.layers=[layer(d,'number','TEXT',[130,95,170,105],options.numberText ?? '001 / 100'),layer(d,'plaque','PIXEL',[100,80,195,119],'')];
+  if(options.duplicateRoles) {
+   for(const role of [...d.layers]) d.layers.push({...role, id:role.id+10, visible:options.duplicateRoles==='visible'});
+  }
+  if(options.overflow) {
+   const number=d.layers[0];
+   Object.defineProperty(number,'bounds',{get:()=>bounds([130,95,number.textItem.contents==='No. 100/100'?196:170,105])});
+  }
   if(options.preflightHidden){const artwork=layer(d,'artwork','PIXEL',[0,0,200,120],'');artwork.id=998;const obsolete=layer(d,'obsolete','TEXT',[50,90,80,100],'054 / 100');obsolete.id=999;d.layers.push(artwork,obsolete);}
   d.maskBounds=[20,30,60,70];
   d.resizeImage=(width,height,resolution,method)=>{
@@ -40,7 +47,7 @@ function execute(strategy,options={}){
  const resource=Buffer.concat([Buffer.from('8BIM'),Buffer.from([4,15,0,0]),uint(4),Buffer.from('test')]);
  const witness=Buffer.concat([header,uint(0),uint(resource.length),resource]).toString('latin1');files.set('C:/stage/expected.icc','test');
  context={File,Folder:function(path){this.fsName=path;},UnitValue:unit,ResampleMethod:{BICUBICSMOOTHER:'bicubic-smoother'},PNGSaveOptions:function(){},PhotoshopSaveOptions:function(){},Extension:{LOWERCASE:1},SaveOptions:{DONOTSAVECHANGES:1},DialogModes:{NO:0},ColorProfile:{NONE:0},DocumentMode:{RGB:'RGB'},BitsPerChannelType:{EIGHT:'EIGHT'},LayerKind:{TEXT:'TEXT'},SCPSDInspector:{inspect:()=>({document:{profile_state:'tagged'},layers:[]}),encode:JSON.stringify}};
- const old=doc('pre-existing');context.app={documents:[old],activeDocument:old,displayDialogs:'original-dialogs',fonts:{getByName:()=>({})},open:()=>{stats.open++;const opened=doc();context.app.documents.push(opened);context.app.activeDocument=opened;return opened;}};
+ const old=doc('pre-existing');context.app={documents:[old],activeDocument:old,displayDialogs:'original-dialogs',bringToFront:()=>{},fonts:{getByName:()=>({})},open:()=>{stats.open++;const opened=doc();context.app.documents.push(opened);context.app.activeDocument=opened;return opened;}};
  vm.createContext(context);vm.runInContext(script,context);let error=null,result;
  try{result=context.SCAutoEditionsPreparation.run({stage_root:'C:/stage',input:'C:/stage/input.psd',output_root:'C:/output',report:'C:/output/preparation.json',icc_path:'C:/stage/expected.icc',number_layer_name:'number',plaque_layer_name:'plaque',edition_total:100,reference_number:50,export_strategy:strategy,native_benchmark:options.admitted!==false,...(options.preflightHidden?{preflight_only:true,scale:1.5,...(options.reviewedHidden?{approved_hidden_number:{name:'obsolete',layer_id:999,bounds_px:[50,90,80,100]}}:{})}:{}),...(options.fractional?{scale:1.5,target_dimensions:[300,180],preparation_plan:{version:'selected-sku-fractional-v1'}}:{}),...(options.integer?{scale:4,target_dimensions:[800,480],preparation_plan:{version:'selected-sku-fractional-v1'}}:{})});}catch(e){error=e;}
  assert.equal(context.app.activeDocument,old);assert.equal(context.app.displayDialogs,'original-dialogs');
@@ -81,3 +88,12 @@ console.log('Fractional model: constrained bicubic smoother, number/plaque/mask 
 
 for(const reviewed of [false,true]){const r=execute('duplicate_merged',{preflightHidden:true,reviewedHidden:reviewed});assert.equal(r.error,null);assert.equal(r.result,'AUTO_EDITIONS_PREFLIGHT');const p=JSON.parse(r.files.get('C:/output/preparation.json'));assert.equal(p.resize_background.layer_id,reviewed?998:999);assert.equal(r.remaining,1);}
 console.log('Preflight model: only exact reviewed obsolete text is excluded; unreviewed layers retain existing admission.');
+
+const variableWidth=execute('duplicate_merged',{numberText:'No. 81/100'});
+assert.equal(variableWidth.error,null);
+assert.equal(JSON.parse(variableWidth.saved.get('number-1.png')).text,'No. 01/100');
+assert.equal(JSON.parse(variableWidth.saved.get('number-100.png')).text,'No. 100/100');
+assert.match(execute('duplicate_merged',{numberText:'No. 81/100',overflow:true}).error.message,/number_region_requires_review/);
+assert.match(execute('duplicate_merged',{numberText:'No. 01/100'}).error.message,/number_width_requires_review/);
+assert.equal(execute('duplicate_merged',{duplicateRoles:'hidden'}).error,null);
+assert.match(execute('duplicate_merged',{duplicateRoles:'visible'}).error.message,/ambiguous_roles/);

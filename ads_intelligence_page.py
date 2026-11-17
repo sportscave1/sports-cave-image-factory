@@ -605,32 +605,23 @@ def _sync_meta_ads(range_label, days, sync_base=True, sync_country=False, sync_a
 
     rows_fetched = 0
     if sync_base:
-        account = fetch_step("account", lambda: meta_ads_client.fetch_meta_account(config=config), {})
-        campaigns = fetch_step("campaigns", lambda: meta_ads_client.fetch_meta_campaigns(config=config), {"rows": [], "page_count": 0})
-        adsets = fetch_step("adsets", lambda: meta_ads_client.fetch_meta_adsets(config=config), {"rows": [], "page_count": 0})
-        ads = fetch_step("ads", lambda: meta_ads_client.fetch_meta_ads(config=config), {"rows": [], "page_count": 0})
-        insights = fetch_step("insights", lambda: meta_ads_client.fetch_meta_ad_insights(days=days, config=config), {"rows": [], "page_count": 0})
-
-        for label, payload in (("campaigns", campaigns), ("adsets", adsets), ("ads", ads), ("insights", insights)):
-            page_counts[label] = payload.get("page_count", 0)
-        rows_fetched += (
-            (1 if account else 0)
-            + len(campaigns.get("rows") or [])
-            + len(adsets.get("rows") or [])
-            + len(ads.get("rows") or [])
-            + len(insights.get("rows") or [])
-        )
-        saved.update(
-            supabase_backend.save_meta_ads_sync(
-                account=account,
-                campaigns=campaigns.get("rows"),
-                adsets=adsets.get("rows"),
-                ads=ads.get("rows"),
-                insights=insights.get("rows"),
-                date_range_label=range_label,
-                account_id=config.get("ad_account_id"),
-            )
-        )
+        # Explicit existing Sync Performance action, now backed by a complete
+        # daily read and one atomic save. No creative downloads or scheduler.
+        import meta_review_sync
+        try:
+            result = meta_review_sync.sync_reporting(days=days, config=config)
+        except Exception as error:
+            supabase_backend.finish_ads_sync_log(sync_log_id, status="error",
+                date_range=range_label, rows_fetched=0, rows_upserted=0,
+                error_message=meta_ads_client.sanitize_meta_error(error))
+            raise
+        counts = result["counts"]
+        saved.update({key: counts.get(key, 0) for key in ("campaigns", "adsets", "ads", "creatives")})
+        saved["insights"] = counts.get("daily", 0)
+        saved["rows_upserted"] = sum(counts.values())
+        saved["reporting"] = result["reporting"]
+        rows_fetched = saved["rows_upserted"]
+        warnings.extend(result.get("warnings", []))
 
     if sync_country:
         country = fetch_step(
@@ -702,7 +693,7 @@ def _sync_meta_ads(range_label, days, sync_base=True, sync_country=False, sync_a
         saved["total_ms"] = int((time.perf_counter() - started) * 1000)
         return saved
 
-    missing_performance_rows = sync_base and (saved.get("ads", 0) <= 0 or saved.get("insights", 0) <= 0)
+    missing_performance_rows = sync_base and not saved.get("reporting", {}).get("complete", False)
     status = "partial_success" if warnings or missing_performance_rows else "success"
     warning_parts = list(warnings)
     if missing_performance_rows:
@@ -990,6 +981,10 @@ def _render_controls(config_status):
             return
         if label == "Performance":
             st.success(f"Performance synced: {result.get('insights', 0)} rows.")
+            reporting = result.get("reporting") or {}
+            if reporting:
+                st.caption(f"Completed account days: {reporting['since']} to {reporting['until']} · "
+                           f"{reporting['timezone']} · {reporting['currency']}. Saved Daily Briefs require explicit regeneration.")
         elif label == "Demographics":
             st.success(
                 f"Demographics synced: {result.get('country_insights', 0)} country rows, "

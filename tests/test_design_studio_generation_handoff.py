@@ -2,6 +2,7 @@ import unittest
 
 import design_studio_page as page
 import design_studio_styles as styles
+from design_subject_authenticity import IDENTITY_HEADING
 from tests.test_design_studio_find_images import BASELINE
 
 
@@ -10,6 +11,7 @@ class GenerationHandoffTests(unittest.TestCase):
         self.assertTrue(prompt.startswith("FINAL OUTPUT MODE: GENERATE ARTWORK"))
         self.assertTrue(prompt.endswith("Generate the completed artwork now."))
         self.assertEqual(prompt.count(styles.FINAL_GENERATION_EXECUTION_CONTRACT), 1)
+        self.assertEqual(prompt.count(IDENTITY_HEADING), 1)
         for requirement in (
             "REFERENCE/SOURCE IMAGES ONLY", "never the final deliverable",
             "YOU MUST USE IMAGE GENERATION", "NEW, fully composed Sports Cave",

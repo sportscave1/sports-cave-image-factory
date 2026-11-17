@@ -846,9 +846,12 @@ class CarouselServiceTests(unittest.TestCase):
             audience_type="inherited",
             customer_lifecycle_strategy="",
         )
-        result = MetaPostingService(
-            client=client, store=store, carousel_validator=validator
-        ).create_paused_campaign(request)
+        with mock.patch.object(client, "find_ad_by_creative", return_value={"id": "old-ad"}) as lookup:
+            result = MetaPostingService(
+                client=client, store=store, carousel_validator=validator
+            ).create_paused_campaign(request)
+        lookup.assert_not_called()
+        self.assertNotEqual(result["meta_ad_id"], "old-ad")
         self.assertEqual(result["campaign_id"], "existing-campaign")
         self.assertEqual(result["adset_id"], "existing-adset")
         self.assertEqual(result["campaign_ownership"], META_OBJECT_EXISTING_TARGET)

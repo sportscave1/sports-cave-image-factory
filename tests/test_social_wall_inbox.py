@@ -1,6 +1,7 @@
 """Local PostgreSQL and rendered UI regressions for the dedicated inbox."""
 import inspect
 import os
+from pathlib import Path
 import unittest
 import uuid
 from unittest.mock import Mock,patch
@@ -121,22 +122,29 @@ class InboxUiTests(unittest.TestCase):
             report.assert_not_called();previews.assert_not_called()
 
     def test_batch_thumbnails_never_download_originals(self):
-        inbox._thumbnails.clear()
+        inbox._clear_thumbnails()
         success=Mock();success.is_success.return_value=True;success.get_success.return_value.thumbnail='fixture'
-        client=Mock();client.files_get_thumbnail_batch.return_value.entries=[success]*24
+        client=Mock();client.clone.return_value=client;client.files_get_thumbnail_batch.return_value.entries=[success]*24
         with patch.object(inbox,'_dropbox_connection',return_value='fixture'),patch.object(inbox.dropbox_integration,'team_space_client',return_value=client),patch.object(inbox.dropbox_integration,'get_file_bytes') as original:
             result=inbox._thumbnails(tuple((str(i),'/fixture/'+str(i),'1') for i in range(24)))
             self.assertEqual(len(result),24);client.files_get_thumbnail_batch.assert_called_once();original.assert_not_called()
+            inbox._thumbnails((('0', '/fixture/0', '1'), ('1', '/fixture/1', '2')))
+            self.assertEqual(client.files_get_thumbnail_batch.call_count, 2)
+            self.assertEqual([arg.path for arg in client.files_get_thumbnail_batch.call_args.args[0]], ['/fixture/1'])
 
     def test_reset_preserves_unrelated_state(self):
         with patch.object(inbox.st,'session_state',{'wp-analytics-device':'mobile','wall-preview-cursors':['x'],'other':'keep'}) as state:
             inbox._reset();self.assertEqual(state['other'],'keep');self.assertEqual(state['wp-analytics-device'],'All');self.assertEqual(state['wall-preview-cursors'],[None])
 
-    def test_actual_sidebar_contains_three_social_children(self):
-        app=AppTest.from_file('tests/sidebar_preview_app.py').run()
+    def test_actual_sidebar_places_wall_preview_under_website(self):
+        app=AppTest.from_file(Path(__file__).with_name('sidebar_preview_app.py').resolve()).run()
         app.session_state['route']='Wall Preview Inbox'
-        app.session_state['sidebar-open-group']='social_media'
         app.run()
         self.assertFalse(app.exception)
-        labels=[b.label for b in app.button]
-        self.assertIn('Overview',labels);self.assertIn('Wall Preview Inbox',labels);self.assertIn('AI Reels',labels)
+        self.assertEqual(app.session_state['sidebar-open-group'], 'website')
+        self.assertIsNotNone(app.sidebar.button(key='sidebar-child::Wall Preview Inbox'))
+        app.session_state['route']='Social Media'
+        app.run()
+        keys={button.key for button in app.sidebar.button}
+        self.assertIn('sidebar-child::AI Reels', keys)
+        self.assertNotIn('sidebar-child::Wall Preview Inbox', keys)

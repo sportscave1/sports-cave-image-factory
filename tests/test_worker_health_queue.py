@@ -61,6 +61,34 @@ def test_active_owned_checkpoint_and_completed_protection(operations):
     with pytest.raises(ValueError,match='protected'):queue.submit(d.connect,pid,'admin',str(uuid.uuid4()))
 
 
+def test_only_explicitly_archived_different_revision_allows_retry(operations):
+    d,sql=operations
+    pid=failed(d,sql)
+    fid=rows(sql,'product_psd_mappings')[0]['dropbox_file_id']
+    current=dict(product_gid=pid,file_id=fid,content_hash='a'*64,revision='current')
+    old={**current,'content_hash':'b'*64,'revision':'previous'}
+    digest='c'*64
+    sql.execute("UPDATE auto_edition_onboarding SET source=%s::jsonb WHERE product_gid=%s",
+                (json.dumps(current),pid))
+    sql.execute("INSERT INTO auto_edition_preparations VALUES(%s,%s::jsonb,'[]','{}','fixture',now())",
+                (digest,json.dumps(dict(source=old))))
+    with pytest.raises(ValueError,match='protected'):
+        queue.submit(d.connect,pid,'admin',str(uuid.uuid4()))
+    sql.execute("""INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail)
+                   VALUES(%s,'fixture','reset_cleared',%s::jsonb)""",
+                (pid,json.dumps(dict(previous=dict(preparation_hash=digest)))))
+    sql.execute("UPDATE auto_edition_preparations SET manifest=%s::jsonb WHERE hash=%s",
+                (json.dumps(dict(source=current)),digest))
+    with pytest.raises(ValueError,match='protected'):
+        queue.submit(d.connect,pid,'admin',str(uuid.uuid4()))
+    sql.execute("UPDATE auto_edition_preparations SET manifest=%s::jsonb WHERE hash=%s",
+                (json.dumps(dict(source=old)),digest))
+    protected=deepcopy(rows(sql,'auto_edition_preparations'))
+    assert queue.submit(d.connect,pid,'admin',str(uuid.uuid4()))['accepted']
+    assert rows(sql,'auto_edition_preparations')==protected
+    assert rows(sql,'product_psd_mappings')[0]['dropbox_file_id']==fid
+
+
 def test_repair_confirmation_then_all_normal_validation_still_required(operations):
     d,sql=operations;pid=failed(d,sql,repair=True)
     with pytest.raises(ValueError,match='Correct'):queue.submit(d.connect,pid,'admin',str(uuid.uuid4()))

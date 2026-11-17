@@ -19,6 +19,63 @@ def test_preflight_cleanup_cannot_release_a_later_uncertain_rpc(tmp_path):
     assert (tmp_path/'preflight-native-status.json').exists()
 
 
+def test_busy_method_lookup_retries_without_invoking_a_script(monkeypatch):
+    from scripts import photoshop_dispatch as dispatch
+
+    attempts = Mock(side_effect=[-2147418111, -2147417846, 0])
+    wait = Mock()
+    monkeypatch.setattr(dispatch.time, 'sleep', wait)
+    dispatch.resolve_script_method(attempts)
+    assert attempts.call_count == 3
+    assert wait.call_count == 2
+
+    attempts = Mock(return_value=-2147352570)
+    with pytest.raises(dispatch.PhotoshopMethodUnavailable, match='80020006'):
+        dispatch.resolve_script_method(attempts)
+    attempts.assert_called_once()
+
+
+def test_photoshop_activation_retries_only_server_execution_failure(monkeypatch):
+    from scripts import photoshop_dispatch as dispatch
+
+    error = OSError('Server execution failed')
+    error.winerror = -2146959355
+    wait = Mock()
+    monkeypatch.setattr(dispatch.time, 'sleep', wait)
+
+    create = Mock(side_effect=[error, None])
+    dispatch.activate_photoshop(create)
+    assert create.call_count == 2
+
+    wait.reset_mock()
+    create = Mock(side_effect=error)
+    with pytest.raises(dispatch.PhotoshopActivationUnavailable, match='0x80080005'):
+        dispatch.activate_photoshop(create)
+    assert create.call_count == 3
+    assert [call.args for call in wait.call_args_list] == [(1,), (2,)]
+
+    create = Mock(side_effect=OSError('Unrelated failure'))
+    with pytest.raises(OSError, match='Unrelated failure'):
+        dispatch.activate_photoshop(create)
+    create.assert_called_once()
+
+
+@pytest.mark.parametrize("prior_close", [None, True, False])
+@pytest.mark.parametrize("activation_failure", [True, False])
+def test_pre_dispatch_failure_preserves_prior_cleanup_evidence(tmp_path, prior_close, activation_failure):
+    from scripts.photoshop_dispatch import PhotoshopActivationUnavailable, PhotoshopMethodUnavailable
+    from scripts.prepare_auto_editions import native_cleanup_uncertain, native_dispatch
+
+    (tmp_path/'photoshop-dispatch.json').write_text('{"started":true}')
+    if prior_close is not None:
+        (tmp_path/'native-status.json').write_text(json.dumps({"owned_document_closed": prior_close}))
+    error = PhotoshopActivationUnavailable() if activation_failure else PhotoshopMethodUnavailable(0x80010001)
+    failed_dispatch = Mock(side_effect=error)
+    with pytest.raises(type(error)):
+        native_dispatch(failed_dispatch, 'script', tmp_path)
+    assert native_cleanup_uncertain(tmp_path) is (prior_close is False)
+
+
 def test_invalid_source_identity_stops_before_native_processing(tmp_path):
     from scripts.prepare_auto_editions import prepare
     with patch('scripts.photoshop_dispatch.run') as native_run:
@@ -46,17 +103,103 @@ def test_opaque_artwork_keeps_the_exact_pinned_background(tmp_path):
     assert check(tmp_path,report)==report['resize_background']
 
 
-@pytest.mark.parametrize('fault',['source_alpha','artwork_alpha','duplicate','nested','font','wrong_total'])
+def test_opaque_composite_resizes_without_promoting_partial_layer(tmp_path):
+    report=native(tmp_path)
+    candidate=Image.new('RGBA',(2835,2004),(31,72,111,255))
+    candidate.putpixel((0,0),(0,0,0,0))
+    candidate.save(tmp_path/'preflight-artwork.png')
+    assert check(tmp_path,report) is None
+
+
+@pytest.mark.parametrize('fault',['source_alpha','duplicate','nested','font','wrong_total'])
 def test_preflight_rejects_incompatible_template_before_number_exports(tmp_path,fault):
     report=native(tmp_path)
     if fault.endswith('_alpha'):
-        name='preflight-original.png' if fault=='source_alpha' else 'preflight-artwork.png'
-        Image.new('RGBA',(2835,2004),(31,72,111,222)).save(tmp_path/name)
+        Image.new('RGBA',(2835,2004),(31,72,111,222)).save(tmp_path/'preflight-original.png')
     elif fault=='duplicate':report['inspection']['layers'].append(deepcopy(report['inspection']['layers'][0]))
     elif fault=='nested':report['inspection']['layers'][0]['path'].append({'name':'nested'})
     elif fault=='font':report['inspection']['layers'][0]['fonts'][0]['installed']=False
     else:report['inspection']['layers'][0]['text']='001 / 200'
     with pytest.raises(ValueError):check(tmp_path,report)
+
+
+
+def test_resize_corner_rounding_preserves_rgb_samples_and_icc(tmp_path):
+    from auto_editions_preflight import normalize_resize_corners
+    Image.new('RGB', (7, 5)).save(tmp_path / 'preflight-original.png')
+    path = tmp_path / 'master.png'
+    with Image.new('RGBA', (14, 10), (31, 72, 111, 255)) as src:
+        src.putpixel((0, 9), (10, 80, 140, 254))
+        src.putpixel((1, 9), (15, 85, 145, 254))
+        src.save(path, icc_profile=b'fixture profile')
+        expected = src.convert('RGB').tobytes()
+    assert normalize_resize_corners(tmp_path, [path.name], (14, 10)) == {path.name: 2}
+    with Image.open(path) as saved:
+        assert saved.mode == 'RGB'
+        assert saved.tobytes() == expected
+        assert saved.info['icc_profile'] == b'fixture profile'
+
+
+@pytest.mark.parametrize('pixel,alpha', [((0, 9), 253), ((4, 5), 254), ((4, 9), 254)])
+def test_resize_corner_rounding_rejects_other_transparency(tmp_path, pixel, alpha):
+    from auto_editions_preflight import normalize_resize_corners, NonOpaqueArtwork
+    Image.new('RGB', (7, 5)).save(tmp_path / 'preflight-original.png')
+    path = tmp_path / 'master.png'
+    with Image.new('RGBA', (14, 10), (31, 72, 111, 255)) as src:
+        src.putpixel(pixel, (10, 80, 140, alpha))
+        src.save(path)
+    before = path.read_bytes()
+    with pytest.raises(NonOpaqueArtwork):
+        normalize_resize_corners(tmp_path, [path.name], (14, 10))
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('level', [193, 222])
+def test_matched_resize_edge_keeps_all_rgb_and_colour_profile(tmp_path, level):
+    from auto_editions_preflight import normalize_resize_corners
+
+    Image.new('RGB', (14, 10)).save(tmp_path / 'preflight-original.png')
+    size = (56, 40)
+    names = ['original.png', 'master.png', 'reference-1.png', 'reference-100.png']
+    expected = {}
+    for index, name in enumerate(names):
+        with Image.new('RGBA', size, (31, 72 + index, 111, level)) as proof:
+            proof.paste((15, 85, 145, 255), (2, 2, 54, 38))
+            proof.save(tmp_path / name, icc_profile=b'fixture profile')
+            expected[name] = proof.convert('RGB').tobytes()
+    assert normalize_resize_corners(tmp_path, names, size, matched_edges=True) == dict.fromkeys(names, 368)
+    for name in names:
+        with Image.open(tmp_path / name) as proof:
+            assert proof.mode == 'RGB'
+            assert proof.tobytes() == expected[name]
+            assert proof.info['icc_profile'] == b'fixture profile'
+
+
+@pytest.mark.parametrize('fault', ['interior', 'different_proof', 'transparent_edge', 'transparent_source'])
+def test_matched_resize_edge_rejects_unproven_alpha_before_writing(tmp_path, fault):
+    from auto_editions_preflight import normalize_resize_corners, NonOpaqueArtwork
+
+    native = Image.new('RGBA', (14, 10), (15, 85, 145, 255))
+    if fault == 'transparent_source':
+        native.putpixel((0, 0), (15, 85, 145, 254))
+    native.save(tmp_path / 'preflight-original.png')
+    size = (56, 40)
+    names = ['original.png', 'master.png', 'reference-1.png']
+    for name in names:
+        proof = Image.new('RGBA', size, (31, 72, 111, 193))
+        proof.paste((15, 85, 145, 255), (2, 2, 54, 38))
+        if name == 'reference-1.png':
+            if fault == 'interior':
+                proof.putpixel((10, 10), (15, 85, 145, 254))
+            elif fault == 'different_proof':
+                proof.putpixel((0, 0), (15, 85, 145, 222))
+            elif fault == 'transparent_edge':
+                proof.putpixel((0, 0), (15, 85, 145, 0))
+        proof.save(tmp_path / name)
+    before = [(tmp_path / name).read_bytes() for name in names]
+    with pytest.raises(NonOpaqueArtwork):
+        normalize_resize_corners(tmp_path, names, size, matched_edges=True)
+    assert [(tmp_path / name).read_bytes() for name in names] == before
 
 
 def test_resize_proof_rejects_painting_and_the_demonstrated_222_alpha(tmp_path):

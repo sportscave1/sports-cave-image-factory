@@ -25,8 +25,17 @@ def native_cleanup_uncertain(output):
 def native_dispatch(run, script, output):
     # A preflight cleanup receipt cannot prove a subsequent RPC closed its doc.
     status=Path(output)/'native-status.json'
+    prior_cleanup_uncertain = status.exists() and native_cleanup_uncertain(output)
     if status.exists():status.replace(Path(output)/'preflight-native-status.json')
-    return run(script)
+    from scripts.photoshop_dispatch import PhotoshopActivationUnavailable, PhotoshopMethodUnavailable
+    try:
+        return run(script)
+    except (PhotoshopActivationUnavailable, PhotoshopMethodUnavailable):
+        # Activation or lookup failed before Invoke. A missing native receipt here does not
+        # indicate an open Photoshop document from this dispatch.
+        if not prior_cleanup_uncertain:
+            (Path(output)/'photoshop-dispatch.json').unlink(missing_ok=True)
+        raise
 
 
 def select_export_strategy():
@@ -142,6 +151,14 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if reviewed and reviewed.get('hidden_number'):names.append('uncorrected.png')
     with measured(timings,'icc_preservation'):
         restored=restore_export_profiles(output,report,names,source_icc=icc)
+    if scale != 1 and not background and not (reviewed and reviewed.get('opaque_backing')):
+        from auto_editions_preflight import normalize_resize_corners
+        # Only the full-canvas proofs can contain the verified resize edge.
+        # Number patches still pass the existing exact RGB and composition checks.
+        canvas = [name for name in names if not name.startswith('number-')]
+        normalized = normalize_resize_corners(output, canvas, report['dimensions'], matched_edges=True)
+        if normalized:
+            report['resize_evidence'] = dict(method='verified_opaque_resize_alpha_v2', pixels=normalized)
     from auto_editions_artwork_recovery import verify_exports
     correction=verify_exports(output,report,identity,names)
     if correction:report['artwork_recovery']=correction

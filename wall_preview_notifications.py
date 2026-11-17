@@ -51,16 +51,35 @@ def status(claims, *, count_only=False):
                 'created_at': str(row['created_at'])} for row in rows]}
 
 
-def mark_seen(preview_id, user):
-    """Only the authenticated viewer calls this after its image load acknowledgement."""
+def inbox_status(user):
     if not os_accounts.can_access_page(user, social_media.WALL_PREVIEW_ROUTE):
         raise PermissionError('Wall Inbox access is not approved.')
-    identity = str(uuid.UUID(str(preview_id)))
-    key = _prefix(user.get('id'))+identity
+    return status({**user, 'sub': user.get('id'), 'allowed_routes': [social_media.WALL_PREVIEW_ROUTE]})
+
+
+def mark_read(user, preview_ids=None):
+    """Mark selected or all visible arrivals read for this account."""
+    if not os_accounts.can_access_page(user, social_media.WALL_PREVIEW_ROUTE):
+        raise PermissionError('Wall Inbox access is not approved.')
+    prefix = _prefix(user.get('id'))
+    ids = None if preview_ids is None else [str(uuid.UUID(str(value))) for value in preview_ids]
+    if ids == []:
+        return 0
     with transaction() as cur:
-        cur.execute('''INSERT INTO app_sync_state(key,value,cursor_value,status,updated_at)
-            SELECT %s,'{"seen":true}'::jsonb,%s,'ready',now()
-            FROM public.wall_previews p WHERE p.id=%s AND (%s OR p.marketing_permission)
+        cur.execute('''WITH marked AS (INSERT INTO app_sync_state(key,value,cursor_value,status,updated_at)
+            SELECT %s || p.id::text,'{"seen":true}'::jsonb,p.id::text,'ready',now()
+            FROM public.wall_previews p
+            WHERE (%s OR p.marketing_permission)
               AND NOT (p.attribution ? 'inbox_deleted_at' OR p.attribution ? 'inbox_deletion')
-              AND EXISTS (SELECT 1 FROM audit_logs WHERE event_type=%s AND entity_id=p.id::text)
-            ON CONFLICT(key) DO NOTHING''', (key, identity, identity, os_accounts.is_admin(user), EVENT))
+              AND EXISTS (SELECT 1 FROM audit_logs WHERE event_type=%s
+                          AND entity_type='wall_preview_notification' AND entity_id=p.id::text)
+              AND NOT EXISTS (SELECT 1 FROM app_sync_state s WHERE s.key=%s || p.id::text)
+            ''' + (' AND p.id=ANY(%s::uuid[])' if ids is not None else '') +
+            ' ON CONFLICT(key) DO NOTHING RETURNING 1) SELECT count(*) AS count FROM marked',
+            (prefix, os_accounts.is_admin(user), EVENT, prefix, *([ids] if ids is not None else [])))
+        return int(cur.fetchone()['count'])
+
+
+def mark_seen(preview_id, user):
+    """Record an authenticated viewer's image load acknowledgement."""
+    mark_read(user, [preview_id])

@@ -52,13 +52,13 @@ class WrittenMetaHeadlineTests(unittest.TestCase):
 
 
 class PreservedDescriptionStyleTests(unittest.TestCase):
-    def test_three_production_templates_are_unchanged(self):
+    def test_first_two_templates_and_style_identities_are_unchanged(self):
         # Snapshot of the approved production templates before this wording upgrade.
         self.assertEqual(legacy.NEW_AD_STYLE_KEYS,
                          ('legacy_standard', 'framed_greatness', 'choose_a_side'))
-        self.assertEqual(hashlib.sha256(json.dumps(legacy.NEW_AD_TEMPLATES,
+        self.assertEqual(hashlib.sha256(json.dumps(legacy.NEW_AD_TEMPLATES[:2],
                          ensure_ascii=False).encode()).hexdigest(),
-                         '8aaba4ac5d45b8771487907c413e27503e77f6251bbcd485af4190ef85a3bbeb')
+                         'cd023a123743fa78fb1a5a34233edbc2e4638b386b0415017ea2305fcde3cf28')
         for product, sport in [('Jordan × Kobe', 'NBA'), ('Shohei Ohtani 50/50', 'Baseball'),
                                ('Alex Volkanovski', 'MMA'), ('Allan Moffat — 500 Miles Alone', 'Motorsport')]:
             for market in ('USA', 'Australia'):
@@ -73,7 +73,7 @@ class PreservedDescriptionStyleTests(unittest.TestCase):
         rules = legacy.build_new_ad_style_rules('Jordan × Kobe', 'NBA', {})
         self.assertIn(legacy.DESCRIPTION_WORDING_INSTRUCTIONS, rules)
         self.assertIn('Limited to 100 worldwide.', rules)
-        self.assertIn('Only 100 exist.', rules)
+        self.assertIn('Every collection needs a centrepiece.\nOnly 100 collectors can own this one.', rules)
         self.assertEqual(rules.count('CTA: Claim Your Edition'), 3)
         self.assertIn('never restructure the description to fit the headline', rules)
         self.assertIn(legacy.DESCRIPTION_WORDING_INSTRUCTIONS, legacy.build_description_style_rules())

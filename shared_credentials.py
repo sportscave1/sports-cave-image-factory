@@ -23,7 +23,7 @@ class CredentialSpec:
     display_name: str
     username_env: str
     password_env: str
-    permission_key: str
+    permission_key: str | None = None
 
 
 CREDENTIAL_REGISTRY = (
@@ -50,7 +50,14 @@ CREDENTIAL_REGISTRY = (
     ),
 )
 CREDENTIAL_PERMISSION_KEYS = tuple(spec.permission_key for spec in CREDENTIAL_REGISTRY)
-_CREDENTIAL_BY_KEY = {spec.key: spec for spec in CREDENTIAL_REGISTRY}
+_MYGOV_CREDENTIAL = CredentialSpec(
+    key="mygov",
+    display_name="myGov",
+    username_env="MYGOV_USERNAME",
+    password_env="MYGOV_PASSWORD",
+)
+_ALL_CREDENTIALS = (*CREDENTIAL_REGISTRY, _MYGOV_CREDENTIAL)
+_CREDENTIAL_BY_KEY = {spec.key: spec for spec in _ALL_CREDENTIALS}
 _CREDENTIAL_BY_PERMISSION = {spec.permission_key: spec for spec in CREDENTIAL_REGISTRY}
 _VALID_FIELDS = {FIELD_USERNAME, FIELD_PASSWORD}
 
@@ -143,6 +150,8 @@ def _can_access_checked_user(user, spec):
         return False
     import os_accounts
 
+    if spec.permission_key is None:
+        return bool(not user.get("legacy") and os_accounts.is_reporting_owner(user))
     if os_accounts.is_admin(user):
         return True
     return spec.permission_key in os_accounts.permission_keys(user)
@@ -156,14 +165,7 @@ def can_access_credential(user, service_key, *, fresh=False, store=None):
 
 def accessible_credential_specs(user, *, fresh=False, store=None):
     checked_user = resolve_user_for_permission_check(user, store=store) if fresh else dict(user or {})
-    if not _active_user(checked_user):
-        return ()
-    import os_accounts
-
-    if os_accounts.is_admin(checked_user):
-        return CREDENTIAL_REGISTRY
-    selected = os_accounts.permission_keys(checked_user)
-    return tuple(spec for spec in CREDENTIAL_REGISTRY if spec.permission_key in selected)
+    return tuple(spec for spec in _ALL_CREDENTIALS if _can_access_checked_user(checked_user, spec))
 
 
 def can_manage_credential_permissions(actor):

@@ -17,6 +17,8 @@ from worker_diagnostics import explain
 ACTOR = 'automatic:backlog-recovery-v1'
 EVENT = 'backlog_recovery_attempt'
 TRANSIENT = {'DOWNLOAD_INTERRUPTED', 'UPLOAD_INTERRUPTED', 'CONNECTION_INTERRUPTED'}
+ACTIVATION = 'Photoshop activation'
+LEGACY_INSPECTION_OSERROR = 'Photoshop inspection failed: OSError'
 COLOUR = {'PROFILE_MISSING', 'COLOUR_POLICY_PENDING'}
 STRUCTURAL = {'NUMBER_LAYER', 'PLAQUE_AMBIGUOUS', 'NUMBER_FORMAT', 'EDITION_GEOMETRY', 'FONT_MISSING'}
 
@@ -47,8 +49,8 @@ def fix_revision(category):
     # Relevant implementation, not every deployment: unrelated releases must not
     # replenish deterministic retry budgets.
     files = ['auto_editions_recovery.py']
-    if category in ('Resize background','Native inspection'):
-        files = ['auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx','scripts/photoshop/inspect_psd_editions.jsx']
+    if category in ('Resize background','Native inspection','Photoshop busy',ACTIVATION):
+        files = ['auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx','scripts/photoshop/inspect_psd_editions.jsx','scripts/photoshop_dispatch.py']
     elif category == 'Colour/provenance':
         files += ['auto_editions_colour.py', 'auto_editions_colour_policy.py',
                   'scripts/prepare_auto_editions.py', 'scripts/photoshop/prepare_auto_editions.jsx']
@@ -104,9 +106,10 @@ def automatic_scope(row, decision):
     Keep legacy/manual artwork repairs in their reviewed scope. New native
     recoveries protect all completed packages and use the same admission guards.
     """
-    return (legacy_enabled() and row['product_gid'] in ordered_scope() or
+    return (decision['category']==ACTIVATION
+        or legacy_enabled() and row['product_gid'] in ordered_scope() or
         (not row.get('preparation_hash') and not row.get('replacement') and
-         decision['category'] in ('Resize background','Native inspection','Upload/network','Stale/source','Colour/provenance')))
+         decision['category'] in ('Resize background','Native inspection','Photoshop busy','Upload/network','Stale/source','Colour/provenance')))
 
 
 def lease_protects(row, runtime):
@@ -127,6 +130,8 @@ def lease_protects(row, runtime):
 def classify(row, config, *, runtime=None):
     """Conservative eligibility from authoritative current checkpoint evidence."""
     replacement = row.get('replacement') or {}
+    # Earlier Companions reduced inspection exceptions to their type. Allow one
+    # guarded reassessment for that exact legacy OSError; future reports are specific.
     # A failed replacement is the current native attempt. Its retained package's
     # older technical error must never hide a newer deterministic failure.
     reason = (replacement.get('reason') if replacement.get('stage')=='Failed' else None) or row.get('technical_reason') or row.get('reason') or ''
@@ -134,7 +139,12 @@ def classify(row, config, *, runtime=None):
     lower = reason.lower()
     transient=(code in TRANSIENT or 'transfer failed: timeouterror' in lower
         or reason=='Preparation failed: HTTPError. Existing PSD and mapping are preserved.')
-    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED'
+    isolated_alpha = code=='ARTWORK_ALPHA' and 'preflight-artwork.png: non-opaque alpha' in lower
+    rounding_alpha = code=='ARTWORK_ALPHA' and 'non-opaque alpha (254-255)' in lower
+    legacy_edge = 'resized artwork contains transparency outside the one-level corner rounding allowance.' in lower
+    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED' or isolated_alpha or rounding_alpha or legacy_edge
+                else ACTIVATION if code=='PHOTOSHOP_ACTIVATION' or reason==LEGACY_INSPECTION_OSERROR
+                else 'Photoshop busy' if code=='PHOTOSHOP_BUSY'
                 else 'Native inspection' if 'cannot open the file because the open options are incorrect' in lower or reason=='Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.'
                 else 'Colour/provenance' if code in COLOUR or 'embedded icc profile required' in lower
                 else 'Plaque/layers' if code in STRUCTURAL
@@ -145,7 +155,8 @@ def classify(row, config, *, runtime=None):
                 else 'Photoshop' if 'photoshop' in lower or 'preparation failed' in lower
                 else 'Other')
     result = dict(category=category, action=None, reason=reason, max_attempts=1)
-    if row.get('status') not in ('Blocked', 'Needs PSD Repair'):
+    if row.get('status') not in ('Blocked', 'Needs PSD Repair') and not (
+            category==ACTIVATION and row.get('status')=='Cloud Ready' and replacement.get('stage')=='Failed'):
         return {**result, 'reason': 'Existing active, queued or verified checkpoint is protected.'}
     if row.get('priority', 0) <= 0:
         return {**result, 'reason': 'Excluded or deferred by the existing priority policy.'}
@@ -157,9 +168,20 @@ def classify(row, config, *, runtime=None):
     source = pending.get('source') if pending.get('stage') == 'Failed' else row.get('source')
     if not source or source.get('file_id') != row.get('dropbox_file_id'):
         return {**result, 'reason': 'Restore or explicitly resolve the current mapped source identity.'}
+    if category==ACTIVATION and (pending.get('stage')=='Failed' or not row.get('preparation_hash')):
+        if pending.get('stage')=='Failed' and pending.get('attempts',0)>=3:
+            return {**result, 'reason':reason+' The replacement reached its native attempt limit.'}
+        if resize_fix_available(runtime):
+            return {**result, 'action':'retry_native'}
+        return {**result, 'reason':reason+' Waiting for an idle Companion with the Photoshop activation fix.'}
     if category=='Resize background' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
-                'reason':'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.'}
+                'reason':('The previous Companion rejected edge alpha after resizing. Waiting for an idle Companion with the verified edge fix.' if legacy_edge else
+                          'The isolated resize candidate was transparent. A fixed idle Companion can preserve the full layered composition and verify its output.' if isolated_alpha else
+                          'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.')}
+    if category=='Photoshop busy' and not row.get('preparation_hash') and not pending:
+        return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
+                'reason':'Photoshop was busy before the script started. Waiting for an idle Companion to retry.'}
     if category=='Native inspection' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
                 'reason':'Photoshop could not open the staged PSD. Waiting for the verified native-window restoration fix on an idle Companion.'}
@@ -221,10 +243,11 @@ def classify(row, config, *, runtime=None):
             return {**result, 'action': 'retry_colour'}
         except (ValueError, KeyError, TypeError) as error:
             return {**result, 'reason': str(error)+' Restore the embedded ICC or register independent, content-bound provenance within the existing approved workflow.'}
-    # Historical generic errors can hide an already fixed colour failure. Only
-    # pinned approved provenance permits one fresh inspection under current code;
-    # it does not authorise assigning a profile to tagged/unknown source bytes.
-    if reason == 'Preparation failed: RuntimeError. Existing PSD and mapping are preserved.':
+    # A legacy failure can hide the original inspection error. A policy pinned
+    # to these exact bytes permits one fresh guarded attempt without guessing ICC.
+    if not row.get('preparation_hash') and not pending and reason in (
+            'Preparation failed: RuntimeError. Existing PSD and mapping are preserved.',
+            'Photoshop inspection failed: Photoshop preparation failed; inspect the retained local failure-detail.json.'):
         try:
             from auto_editions_colour_policy import resolve
             resolve(source, **config)
@@ -315,7 +338,8 @@ def temporary_admission(error):
 def plan(connect, config):
     """Full authoritative backlog; independent of the 50-row UI pagination."""
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(SQL + " WHERE q.status IN ('Blocked','Needs PSD Repair') ORDER BY CASE WHEN q.priority=8 THEN 11 ELSE q.priority END DESC,q.created_at,q.product_gid")
+        cur.execute(SQL + """ WHERE (q.status IN ('Blocked','Needs PSD Repair') OR
+            (q.status='Cloud Ready' AND to_jsonb(q)->'replacement'->>'stage'='Failed')) ORDER BY CASE WHEN q.priority=8 THEN 11 ELSE q.priority END DESC,q.created_at,q.product_gid""")
         rows = cur.fetchall()
         runtime=native_runtime(cur)
         scope=ordered_scope()

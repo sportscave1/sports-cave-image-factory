@@ -9,13 +9,13 @@ const project = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/proj
 const conversation = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b-sc-mockups-uploads/c/01234567-0123-0123-0123-0123456789ab';
 
 function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '',
-  initialFiles = [], design = false, start = 3, total = 6, canSet = true, powerAvailable = true,
+  initialFiles = [], design = false, ad = false, start = 3, total = 6, canSet = true, powerAvailable = true,
   resetAfterPaste = false, draftBackupOK = true, ignoreEscape = false,
   splitPreview = false, mismatchedPreview = false, sendTypeButton = false,
   afterThinkingDelay = 0, afterPermitDelay = 0, acknowledge = true, attachmentPreview = false,
   invalidateAfterReopen = false, headerAvailable = true, duplicateSend = false,
   permitOK = true, cancelAfter = Infinity, afterPasteText = "", extraAfterPaste = false, renameReferenceAfterPaste = false} = {}) {
-  const location = {href:design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : project};
+  const location = {href:ad ? 'https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/project' : design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : project};
   const files = [...initialFiles];
   const sent = [];
   const thinking = [];
@@ -53,7 +53,7 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
     sent.push(inserted);
     thinking.push({selected, expanded});
     current = true;
-    if (acknowledge) location.href = design ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a1e449948e881919c1e345006d63654-sports-cave-designs') : conversation;
+    if (acknowledge) location.href = ad ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a6bd98cd6f081918788b544dcdecfc2-sports-cave-meta-ads') : design ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a1e449948e881919c1e345006d63654-sports-cave-designs') : conversation;
   }};
   const staleSend = {...button,disabled:true,getClientRects:()=>[]};
   const querySelector = query => query.includes('Select ChatGPT model') ? trigger :
@@ -317,4 +317,12 @@ test('Live regression: ChatGPT renames the verified reference after upload and S
   assert.equal(result.sent,true,result.reason);
   assert.deepEqual(app.sent,[prompt]);
   assert.equal(app.permitted(),1);
+});
+test('Meta Ads retains one-step-below-maximum submission without reopening the prepared composer', async () => {
+  const browser = fixture({ad:true, asAttachment:true, total:7, invalidateAfterReopen:true});
+  const prompt = 'Sports Cave automatic ad job\n' + 'Use the exact Dropbox image. '.repeat(200);
+  assert.equal((await browser.invoke({type:'project:send', id:'ad', prompt})).sent,true);
+  assert.deepEqual(browser.sent,[prompt]);
+  assert.deepEqual(browser.thinking,[{selected:6, expanded:false}]);
+  assert.equal(browser.permitted(),1);
 });

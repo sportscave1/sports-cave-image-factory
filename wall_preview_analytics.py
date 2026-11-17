@@ -159,14 +159,7 @@ BASE="""WITH resolved AS (SELECT e.*,
  filtered AS (SELECT * FROM normalized WHERE {where}) """
 
 
-def report(params=None):
-    where,args=filters(params or {})
-    # product filters also resolve legacy preview metadata, without fabricating events.
-    where=where.replace('product_id=%s','resolved_product=%s').replace('capture_source=%s','resolved_capture=%s').replace('device_type=%s','resolved_device=%s')
-    base=BASE.format(where=where)
-    def rows(cur,sql):cur.execute(base+sql,tuple(args));return [dict(r) for r in cur.fetchall()]
-    with transaction() as cur:
-        engagement=rows(cur,""", visits AS (
+ENGAGEMENT_SQL = """, visits AS (
           SELECT wall_preview_session_id,visitor_id,resolved_product,
            min(occurred_at) FILTER(WHERE event_type='wall_preview_cta_click') clicked,
            min(occurred_at) FILTER(WHERE event_type='wall_preview_open') opened,
@@ -184,7 +177,36 @@ def report(params=None):
            count(*) FILTER(WHERE cart>=opened) atc,
            avg(active) FILTER(WHERE opened IS NOT NULL) avg_active_seconds,
            percentile_cont(0.5) WITHIN GROUP(ORDER BY active) FILTER(WHERE opened IS NOT NULL) median_active_seconds
-          FROM visits""")[0]
+          FROM visits"""
+
+
+def _report_scope(params):
+    where,args=filters(params or {})
+    # product filters also resolve legacy preview metadata, without fabricating events.
+    where=where.replace('product_id=%s','resolved_product=%s').replace('capture_source=%s','resolved_capture=%s').replace('device_type=%s','resolved_device=%s')
+    return BASE.format(where=where), tuple(args)
+
+def _engagement_rates(row):
+    def percent(numerator, denominator):
+        return round(numerator / denominator * 100, 1) if denominator else None
+
+    return {**row, 'click_open_percent': percent(row['click_opens'], row['cta_clicks']),
+            'placement_percent': percent(row['confirmed'], row['opens']),
+            'cart_percent': percent(row['atc'], row['opens'])}
+
+
+def overview_engagement(params):
+    base, args = _report_scope(params)
+    with transaction() as cur:
+        cur.execute(base + ENGAGEMENT_SQL, args)
+        return _engagement_rates(dict(cur.fetchone()))
+
+
+def report(params=None):
+    base, args = _report_scope(params)
+    def rows(cur,sql):cur.execute(base+sql,tuple(args));return [dict(r) for r in cur.fetchall()]
+    with transaction() as cur:
+        engagement=rows(cur,ENGAGEMENT_SQL)[0]
         counts=rows(cur,"SELECT event_name,count(*) AS events,count(DISTINCT COALESCE(journey::text,preview_id::text)) AS journeys FROM filtered GROUP BY event_name")
         sessions=rows(cur,'SELECT count(DISTINCT session_id) AS n FROM filtered')[0]['n']
         revenue=rows(cur,"SELECT currency,sum(line_revenue) AS revenue FROM filtered WHERE source='shopify' AND event_name='WallPreviewPurchased' AND line_revenue IS NOT NULL AND currency<>'' GROUP BY currency")
@@ -226,7 +248,7 @@ def report(params=None):
         p['revenue']=[r for r in product_revenue if r['product_id']==p['product_id']]
         p['purchase_percent']=ratio(int(p.pop('converted')),int(p['opens']))
         p.pop('sort_revenue',None)
-    return {'engagement':{**engagement,'click_open_percent':ratio(engagement['click_opens'],engagement['cta_clicks']),'placement_percent':ratio(engagement['confirmed'],engagement['opens']),'cart_percent':ratio(engagement['atc'],engagement['opens'])},'summary':{'opens':count('Started'),'sessions':int(sessions),'photo_ready':count('PhotoReady'),
+    return {'engagement':_engagement_rates(engagement),'summary':{'opens':count('Started'),'sessions':int(sessions),'photo_ready':count('PhotoReady'),
             'confirmed':count('Confirmed'),'atc':count('AddedToCart'),'purchased':count('Purchased'),
             'atc_percent':ratio(next((int(r['n']) for r in transitions if r['event_name']=='WallPreviewStarted' and r['next_event']=='WallPreviewAddedToCart'),0),count('Started')),'purchase_percent':ratio(next((int(r['n']) for r in transitions if r['event_name']=='WallPreviewStarted' and r['next_event']=='WallPreviewPurchased'),0),count('Started')),'revenue':revenue},
             'funnel':funnel,'products':products,'insights':insight}

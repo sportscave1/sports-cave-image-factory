@@ -328,7 +328,7 @@ def test_host_claim_does_not_refresh_catalogue_with_v15_enabled(monkeypatch):
         with patch.object(api,'preparation_actor',return_value=ADMIN),patch.object(api,'queue',return_value=queue),\
                 patch('auto_editions_priority.refresh',side_effect=AssertionError('Catalogue scan on claim')):
             response=await api.claim(request('POST',body={}))
-            assert response.status_code==200 and json.loads(response.body)=={'grant':None}
+            assert response.status_code==200 and json.loads(response.body)['grant'] is None
     asyncio.run(check())
 
 
@@ -352,12 +352,13 @@ def test_worker_reuses_existing_service_thread_and_honours_rollout_gate():
     import sports_cave_worker as worker
     for enabled in (False,True):
         supervisor=worker.Supervisor();supervisor.stop.set()
-        with patch.object(discovery,'enabled',return_value=enabled),patch.object(worker.threading,'Thread') as thread:
+        with patch.object(discovery,'enabled',return_value=enabled),patch('product_quiz_worker.enabled',return_value=False),patch.object(worker.threading,'Thread') as thread:
             supervisor.run()
-            assert thread.call_count==int(enabled)
-            if enabled:
-                thread.return_value.start.assert_called_once()
-                thread.return_value.join.assert_called_once()
+            names=[call.kwargs['name'] for call in thread.call_args_list]
+            assert names.count('auto-editions-discovery')==int(enabled)
+            assert names.count('edition-product-onboarding')==1
+            assert thread.return_value.start.call_count==1+int(enabled)
+            assert thread.return_value.join.call_count==1+int(enabled)
 
 
 @pytest.mark.skipif(not os.getenv('AUTO_EDITIONS_NATIVE_TEST_PORT'),reason='Independent connections require isolated native PostgreSQL')

@@ -93,6 +93,15 @@ def job():
     return dict(id=ae.fingerprint(identity),identity=identity)
 
 
+def test_failure_details_explains_size_error_and_retry_budget():
+    from auto_editions_jobs import failure_details
+    details=failure_details(dict(status='Blocked',error_code='output_too_large',attempts=1))
+    assert 'size limit' in details['error_message'] and details['retryable']
+    details=failure_details(dict(status='Blocked',error_code='output_too_large',attempts=3))
+    assert 'Retry limit reached' in details['error_message'] and not details['retryable']
+    assert failure_details(dict(status='Ready'))=={}
+
+
 def test_synthetic_connection_nested_async_worker_rollback_does_not_deadlock(database):
     import asyncio
     from starlette.concurrency import run_in_threadpool
@@ -144,6 +153,30 @@ def test_retry_is_bounded_and_browser_roles_cannot_read_jobs(database):
             with pytest.raises(RuntimeError,match='permission denied'):
                 sql.execute('SELECT * FROM auto_edition_jobs')
         finally:sql.execute('RESET ROLE')
+
+
+@pytest.mark.parametrize('code',['source_changed','asset_invalid','preparation_blocked','output_too_large'])
+def test_explicit_retry_reuses_identity_preserves_budget_and_duplicate_clicks(database,code):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin')
+    for attempt in (1,2):
+        claim=jobs.claim();assert claim['attempts']==attempt
+        jobs.finish(j['id'],claim['lease_token'],error_code=code)
+        assert jobs.retry(j['id'],'admin')['status']=='Queued'
+        assert jobs.retry(j['id'],'admin')['status']=='Queued'
+    claim=jobs.claim();assert claim['attempts']==3
+    jobs.finish(j['id'],claim['lease_token'],error_code=code)
+    with pytest.raises(ValueError,match='Retry limit reached'):jobs.retry(j['id'],'admin')
+    assert jobs.read(j['id'])['payload']==j
+    sql.execute("SELECT count(*) AS n FROM auto_edition_job_audit WHERE event='retry'")
+    assert sql.fetchone()['n']==2
+
+
+def test_retry_ready_job_never_discards_or_regenerates_result(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin');claim=jobs.claim()
+    jobs.finish(j['id'],claim['lease_token'],result={'exact':'archived-output'})
+    assert jobs.retry(j['id'],'admin')['status']=='Ready'
+    assert jobs.read(j['id'])['result']=={'exact':'archived-output'}
+    assert jobs.claim() is None
 
 
 def test_expired_output_is_not_downloadable_and_regenerates_only_on_request(database):

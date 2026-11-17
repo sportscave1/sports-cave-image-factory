@@ -302,23 +302,10 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn('title="Open Daily Planner"', markup)
         self.assertNotIn("Shopify", source)
 
-    def test_home_greeting_uses_browser_time_display_name_and_no_smiley(self):
+    def test_top_bar_does_not_restore_the_home_greeting(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
-
-        self.assertEqual(1, source.count('id="sc-os-files"'))
-        self.assertIn('doc.getElementById("sc-home-greeting")', source)
-        self.assertNotIn('id="sc-os-topbar-greeting"', source)
-        self.assertIn("state.config.userDisplayName", source)
-        self.assertIn("topBarGreetingForDate(new Date())", source)
-        self.assertIn('if (hour >= 5 && hour < 12) return "Good morning";', source)
-        self.assertIn('if (hour >= 12 && hour < 17) return "Good afternoon";', source)
-        self.assertIn('return "Good night";', source)
-        self.assertIn(
-            "topbarGreeting.textContent = `${topBarGreetingForDate(new Date())}, ${displayName}`",
-            source,
-        )
-        self.assertNotIn("Good morning, Nathan", source)
-        self.assertNotIn(":)", source)
+        self.assertNotIn("sc-home-greeting", source)
+        self.assertNotIn("scheduleTopBarGreeting", source)
 
     def test_top_bar_opens_planner_for_home_without_claiming_alarm_ownership(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
@@ -328,7 +315,7 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertNotIn('runClaimedPlannerEffect("time-up"', source)
         self.assertNotIn("chime:true", source)
 
-    def test_top_bar_config_projects_authenticated_display_name(self):
+    def test_top_bar_config_omits_the_home_greeting_name(self):
         user = {
             "id": "worker-1",
             "display_name": "Reina",
@@ -349,8 +336,7 @@ class TopBarComponentTests(unittest.TestCase):
                 current_route="Dashboard",
             )
 
-        self.assertEqual(config["userDisplayName"], "Reina")
-        self.assertNotEqual(config["userDisplayName"], "Nathan")
+        self.assertNotIn("userDisplayName", config)
 
     def test_refresh_button_performs_a_full_page_reload(self):
         source = COMPONENT_PATH.read_text(encoding="utf-8")
@@ -499,7 +485,7 @@ class TopBarComponentTests(unittest.TestCase):
         body, kwargs = components.calls[0]
         self.assertEqual({"height": 0, "width": 0}, kwargs)
         self.assertIn('"authToken": "signed-token"', body)
-        self.assertIn('"userDisplayName": "Admin"', body)
+        self.assertNotIn('"userDisplayName"', body)
         self.assertEqual(1, body.count('id="sc-os-refresh"'))
         self.assertEqual(1, body.count('id="sc-os-files"'))
         self.assertEqual(1, body.count('id="sc-os-daily-planner"'))

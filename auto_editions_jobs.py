@@ -5,6 +5,28 @@ import uuid
 import auto_editions as ae
 
 
+RETRYABLE_ERRORS=('worker_unavailable','source_changed','asset_invalid',
+                  'preparation_blocked','output_too_large')
+ERROR_MESSAGES={
+    'output_too_large':'The full-quality JPG exceeds the download size limit. The artwork has not been reduced.',
+    'source_changed':'The artwork or preparation changed during generation. Retry to recheck the current files.',
+    'asset_invalid':'An artwork asset failed verification. Review the prepared files before retrying.',
+    'preparation_blocked':'Artwork generation failed a preparation check. Review the design before retrying.',
+    'worker_unavailable':'JPG generation was interrupted. Retry to resume the same order.',
+    'cache_expired':'The temporary JPG expired. Retry to prepare it again.',
+}
+
+
+def failure_details(row):
+    if not row or row.get('status')!='Blocked':return {}
+    code=row.get('error_code')
+    retryable=(code in RETRYABLE_ERRORS and row.get('attempts',3)<3) or code=='cache_expired'
+    message=ERROR_MESSAGES.get(code,'JPG generation is blocked. Ask an administrator to review this design.')
+    if code in RETRYABLE_ERRORS and row.get('attempts',3)>=3:
+        message+=' Retry limit reached; administrator review is required.'
+    return dict(error_message=message,retryable=retryable)
+
+
 class Jobs:
     def __init__(self, connect):
         self.connect=connect
@@ -51,7 +73,7 @@ class Jobs:
 
     def finish(self, job_id, lease, result=None, error_code=None):
         # Caller supplies an allowlisted code, never provider exception messages.
-        if error_code not in (None,'source_changed','asset_invalid','worker_unavailable'):
+        if error_code not in (None,*RETRYABLE_ERRORS):
             raise ValueError('Unsupported worker error code.')
         if bool(result) == bool(error_code):
             raise ValueError('Exactly one result or error is required.')
@@ -69,10 +91,18 @@ class Jobs:
         if not actor:raise PermissionError('Authenticated actor required.')
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('''UPDATE public.auto_edition_jobs SET status='Queued',error_code=NULL,updated_at=now()
-                WHERE id=%s AND status='Blocked' AND attempts < 3 AND error_code='worker_unavailable'
-                RETURNING id''',(job_id,))
-            if not cur.fetchone():raise ValueError('This job cannot be retried automatically.')
+                WHERE id=%s AND status='Blocked' AND attempts < 3 AND error_code=ANY(%s)
+                RETURNING id,status,attempts,error_code,result''',(job_id,list(RETRYABLE_ERRORS)))
+            row=cur.fetchone()
+            if not row:
+                cur.execute('SELECT id,status,attempts,error_code,result FROM public.auto_edition_jobs WHERE id=%s',(job_id,))
+                row=cur.fetchone()
+                # Duplicate clicks/lost acknowledgements reuse the active or
+                # completed job, never reset its attempts or regenerate a JPG.
+                if row and row['status'] in ('Queued','Generating','Ready'):return dict(row)
+                raise ValueError('This job cannot be retried automatically. Retry limit reached or artwork review required.')
             self.audit(cur,job_id,actor,'retry')
+            return dict(row)
 
     def read(self, job_id):
         # HTTP callers must revalidate current user, allocation and source first.

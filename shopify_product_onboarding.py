@@ -152,12 +152,20 @@ def drain(db, config=None, limit=10, renew=None):
     retry schedule (30s exponential, capped at one hour), without a retry cutoff.
     """
     with db.connect() as conn, conn.cursor() as cur:
-        cur.execute("""SELECT webhook_id,topic,payload,shop_domain FROM webhook_events
+        cur.execute("""WITH due AS (
+            SELECT *,CASE WHEN status='received' AND webhook_id NOT LIKE 'edition-recovery-%%'
+                          THEN 0 ELSE 1 END AS lane FROM webhook_events
             WHERE lower(replace(topic,'_','/')) IN ('products/create','products/update','editions/onboard')
               AND status IN ('received','processing','failed','retry','pending')
               AND (processed_at IS NULL OR processed_at <= now() -
                    least(3600,30*power(2,least(COALESCE((payload->>'_onboarding_attempts')::int,0),7))) * interval '1 second')
-            ORDER BY COALESCE(processed_at,received_at),webhook_id LIMIT %s""", (limit,))
+            ), ranked AS (
+              SELECT *,row_number() OVER(PARTITION BY lane ORDER BY
+                CASE WHEN lane=0 THEN received_at END DESC,
+                COALESCE(processed_at,received_at),webhook_id) AS position FROM due)
+            SELECT webhook_id,topic,payload,shop_domain FROM ranked
+            ORDER BY (position-1)/(CASE WHEN lane=0 THEN 4 ELSE 1 END),lane,position
+            LIMIT %s""", (limit,))
         rows = list(cur.fetchall())
     for row in rows:
         if renew:
@@ -177,10 +185,11 @@ def drain(db, config=None, limit=10, renew=None):
 
 
 def reconcile(db, config=None, max_pages=4, renew=None):
-    """Bounded update-window scan; save page continuation only after processing.
+    """Bounded update-window scan; checkpoint only after durable receipt storage.
 
-    Pending metadata is durably retained in receipts. API/persistence failures
-    retain the old page/checkpoint; replay goes through the same registration.
+    Processing belongs to drain, with backoff, independently of scan progress.
+    A failing product cannot pin a scan page or occupy the worker for hours.
+    API/receipt persistence failures still retain the old page/checkpoint.
     """
     import shopify_sync as shopify
     state = db.get_app_setting(CHECKPOINT, {}, ensure_schema_first=False)
@@ -200,17 +209,7 @@ def reconcile(db, config=None, max_pages=4, renew=None):
             pid = product['id'].rsplit('/', 1)[-1]
             event = 'edition-recovery-' + hashlib.sha256((product['id'] + product['updatedAt']).encode()).hexdigest()
             payload = {'id': pid}
-            claim = db.claim_product_create_webhook_receipt(payload, event, 'products/update', shop_domain=(config or {}).get('store_domain', ''))
-            if not claim['duplicate']:
-                process_receipt({'payload': payload, 'webhook_id': event, 'topic': 'products/update'}, db, config)
-            else:
-                # A previous attempt may have failed after receipt persistence.
-                # Never advance this page past a failed receipt.
-                with db.connect() as conn, conn.cursor() as cur:
-                    cur.execute('SELECT status FROM webhook_events WHERE webhook_id=%s', (event,))
-                    receipt = cur.fetchone()
-                if not receipt or receipt['status'] in ('received','processing','failed','retry'):
-                    process_receipt({'payload': payload, 'webhook_id': event, 'topic': 'products/update'}, db, config)
+            db.claim_product_create_webhook_receipt(payload, event, 'products/update', shop_domain=(config or {}).get('store_domain', ''))
         page = connection['pageInfo']
         if page.get('hasNextPage') is False:
             db.set_app_setting(CHECKPOINT, {'checkpoint': end}, ensure_schema_first=False)

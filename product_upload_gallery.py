@@ -31,14 +31,16 @@ def register(result, asset, source, path):
             if monotonic() - item['created'] > 86400:
                 del _assets[token]
             elif item['identity'] == identity:
-                if item['signature'] == signature and item['source'] == source:
+                if (item['signature'] == signature and item['source'] == source
+                        and item.get('restart') == result.get('_staff_full_restart')):
                     return '/api/product-uploads/asset?' + urlencode(dict(token=token))
                 del _assets[token]
         while len(_assets) >= 200:
             del _assets[next(iter(_assets))]
         token = secrets.token_urlsafe(32)
         _assets[token] = dict(identity=identity, actor=identity[0], key=identity[1], source=dict(source),
-                              signature=signature, path=path, created=monotonic())
+                              signature=signature, path=path, created=monotonic(),
+                              restart=result.get('_staff_full_restart'))
         return '/api/product-uploads/asset?' + urlencode(dict(token=token))
 
 
@@ -50,6 +52,8 @@ def resolve(token, actor, read):
     row = read(item['key'], actor)
     if not row or row['data'].get('source') != item['source']:
         raise ValueError('This image belongs to a previous PSD selection.')
+    if row['data'].get('staff_full_restart') != item.get('restart'):
+        raise ValueError('This image belongs to an earlier reset. Open the current mockup.')
     path = item['path']
     if not path.is_file() or (str(path), path.stat().st_size, path.stat().st_mtime_ns) != item['signature']:
         raise ValueError('This original has been replaced. Reopen the current mockup.')
@@ -100,9 +104,11 @@ def preview_item(path, original, label):
     return item
 
 
-def render(*, key, items=(), original='', prompt=None, mode='image'):
+def render(*, key, items=(), original='', prompt=None, mode='image', handoff=None):
     import streamlit.components.v1 as components
     # Keyed render handshake instead of unkeyed script-generated srcdoc cards.
     # Arguments contain preview bytes and original URLs, never original bytes.
     component=components.declare_component('product_upload_gallery',path=str(Path(__file__).parent/'components/product_upload_gallery'))
-    return component(mode=mode,items=list(items),original=original,prompt=prompt,key=key,default=None)
+    optional = {}
+    if handoff: optional['handoff'] = handoff
+    return component(mode=mode,items=list(items),original=original,prompt=prompt,key=key,default=None,**optional)

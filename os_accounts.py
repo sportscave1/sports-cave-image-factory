@@ -49,7 +49,8 @@ REPORTING_OWNER_ENV_KEYS = (
 
 PAGE_REGISTRY = (
     {"key": "task_recorder", "route": "Task Recorder", "label": "Task Recorder", "worker_assignable": False, "top_level": True},
-    {"key": "worker_health", "route": "Worker Health", "label": "Worker Health", "worker_assignable": False, "top_level": True},
+    {"key": "worker_health", "route": "Worker Health", "label": "Editions Companion", "worker_assignable": False, "top_level": True},
+    {"key": "upload_companion", "route": "Upload Companion", "label": "Companion Queues", "worker_assignable": False, "top_level": True},
     {"key": "developer_studio", "route": "Developer Studio", "label": "Dev Mode", "worker_assignable": False, "top_level": True},
     {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": False, "parent_key": "developer", "navigation_child": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
@@ -64,7 +65,7 @@ PAGE_REGISTRY = (
     },
     {"key": social_media.WALL_PREVIEW_PAGE_KEY, "route": social_media.WALL_PREVIEW_ROUTE,
      "label": "Wall Preview Inbox", "worker_assignable": False,
-     "parent_key": social_media.SOCIAL_MEDIA_PAGE_KEY, "navigation_child": True},
+     "parent_key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE], "navigation_child": True},
     {
         "key": social_media.AI_REELS_PAGE_KEY,
         "route": social_media.AI_REELS_ROUTE,
@@ -148,7 +149,15 @@ PAGE_REGISTRY = (
             "navigation_child": True,
         }
         for route in seo_workspace.SEO_ROUTES[1:]
+        if route != analytics_navigation.WEBSITE_OVERVIEW_ROUTE
     ),
+    {
+        "key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE],
+        "route": analytics_navigation.WEBSITE_OVERVIEW_ROUTE,
+        "label": "Website",
+        "worker_assignable": False,
+        "top_level": True,
+    },
     {"key": "email", "route": "Email", "label": "Email", "worker_assignable": True},
     {"key": "reviews", "route": "Reviews", "label": "Reviews", "worker_assignable": True},
     *({"key": key, "route": route, "label": label, "worker_assignable": key != 'crm_settings_view', "navigation_child": True}
@@ -179,14 +188,20 @@ PAGE_REGISTRY = (
         "navigation_child": True,
     },
     {
+        "key": "accounting",
+        "route": "Accounting",
+        "label": "Accounting",
+        "worker_assignable": True,
+    },
+    {
         "key": "accounts_access",
         "route": "Accounts & Access",
         "label": "Settings",
         "worker_assignable": False,
     },
     {"key": "developer", "route": "Developer", "label": "Developer", "worker_assignable": False, "top_level": True},
-    {"key": "product_quiz", "route": "Product Quiz", "label": "Product Quiz", "worker_assignable": False,
-     "parent_key": "developer", "navigation_child": True},
+    {"key": "product_quiz", "route": analytics_navigation.PRODUCT_QUIZ_ROUTE, "label": "Product Quiz", "worker_assignable": False,
+     "parent_key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE], "navigation_child": True},
     {"key": "products", "route": "Products", "label": "Products", "worker_assignable": False},
     {
         "key": "product_assets",
@@ -413,7 +428,7 @@ def can_access_page(user, route_or_key):
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
     if page and page["key"] == "developer_studio":
         return is_reporting_owner(user)
-    if page and page['key'] in {'worker_health', 'task_recorder'}:return is_admin(user)
+    if page and page['key'] in {'worker_health', 'upload_companion', 'task_recorder'}:return is_admin(user)
     if page and page['key']=='crm_settings_view':
         return is_admin(user) or any(key in permission_keys(user) for key,_,_ in crm_navigation.PAGES)
     if page and page["key"] == REPORTING_PAGE_KEY:

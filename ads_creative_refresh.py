@@ -1768,7 +1768,7 @@ Approved collector-led creative CTAs are: {approved_ctas}. Do not use "Own the F
 
 {moment_block or 'No campaign moment is active. Keep the package evergreen and do not invent an event or offer.'}
 
-{ads_page.WRITTEN_META_HEADLINE_INSTRUCTIONS if campaign_type != 'Carousel' else ''}
+{ads_page.WRITTEN_META_HEADLINE_INSTRUCTIONS if campaign_type != 'Carousel' else ads_page.RACING_WRITTEN_COPY_INSTRUCTIONS}
 
 ON-IMAGE COPY CONTRACT
 

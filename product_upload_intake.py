@@ -10,13 +10,36 @@ import uuid
 CHUNK = 4 * 1024 * 1024  # Stable Dropbox hash blocks and legacy resume offsets.
 TRANSPORT_CHUNK = 2 * CHUNK  # Existing adapter supports 8 MiB ordered appends.
 MAX_BYTES = 1024 ** 3
-MODES = {'DRAFT': 'Upload to Draft', 'LIVE': 'Upload to Live', 'UPDATE': 'Update Existing'}
+MODES = {'DRAFT': 'Upload to Draft', 'LIVE': 'Upload to Live', 'UPDATE': 'Update Existing', 'SMART': 'Smart Upload'}
 
 
 def mode(value):
     if value not in MODES:
-        raise ValueError('Choose Draft, Live or Update Existing.')
+        raise ValueError('Choose Draft, Live, Update Existing or Smart Upload.')
     return value
+
+
+def action_mode(row):
+    return 'SMART' if row['data'].get('smart_upload') else row['mode']
+
+
+def stored_mode(selected, metadata=None):
+    if selected != 'SMART':
+        return selected
+    return 'UPDATE' if (metadata or {}).get('upload_intent') == 'existing_product_refresh' else 'LIVE'
+
+
+def smart_claim(cur, source):
+    """Serialise Smart selections and mode switches for one Dropbox revision."""
+    from design_review_metadata import review_key
+    cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', ('smart-upload:' + review_key(source),))
+    cur.execute(
+        """SELECT * FROM product_upload_intakes WHERE data->>'smart_upload'='true'
+           AND data->'source'->>'id'=%s AND data->'source'->>'rev'=%s
+           ORDER BY created_at LIMIT 1""",
+        (source['id'], source['rev']),
+    )
+    return cur.fetchone()
 
 
 def inspect_chunk(state, data, offset, size):
@@ -80,6 +103,8 @@ class Intakes:
             if not row:
                 raise ValueError('This saved upload is unavailable to this account.')
             row = dict(row)
+            if row['data'].get('staff_upload_cancelled'):
+                raise ValueError('This upload was cancelled. Restart it explicitly before continuing.')
             before = (row['mode'], json.dumps(row['data'], sort_keys=True))
             yield row, cur
             if before != (row['mode'], json.dumps(row['data'], sort_keys=True)):
@@ -95,8 +120,52 @@ class Intakes:
             row = cur.fetchone()
             return dict(row) if row else None
 
+    def read_review(self, key, actor, source):
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT * FROM product_upload_intakes WHERE actor_id=%s AND
+                   (id=%s OR (data->>'smart_upload'='true' AND
+                              data->'source'->>'id'=%s AND data->'source'->>'rev'=%s))
+                   ORDER BY (data->>'smart_upload'='true') DESC NULLS LAST, created_at LIMIT 1""",
+                (str(actor), key, source['id'], source['rev']),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def read_review_gallery(self, actor, sources):
+        """Get just the display state for the visible exact revisions in one lookup."""
+        if not sources:
+            return {}
+        requested = [dict(key=key, file_id=source['id'], revision=source['rev'])
+                     for key, source in sources.items()]
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """WITH requested AS (
+                       SELECT * FROM jsonb_to_recordset(%s::jsonb)
+                       AS source(key uuid, file_id text, revision text)
+                   )
+                   SELECT DISTINCT ON (requested.key) requested.key AS review_key, intake.id,
+                          jsonb_build_object('product_gid', intake.data->'product_gid',
+                              'shopify_completion', intake.data->'shopify_completion',
+                              'design_review', intake.data->'design_review',
+                              'review_sport', intake.data->'review_sport',
+                              'mockups_exported', intake.data->'mockups_exported',
+                              'product_url', intake.data->'product_url') AS data
+                   FROM product_upload_intakes AS intake JOIN requested ON (
+                       intake.id=requested.key OR (intake.data->>'smart_upload'='true'
+                           AND intake.data->'source'->>'id'=requested.file_id
+                           AND intake.data->'source'->>'rev'=requested.revision))
+                   WHERE intake.actor_id=%s
+                   ORDER BY requested.key, (intake.data->>'smart_upload'='true') DESC NULLS LAST,
+                            intake.created_at""",
+                (json.dumps(requested), str(actor)),
+            )
+            return {str(row['review_key']): dict(row) for row in cur.fetchall()}
+
     def create(self, key, actor, selected, name, size, provider, content_hash):
         key = str(uuid.UUID(key)); mode(selected)
+        if selected == 'SMART':
+            raise ValueError('Choose an existing Dropbox PSD for Smart Upload.')
         if not isinstance(name, str) or not name.lower().endswith('.psd') or len(name) > 255 or any(ord(c) < 32 for c in name):
             raise ValueError('Select a PSD file with a valid filename.')
         if type(size) is not int or not 40 <= size <= MAX_BYTES:
@@ -182,19 +251,33 @@ class Intakes:
             d.pop('session', None)
             return row
 
-    def change_mode(self, key, actor, selected):
+    def change_mode(self, key, actor, selected, *, metadata=None):
         with self.locked(key, actor) as (row, cur):
             mode(selected)
-            if row['mode'] != selected:
+            if action_mode(row) != selected:
+                if (row['data'].get('design_review') or {}).get('decision') == 'approved':
+                    raise ValueError('This approved Design Studio revision uses Smart Upload.')
                 if row['data'].get('product_gid'):
                     raise ValueError('This PSD is already linked. Start a new upload for another action.')
-                row['mode'] = selected
+                if action_mode(row) == 'SMART' and row['data'].get('copied'):
+                    raise ValueError('The Smart Upload handoff has started. Reuse this action to avoid a duplicate.')
+                if selected == 'SMART':
+                    source = row['data'].get('source')
+                    if not source or row['data'].get('workflow_version') != 3:
+                        raise ValueError('Choose an existing Dropbox PSD for Smart Upload.')
+                    previous = smart_claim(cur, source)
+                    if previous and previous['id'] != row['id']:
+                        raise ValueError('This PSD revision already has a Smart Upload. Reselect it in Smart Upload mode to resume.')
+                    if metadata is not None:
+                        row['data']['metadata'] = metadata
+                row['mode'] = stored_mode(selected, row['data'].get('metadata'))
+                row['data']['smart_upload'] = selected == 'SMART'
                 row['data'].update(copied=False, lookup='', choices=[])
             return row
 
     def copied(self, key, actor, selected, source_version=None):
         with self.locked(key, actor) as (row, cur):
-            if row['mode'] != selected or not row['data'].get('basic_validated'):
+            if action_mode(row) != selected or not row['data'].get('basic_validated'):
                 raise ValueError('Upload or action changed. Copy the current prompt again.')
             if row['data'].get('workflow_version') in (2,3) and not row['data'].get('mockups_exported'):
                 raise ValueError('Save or download the completed image package before the Shopify handoff.')
@@ -210,7 +293,7 @@ def public(row):
         return None
     d = row['data']
     # No provider session, tokens, storage path or raw worker errors in the UI.
-    result = dict(id=str(row['id']), mode=row['mode'], transport_chunk_bytes=TRANSPORT_CHUNK, relay_resume=True, **{k:d.get(k) for k in (
+    result = dict(id=str(row['id']), mode=action_mode(row), transport_chunk_bytes=TRANSPORT_CHUNK, relay_resume=True, **{k:d.get(k) for k in (
         'name','size','offset','state','basic_validated','copied','lookup','choices','product_title',
         'preparation_hash','reason','preview_url','product_url','companion_connected','shopify_completion',
         'selected_at')})

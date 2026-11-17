@@ -146,9 +146,9 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records,
                 or number[0].get('visible') is not True or plaques[0].get('visible') is not True
                 or number[0].get('smart_object_chain') or plaques[0].get('smart_object_chain')):
             return result('Needs Repair', 'Original numbering and plaque roles are ambiguous.', m, standard)
-        text=re.fullmatch(r'\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*(\d{1,6})(?:\s*/\s*|\s+of\s+)(\d{1,6})\s*',
-                          str(m.get('original_text','')),re.I)
-        if not text or not 1<=int(text[1])<=int(text[2])==m['edition_total']:
+        from auto_editions_onboarding import NUMBER
+        text=NUMBER.fullmatch(str(m.get('original_text','')))
+        if not text or not 1<=int(text[2])<=int(text[4])==m['edition_total']:
             return result('Needs Repair', 'Original edition text differs from the approved limit.', m, standard)
         fonts = [f for layer in layers for f in layer.get('fonts', [])]
         if not number[0].get('fonts') or not fonts or any(f.get('installed') is not True for f in fonts):

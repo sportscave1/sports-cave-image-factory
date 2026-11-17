@@ -21,6 +21,8 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
     import image_factory as factory
     factory.require_complete_product_image_manifest(result['product_image_manifest'])
     with Intakes(connect).locked(result['_product_upload_intake'], actor) as (row, cur):
+        if result.get('_staff_full_restart') != row['data'].get('staff_full_restart'):
+            raise ValueError('These mockups belong to an earlier reset. Regenerate the current attempt.')
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
             raise ValueError('Export belongs to a previous PSD; it cannot unlock this Shopify handoff.')
         token = result.get('_product_upload_save_token')
@@ -51,18 +53,21 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
             op['output']['webp_source'] = current_source(row)
 
 
-def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None):
+def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False,
+         parent_identity=None, extend_core=None, recheck_complete=False, recover_missing_folder=False):
     """Reserve a destination once, including the existing numbered-folder rule.
 
     The provider call never occurs under a long DB transaction. Failed/unknown
-    transfers retry the exact destination and bytes, rather than drawing a new
-    numbered folder. Existing standalone Mockups behaviour is unaffected.
+    transfers retry the exact destination and bytes. An approved core save
+    can reserve a fresh destination if its original folder no longer exists.
     """
     import auto_editions as ae
     entries=[dict(name=x['archive_name'],hash=ae.file_hash(x['path'])) for x in manifest]
     fingerprint=hashlib.sha256(json.dumps([entries,parent_identity or parent,folder_name,conflict],sort_keys=True).encode()).hexdigest()
     store=Intakes(connect);key=result['_product_upload_intake'];api=provider.api
     with store.locked(key,actor) as (row,cur):
+        if result.get('_staff_full_restart') != row['data'].get('staff_full_restart'):
+            raise ValueError('These mockups belong to an earlier reset. Regenerate the current attempt.')
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
             raise ValueError('Selected mockups belong to a previous PSD.')
         if result.get('_product_upload_source') and row['data']['source'] != result['_product_upload_source']:
@@ -72,15 +77,23 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         token=result.get('_product_upload_save_token')
         if token and row['data'].get('mockup_save_token') != token:
             raise ValueError('A newer image set or save operation replaced this save.')
-        if old and parent_identity and old.get('folder_id'):
-            owned=api.get_metadata_if_exists(provider.token,old['folder_id'])
-            target=api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
-            if not owned or owned.get('id')!=old['folder_id'] or target.rsplit('/',1)[0].casefold()!=parent.casefold():
-                raise ValueError('The reserved product folder moved or is unavailable. No new folder was created; restore it before retrying.')
-            old['target']=target
-            if old.get('receipt'):old['receipt']=dict(old['receipt'],destination=target)
+        if not old and extend_core:
+            core = saves.get(extend_core) or {}
+            target = core.get('target', '')
+            core_manifest = core.get('manifest') or []
+            core_names = {entry['name'] for entry in core_manifest}
+            if (core.get('state') == 'Saving' or not core.get('folder_id')
+                    or core.get('requested_folder') != folder_name
+                    or core.get('parent_identity') != parent_identity
+                    or len(core_manifest) != 5 or len(core_names) != 5
+                    or not all(entry in entries for entry in core_manifest)):
+                raise ValueError('The earlier core save no longer matches this package. Use a new destination.')
+            old = dict(target=target, folder_id=core['folder_id'], confirmed=core.get('confirmed', []),
+                       state='Failed')
         if old and old['state']=='Saving' and time.time()-old['started_at']<600:
             raise ValueError('This exact save is already running. Wait for its receipt before retrying.')
+        if old and parent_identity and old.get('folder_id'):
+            old = resolve_reserved_folder(api, provider.token, parent, folder_name, old, recover_missing_folder)
         if not token:
             from product_upload_source import invalidate
             token=invalidate(row)
@@ -88,7 +101,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         result['_product_upload_export_fingerprint']=fingerprint
         row['data']['mockup_save_fingerprint']=fingerprint
         row['data'].update(mockups_exported=False,mockups_context=None,copied=False)
-        if old and old['state']=='Complete': return dict(old['receipt'],export_fingerprint=fingerprint,save_token=token)
+        if old and old['state']=='Complete' and not recheck_complete:
+            return dict(old['receipt'],export_fingerprint=fingerprint,save_token=token)
         if old: target=old['target']
         else:
             proposed=api.join_upload_path(parent,api.sanitize_path_component(folder_name,fallback='mockups'))
@@ -98,7 +112,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
             target=api.numbered_path(provider.token,proposed) if existing and conflict=='numbered' else proposed
         import uuid
         attempt=uuid.uuid4().hex
-        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt,manifest=entries)
+        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt,
+                                manifest=entries,requested_folder=folder_name,parent_identity=parent_identity)
     def checkpoint(**changes):
         with store.locked(key,actor) as (row,cur):
             record=row['data']['mockup_saves'][fingerprint]
@@ -116,7 +131,37 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         checkpoint(state='Failed')
         raise
     receipt=dict(receipt,export_fingerprint=fingerprint,save_token=token)
+    if old and old.get('recreated_folder'):
+        receipt['recreated_folder'] = True
     checkpoint(state='Failed' if receipt.get('failures') or receipt.get('cancelled') or
                {x.get('relative_path') for x in receipt.get('successes', [])} != {x['name'] for x in entries}
                else 'Complete',receipt=receipt)
     return receipt
+
+
+def resolve_reserved_folder(api, token, parent, folder_name, saved, recover_missing):
+    """Reuse an owned folder or reserve an empty path for an approved core retry."""
+    folder_id = saved['folder_id']
+    lookup_options = {'missing_only': True} if recover_missing else {}
+    owned = api.get_metadata_if_exists(token, folder_id, **lookup_options)
+    if not owned or not (owned.get('path_display') or owned.get('path_lower')):
+        # The sport may have been renamed. Use its currently verified path.
+        candidate = api.join_upload_path(parent, saved['target'].rsplit('/', 1)[-1])
+        at_path = api.get_metadata_if_exists(token, candidate, **lookup_options)
+        if at_path and at_path.get('id') == folder_id:
+            owned = at_path
+        elif not owned and recover_missing:
+            target = candidate
+            if at_path:
+                proposed = api.join_upload_path(parent, folder_name)
+                target = api.numbered_path(token, proposed)
+            # Keep the save fingerprint but discard every receipt for the old folder.
+            return dict(state='Failed', target=target, recreated_folder=True)
+    target = api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
+    if (not owned or owned.get('id') != folder_id or owned.get('.tag') != 'folder'
+            or target.rsplit('/', 1)[0].casefold() != parent.casefold()):
+        raise ValueError('The reserved product folder moved or is unavailable. Restore it to the selected sport folder before retrying.')
+    updated = dict(saved, target=target)
+    if saved.get('receipt'):
+        updated['receipt'] = dict(saved['receipt'], destination=target)
+    return updated

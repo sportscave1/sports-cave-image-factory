@@ -26,9 +26,9 @@
       const open=async()=>{if(instance){instance.open();return;}if(loading)return;loading=true;button.disabled=true;button.textContent='Opening…';try{
         const data=await runtime();
         instance=await window.SportsCaveQuizRuntime.mount({host,shadow,base,mode,launcher:button,...data});
-        button.textContent=data.config.appearance.title;button.disabled=false;
+        button.textContent='Find your next edition';button.disabled=false;
       }catch{fallback();}finally{loading=false;}};
-      const button=document.createElement('button');button.type='button';button.textContent='Find your edition';button.addEventListener('click',open);shadow.append(button);
+      const button=document.createElement('button');button.type='button';button.textContent='Find your next edition';button.addEventListener('click',open);shadow.append(button);
       if(mode==='inline'){
         const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();open();}});observer.observe(host);
       }

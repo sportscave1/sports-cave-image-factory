@@ -50,7 +50,8 @@ def test_compact_order_transfer_and_no_legacy_gates(mode):
     assert not any(word in text for word in (
         'before any Shopify write', 'stop before', 'MANDATORY FINAL', 'FINAL QA CHECKLIST',
         'product_sport_tags.classify_product', '"content_hash"', '"revision"', '"version"'))
-    assert len(text) < 14000
+    # Include the shared edition-tag policy while keeping the exported brief compact.
+    assert len(text) < 15000
     for value in ('MAP', 'allocations', 'counters', 'history', 'original filenames'):
         assert value in text
     if mode == 'DRAFT':
@@ -109,7 +110,7 @@ def test_products_do_not_leak_identity_or_unrelated_sport_rules():
 def test_saved_values_and_selected_options_are_preserved():
     row = fixture()
     row['data'].update(
-        subjects=['Synthetic Athlete'], customer_facing_title='Synthetic Athlete — Courtside Legacy',
+        subjects=['Synthetic Athlete'], customer_facing_title='Courtside Legacy – Synthetic Athlete Wall Art',
         confirmed_limit=75, worldwide=True, selected_collections=[dict(id='gid://shopify/Collection/42', title='Chosen')],
         publication_settings=dict(channels=['Online Store'], markets=['Australia']),
         inventory=dict(location_id='gid://shopify/Location/10', quantity=7, tracked=False),
@@ -153,10 +154,28 @@ def test_custom_template_clauses_survive_without_repeated_policy():
     assert 'COMMON PRODUCT BUILD' not in text
 
 
+@pytest.mark.parametrize('mode,scope', [('DRAFT', None), ('LIVE', None),
+                                      ('UPDATE', 'media_only'), ('UPDATE', 'full_standardisation')])
+def test_all_upload_prompts_add_edition_tags_without_losing_saved_tags(mode, scope):
+    row = fixture(mode)
+    row['data'].update(update_scope=scope, existing_tags=['Existing collector tag'],
+                       confirmed_limit=75, verified_collection_facts={'league': 'NBA'})
+    text = prompt(row, lambda key, default, **kw: default + '\nKeep the custom tag: Collector Club.')
+    for value in ('SC_SPORT_BASKETBALL', 'SC_LEAGUE_NBA', 'SC_SUBJECT_MICHAEL_JORDAN',
+                  'SC_TEAM_CHICAGO_BULLS', 'SC_EVENT_BATHURST_1000', 'SC_YEAR_1998',
+                  'SC_FORMAT_QUOTE', 'SC_FORMAT_DUO', 'SC_THEME_RIVALRY', 'SC_THEME_CHAMPIONSHIP',
+                  'Existing collector tag', 'Collector Club', 'sc-edition-limit-75',
+                  context_from_row(row)['operation_tag'], '"league": "NBA"'):
+        assert value in text
+    assert text.count('SPORTS CAVE EDITION CLASSIFICATION TAGS') == 1
+    assert 'does not cap classification tags' in text
+    assert 'Verify every intended addition' in text
+
+
 def test_plain_legacy_template_is_normalized_too():
     from product_upload_prompt_core import NEW_SHOPIFY_PRODUCT_PROMPT
     text = prompt(fixture(), lambda key, default, **kw: NEW_SHOPIFY_PRODUCT_PROMPT)
-    assert len(text) < 14000
+    assert len(text) < 15000
     assert 'BRUTAL DRAFT RULE' not in text
 
 

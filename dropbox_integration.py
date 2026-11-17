@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlencode
@@ -520,6 +520,9 @@ def get_file_response(access_token, path):
     if clean_path.startswith('id:'):
         if not re.fullmatch(r'id:[A-Za-z0-9_-]+',clean_path):
             raise ValueError('Invalid Dropbox file or folder ID.')
+    elif clean_path.startswith('rev:'):
+        if not re.fullmatch(r'rev:[a-fA-F0-9]+', clean_path):
+            raise ValueError('Invalid Dropbox file revision.')
     else:
         clean_path = normalize_dropbox_path(path)
     try:
@@ -527,6 +530,18 @@ def get_file_response(access_token, path):
     except Exception as error:
         raise _dropbox_error(error, "Dropbox file preview is unavailable.") from error
     return _metadata_to_dict(metadata), response
+
+
+def recent_file_revisions(access_token, file_id):
+    """Return recent revisions for the same file across Dropbox renames."""
+    if not re.fullmatch(r'id:[A-Za-z0-9_-]+', file_id):
+        raise ValueError('Invalid Dropbox file ID.')
+    try:
+        result = team_space_client(access_token).files_list_revisions(
+            file_id, mode=_dropbox_sdk().files.ListRevisionsMode.id, limit=5)
+    except Exception as error:
+        raise _dropbox_error(error, 'Dropbox revision history is unavailable.') from error
+    return [_metadata_to_dict(entry) for entry in result.entries]
 
 
 def get_file_metadata(access_token, path):
@@ -792,11 +807,15 @@ def join_upload_path(current_folder, relative_path):
     return destination
 
 
-def get_metadata_if_exists(access_token, path):
+def get_metadata_if_exists(access_token, path, *, missing_only=False):
     try:
         return get_file_metadata(access_token, path)
     except DropboxApiError as error:
-        if _is_missing_path_error(error):
+        if missing_only:
+            lookup = getattr(error.__cause__, 'error', None)
+            if getattr(lookup, 'is_path', lambda: False)() and lookup.get_path().is_not_found():
+                return None
+        elif _is_missing_path_error(error):
             return None
         raise
 
@@ -1045,6 +1064,7 @@ def finish_upload_session(
     dropbox_path,
     *,
     mode="add",
+    expected_revision=None,
 ):
     """Commit a Dropbox upload session only after its final bounded chunk."""
     chunk = bytes(data or b"")
@@ -1055,12 +1075,18 @@ def finish_upload_session(
         session_id=str(session_id or ""),
         offset=max(0, int(offset or 0)),
     )
-    write_mode = sdk.files.WriteMode.overwrite if str(mode) == "overwrite" else sdk.files.WriteMode.add
+    if expected_revision is not None:
+        if not re.fullmatch(r'[0-9a-f]{9,}', expected_revision):
+            raise ValueError('An exact Dropbox revision is required.')
+        write_mode = sdk.files.WriteMode.update(expected_revision)
+    else:
+        write_mode = sdk.files.WriteMode.overwrite if str(mode) == "overwrite" else sdk.files.WriteMode.add
     commit = sdk.files.CommitInfo(
         path=normalize_dropbox_path(dropbox_path),
         mode=write_mode,
         autorename=False,
         mute=False,
+        **({'strict_conflict': True} if expected_revision is not None else {}),
     )
     try:
         metadata = team_space_client(access_token).files_upload_session_finish(
@@ -1071,6 +1097,18 @@ def finish_upload_session(
     except Exception as error:
         raise _dropbox_error(error, "Dropbox upload could not finish.") from error
     return _metadata_to_dict(metadata)
+
+
+def upload_revision(access_token, path, local_path, expected_revision):
+    """Write to the same Dropbox path, requiring the known current revision."""
+    session = start_upload_session(access_token)
+    offset = 0
+    with Path(local_path).open('rb') as stream:
+        while chunk := stream.read(DROPBOX_UPLOAD_CHUNK_SIZE):
+            append_upload_session(access_token, session, offset, chunk)
+            offset += len(chunk)
+    return finish_upload_session(access_token, session, offset, b'', path,
+                                 expected_revision=expected_revision)
 
 
 def upload_local_file(
@@ -1261,7 +1299,7 @@ def replace_path(access_token, source_path, destination_path, *, operation, root
     return metadata
 
 
-def delete_path_recoverable(access_token, path, *, root_path):
+def delete_path_recoverable(access_token, path, *, root_path, expected_revision=None):
     """Remove a Dropbox item while retaining Dropbox Deleted Files recovery."""
     clean_path = normalize_dropbox_path(path)
     clean_root = normalize_dropbox_path(root_path)
@@ -1270,7 +1308,9 @@ def delete_path_recoverable(access_token, path, *, root_path):
     if clean_path.casefold() == clean_root.casefold():
         raise ValueError("The shared Files folder cannot be removed.")
     try:
-        result = team_space_client(access_token).files_delete_v2(clean_path)
+        client = team_space_client(access_token)
+        result = (client.files_delete_v2(clean_path, parent_rev=expected_revision)
+                  if expected_revision else client.files_delete_v2(clean_path))
     except Exception as error:
         raise _dropbox_error(error, "Dropbox item could not be removed.") from error
     metadata = getattr(result, "metadata", result)
@@ -1343,16 +1383,32 @@ def get_psd_file_response(access_token, file_id, revision):
         raise _dropbox_error(error,'Dropbox original is unavailable.') from error
 
 
-def get_psd_thumbnail_bytes(access_token, file_id):
+@contextmanager
+def get_verified_psd_stream(access_token, file_id, revision):
+    metadata, response = get_psd_file_response(access_token, file_id, revision)
+    try:
+        first = next(response.iter_content(chunk_size=64), b'')
+        if not first.startswith(b'8BPS\x00\x01'):
+            raise DropboxSourceChangedError('The saved PSD header could not be verified.')
+        yield metadata
+    finally:
+        response.close()
+
+
+def get_psd_thumbnail_bytes(access_token, file_id, *, revision=None):
     """Dropbox-generated small flattened preview; never fetch or parse the master."""
     if not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')):
         raise ValueError('Invalid PSD identity.')
     dropbox = _dropbox_sdk()
     try:
-        _, response = team_space_client(access_token).files_get_thumbnail(
+        metadata, response = team_space_client(access_token).files_get_thumbnail(
             file_id,format=dropbox.files.ThumbnailFormat('jpeg'),
             size=dropbox.files.ThumbnailSize('w1024h768'),mode=dropbox.files.ThumbnailMode('bestfit'))
         try:
+            if revision:
+                actual = _metadata_to_dict(metadata)
+                if actual.get('id') != file_id or actual.get('rev') != revision:
+                    raise DropboxSourceChangedError('Artwork changed. Reload the review gallery.')
             content = bytearray()
             for chunk in response.iter_content(chunk_size=64*1024):
                 if len(content)+len(chunk)>2*1024*1024:

@@ -48,7 +48,7 @@
   }
   function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&['/auto-editions/download','/auto-editions/open','/auto-editions/view'].includes(u.pathname)&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
   function paint(id,row){
-   const busy=row.starting||row.transferring||['Generating','Queued'].includes(row.status),label=busy?(row.transferring?'Downloading\u2026':'Preparing JPG\u2026'):row.downloadError?'Retry':row.status==='Ready'?'Open':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?'Retry':'Download JPG';
+   const busy=row.starting||row.transferring||['Generating','Queued'].includes(row.status),label=busy?(row.transferring?'Downloading\u2026':'Preparing JPG\u2026'):row.downloadError?'Retry':row.status==='Ready'?'Open':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?(row.retryable===false?'Needs review':'Retry'):'Download JPG';
    const marker=immediate.get(id);if(marker){
     marker.classList.toggle('sc-edition-generating',!!busy);if(marker.textContent!==label)marker.textContent=label;
     marker.style.pointerEvents=busy?'none':'auto';marker.style.cursor=busy?'default':'pointer';marker.setAttribute('role',busy?'status':'link');marker.tabIndex=busy?-1:0;
@@ -67,7 +67,9 @@
    document.getElementById('sc-edition-error')?.remove();
    const box=document.createElement('div');box.id='sc-edition-error';box.dataset.allocation=id;box.setAttribute('role','alert');box.style.cssText='position:fixed;bottom:18px;right:18px;max-width:360px;padding:12px;background:white;border:1px solid #ccd2dc;border-radius:8px;font:13px system-ui;z-index:9999';
    const message=document.createElement('span');message.textContent=row.error||'Saved JPG unavailable. Retry Open.';box.append(message);
-   const retry=document.createElement('button');retry.textContent=row.downloadError?'Retry download':row.openError?'Retry Open':'Retry';retry.onclick=()=>{box.remove();if(row.openError)openSaved(url('/auto-editions/open',id,row.job_id));else start(row.retryURL||url('/auto-editions/download',id)+'#Retry');};box.append(retry);
+   if(row.retryable!==false||row.downloadError||row.openError||row.requestError){
+    const retry=document.createElement('button');retry.textContent=row.downloadError?'Retry download':row.openError?'Retry Open':'Retry';retry.onclick=()=>{box.remove();if(row.openError)openSaved(url('/auto-editions/open',id,row.job_id));else start(url('/auto-editions/download',id)+'#Retry');};box.append(retry);
+   }
    const close=document.createElement('button');close.textContent='Dismiss';close.onclick=()=>box.remove();box.append(close);document.body.append(box);
   }
   function navigateSaved(id,row){if(!window.SportsCaveFilesWindow)throw Error('Files navigation is loading. Retry Open.');const began=performance.now();window.SportsCaveFilesWindow.open({allocation:id,job:row.job_id});trace('popup_handoff',id,performance.now()-began);}
@@ -106,11 +108,12 @@
   async function poll(id){const row=jobs.get(id);if(!row||row.polling||row.starting)return;row.polling=true;
    try{if(row.deadline&&performance.now()>row.deadline)throw Error('JPG preparation is taking longer than expected. Retry to check the same job.');const d=await api('/api/auto-editions/state',id,false,row.job_id);if(departed||row.cancelled)return;Object.assign(row,d);paint(id,row);
     if(d.status==='Ready'){if(row.clickedAt)trace('ready_observed',id,performance.now()-row.clickedAt);if(row.pending||saved('sc-edition-pending:'+id)){await initiateDownload(id,row);if(departed||row.cancelled)return;row.pending=false;forget('sc-edition-pending:'+id);try{navigateSaved(id,row);}catch(e){row.status='Unavailable';row.openError=true;row.error='Download started. '+e.message;paint(id,row);showError(id,row);}}else{row.feedback='';paint(id,row);}}
-    else if(d.status==='Blocked'){row.feedback='';row.error='JPG preparation is blocked. Review the artwork, then retry.';forget('sc-edition-pending:'+id);paint(id,row);showError(id,row);}
+    else if(d.status==='Blocked'){row.feedback='';row.error=d.error_message||'JPG preparation is blocked. Review the artwork, then retry.';forget('sc-edition-pending:'+id);paint(id,row);showError(id,row);}
    }catch(e){if(departed||row.cancelled)return;row.feedback='';forget('sc-edition-pending:'+id);row.status=row.downloadError?'Ready':'Blocked';row.requestError=!row.downloadError;row.error=e.message;paint(id,row);showError(id,row);}finally{row.polling=false;}
   }
   async function start(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id');if(!/^\d+$/.test(id||''))return;
    const old=jobs.get(id);if(old?.starting||old?.transferring||old?.status==='Generating'||old?.status==='Queued')return;
+   if(old?.retryable===false&&!old?.downloadError&&!old?.openError&&!old?.requestError){showError(id,old);return;}
    if(old?.downloadError){try{await initiateDownload(id,old);if(departed||old.cancelled)return;forget('sc-edition-pending:'+id);try{navigateSaved(id,old);}catch(e){old.status='Unavailable';old.openError=true;old.error='Download started. '+e.message;paint(id,old);showError(id,old);}}catch(e){if(!departed&&!old.cancelled){old.error=e.message;paint(id,old);showError(id,old);}}return;}
    if(old?.status==='Ready'){openSaved(url('/auto-editions/open',id,old.job_id));return;}
    const row={status:'Generating',starting:true,pending:true,feedback:'Preparing JPG\u2026',ownerPage:new URLSearchParams(location.search).get('page'),retryURL:value,clickedAt:performance.now(),deadline:performance.now()+360000};jobs.set(id,row);paint(id,row);remember('sc-edition-pending:'+id,'1');

@@ -22,13 +22,14 @@ class FixtureReports:
         if 'page' in dimensions:row['page']='https://fixture.invalid/products/art?variant=1'
         return [row]
     def ga4(self,property_id,contract,start,end,filters=()):
+        st.session_state.setdefault('fixture-ga4-dimensions', []).append(contract.dimensions)
         if st.session_state.get('fixture-fail-ga4'):raise RuntimeError('synthetic unavailable')
         dims={d: ('20261017' if d=='date' else '/products/art?variant=1' if d=='landingPagePlusQueryString' else 'fixture') for d in contract.dimensions}
         return {'rows':[{'dimensions':dims,'metrics':{metric:12 for metric in contract.metrics}}], 'metadata':{'timezone':'Australia/Sydney','currency':'AUD','fixture':True}}
 
 st.set_page_config(layout='wide')
 st.caption('OFFLINE TEST FIXTURE — synthetic reports; no production connections')
-route=st.selectbox('Workspace',nav.SEO_MENU_ROUTES,format_func=lambda r:nav.SEO_NAV_LABELS[r],key='fixture-route')
+route=st.selectbox('Workspace',(*nav.SEO_MENU_ROUTES, nav.SEO_ANALYTICS_ROUTE),format_func=lambda r:nav.SEO_NAV_LABELS[r],key='fixture-route')
 user={'id':'fixture','role':'admin','display_name':'Offline test'}
 root=Path(os.environ.get('SEO_PHASE1_FIXTURE_DIR',str(Path(__file__).resolve().parents[2]/'.local'/'fixture')))
 store=seo_workspace.LocalSEOStore(root/'workspace.json')

@@ -5,6 +5,7 @@ import base64
 from functools import lru_cache
 from pathlib import Path
 import streamlit as st
+from product_upload_intake import action_mode
 
 
 def render_page(app):
@@ -20,7 +21,51 @@ def render_page(app):
     component=app.get_components_module().declare_component('product_uploads_workflow',path=str(app.BASE_DIR/'components/product_uploads'))
     resume=None
     requested=st.query_params.get('upload')
-    if requested and st.session_state.get('_product_upload_resume_seen')!=requested:
+    review_launch = st.session_state.pop('_design_review_upload', None)
+    staff_key = st.query_params.get('staff_upload_job')
+    if staff_key:
+        from product_upload_staff_queue import worker_job, advance
+        from os_accounts import is_admin
+        try:
+            staff_job = worker_job(staff_key, user['id']) if is_admin(user) else None
+        except ValueError:
+            staff_job = None
+        if not staff_job:
+            st.info('This desktop upload has finished or is unavailable.')
+            return
+        if staff_job['stage'] >= 5:
+            st.info('ChatGPT accepted the upload. The desktop companion is verifying publication and mapping.')
+            return
+        if not staff_job['intake_id']:
+            from design_review_page import _review
+            from product_upload_services import Dropbox
+            try:
+                provider = Dropbox()
+                original = provider.metadata_if_present(staff_job['source_id'])
+                if not original or original.get('rev') != staff_job['source_rev']:
+                    raise ValueError('The original PSD changed after this request. Open Design Studio to review its current revision.')
+                intake = _review(provider, user, original, 'approved', selected_sport=staff_job['sport'])
+                advance(staff_key, user['id'], 1, intake=intake, allowed=[1])
+                staff_job = worker_job(staff_key, user['id'])
+            except ValueError as error:
+                advance(staff_key, user['id'], 7, str(error), allowed=[1])
+                st.error(str(error))
+                return
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception('Desktop PSD preparation could not start')
+                advance(staff_key, user['id'], 7, 'Could not open the original PSD. Check Dropbox and Design Studio.', allowed=[1])
+                return
+        requested = str(staff_job['intake_id'])
+        if staff_job.get('dispatch_id'):
+            from product_upload_jobs import JOBS
+            attempt_row=Intakes(connect).read(requested,user['id'])
+            JOBS.begin_staff_attempt(requested, user['id'], str(staff_job['dispatch_id']),
+                                    full=bool((attempt_row or {}).get('data',{}).get('staff_full_restart')))
+        if st.session_state.get('_product_upload_active') != requested:
+            review_launch = requested
+        desktop_progress(staff_key, requested, user['id'])
+    if requested and (st.session_state.get('_product_upload_resume_seen')!=requested or review_launch==requested):
         st.session_state['_product_upload_resume_seen']=requested
         try:
             resume=Intakes(connect).read(str(uuid.UUID(requested)),user['id'])
@@ -35,8 +80,11 @@ def render_page(app):
     # Never fall back to the most recent upload for the account.
     if not resume and st.session_state.get('_product_upload_active'):
         resume=Intakes(connect).read(st.session_state['_product_upload_active'],user['id'])
-    event=component(section='upload',**(dict(id=str(resume['id']),mode=resume['mode']) if resume else {}),
+    event=component(section='upload',**(dict(id=str(resume['id']),mode=action_mode(resume)) if resume else {}),
                     refresh=st.session_state.get('_product_upload_linked',''),key='product-upload-input-'+visit,default=None)
+    if resume and review_launch == requested == str(resume['id']):
+        # Start the gallery's account-owned intake without waiting for the iframe's status fetch.
+        event = dict(id=requested, mode=action_mode(resume), nonce=uuid.uuid4().hex)
     if event and event.get('nonce')!=st.session_state.get('_product_upload_event'):
         previous=st.session_state.get('_product_upload_active')
         st.session_state['_product_upload_event']=event['nonce']
@@ -54,16 +102,20 @@ def render_page(app):
             from product_upload_gallery import revoke
             revoke(previous,user['id'])
             from product_upload_jobs import JOBS
-            JOBS.cancel(previous,user['id'])
-            from product_upload_mockups import release_transient
-            release_transient(st.session_state.get('_product_upload_mockups_result'))
+            previous_row = Intakes(connect).read(previous, user['id']) if previous else None
+            previous_decision = ((previous_row or {}).get('data', {}).get('design_review') or {}).get('decision')
+            if previous_decision not in ('approved', 'preparing'):
+                JOBS.cancel(previous,user['id'])
+                from product_upload_mockups import release_transient
+                release_transient(st.session_state.get('_product_upload_mockups_result'))
+            st.session_state.pop('product-upload-job-applied-'+str(previous), None)
             st.session_state.pop('_product_upload_mockups_result',None)
     key=st.session_state.get('_product_upload_active')
     manual=st.session_state.get('_product_upload_manual',False)
     if manual:
         return
     if not key: return
-    row=Intakes(connect).read(key,user['id'])
+    row=resume if resume and str(resume['id'])==key else Intakes(connect).read(key,user['id'])
     if row and st.query_params.get('recorder_source') is not None:
         try:
             from product_upload_recorder import restore
@@ -73,6 +125,8 @@ def render_page(app):
     if row and row['data'].get('workflow_version') == 3:
         from product_upload_dropbox import status
         row = status(row, connect)
+    if staff_key and key != requested:
+        return
     if not row or not row['data'].get('basic_validated'): return
     with st.container(key='product-upload-workspace'):
         with st.container(key='mockups-workspace'):
@@ -90,10 +144,30 @@ def render_page(app):
     if not state.get('saved_source_version'):return
     from product_upload_prompt_copy import render_copy
     render_copy(app, row, user, state['saved_source_version'])
-    linked=component(section='handoff',isolated_copy=True,id=key,mode=row['mode'],source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
+    linked=component(section='handoff',isolated_copy=True,id=key,mode=action_mode(row),source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
     if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
         st.session_state['_product_upload_linked']=linked['nonce']
         st.rerun()
+
+
+@st.fragment(run_every=4)
+def desktop_progress(job_id, intake, actor):
+    from product_upload_jobs import JOBS
+    from product_upload_staff_queue import advance
+    from product_upload_sport import state_key
+    error = st.session_state.get('product-upload-job-error-'+intake) or st.session_state.get(state_key(intake)+'-error')
+    if error:
+        advance(job_id, actor, 7, str(error), allowed=[1, 2, 3])
+        return
+    for stage, operation in ((3, 'save'), (2, 'generate'), (1, 'prepare')):
+        task = JOBS.snapshot(intake, actor, operation)
+        if not task:
+            continue
+        if task['state'] in ('Failed', 'Cancelled'):
+            advance(job_id, actor, 7, task.get('error') or 'Artwork processing was cancelled.', allowed=[1, 2, 3])
+        else:
+            advance(job_id, actor, stage, allowed=[1, 2, 3])
+        return
 
 
 @st.fragment(run_every=0.25)
@@ -114,17 +188,26 @@ def progress_preview(path):
 
 # Leave time for progress paint/terminal result hydration between fragment ticks.
 @st.fragment(run_every=1.0)
-def poll_generation(app,key,actor,name,sport,source_hash):
+def poll_generation(app,key,actor,name,sport,source_hash,*,can_autosave=False):
     from product_upload_jobs import JOBS
     if st.session_state.get('_product_upload_active')!=key:return
+    result=app._mockups_result()
+    if result:
+        save=JOBS.snapshot(key,actor,'save')
+        if save and save.get('token')==st.session_state.get('product-upload-core-save-job-'+key):
+            from product_upload_outputs_ui import render_save_progress
+            render_save_progress(app,key,actor,core=True)
+        elif can_autosave and not save and st.session_state.get('product-upload-generation-ack-'+key) and not (
+                result.get('product_upload_core_receipt') or result.get('product_upload_save_receipt')):
+            st.progress(.5,text='Mockups generated · preparing Dropbox save')
+        return
     job=JOBS.snapshot(key,actor,'generate')
     if not job:return
     if job['state'] in ('Queued','Running'):
         if job['total']:
-            st.progress(job['completed']/job['total'],text=f"Generating mockups · {job['completed']} of {job['total']}")
+            st.progress(.5*job['completed']/job['total'],text=f"Generating mockups · {job['completed']} of {job['total']}")
         else:
-            st.caption('Generating mockups · '+job['stage'])
-            st.html('<progress aria-label="Mockup generation progress" style="width:100%;height:7px;accent-color:#b08b40"></progress>')
+            st.progress(0.,text='Generating mockups · '+job['stage'])
         if job['previews']:
             # Existing tiny preview bytes, cached once; no repeated PIL resize
             # or full-resolution artwork delivery on every progress tick.
@@ -144,7 +227,6 @@ def poll_generation(app,key,actor,name,sport,source_hash):
             if st.session_state.get(marker)!=job['token']:
                 st.session_state[marker]=job['token'];st.rerun()
             st.info('Product details changed during generation. Generate mockups again for the current details.');return
-        if st.session_state.get('product-upload-job-applied-'+key)==job['token']:return
         st.session_state['product-upload-job-applied-'+key]=job['token']
         app._set_mockups_result(app.normalize_generation_result(result))
         st.rerun()
@@ -160,16 +242,19 @@ def render_design(app,row,user):
     result=app._mockups_result()
     if result and result.get('_product_upload_intake')!=key:
         app._set_mockups_result(None);result=None
+    if result and result.get('_staff_full_restart') != row['data'].get('staff_full_restart'):
+        app._set_mockups_result(None);result=None
     st.subheader('Prepare product images')
     from product_upload_sport import render_selector,selected,rebind_result
     active_jobs=[JOBS.snapshot(key,user['id'],operation) for operation in ('generate','save')]
     busy=any(job and job['state'] in ('Queued','Running') for job in active_jobs)
     with st.container(key='product-upload-details'):
         with st.container(key='product-upload-detail-name'):
-            saved_name=(row['data'].get('mockups_context') or {}).get('design_name')
+            saved_name=(row['data'].get('mockups_context') or {}).get('design_name') or (row['data'].get('metadata') or {}).get('design_name')
             name=st.text_input('Product name',value=saved_name or Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
         with st.container(key='product-upload-detail-sport'):
-            choice=render_selector(app,key,user,disabled=busy)
+            choice=render_selector(app,key,user,disabled=busy,
+                suggested_sport=(row['data'].get('metadata') or {}).get('sport', '') if row['data'].get('smart_upload') else '')
     sport=choice['sport'] if choice else ''
     from product_upload_recorder import publish
     publish(row, name, choice)
@@ -188,15 +273,25 @@ def render_design(app,row,user):
     running=bool(pending and pending['state'] in ('Queued','Running'))
     saving=JOBS.snapshot(key,user['id'],'save')
     running=running or bool(saving and saving['state'] in ('Queued','Running'))
-    from product_upload_generation_status import attempt, status, markup
+    decision = (row['data'].get('design_review') or {}).get('decision')
+    from_review = decision in ('approved', 'preparing')
+    ready = spec.get('state') == 'Ready'
+    from product_upload_generation_status import attempt, status, markup, recover_review_attempt
     acknowledgement='product-upload-generation-ack-'+key
-    def queue_generation():
-        if spec.get('state')!='Ready' or running or st.session_state.get('_product_upload_active')!=key:return
+    current=st.session_state.get(acknowledgement)
+    if result and not running:
+        state, _=status(current,pending,st.session_state.get('product-upload-job-applied-'+key),
+                       result,key,name,sport,row['data']['source']['content_hash'])
+        if not current or state!='ready':
+            recovered=recover_review_attempt(row,result,choice,name)
+            if recovered:st.session_state[acknowledgement]=recovered
+    def queue_generation(*, automatic=False):
+        if (not ready and not from_review) or running or st.session_state.get('_product_upload_active')!=key:return
         active_save=JOBS.snapshot(key,user['id'],'save')
         if active_save and active_save['state'] in ('Queued','Running'):return
         selected_name=st.session_state.get('product-upload-name-'+key,name).strip()
-        selection=selected(key)
-        if selection:
+        selection=choice if automatic else selected(key)
+        if selection and not automatic:
             from product_upload_export import resolve_category
             from product_upload_sport import state_key
             try:
@@ -213,7 +308,7 @@ def render_design(app,row,user):
             st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],reused=True)
             st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
             return
-        if row['data'].get('product_gid'):
+        if row['data'].get('product_gid') and not row['data'].get('staff_full_restart'):
             st.session_state['product-upload-job-error-'+key]='This PSD is already linked to Shopify. Start a separate design workflow.';return
         if result:
             from product_upload_mockups import release_transient
@@ -223,33 +318,42 @@ def render_design(app,row,user):
                 result=app.ensure_lifestyle_prompts(result)
                 return app.rebuild_result_artifacts(result)
             queued=generate(connect,row,user['id'],selected_name,selected_sport,Dropbox,app.BASE_DIR,
-                app.MOCKUPS_GENERATION_SEMAPHORE,app.build_mockup_final_prompt_items,reset_exports=bool(result),finalize=finalize)
+                app.MOCKUPS_GENERATION_SEMAPHORE,app.build_mockup_final_prompt_items,
+                reset_exports=bool(result),finalize=finalize,prepare_first=not ready)
             st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],job=queued['token'])
             st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
             st.session_state.pop('product-upload-job-error-'+key,None)
         except Exception as error:
             st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],failed=True)
             st.session_state['product-upload-job-error-'+key]=str(error)
+    if (from_review and choice and name.strip() and not row['data'].get('mockups_exported')
+            and (not row['data'].get('product_gid') or row['data'].get('staff_full_restart')) and not result and not pending and not running
+            and not st.session_state.get(acknowledgement)):
+        queue_generation(automatic=True)
+        pending=JOBS.snapshot(key,user['id'],'generate')
+        running=bool(pending and pending['state'] in ('Queued','Running'))
     st.button('Generate mockups',type='primary',key='product-upload-generate-'+key,on_click=queue_generation,
-        disabled=running or not name.strip() or not sport or spec.get('state')!='Ready')
+        disabled=running or not name.strip() or not sport or (not ready and not from_review))
     if spec.get('state')=='Ready':
         st.html(markup(*status(st.session_state.get(acknowledgement),pending,
             st.session_state.get('product-upload-job-applied-'+key),result,key,name,sport,row['data']['source']['content_hash'])))
     if st.session_state.get('product-upload-job-error-'+key):st.error(st.session_state['product-upload-job-error-'+key])
     preparing=JOBS.snapshot(key,user['id'],'prepare')
-    if spec.get('state')!='Ready':
+    if not ready and not running:
         if preparing and preparing['state']=='Failed':st.error(preparing['error'])
         elif spec.get('state')=='Failed':st.error(spec.get('reason') or 'Artwork preparation failed. Retry preparation; the original and workflow are retained.')
         else:st.info('Downloading/preparing the original PSD. Generate mockups will be enabled when artwork is ready.')
         if st.button('Retry artwork preparation' if spec.get('state')=='Failed' else 'Prepare artwork',key='product-upload-artwork-retry-'+key,
-                     disabled=bool(preparing and preparing['state'] in ('Queued','Running'))):
+                     disabled=running or bool(preparing and preparing['state'] in ('Queued','Running'))):
             try:prepare(connect,key,user['id'],Dropbox)
             except Exception as error:st.error(str(error));return
             st.rerun(scope='fragment')
         poll_render(key,user['id'],spec.get('state'))
-    elif not running and not result:st.caption('Artwork ready. Generate mockups to continue.')
+    elif ready and not running and not result:st.caption('Artwork ready. Generate mockups to continue.')
     with st.container(key='product-upload-generation'):
-        if pending and not result:poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'])
+        if pending or (result and st.session_state.get(acknowledgement)):
+            poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'],
+                            can_autosave=bool(choice and app.os_accounts.can_access_page(user,'Files')))
         if result:
             result['_product_upload_actor_id']=str(user['id'])
             from product_upload_outputs_ui import render_outputs

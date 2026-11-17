@@ -42,17 +42,36 @@ def confirm(service, key, actor, pid, shopify):
                 raise ValueError('The selected source changed; review it before linking.')
             product = shopify.fetch_product_by_shopify_id(pid)
             if product.get('shopify_product_id') != pid: raise ValueError('Shopify returned a different product identity.')
+            smart = d.get('smart_upload')
+            smart_refresh = smart and row['mode'] == 'UPDATE'
+            if smart:
+                from product_upload_identity import tag
+                tags = product.get('tags') or []
+                if isinstance(tags, str):
+                    tags = [part.strip() for part in tags.split(',')]
+                if tag(key) not in tags or not media_complete(product, d):
+                    raise ValueError('The Smart Upload tag and complete Shopify image package are not confirmed.')
+                if smart_refresh and (d.get('metadata') or {}).get('shopify_product_id') != pid:
+                    raise ValueError('This product does not match the exact Smart Upload refresh target.')
             if normal_title(product['title']) != normal_title(previous['title']): raise ValueError('Shopify title changed. Repeat the lookup.')
             state = product.get('status','').upper()
             if row['mode'] == 'DRAFT' and state != 'DRAFT': raise ValueError('The requested Shopify draft is not confirmed.')
             if row['mode'] == 'LIVE' and (state != 'ACTIVE' or not product.get('online_store_url')):
                 raise ValueError('The requested Shopify publication is not confirmed.')
             existing = service.mappings.read()
-            if any(p != pid and m['dropbox_file_id'] == meta['id'] for p,m in existing.items()) or pid in existing and existing[pid]['dropbox_file_id'] != meta['id']:
+            mapped_elsewhere = any(p != pid and m['dropbox_file_id'] == meta['id'] for p,m in existing.items())
+            master_differs = pid in existing and existing[pid]['dropbox_file_id'] != meta['id']
+            if mapped_elsewhere or (master_differs and not smart_refresh):
                 raise ValueError('A different product/PSD mapping already exists. Use the established replacement workflow.')
             cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', ('product-file-link:'+meta['id'],))
             cur.execute("SELECT id FROM product_upload_intakes WHERE data->'source'->>'id'=%s AND data->>'product_gid' IS NOT NULL AND data->>'product_gid'<>%s LIMIT 1", (meta['id'],pid))
             if cur.fetchone(): raise ValueError('This exact PSD is already linked to another confirmed Shopify product.')
+            if smart_refresh and master_differs:
+                # A listing media refresh is separate from edition master replacement.
+                d.update(product_gid=pid, product_title=product['title'], product_url=product.get('admin_url', ''),
+                         choices=[], state='Shopify confirmed', shopify_completion='Listing updated',
+                         master_mapping_pending=True)
+                return row
             # Persist confirmed product identity BEFORE any file work. This is
             # the durable link even if registration or path reconciliation fails.
             d.update(product_gid=pid, product_title=product['title'], product_url=product.get('admin_url',''),

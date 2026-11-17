@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from collections import OrderedDict, deque
-from copy import deepcopy
+from concurrent.futures import Future
+from copy import copy, deepcopy
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import hashlib
@@ -29,7 +30,7 @@ class DirectReportingError(analytics_reporting.AnalyticsReportingError):
 
 
 class MemoryReports:
-    """Bounded process cache; single flight also bounds concurrent Google calls."""
+    """Bounded process cache with one in-flight fetch per report key."""
     def __init__(self, *, clock=time.monotonic, max_bytes=32 * 1024 * 1024):
         self.clock, self.max_bytes = clock, max_bytes
         self.entries = OrderedDict()
@@ -38,6 +39,8 @@ class MemoryReports:
         self.cooldowns = {}
         self.request_times = {}
         self.generation = 0
+        self.in_flight = {}
+        self.request_slots = threading.BoundedSemaphore(4)
 
     def read(self, key, ttl, fetch):
         with self.lock:
@@ -50,15 +53,35 @@ class MemoryReports:
             if key in self.entries:
                 self.entries.move_to_end(key)
                 return deepcopy(self.entries[key][1])
+            generation = self.generation
+            flight_key = (generation, key)
+            flight = self.in_flight.get(flight_key)
+            leader = flight is None
+            if leader:
+                flight = self.in_flight[flight_key] = Future()
+
+        if not leader:
+            return deepcopy(flight.result())
+
+        try:
             value = fetch()
             size = len(json.dumps(value, default=str).encode())
-            if size <= self.max_bytes:
-                while self.entries and (self.size + size > self.max_bytes or len(self.entries) >= 128):
-                    _, (_, _, removed) = self.entries.popitem(last=False)
-                    self.size -= removed
-                self.entries[key] = (self.clock() + ttl, deepcopy(value), size)
-                self.size += size
+            stored = deepcopy(value)
+            with self.lock:
+                if generation == self.generation and size <= self.max_bytes:
+                    while self.entries and (self.size + size > self.max_bytes or len(self.entries) >= 128):
+                        _, (_, _, removed) = self.entries.popitem(last=False)
+                        self.size -= removed
+                    self.entries[key] = (self.clock() + ttl, stored, size)
+                    self.size += size
+            flight.set_result(stored)
             return value
+        except BaseException as error:
+            flight.set_exception(error)
+            raise
+        finally:
+            with self.lock:
+                del self.in_flight[flight_key]
 
     def clear(self):
         with self.lock:
@@ -78,35 +101,46 @@ class DirectTransport(google_seo_import.GoogleSEOReportingClient):
         self.scope, self.cache = scope, cache
 
     def _post(self, endpoint, payload, *, stage):
+        if endpoint.endswith(':checkCompatibility'):
+            key = ('ga4_compatibility', self.scope, endpoint, json.dumps(payload, sort_keys=True))
+            return self.cache.read(key, GA4_TTL, lambda: self._request(endpoint, payload, stage=stage))
+        return self._request(endpoint, payload, stage=stage)
+
+    def _cooldown(self, seconds):
         with self.cache.lock:
-            now = self.cache.clock()
-            cooldown = self.cache.cooldowns.get(self.scope, 0)
-            if now < cooldown:
-                raise DirectReportingError('Google reporting is temporarily unavailable. Try again after the quota cooldown.', code='google_reporting_cooldown')
-            recent = self.cache.request_times.setdefault(self.scope, deque())
-            while recent and now - recent[0] >= 60:
-                recent.popleft()
-            if len(recent) >= 120:
-                raise DirectReportingError('Google report request budget reached. Wait a minute before refreshing.', code='google_reporting_rate_limit')
-            recent.append(now)
+            until = self.cache.clock() + seconds
+            self.cache.cooldowns[self.scope] = max(self.cache.cooldowns.get(self.scope, 0), until)
+
+    def _request(self, endpoint, payload, *, stage):
+        with self.cache.request_slots:
+            with self.cache.lock:
+                now = self.cache.clock()
+                if now < self.cache.cooldowns.get(self.scope, 0):
+                    raise DirectReportingError('Google reporting is temporarily unavailable. Try again after the quota cooldown.', code='google_reporting_cooldown')
+                recent = self.cache.request_times.setdefault(self.scope, deque())
+                while recent and now - recent[0] >= 60:
+                    recent.popleft()
+                if len(recent) >= 120:
+                    raise DirectReportingError('Google report request budget reached. Wait a minute before refreshing.', code='google_reporting_rate_limit')
+                recent.append(now)
             try:
                 response = self.request_post(endpoint, headers=self.headers, json=payload, timeout=(5, 25))
             except requests.RequestException as error:
-                self.cache.cooldowns[self.scope] = now + 60
+                self._cooldown(60)
                 raise DirectReportingError('Google reporting request timed out. Try again shortly.', code='google_reporting_network') from error
             if response.status_code >= 400:
                 try:
                     retry_after = max(60, min(3600, int(response.headers.get('Retry-After', 60))))
                 except (TypeError, ValueError):
                     retry_after = 60
-                self.cache.cooldowns[self.scope] = now + (retry_after if response.status_code == 429 else 60)
+                self._cooldown(retry_after if response.status_code == 429 else 60)
                 raise DirectReportingError(
                     'Google reporting is unavailable. Check the connection and property permissions.' if response.status_code in (401, 403) else 'Google reporting is temporarily unavailable. Try again shortly.',
                     code=f'google_reporting_http_{response.status_code}', retryable=response.status_code in (429, 500, 502, 503, 504))
             result = google_seo._response_json(response, stage=stage)
             quota = result.get('propertyQuota') or {}
             if any(int((quota.get(name) or {}).get('remaining', 100)) < 10 for name in ('tokensPerDay', 'tokensPerHour', 'tokensPerProjectPerHour')) or int((quota.get('serverErrorsPerProjectPerHour') or {}).get('remaining', 10)) <= 1:
-                self.cache.cooldowns[self.scope] = now + 3600
+                self._cooldown(3600)
             return result
 
 
@@ -114,8 +148,19 @@ class GoogleReports:
     def __init__(self, *, connection_store=None, cache=REPORTS, client_factory=None):
         self.store = connection_store or google_seo.default_store()
         self.cache, self.client_factory = cache, client_factory
+        self._connection_snapshot = None
+
+    def for_request(self, connection):
+        scoped = copy(self)
+        scoped._connection_snapshot = dict(connection)
+        return scoped
 
     def connection(self):
+        if self._connection_snapshot is not None:
+            return self._connection_snapshot
+        return self._read_connection()
+
+    def _read_connection(self):
         try:
             return self.store.get_connection()
         except Exception as error:
@@ -131,7 +176,7 @@ class GoogleReports:
         identity = self.identity(connection)
         def token():
             access, selected = google_seo.access_token_for_connection(self.store, google_seo.load_config())
-            if self.identity(self.connection()) != identity or any(selected.get(key) != connection.get(key) for key in ("gsc_site_url", "ga4_property_id")):
+            if self.identity(self._read_connection()) != identity or any(selected.get(key) != connection.get(key) for key in ("gsc_site_url", "ga4_property_id")):
                 raise DirectReportingError('Google connection changed. Refresh this page.', code='google_connection_changed')
             return access
         try:
@@ -140,11 +185,20 @@ class GoogleReports:
             raise DirectReportingError('Google authentication failed. Check or reconnect the existing Google connection.', code=error.code, retryable=False) from error
         return DirectTransport(access, identity, cache=self.cache)
 
-    def ga4(self, property_id, contract_key, start, end, *, filters=()):
+    def ga4_compatibility(self, property_id, contract):
+        connection = self._ga4_connection(property_id)
+        client = analytics_reporting.CanonicalGA4Client('', reporting_client=self.client(connection))
+        return client.compatibility(property_id, contract)
+
+    def _ga4_connection(self, property_id):
         connection = self.connection()
         selected = analytics_reporting.CanonicalGA4Client._property(connection.get('ga4_property_id'))
         if not connection.get('ga4_property_id') or selected != analytics_reporting.CanonicalGA4Client._property(property_id):
             raise DirectReportingError('Select the connected GA4 property.', code='google_property_mismatch', retryable=False)
+        return connection
+
+    def ga4(self, property_id, contract_key, start, end, *, filters=()):
+        connection = self._ga4_connection(property_id)
         contract = analytics_contracts.report_contract(contract_key) if isinstance(contract_key, str) else contract_key
         start, end = date.fromisoformat(str(start)), date.fromisoformat(str(end))
         if start > end:

@@ -7,7 +7,7 @@ from PIL import Image
 from tests.test_product_upload_intake import database,env,saved,ADMIN
 from tests.fixtures.product_upload_outputs_provider import Outputs
 from product_upload_export import transfer,product_folder,collection_root
-from product_upload_lifestyle import compose,scene_texts,INSTRUCTIONS,PER_IMAGE,FILENAMES,ROOMS
+from product_upload_lifestyle import compose,scene_texts,FINISHED_MOCKUPS,INSTRUCTIONS,PER_IMAGE,FILENAMES,ROOMS
 
 
 def test_master_each_scene_complete_and_custom_selections_stable():
@@ -23,10 +23,36 @@ def test_master_each_scene_complete_and_custom_selections_stable():
     loaded=lambda filename,default:custom[FILENAMES.index(filename)]
     assert scene_texts(result,loaded,lambda *a:'saved custom')==custom
     master=compose(INSTRUCTIONS,first)
-    assert master.count(PER_IMAGE)==3
-    for text in ('THREE complete','Immediately generate Card 1','Immediately continue to Card 2 without waiting for approval or another message','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','841 × 594 mm','594 × 841 mm','acrylic rather than glass','Reflections match the room lighting','1024 × 1024'):
+    assert master.count(PER_IMAGE.removeprefix(FINISHED_MOCKUPS + '\n\n')) == 1
+    for text in ('THREE complete','Immediately generate Card 1','Immediately continue to Card 2 without waiting for approval or another message','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','87 cm wide × 62 cm high for landscape','62 cm wide × 87 cm high for portrait','premium clear glass','Reflections match the room lighting','1024 × 1024'):
         assert text in master
     assert all(filename in factory.PRODUCT_PAGE_PROMPT_FILENAMES for filename in FILENAMES)
+
+
+def test_full_restart_uses_fresh_folder_and_rejects_prior_outputs(env,tmp_path):
+    from product_upload_source import invalidate
+    store, _, _ = env
+    row,result,manifest=make_result(env,tmp_path)
+    api=Outputs();provider=SimpleNamespace(api=api,token='fixture')
+    def save(value):
+        return transfer(provider,value,manifest,api.root,api.base+'/Baseball','Reset fixture',store.connect,
+                        ADMIN['id'],lambda *a:None,conflict='numbered')
+    original=save(result)
+    assert not original['failures']
+    prior=deepcopy(result)
+    before=deepcopy(api.files)
+    with store.locked(row['id'],ADMIN['id']) as (current,_):
+        current['data']['staff_full_restart']='fresh-attempt'
+        invalidate(current)
+        current['data'].pop('mockup_saves',None)
+    with pytest.raises(ValueError,match='earlier reset'):
+        save(prior)
+    result['_staff_full_restart']='fresh-attempt'
+    result.pop('_product_upload_save_token',None)
+    fresh=save(result)
+    assert not fresh['failures'] and fresh['destination']!=original['destination']
+    assert fresh['destination'].endswith(' (2)')
+    assert all(api.files[path]==metadata for path,metadata in before.items())
 
 
 def make_result(env,tmp_path):
@@ -66,6 +92,82 @@ def test_save_uses_standalone_manifest_partial_retry_lost_ack_and_duplicate(env,
     assert store.read(row['id'],ADMIN['id'])['data']['mockups_exported']
     assert not store.read(row['id'],ADMIN['id'])['data'].get('product_gid')
     assert any(isinstance(u[1],float) and not u[1].is_integer() for u in updates)
+
+
+@pytest.mark.parametrize('numbered', [False, True])
+def test_core_handoff_retries_then_manual_save_extends_same_folder(env, tmp_path, monkeypatch, numbered):
+    from product_upload_chat_handoff import CORE, prepare
+    from product_upload_source import current_source
+    store, _, _ = env
+    row, result, manifest = make_result(env, tmp_path)
+    core = [entry for entry in manifest if entry['product_slot_id'] in CORE]
+    api = Outputs()
+    provider = SimpleNamespace(api=api, token='fixture')
+    parent = api.base + '/Baseball'
+    category = api.files[parent]['id']
+    find = api.get_metadata_if_exists
+    monkeypatch.setattr(api, 'get_metadata_if_exists', lambda token, key, **kwargs: find(token, key) or
+                        next((dict(value) for value in api.files.values() if value.get('id') == key), None))
+    monkeypatch.setattr('prompt_store.get_prompt', lambda _key, default, **kwargs: default)
+    progress = []
+
+    def save(entries, **options):
+        return transfer(provider, result, entries, api.root, parent, 'Product', store.connect,
+                        ADMIN['id'], lambda *event: progress.append(event), category_id=category,
+                        **options)
+
+    if numbered:
+        unrelated = api.create_folder('fixture', parent, 'Product')
+        assert save(core, core_only=True, conflict='cancel')['cancelled']
+    # Approved automatic uploads cycle through the same first choice as manual saves
+    # and reserve a numbered folder when the original is already owned.
+    automatic = dict(core_only=True, conflict='cancel', number_on_conflict=numbered)
+    api.fail_once = core[0]['archive_name']
+    incomplete = save(core, **automatic)
+    with pytest.raises(ValueError):
+        prepare(result, row, incomplete, 'Exact original lifestyle prompt.')
+    receipt = save(core, **automatic)
+    assert len(receipt['successes']) == 5
+    assert {total for _, _, total in progress} == {5}
+    assert not store.read(row['id'], ADMIN['id'])['data']['mockups_exported']
+    manual = prepare(result, row, receipt, 'Exact original lifestyle prompt.')
+    assert not manual['automatic']
+    handoff = prepare(result, row, dict(receipt, generation_receipt='a' * 32), 'Exact original lifestyle prompt.')
+    assert handoff['automatic'] and handoff['companion_id'] == manual['companion_id']
+    prompt = handoff['prompt']
+    black = next(item['metadata'] for item in receipt['successes']
+                 if item['relative_path'] == core[0]['archive_name'])
+    assert black['id'] in prompt and black['path_display'] in prompt
+    assert 'Exact original lifestyle prompt.' in prompt and 'lossless WebP, method 1' in prompt
+    from psd_directory import REVIEW_FOLDER, ROOT
+    assert 'Upload to Live' in prompt and 'Create as DRAFT' not in prompt
+    assert 'Use ACTIVE from the first Shopify create call' in prompt
+    assert 'Online Store publication confirmed' in prompt
+    mapping = prompt.split('STEP 5 — VERIFY EDITION OPS AND ATTACH THE ORIGINAL PSD', 1)[1]
+    assert mapping.index('Wait for the published product') < mapping.index('Move that original master') < mapping.index('Open Add / Attach PSD')
+    assert all(value in mapping for value in (REVIEW_FOLDER, ROOT, row['data']['source']['id'],
+                                               row['data']['source']['rev'], row['data']['source']['content_hash']))
+    assert 'use Add / Attach PSD manually' not in prompt
+    assert 'https://www.dropbox.com/home/' in prompt
+    assert 'Retrieve only the original black-frame WebP using the connected Dropbox tools' in prompt
+    assert 'Leave the other four WebPs in Dropbox' in prompt
+    assert 'If an approval is required or denied, report the exact pending action' in prompt
+    assert 'Create the product as ACTIVE from the first create call' in prompt
+
+    # A stale completion record must recover a missing WebP before it can dispatch.
+    del api.files[black['path_display']]
+    refreshed = save(core, **automatic)
+    assert refreshed['destination'] == receipt['destination']
+    assert len(refreshed['successes']) == 5 and black['path_display'] in api.files
+
+    full = save(manifest, conflict='cancel', extend_core=receipt['export_fingerprint'])
+    assert len(full['successes']) == 8
+    assert full['destination'] == receipt['destination']
+    assert full['product_folder_id'] == receipt['product_folder_id']
+    assert sum(kind == 'upload' for kind, _ in api.calls) == 10  # eight originals, one failed, one recovered
+    assert current_source(store.read(row['id'], ADMIN['id']))['expected_webp_count'] == 8
+    if numbered:
+        assert api.files[parent + '/Product'] == unrelated
 
 
 def test_save_collision_numbered_no_replace_and_source_fence(env,tmp_path):
@@ -121,6 +223,37 @@ def test_product_renderer_has_no_zip_controls_and_standalone_unchanged():
     assert 'Copy each prompt' not in text
 
 
+def test_automatic_save_uses_second_half_and_waits_for_confirmed_receipt(monkeypatch):
+    import product_upload_outputs_ui as ui
+    from product_upload_jobs import JOBS
+
+    key = 'upload'
+    token = 'save'
+    state = {'_product_upload_active': key}
+    receipt = {'core_only': True, 'successes': [{}] * 5}
+    result = {'_product_upload_intake': key, 'product_upload_core_receipt': receipt}
+    app = SimpleNamespace(_mockups_result=lambda: result)
+    job = dict(state='Running', total=5, completed=0, stage='Saving WebPs', token=token)
+    observed = []
+    monkeypatch.setattr(ui.st, 'session_state', state)
+    monkeypatch.setattr(ui.st, 'progress', lambda value, *, text: observed.append(value))
+    monkeypatch.setattr(JOBS, 'snapshot', lambda *args: job)
+    monkeypatch.setattr(JOBS, 'result', lambda *args: receipt)
+
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    job['completed'] = 5
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    assert observed == [.5, .85]
+    job['state'] = 'Ready'
+    state['product-upload-save-applied-' + key] = token
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    assert observed[-1] == 1.
+    receipt['generation_receipt'] = 'a' * 32
+    observed.clear()
+    ui.save_progress.__wrapped__(app, key, 'actor', core=True)
+    assert observed == []  # The browser now owns the last handoff stages.
+
+
 def test_retain_uploaded_original_without_export_resize(tmp_path):
     import io
     from product_upload_gallery import retain_upload_original
@@ -170,6 +303,78 @@ def test_category_id_rename_retries_same_owned_product_folder(env,tmp_path):
     second=transfer(provider,result,manifest,api.root,new_parent,'Product',store.connect,ADMIN['id'],lambda *a:None,category_id='id:category')
     assert not second['failures'] and second['destination']==new_parent+'/Product'
     assert len([c for c in api.calls if c[0]=='folder'])==1
+
+
+@pytest.mark.parametrize('reservation', ['deleted', 'replaced', 'path-only', 'id-without-path', 'moved'])
+def test_approved_core_save_recovers_stale_folder_reservation(env, tmp_path, monkeypatch, reservation):
+    from product_upload_chat_handoff import CORE, prepare
+
+    store, _, _ = env
+    row, result, manifest = make_result(env, tmp_path)
+    core = [item for item in manifest if item['product_slot_id'] in CORE]
+    api = Outputs()
+    provider = SimpleNamespace(api=api, token='fixture')
+    parent = api.base + '/Baseball'
+    category_id = api.files[parent]['id']
+    lookup_overrides = {}
+
+    def metadata(token, key, *, missing_only=False):
+        if key in lookup_overrides:
+            return deepcopy(lookup_overrides[key])
+        return deepcopy(api.files.get(key) or next((item for item in api.files.values()
+                                                   if item['id'] == key), None))
+
+    monkeypatch.setattr(api, 'get_metadata_if_exists', metadata)
+    monkeypatch.setattr('prompt_store.get_prompt', lambda _key, default, **kwargs: default)
+
+    def save():
+        return transfer(provider, result, core, api.root, parent, 'Product', store.connect,
+                        ADMIN['id'], lambda *args: None, category_id=category_id,
+                        core_only=True, conflict='cancel', number_on_conflict=True)
+
+    first = save()
+    original = prepare(result, row, first, 'Lifestyle instructions')
+    old_target = first['destination']
+    if reservation == 'path-only':
+        lookup_overrides[first['product_folder_id']] = None
+    elif reservation == 'id-without-path':
+        lookup_overrides[first['product_folder_id']] = {'.tag': 'folder', 'id': first['product_folder_id']}
+    else:
+        for path in tuple(api.files):
+            if path == old_target or path.startswith(old_target + '/'):
+                item = api.files.pop(path)
+                if reservation == 'moved':
+                    new_path = path.replace(old_target, api.base + '/Cricket/Product', 1)
+                    api.files[new_path] = dict(item, path_display=new_path)
+    if reservation == 'replaced':
+        replacement = api.create_folder('fixture', parent, 'Product')
+
+    previous_calls = len(api.calls)
+    if reservation == 'moved':
+        with pytest.raises(ValueError, match='Restore it to the selected sport folder'):
+            save()
+        assert len(api.calls) == previous_calls
+        return
+
+    recovered = save()
+    assert len(recovered['successes']) == 5 and not recovered['failures']
+    assert recovered['export_fingerprint'] == first['export_fingerprint']
+    handoff = prepare(result, row, recovered, 'Lifestyle instructions')
+    assert handoff['companion_id'] == original['companion_id']
+    if reservation in ('path-only', 'id-without-path'):
+        assert recovered['product_folder_id'] == first['product_folder_id']
+        assert len(api.calls) == previous_calls
+    else:
+        assert recovered['product_folder_id'] != first['product_folder_id']
+        assert {x['metadata']['id'] for x in recovered['successes']}.isdisjoint(
+            x['metadata']['id'] for x in first['successes'])
+        assert len(api.calls) == previous_calls + 6
+    expected_target = old_target + ' (2)' if reservation == 'replaced' else old_target
+    assert recovered['destination'] == expected_target
+    assert expected_target + '/WEBP' in handoff['prompt']
+    if reservation == 'replaced':
+        assert api.files[old_target] == replacement
+        assert not any(path.startswith(old_target + '/') for path in api.files)
 
 
 def test_category_move_during_transfer_stops_before_more_uploads(env,tmp_path):

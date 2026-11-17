@@ -40,7 +40,7 @@ from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
 from activity_log import record_activity_log
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from ads_meta_contract import META_AD_URL_PARAMETERS, META_DEFAULT_CTA
-from ads_product_catalog import load_live_edition_product_rows
+from ads_product_catalog import load_live_edition_product_rows, recommend_new_ads_category
 import dropbox_integration
 import os_accounts
 import sports_cave_physical_realism as physical_realism
@@ -1644,11 +1644,21 @@ def _on_ads_product_selector_changed(rows):
     )
     st.session_state[ADS_PRODUCT_NAME_KEY] = selection.get("selected_label") or ""
     _synchronise_ads_product_url_state(selection)
+    if _active_ads_workflow_mode() == ADS_WORKFLOW_MODE_NEW:
+        _apply_new_ads_product_defaults(selection)
     if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
         import ads_refresh_product
         if not ads_refresh_product.correct(st.session_state,selection.get('row'),previous_url):
             st.session_state[ADS_PRODUCT_URL_KEY]=previous_url
             st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]=True
+
+
+def _apply_new_ads_product_defaults(selection):
+    st.session_state["ads_category"] = recommend_new_ads_category(
+        selection.get("row"), selection.get("selected_label"),
+    ) or "Select category"
+    if st.session_state.get("ads_platform") != "Google":
+        st.session_state["ads_campaign_type"] = "Instant Experience"
 
 
 def prepare_ads_product_selector_state(rows, *, result=None):
@@ -5491,7 +5501,7 @@ PRODUCT AND VERIFIED METADATA
 - Country/market: {country}
 - Destination URL for ad setup only: {product_url or "[exact product-page URL from the Ads form]"}
 - Route key: {visual["route_key"]}
-- Route name: {visual["route"]}
+- Route name (compatibility identity only; not a camera instruction): {visual["route"]}
 - Camera role: {visual["camera_role"]}
 - Product sport used for room selection: {visual.get("product_sport")}
 - Product era/mood classification: {visual.get("product_era")} / {visual.get("artwork_mood")}
@@ -7285,10 +7295,14 @@ def _refresh_copy_count(value):
 
 
 def _ie_concepts_for_result(result):
-    if not _is_ie_copy_v2(result):
-        return INSTANT_EXPERIENCE_CONCEPTS
-    return tuple({**c, "display_name": ie_copy.ROUTES[c["id"]][0],
-                  "supporting_label": ie_copy.ROUTES[c["id"]][1]} for c in INSTANT_EXPERIENCE_CONCEPTS)
+    # Keep CSV identities stable while presenting scene names in the OS.
+    concepts = INSTANT_EXPERIENCE_CONCEPTS
+    if _is_ie_copy_v2(result):
+        concepts = tuple({**c, "display_name": ie_copy.ROUTES[c["id"]][0],
+                          "supporting_label": ie_copy.ROUTES[c["id"]][1]} for c in concepts)
+    return tuple({**c, "csv_route_label": _instant_experience_copy_csv_route_label(c),
+                  "display_name": c["scene_name"], "supporting_label": c["scene_label"]}
+                 for c in concepts)
 
 
 def _ie_default_cta(result, concept_id):
@@ -7558,6 +7572,8 @@ def compose_final_ads_prompt(
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
             workflow_mode=workflow_mode,
         )
+    if campaign_type == "Carousel":
+        prompt += "\n\n" + RACING_WRITTEN_COPY_INSTRUCTIONS
     if campaign_type == "Instant Experience":
         prompt += "\n\n" + WRITTEN_META_HEADLINE_INSTRUCTIONS
     if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
@@ -8430,6 +8446,11 @@ def build_carousel_winner_examples(example_text):
     return "; ".join(example for example in examples if example)
 
 
+RACING_WRITTEN_COPY_INSTRUCTIONS = """RACING WRITTEN COPY — NO COMPETITOR NUMBERS
+For every racing sport, including horse racing, Formula 1/F1, NASCAR, V8 Supercars, rally, IndyCar, endurance, motorcycle racing and all other motorsport/racing disciplines: never mention a car, bike, vehicle or horse racing number in any newly generated or explicitly regenerated primary text, description, written headline or carousel card copy. This applies even when a number appears in the product title, supplied details, reference copy or artwork. Omit race-entry, starting, saddlecloth and competitor identifiers in digits, words, hashtags or indirect number-based hooks (for example, "No. 5", "#5", "number five", "the 5" or "Make Room for the 5"). Identify the subject through its supplied driver, rider, horse or team name and verified story instead; do not echo a numbered product title verbatim into written ad copy. This rule overrides conflicting written-copy examples and title-reuse instructions. It does not ban verified years, race names, achievements or the approved 100-edition scarcity claim. Preserve all other factual and style safeguards, saved ads, catalogue product.name, artwork/image details, image prompts and on-image footer rules. Before returning fresh written copy, check every description and headline for competitor-number references and rewrite any found.
+"""
+
+
 WRITTEN_META_HEADLINE_INSTRUCTIONS = """WRITTEN META HEADLINE — PRODUCT MEANING
 Scope: only newly generated written Meta headline fields in ad output and CSV. These rules take precedence over all other written-headline directions, examples and option counts, including refresh instructions. They do not apply to on-image scarcity headlines, image prompts, primary text, descriptions, CTAs, catalogue product.name or any other field. Preserve explicitly assigned or proven headlines unless headline regeneration is requested; never rewrite saved ads.
 For each three-ad package, return exactly THREE final headlines total: ONE selected headline in each ad's existing headline field, reused verbatim in its CSV cell. Never return three headlines per ad, alternatives, angle labels or extra fields.
@@ -8442,7 +8463,7 @@ The image already communicates edition scarcity; the written headline must add e
 Adapt to the actual fan base and product, not national stereotypes. USA: consider relevant athlete mentality, team/city allegiance, defining records and era memories. Australia: consider relevant sporting heritage, local allegiance, shared memories and homegrown connection. Do not force Australian pride into USA copy because an athlete is Australian. A shared emotional connection can use the same headline in both markets; do not force market-only wording changes.
 Within the existing generation process, consider at least nine headline candidates internally, then select the strongest three. Assess exact-product fit, supporter emotion, brevity/natural wording, confident collector tone, distinctness and factual accuracy. Ask: Would a knowledgeable fan recognise why this belongs with this edition? Does it add something beyond scarcity? Does it sound like a fan's belief rather than a shop's sales pitch? Rewrite weak candidates before returning only one selected headline per ad.
 Generate from product meaning each time, never a rotating headline bank. Avoid repetition across unrelated products when recent headline history is already supplied; never claim to check unavailable history or add history infrastructure. Do not sacrifice a strong phrase solely for novelty. These are creative candidates to test, not proven winners.
-"""
+""" + "\n\n" + RACING_WRITTEN_COPY_INSTRUCTIONS
 
 
 def build_category_winner_angle_block(category, campaign_type, country, *, include_ie_setting=True):
@@ -8573,7 +8594,7 @@ def build_instant_experience_execution_image_brief(index, visual):
 
 IMAGE GENERATION PROMPT
 Image {index}; Route key: {visual['route_key']}; camera role: {visual['camera_role']}.
-Output label: Ad {index} — {'Collector Hallway' if index == 1 else visual['room_type']}
+Output label: Ad {index} — {INSTANT_EXPERIENCE_CONCEPTS[index - 1]['scene_name']}
 Camera: {visual['camera_side']}.
 SCENE: {scene}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}.
@@ -9075,6 +9096,24 @@ def render_generic_winner_pattern_note(category, campaign_type):
 def render_meta_url_parameters_section(section_number):
     """Compatibility shim for saved/legacy Ads callers; Posting owns tracking."""
     return None
+
+
+def _apply_morning_brief_product(rows):
+    from home_brief_calendar import PRODUCT_QUERY
+
+    handle = st.query_params.get(PRODUCT_QUERY)
+    if not handle:
+        return
+    del st.query_params[PRODUCT_QUERY]
+    if not isinstance(handle, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,149}", handle):
+        st.warning("The Morning Brief product link is invalid.")
+        return
+    matches = [row for row in rows if _edition_ops_product_handle_from_row(row).casefold() == handle]
+    if len(matches) != 1:
+        st.warning("The Morning Brief product is unavailable in the New Ads product list.")
+        return
+    st.session_state[ADS_PRODUCT_SELECTOR_KEY] = _edition_ops_product_selector_identity(matches[0])
+    _apply_new_ads_product_defaults({"row": matches[0]})
 
 
 def render_product_name_input(*, rows=None, result=None):
@@ -10843,6 +10882,8 @@ def _instant_experience_copy_csv_output_mode(result):
 
 
 def _instant_experience_copy_csv_route_label(concept):
+    if concept.get("csv_route_label"):
+        return concept["csv_route_label"]
     return (
         f"{str(concept.get('display_name') or '').upper()} \u2014 "
         f"{concept.get('supporting_label') or ''}"
@@ -12298,7 +12339,7 @@ def _render_instant_experience_concepts(result, workflow):
     st.caption("Upload one cover and one Description, Headline and CTA per visual." if _is_ie_copy_v2(result) else "Upload one cover and one matching Primary Text / Headline pair per creative." if _refresh_copy_count(result) == 1 else "Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
 
     compact_refresh = result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
-    concept_columns = st.columns(3) if compact_refresh else []
+    concept_columns = st.columns(3)
     for concept_index, concept in enumerate(_ie_concepts_for_result(result)):
         concept_id = concept["id"]
         slot = slot_by_concept.get(concept_id) or {}
@@ -12307,9 +12348,9 @@ def _render_instant_experience_concepts(result, workflow):
             heading = f"REFRESH CREATIVE {concept['position']} — WINNER REFINEMENT"
         if compact_refresh:
             heading = f"Refresh {concept['position']} · Winner refinement"
-        with (concept_columns[concept_index] if compact_refresh else nullcontext()), st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
+        with concept_columns[concept_index], st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
             st.markdown(f"**{heading}**")
-            image_column, copy_column = (st.container(), st.container()) if compact_refresh else st.columns([1, 2])
+            image_column, copy_column = (st.container(), st.container())
             with image_column:
                 uploaded_file = st.file_uploader(
                     slot.get("label") or f"{concept['display_name']} Cover",
@@ -12331,36 +12372,6 @@ def _render_instant_experience_concepts(result, workflow):
                         st.warning(saved_slot["preview_error"])
                     else:
                         st.caption("Preview not available. The original image is still retained.")
-                    original_name = saved_slot.get("original_name") or "Uploaded cover"
-                    if compact_refresh:
-                        st.caption(f"{original_name} · {saved_slot.get('source_width') or saved_slot.get('output_width')} × {saved_slot.get('source_height') or saved_slot.get('output_height')} px · {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
-                    else:
-                        st.caption(f"Filename: {original_name}")
-                        st.caption(
-                            "Original: "
-                            f"{saved_slot.get('source_width') or saved_slot.get('output_width')} x "
-                            f"{saved_slot.get('source_height') or saved_slot.get('output_height')} px"
-                        )
-                        st.caption(f"Original size: {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
-                    output_filename = _meta_output_filename(result, workflow, slot)
-                    export_image = _instant_experience_export_image_details(
-                        result,
-                        saved_slot,
-                    )
-                    st.download_button(
-                        "Download cover" if compact_refresh else "Download Full-Resolution Cover",
-                        data=export_image["data"],
-                        file_name=output_filename,
-                        mime=export_image.get("content_type")
-                        or ads_image_workflow.mime_type_for_image_filename(
-                            output_filename,
-                            source_format=export_image.get("output_format")
-                            or export_image.get("source_format")
-                            or "",
-                        ),
-                        key=f"ads-ie-cover-download::{result['context_key']}::{concept_id}",
-                        use_container_width=True,
-                    )
                     outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
                     if outcome.get("status") == "saved":
                         st.success("Saved")
@@ -12374,8 +12385,6 @@ def _render_instant_experience_concepts(result, workflow):
                     ):
                         _remove_ads_image_slot(result, slot["id"])
                         st.rerun()
-                    if not compact_refresh:
-                        st.caption("Drop or browse for a replacement at any time.")
                 elif saved_slot.get("error"):
                     st.error(saved_slot["error"])
                     if st.button(
@@ -12398,7 +12407,7 @@ def _render_instant_experience_concepts(result, workflow):
                     )
                     if not compact_refresh:
                         st.markdown("**Ad Copy**" if _is_ie_copy_v2(result) else "**Primary Text / Description**" if _refresh_copy_count(result) == 1 else f"**{variation['description_label']}**")
-                    field_columns = [st.container() for _ in INSTANT_EXPERIENCE_COPY_FIELDS] if compact_refresh else st.columns([2, 1, 1])
+                    field_columns = [st.container() for _ in INSTANT_EXPERIENCE_COPY_FIELDS]
                     for field_column, (field_key, field_label) in zip(
                         field_columns,
                         INSTANT_EXPERIENCE_COPY_FIELDS,
@@ -12430,14 +12439,6 @@ def _render_instant_experience_concepts(result, workflow):
                                 widget_args.pop("value", None)
                                 widget_args["disabled"] = True
                             variation[field_key] = st.text_area(("Description" if _is_ie_copy_v2(result) and field_key == "primary_text" else "Primary Text / Description" if field_key == "primary_text" and _refresh_copy_count(result) == 1 else field_label), **widget_args)
-                            if field_key == "primary_text":
-                                render_prompt_copy_button(
-                                    _preserve_multiline_text(variation[field_key]),
-                                    key=f"{widget_key}::copy",
-                                    label="Copy Description",
-                                    success_label="Description copied",
-                                    compact=compact_refresh,
-                                )
                     variations[index - 1] = variation
                 concept_notes[concept_id] = variations
                 complete_count = sum(
@@ -12578,14 +12579,6 @@ def _render_ads_image_slots(result, workflow):
             saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
             if saved_slot.get("valid"):
                 st.image(saved_slot.get("preview_data") or saved_slot["data"], width="stretch")
-                output_label = (
-                    f"{saved_slot.get('output_width')} x {saved_slot.get('output_height')} "
-                    f"{saved_slot.get('output_format')}"
-                )
-                st.caption(
-                    f"{output_label} | {saved_slot['output_size'] / (1024 * 1024):.2f} MB"
-                )
-                st.caption(_meta_output_filename(result, workflow, slot))
                 outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
                 if outcome.get("status") == "saved":
                     st.success("Saved")
@@ -12788,6 +12781,7 @@ def _ads_saved_source_signature(result, workflow):
             "campaign_moment", "creative_refresh_context",
         )},
         "copy": copy,
+        **({"posting_settings": result["posting_settings"]} if result.get("posting_settings") else {}),
         **({"refresh_executions": (workflow.get("ad_notes") or {}).get("refresh_executions") or []}
            if (result.get("creative_refresh_context") or {}).get("refresh_plan") else {}),
         "images": [
@@ -14226,12 +14220,19 @@ def _submit_ads_review(result, workflow):
 
 
 def _render_final_ad_review(result, workflow=None):
-    render_prompt_copy_button(
-        build_final_ad_review_copy_prompt(result, workflow),
-        f"ads-final-review-prompt::{result['context_key']}",
-        label="Copy Final Review Prompt",
-        success_label="Final review prompt copied",
-    )
+    """Optional copy assistance must never gate the save/post controls below it."""
+    st.caption("Optional: review or improve the copy before posting. You can post without copying this prompt.")
+    try:
+        prompt = build_final_ad_review_copy_prompt(result, workflow)
+        render_prompt_copy_button(
+            prompt,
+            f"ads-final-review-prompt::{result['context_key']}",
+            label="Copy Final Review Prompt",
+            success_label="Final review prompt copied",
+        )
+    except Exception:
+        logging.exception("Optional Ads copy review prompt could not be displayed")
+        st.caption("The optional review prompt is unavailable. You can still use Post now below.")
 
 
 def render_product_artwork_reference(selection, product_url, *, creative_refresh=False):
@@ -14396,8 +14397,7 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
         if not source_matches:
             issues = ['Settings changed. Select Submit to prepare the matching refresh before saving.'] + issues
         with st.container(key='ads-refresh-actions'):
-            # Keep the existing Save / POST NOW actions compact. Only posting needs
-            # the explicit visual sign-off; draft saving remains completely unchanged.
+            # Preserve the existing content-bound visual sign-off before save/handoff.
             if _ads_image_valid_slots(result, workflow):
                 with st.expander("Final visual verification — required before POST NOW",
                                  expanded=bool(_creative_refresh_visual_review_issues(result, workflow))):
@@ -14418,19 +14418,15 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
                     if previous_review != workflow.get('refresh_visual_review_key') and workflow.get('refresh_workspace_saved'):
                         import ads_refresh_saved
                         workflow['refresh_workspace_export'] = ads_refresh_saved.dumps(result, workflow)
-            save_col, post_col = st.columns(2)
-            with save_col:
-                if source_matches:
-                    _render_ads_image_save(result, workflow, quality_issues=[])
-                else:
-                    st.button('Save now', disabled=True, key=f"ads-images-save-open::{result['context_key']}")
-                    st.caption('Product settings changed. Apply them with Submit before saving this refresh.')
-            with post_col:
-                _render_saved_ad_post_now(result, workflow, source_matches=source_matches,
-                                          quality_issues=issues)
+            import ads_auto_post
+            ads_auto_post.render(sys.modules[__name__], result, workflow,
+                                 source_matches=source_matches, quality_issues=issues)
     else:
-        _render_ads_image_save(result, workflow)
-        _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
+        import ads_auto_post
+        if _is_instant_experience_result(result):
+            _render_final_ad_review(result, workflow)
+        ads_auto_post.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
+
 
 
 def render_supported_result(result, *, source_matches=True):
@@ -14469,11 +14465,7 @@ def render_supported_result(result, *, source_matches=True):
         )
 
         _render_instant_experience_concepts(result, workflow)
-        _render_ads_image_save(result, workflow)
-        _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
-        st.subheader("2. Build it in Meta")
-        st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
-        render_meta_url_parameters_section(3)
+        _render_ads_final_actions(result, workflow, source_matches=source_matches)
         return
 
     if campaign_type == "Instant Experience":
@@ -14484,11 +14476,7 @@ def render_supported_result(result, *, source_matches=True):
         )
 
         _render_instant_experience_concepts(result, workflow)
-        _render_ads_image_save(result, workflow)
-        _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
-        st.subheader("2. Build it in Meta")
-        st.caption("Upload the three Instant Experience covers generated from the prompt above.")
-        render_meta_url_parameters_section(3)
+        _render_ads_final_actions(result, workflow, source_matches=source_matches)
         return
 
     if campaign_type == "Single Image / Video":
@@ -14497,7 +14485,6 @@ def render_supported_result(result, *, source_matches=True):
             master_prompt += "\nReturn THREE complete ads in this exact CSV template, including standalone image prompts:\n" + build_standard_ads_csv(product_name=product_name).decode("utf-8-sig")
         render_prompt_copy_button(master_prompt, f"ads-prompt::{result['context_key']}")
         ads_standard_workflow.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
-        render_meta_url_parameters_section(3)
         return
 
     st.subheader("1. Copy this ChatGPT prompt")
@@ -14508,15 +14495,8 @@ def render_supported_result(result, *, source_matches=True):
 
     _render_ads_image_slots(result, workflow)
     _render_ads_setup_notes(result, workflow)
-    _render_ads_image_save(result, workflow)
-    _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
-    st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
+    _render_ads_final_actions(result, workflow, source_matches=source_matches)
 
-    st.subheader("2. Build it in Meta")
-    for index, step in enumerate(META_BUILD_ORDER, start=1):
-        st.markdown(f"{index}. {step}")
-    st.caption("Review every fact before publishing. Remove anything that cannot be confirmed from the product or artwork.")
-    render_meta_url_parameters_section(3)
 
 def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     import ads_google_ui
@@ -14528,6 +14508,11 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     st.markdown(
         """
         <style>
+        [class*="st-key-ads-ie-concept"] {padding: .85rem !important; border-radius: 10px;}
+        [class*="st-key-ads-ie-concept"] [data-testid="stVerticalBlock"] {gap: .55rem;}
+        [class*="st-key-ads-ie-concept"] [data-testid="stFileUploader"] {margin-bottom: 0;}
+        [class*="st-key-ads-ie-concept"] [data-testid="stImage"] img {border-radius: 6px;}
+
         div[data-testid="stMainBlockContainer"] {
             padding-top: 4rem !important;
         }
@@ -14705,7 +14690,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                     "3. Upload the black-framed Sports Cave product WebP and attach the winning ad image to ChatGPT.\n"
                     "4. Copy and paste the generated master prompt.\n"
                     "5. ChatGPT will return the normal New Ads production package.\n"
-                    "6. Import the completed CSV, add generated images, review and Save. Use POST NOW when the saved format is supported by Posting."
+                    "6. Import the completed CSV, add generated images and review. Post now saves to Dropbox automatically, then opens Posting."
                 )
             else:
                 st.markdown(
@@ -14729,6 +14714,8 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.session_state[ADS_PRODUCT_NAME_KEY] = result.get("product_name")
 
     product_rows = load_edition_ops_product_rows()
+    if workflow_mode == ADS_WORKFLOW_MODE_NEW:
+        _apply_morning_brief_product(product_rows)
     if is_google:
         ads_google_ui.apply_pending(product_rows)
         result = st.session_state.get(result_state_key)
@@ -14739,11 +14726,18 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     )
     category_col, country_col, campaign_col = st.columns(3)
     with category_col:
+        if not is_creative_refresh and product_name and "ads_category" not in st.session_state:
+            st.session_state["ads_category"] = recommend_new_ads_category(
+                product_selection.get("row"), product_name,
+            ) or "Select category"
         normalize_sport_state(st.session_state, "ads_category", "Select category")
         category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
     with country_col:
         country = st.selectbox("Country", COUNTRY_OPTIONS, key="ads_country")
     with campaign_col:
+        if (not is_creative_refresh and not is_google
+                and st.session_state.get("ads_campaign_type") in (None, "Select campaign type")):
+            st.session_state["ads_campaign_type"] = "Instant Experience"
         campaign_type = st.selectbox(
             "Campaign type",
             ["Demand Gen"] if is_google else CAMPAIGN_TYPE_OPTIONS,

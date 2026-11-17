@@ -3889,6 +3889,10 @@ def render_copy_prompt_box(
     effective_prompt = prompt_store.get_prompt(prompt_id, _clean_prompt(default_prompt_text))
     if key in DESIGN_STUDIO_IMAGE_GENERATION_PROMPT_KEYS:
         effective_prompt = build_design_studio_image_generation_prompt(effective_prompt)
+    elif key == "harsh-review":
+        from design_subject_authenticity import IDENTITY_OVERRIDES_CONTINUITY
+        identity = IDENTITY_OVERRIDES_CONTINUITY.strip()
+        effective_prompt = IDENTITY_OVERRIDES_CONTINUITY + effective_prompt.replace(identity, "").strip()
     source_record = prompt_store.get_prompt_source(
         prompt_id,
         _clean_prompt(default_prompt_text),

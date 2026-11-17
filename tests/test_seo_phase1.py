@@ -15,7 +15,7 @@ class Phase1Tests(unittest.TestCase):
     def setUp(self):
         self.state=w.default_state()
     def test_menu_and_legacy_routes_keep_access(self):
-        self.assertEqual([n.SEO_NAV_LABELS[r] for r in n.SEO_MENU_ROUTES],['Worker','Analytics','Plan','Review','History'])
+        self.assertEqual([n.SEO_NAV_LABELS[r] for r in n.SEO_MENU_ROUTES],['Worker','Plan','Review','History'])
         self.assertEqual(m.destination(n.SEO_KEYWORDS_ROUTE),(n.SEO_ANALYTICS_ROUTE,'Queries'))
         for old in a.ANALYTICS_ROUTES:
             self.assertEqual(m.destination(old)[0],n.SEO_ANALYTICS_ROUTE)

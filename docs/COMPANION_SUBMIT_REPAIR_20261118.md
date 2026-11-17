@@ -150,3 +150,19 @@ C:/Users/hello/AppData/Local/SportsCave/UploadCompanion/backups/progress-1.4.6-2
 Existing chat content scripts are not retroactively replaced by extension reload.
 Did not regenerate rejected outputs, fabricate a complete manifest, publish a
 partial product, or claim mapping completion. No commit, push or deployment.
+
+## Authorized release preparation
+
+User subsequently explicitly authorized pushing to Render and a complete live
+workflow test. Integrated current live main 6c07260b3ffdf3702bf9ee528b59f0fb41cc0c6c
+into this owned task branch. Preserved newer scene quality, safety-rejection
+handling, staff mapping protocol and Design Studio changes. Resolved overlapping
+companion files against the tested 1.4.6 implementation; retained existing
+progress tests and Meta Ads coverage. Added timer globals to the queue test VM
+to model the worker keep-alive API.
+
+Combined verification: 35 Node companion/queue tests pass; 33 Python prompt,
+scene-quality, staff-queue and staff-mapping tests pass with disposable PGlite.
+One upstream Starlette test-client deprecation warning. Topology validation and
+diff whitespace checks pass. No infrastructure or migration changes. Canonical
+Render service is configured to auto-deploy main; no Blueprint sync is needed.

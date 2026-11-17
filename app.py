@@ -1369,6 +1369,38 @@ def inject_styles():
             gap: 0.5rem !important;
         }
 
+        .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) {
+            gap: clamp(1rem, 1.5vw, 1.6rem) !important;
+        }
+
+        .st-key-home-weekly-card {
+            margin-top: 1rem;
+            padding: clamp(.75rem, 1.4vw, 1.25rem);
+            border: 1px solid rgba(128, 114, 82, .23);
+            border-radius: 16px;
+            background: var(--background-color, #fff);
+            box-shadow: 0 2px 8px rgba(30, 24, 12, .05);
+        }
+
+        .st-key-home-weekly-card [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap;
+        }
+
+        .st-key-home-weekly-card [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            min-width: min(100%, 8.5rem);
+            flex: 1 1 8.5rem;
+        }
+
+        @media (max-width: 1100px) {
+            .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) {
+                flex-direction: column;
+            }
+            .st-key-home-ops-dashboard [data-testid="stHorizontalBlock"]:has(.st-key-home-meta-brief) > [data-testid="stColumn"] {
+                width: 100%;
+                flex: 0 0 auto;
+            }
+        }
+
         .st-key-home-ops-dashboard [data-testid="stMetric"] {
             border-radius: 8px !important;
             border-top-width: 1px !important;
@@ -7183,10 +7215,12 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Reviews": ":material/reviews:",
     "Image Protection": ":material/shield:",
     "Reporting": ":material/bar_chart:",
+    "Accounting": ":material/calculate:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
     "Worker Health": ":material/monitor_heart:",
+    "Upload Companion": ":material/upload:",
     "Task Recorder": ":material/videocam:",
     "Accounts & Access": ":material/settings:"
 }
@@ -7231,21 +7265,22 @@ def _sidebar_route_button(
 
 def _active_sidebar_group(route):
     import crm_navigation
-    if route in {"Developer", "Worker Health", "Task Recorder", "Product Quiz", "Image Protection"}:
+    if route in (*analytics_nav.WEBSITE_ROUTES, *analytics_nav.ANALYTICS_ROUTES):
+        return "website"
+    if route in {"Developer", "Worker Health", "Upload Companion", "Task Recorder", "Image Protection"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
     return navigation_runtime.active_disclosure_group(
         route,
-        social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE},
-        seo_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
+        social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
+        seo_routes=seo_nav.SEO_ROUTES,
         reporting_routes={
             "Reporting",
             os_accounts.DAILY_PLANNER_ROUTE,
             os_accounts.WEEKLY_REVIEW_ROUTE,
         },
         ads_routes=ads_nav.ADS_ROUTES,
-        analytics_routes=analytics_nav.ANALYTICS_ROUTES,
     )
 
 
@@ -7259,19 +7294,7 @@ def _toggle_sidebar_group(group):
 @st.fragment
 def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
     if SIDEBAR_OPEN_GROUP_KEY not in st.session_state:
-        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = navigation_runtime.initial_disclosure_group(
-            current_page,
-            stored=None,
-            social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE},
-            seo_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
-            reporting_routes={
-                "Reporting",
-                os_accounts.DAILY_PLANNER_ROUTE,
-                os_accounts.WEEKLY_REVIEW_ROUTE,
-            },
-            ads_routes=ads_nav.ADS_ROUTES,
-            analytics_routes=analytics_nav.ANALYTICS_ROUTES,
-        )
+        st.session_state[SIDEBAR_OPEN_GROUP_KEY] = _active_sidebar_group(current_page)
     active_group = _active_sidebar_group(current_page)
     if active_group and st.session_state.get("sidebar-email-last-route") != current_page:
         # The selected route owns disclosure state.  A stale fragment value
@@ -7358,7 +7381,6 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             children = st.container(key="sidebar-social-children")
             children.markdown('<span id="sidebar-social-children"></span>', unsafe_allow_html=True)
             child_button(children, social_media.SOCIAL_MEDIA_ROUTE, "Overview")
-            child_button(children, social_media.WALL_PREVIEW_ROUTE, "Wall Preview Inbox")
             child_button(
                 children,
                 social_media.AI_REELS_ROUTE,
@@ -7390,13 +7412,26 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                     icon=SIDEBAR_ICON_BY_ROUTE.get(route),
                 )
 
+    website_routes = tuple(route for route in analytics_nav.WEBSITE_ROUTES if route in history_routes)
+    if website_routes and disclosure(
+        "website",
+        "Website",
+        ":material/language:",
+        website_routes[0],
+        force_open_routes=(*website_routes, *analytics_nav.ANALYTICS_ROUTES),
+    ):
+        children = st.container(key="sidebar-website-children")
+        children.markdown('<span id="sidebar-website-children"></span>', unsafe_allow_html=True)
+        for route in website_routes:
+            child_button(children, route, analytics_nav.WEBSITE_NAV_LABELS[route])
+
     if any(route in allowed_routes for route in seo_nav.SEO_MENU_ROUTES):
         if disclosure(
             "seo",
             "SEO",
             SIDEBAR_ICON_BY_ROUTE[seo_nav.SEO_OVERVIEW_ROUTE],
-            seo_nav.SEO_OVERVIEW_ROUTE if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes else seo_nav.SEO_ANALYTICS_ROUTE,
-            force_open_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
+            seo_nav.SEO_OVERVIEW_ROUTE,
+            force_open_routes=tuple(route for route in seo_nav.SEO_ROUTES if route != analytics_nav.WEBSITE_OVERVIEW_ROUTE),
         ):
             children = st.container(key="sidebar-seo-children")
             children.markdown('<span id="sidebar-seo-children"></span>', unsafe_allow_html=True)
@@ -7414,20 +7449,20 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if ('Worker Health' in allowed_routes or 'Task Recorder' in allowed_routes or 'Developer' in allowed_routes or 'Image Protection' in history_routes) and disclosure(
+    if ({'Worker Health', 'Upload Companion', 'Task Recorder', 'Developer'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
         'developer','Developer',':material/developer_mode:','Worker Health',
         can_open_overview='Worker Health' in allowed_routes,
     ):
         children=st.container(key="sidebar-developer-children")
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
         if 'Worker Health' in allowed_routes:
-            child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+            child_button(children,'Worker Health','Editions Companion',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Upload Companion' in allowed_routes:
+            child_button(children,'Upload Companion','Companion Queues',icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
         if 'Task Recorder' in allowed_routes:
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Image Protection' in history_routes:
             child_button(children, 'Image Protection', 'Image Protection', icon=SIDEBAR_ICON_BY_ROUTE['Image Protection'])
-        if 'Product Quiz' in history_routes:
-            child_button(children, "Product Quiz", "Product Quiz")
         if 'Developer Studio' in allowed_routes:
             children.container(key='sidebar-row-developer_studio').link_button('Dev Mode',
                 '?page=Developer%20Studio&dev_mode=1',use_container_width=True,icon=SIDEBAR_ICON_BY_ROUTE['Developer Studio'],
@@ -7559,6 +7594,8 @@ def render_sidebar():
                 reporting_daily_allowed=reporting_daily_allowed,
                 reporting_weekly_allowed=reporting_weekly_allowed,
             )
+
+    _sidebar_route_button("Accounting", current_page, allowed_routes)
 
     if (
         current_page not in MENU_OPTIONS
@@ -10614,44 +10651,6 @@ def render_active_alerts(events, today):
     )
 
 
-@st.fragment(parallel=True)
-def render_active_upcoming_events(events, today):
-    started = time.perf_counter()
-    render_html_section_title("Active & Upcoming Events")
-    rows = sports_cave_dashboard.build_home_event_rows(events, today, limit=8)
-    if not rows:
-        st.markdown(
-            '<div class="sc-empty-note">No confirmed live or upcoming events.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-    records = []
-    for row in rows:
-        remaining = int(row.get("days_remaining") or 0)
-        if row.get("status") == "Live":
-            timing = "Ends today" if remaining == 0 else f"{remaining} day{'s' if remaining != 1 else ''} left"
-        else:
-            timing = "Starts today" if remaining == 0 else f"In {remaining} day{'s' if remaining != 1 else ''}"
-        records.append(
-            {
-                "Event": row.get("name") or "",
-                "Type": row.get("category") or row.get("type") or "Event",
-                "Status": row.get("status") or "Coming soon",
-                "Dates": row.get("date_label") or "",
-                "Timing": timing,
-            }
-        )
-    st.dataframe(
-        records,
-        hide_index=True,
-        width="stretch",
-        height=min(318, 42 + len(records) * 34),
-        row_height=TABLE_ROW_HEIGHT,
-        key="home-active-upcoming-events",
-    )
-    safe_startup_print(f"PERF Dashboard events={(time.perf_counter() - started):.3f}s")
-
-
 def _home_duration_label(seconds):
     total = max(int(seconds or 0), 0)
     hours, remainder = divmod(total, 3600)
@@ -12524,13 +12523,22 @@ def render_lightweight_dashboard_page():
     user = current_os_user()
     local_now = account_local_now(user)
     today = sports_sales_calendar.sydney_date(local_now)
-    events = sports_cave_dashboard.load_calendar_events()
     with st.container(key="home-ops-dashboard"):
+        import home_meta_morning_brief
+        import home_sports_morning_brief
+
+        if home_meta_morning_brief.can_view(user):
+            sports_column, meta_column = st.columns([3, 2], gap="medium")
+            with sports_column:
+                home_sports_morning_brief.render(st, user, today)
+            with meta_column, st.container(key="home-meta-brief"):
+                home_meta_morning_brief.render(st, user, today)
+        else:
+            home_sports_morning_brief.render(st, user, today)
         home_daily_planner.render_status(st, user, local_now)
-        render_active_upcoming_events(events, today)
-        render_home_weekly_work(user, local_now)
-    # The two fragments complete independently; this measures shell/dispatch,
-    # not their completion time or the browser's time to interactive content.
+        with st.container(key="home-weekly-card"):
+            render_home_weekly_work(user, local_now)
+    # The weekly-work fragment completes independently of shell dispatch.
     safe_startup_print(f"PERF Dashboard shell_dispatch={(time.perf_counter() - started):.3f}s")
 
 
@@ -13820,8 +13828,8 @@ def render_selected_page(current_page):
     # headings/top spacing. Keep newer module-specific workspaces independent.
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
-        "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
-        "Developer Studio", "Developer", "Worker Health", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access", "Accounting",
+        "Developer Studio", "Developer", "Worker Health", "Upload Companion", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -13857,10 +13865,16 @@ def render_selected_page(current_page):
     elif current_page == 'Worker Health':
         from worker_health_page import render_page
         render_page(current_os_user())
+    elif current_page == 'Upload Companion':
+        from upload_companion_page import render_page
+        render_page(current_os_user())
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
     elif current_page == "Reporting":
         get_reporting_page().render_page(current_os_user())
+    elif current_page == "Accounting":
+        from accounting_page import render_page
+        render_page()
     elif current_page == os_accounts.DAILY_PLANNER_ROUTE:
         set_current_page("Dashboard", source="daily-planner-popup")
         st.rerun()
@@ -13898,10 +13912,9 @@ def render_selected_page(current_page):
             ),
         )
     elif current_page == "Design Studio":
-        get_design_studio_page().render_design_studio_page(
-            can_edit_prompts=prompt_editing_allowed(),
-            user=current_os_user(),
-        )
+        from design_review_page import render
+        from types import SimpleNamespace
+        render(SimpleNamespace(**globals()), current_os_user())
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
@@ -13941,7 +13954,8 @@ def render_selected_page(current_page):
     elif current_page == ads_nav.POSTING_ROUTE:
         get_ads_posting_page().render_page()
     elif current_page == ads_nav.META_REVIEW_ROUTE:
-        get_ads_meta_review_page().render_page()
+        get_ads_meta_review_page().render_page(
+            authorize=lambda: _refresh_session_account_if_due(current_os_user()))
     elif current_page == "Product Quiz":
         from product_quiz_page import render_page
         render_page(current_os_user())
@@ -14015,11 +14029,11 @@ def main():
 
     log_startup_stage("ROUTER START")
     current_page = get_current_page()
-    if st.session_state.get("posting_success_receipt"):
-        from ads_posting_progress import cleanup_completed, RECEIPT_KEY
-        cleanup_completed()
-        if current_page != "Posting":
-            st.session_state.pop(RECEIPT_KEY, None)
+    from ads_posting_progress import cleanup_completed, render_current as render_posting_notification
+    cleanup_completed()
+    if current_page != "Posting":
+        from ads_posting_progress import preserve_draft_on_navigation
+        preserve_draft_on_navigation()
     apply_global_search_context(current_page)
     log_startup_stage(f"PAGE SELECTED: {current_page}")
     log_app_memory(f"Page load start: {current_page}")
@@ -14069,6 +14083,8 @@ def main():
                 navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
                 status=page_status,
             )
+    if current_page != "Posting":
+        render_posting_notification(compact=True)
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
     safe_startup_print(

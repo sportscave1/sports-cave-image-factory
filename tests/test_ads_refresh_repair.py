@@ -32,14 +32,11 @@ class ActiveRefreshRepairTests(unittest.TestCase):
     def test_five_card_save_reopen_post_uses_exact_package(self):
         app = app_for()
         self.assertFalse(app.exception)
-        self.assertFalse(button(app,'Save now').disabled)
+        self.assertTrue(button(app,'Post now').disabled)
         before = deepcopy(app.session_state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY])
-        button(app,'Save now').click().run(timeout=30)
-        button(app,'Save 5 images here').click().run(timeout=30)
-        self.assertFalse(app.exception)
-        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
-        self.assertFalse(button(app,'POST NOW').disabled)
+        button(app,'Post now').click().run(timeout=30)
+        self.assertFalse(app.exception)
         workflow = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         package = workflow[posting.SAVED_PACKAGE_KEY]
         self.assertEqual(len(package['assets']),5)
@@ -48,23 +45,19 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         state={}; saved.restore(data,state)
         self.assertEqual(state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]['product_url'],before['product_url'])
         self.assertEqual(posting.content_hash(state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY][posting.SAVED_PACKAGE_KEY]),posting.content_hash(package))
-        button(app,'POST NOW').click().run(timeout=30)
-        self.assertFalse(app.exception)
-        self.assertEqual(app.session_state['current_page'],ads.POSTING_ROUTE)
+        self.assertIn('fixture_direct_submitted',app.session_state)
+        self.assertNotIn('current_page',app.session_state)
         self.assertEqual(posting.content_hash(app.session_state[posting.PENDING_KEY]['package']),posting.content_hash(package))
 
     def test_ie_active_save_then_post_preserves_three_covers(self):
         app = app_for('Instant Experience')
         self.assertFalse(app.exception)
         original=app.session_state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]['master_prompt']
-        button(app,'Save now').click().run(timeout=30)
-        button(app,'Save Instant Experience Package here').click().run(timeout=30)
+        self.assertTrue(button(app,'Post now').disabled)
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
+        button(app,'Post now').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]['master_prompt'],original)
-        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
-        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
-        button(app,'POST NOW').click().run(timeout=30)
-        self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state[posting.PENDING_KEY]['package']['assets']),3)
 
     def test_historical_analysis_remains_optional_and_is_preserved_on_save(self):
@@ -74,12 +67,9 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         records=deepcopy(workflow['ad_notes']['refresh_executions'])
         workflow['ad_notes']['refresh_execution_error']='Historical incomplete analysis'
         app.run(timeout=30)
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
+        button(app,'Post now').click().run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertFalse(button(app,'Save now').disabled)
-        button(app,'Save now').click().run(timeout=30)
-        button(app,'Save 5 images here').click().run(timeout=30)
-        self.assertFalse(app.exception)
-        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         self.assertEqual(workflow['ad_notes']['refresh_executions'],records)
         _, restored=saved.loads(workflow['refresh_workspace_export'])
@@ -99,7 +89,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         app=app_for()
         originals=deepcopy(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['slots'])
         next(t for t in app.text_input if t.label=='Product page URL *').set_value('https://sportscave.com.au/products/wrong').run(timeout=30)
-        self.assertTrue(button(app,'Save now').disabled)
+        self.assertTrue(button(app,'Post now').disabled)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['slots'],originals)
         button(app,'Submit').click().run(timeout=30)
         self.assertTrue(any('do not match' in e.value for e in app.warning))

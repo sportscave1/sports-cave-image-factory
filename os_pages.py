@@ -10851,6 +10851,7 @@ Homepage: https://www.sportscaveshop.com
 Soccer: https://www.sportscaveshop.com/collections/soccer
 NBA: https://www.sportscaveshop.com/collections/nba
 Cricket: https://www.sportscaveshop.com/collections/cricket
+Darts: https://www.sportscaveshop.com/collections/darts-wall-art
 Motor Racing: https://www.sportscaveshop.com/collections/motor-racing-wall-art
 Combat Sports: https://www.sportscaveshop.com/collections/combat-art
 Horse Racing: https://www.sportscaveshop.com/collections/horse-racing-wall-art
