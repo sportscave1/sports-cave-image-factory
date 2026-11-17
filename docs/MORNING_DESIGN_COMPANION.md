@@ -33,6 +33,9 @@ the existing Edge companion, enabling the queue and live end-to-end verification
   and three-hour timeouts are not automatically resubmitted. They release their slot
   automatically so the next queued job can proceed. Failed jobs are never replayed
   automatically; late verified uploads can still update their status.
+- A revision-matched final PSD and complete handoff marked `needs_attention`
+  shows **Uploaded · needs review** and releases its slot. Artwork review concerns
+  are preserved; they do not block other queued designs or imply publication.
 - Pause prevents new claims and discovery; already claimed work is still checked.
   Resume discovers suggestions published during the pause.
 
@@ -65,7 +68,7 @@ Evidence and extension ZIP: `output/morning-design-queue/` (local, ignored).
    rerun the focused checks, and deploy through the existing canonical service.
 2. Apply the registered `20261117150000_morning_design_queue.sql` migration. It
    creates private, RLS-enabled tables and starts disabled. No Blueprint changes.
-3. Update the existing paired Edge extension from the packaged 1.2.0 files in
+3. Update the existing paired Edge extension from the packaged 1.2.1 files in
    its established directory, retaining its extension ID and local storage.
    Reload it only after checking product handoffs are idle; do not install a
    second copy or clear its pairing/submission journal.
@@ -79,3 +82,17 @@ Evidence and extension ZIP: `output/morning-design-queue/` (local, ignored).
 To pause new designs, turn the toggle off. Existing product jobs are independent.
 Do not clear journals or reset jobs as a recovery technique; inspect uncertain
 chats and the Review folder first.
+
+## Live verification, 17 November 2026
+
+Existing Edge extension `cakljpcnjfimphkifglkhhilafmkpnmc` updated in place to
+1.2.1, with pairing retained. Morning queue enabled. Job
+`55374a14-430d-5ed1-ba46-b3c74a330428` automatically submitted the full prompt
+in the correct Designs project. Dropbox independently confirms final PSD
+`id:u1tYiAa2O-AAAAAAAACk-Q`, revision `0166071f863a6af000000036d367e13`,
+270,034,250 bytes, **The Heart of Oil Country - Connor McDavid Wall Art.psd**,
+in Review. Matching JSON `id:u1tYiAa2O-AAAAAAAACk-g` contains that exact
+revision and queue job ID. Artwork is flagged for face softness review, not
+approved for publication. The saved-with-review-concerns slot-release case
+was added to focused tests (30 Python tests pass). Live advancement is being
+verified during this release.

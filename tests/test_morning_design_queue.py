@@ -146,6 +146,9 @@ def test_real_file_verification_rejects_wrong_revision_and_missing_metadata(monk
     monkeypatch.setattr(design_review_page, 'final_psd', lambda source: True)
     monkeypatch.setattr(design_review_metadata, '_read_sidecar', lambda *args: (value, sidecar))
     assert queue.verify_outputs([{'id': key}])[key]['stage'] == 4
+    value['review_status'] = 'needs_attention'
+    assert queue.verify_outputs([{'id': key}])[key]['stage'] == 5
+    value['review_status'] = 'ready_for_review'
     value['dropbox_revision'] = 'stale'
     assert queue.verify_outputs([{'id': key}]) == {}
     value['dropbox_revision'] = 'R1'
@@ -153,3 +156,16 @@ def test_real_file_verification_rejects_wrong_revision_and_missing_metadata(monk
     assert queue.verify_outputs([{'id': key}])[key]['stage'] == 3
     value['morning_design_job_id'] = 'some-other-job'
     assert queue.verify_outputs([{'id': key}]) == {}
+
+
+def test_saved_artwork_with_review_concerns_releases_slot(store, monkeypatch):
+    cur, token = store
+    publish(cur)
+    first = queue.tick(token, [])['jobs'][0]
+    monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {first['id']: dict(stage=5,
+        message='Face softness needs review.', source=dict(id='id:saved', rev='R1', path_display='/Review/Final.psd'))})
+    following = queue.tick(token, [])['jobs']
+    assert len(following) == 1 and following[0]['id'] != first['id']
+    saved = next(j for j in queue.list_jobs() if j['id'] == first['id'])
+    assert saved['label'] == 'Uploaded · needs review'
+    assert saved['file_path'] == '/Review/Final.psd'

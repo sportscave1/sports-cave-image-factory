@@ -63,7 +63,8 @@ def list_jobs(day=None):
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
             ORDER BY edition_date DESC,created_at,id LIMIT 100''', (day, day))
-        return [dict(id=str(r['id']), title=r['title'], label=LABELS[r['stage']], stage=r['stage'],
+        return [dict(id=str(r['id']), title=r['title'],
+                     label='Uploaded · needs review' if r['stage'] == 5 and r['file_path'] else LABELS[r['stage']], stage=r['stage'],
                      chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path']) for r in cur.fetchall()]
 
 
@@ -104,6 +105,11 @@ def verify_outputs(jobs):
                 continue
             details = _handoff_details(value, source)
             stage = 4 if details['review_status'] == 'ready_for_review' else 3
+            # A completed handoff can honestly flag artwork quality for review.
+            # It must release the generation slot without claiming visual approval.
+            if (value.get('review_status') == 'needs_attention' and details['design_name']
+                    and details['intended_collections'] and details['sport']):
+                stage = 5
             result = dict(stage=stage, source=source, message=details.get('review_notes', ''))
             if key in results and (results[key]['stage'] == 5 or results[key]['source']['id'] != source['id']):
                 result = dict(stage=5, source=source, message='Multiple final PSDs claim this job. Review them manually.')
@@ -138,7 +144,7 @@ def tick(token, events):
             source = result['source']
             cur.execute('''UPDATE morning_design_jobs SET stage=%s,file_id=%s,file_rev=%s,file_path=%s,
                 message=%s,updated_at=CASE WHEN stage<>%s THEN now() ELSE updated_at END
-                WHERE id=%s AND (stage BETWEEN 1 AND 3 OR (stage=5 AND %s=4))''',
+                WHERE id=%s AND (stage BETWEEN 1 AND 3 OR (stage=5 AND (%s=4 OR file_id='')))''',
                 (result['stage'], source['id'], source['rev'], source['path_display'], result['message'], result['stage'], key, result['stage']))
         for event in events:
             try:
