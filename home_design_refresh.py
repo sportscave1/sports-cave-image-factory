@@ -7,6 +7,8 @@ import json
 import re
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_signature_free import SIGNATURE_FREE_COMPOSITION
+from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from design_subject_authenticity import AUTHENTICITY_CHECK
 from home_morning_brief_actions import PROJECT_URL
@@ -76,6 +78,8 @@ that the artwork caused poor sales.
    technically sound. Compare headline options against the shortlisted photos. Briefly state
    the strongest hero, story, title treatment and creative direction before generating.
 
+{BACKGROUND_RESEARCH}{COLLECTOR_BACKGROUND}
+
 3. Generate and inspect two complete designs with ChatGPT image generation.
    Pass 1 must be a complete new flat design, with a materially new composition and visual
    treatment. Supply the selected authentic photographs as identity references and relevant
@@ -95,9 +99,10 @@ that the artwork caused poor sales.
    report any incomplete pass.
 
    In both passes, preserve the identity, expression, anatomy, pose, uniform, team details and
-   era shown in the selected verified photographs. Preserve verified signatures and official
-   logos. Add the exact official plaque and original editable edition-number layer during PSD
+   era shown in the selected verified photographs. Preserve official logos. Add the exact official plaque and original editable edition-number layer during PSD
    assembly.
+
+{SIGNATURE_FREE_COMPOSITION}
 
 {AUTHENTICITY_CHECK}4. Compare and score the original, Pass 1 and Pass 2 side by side at matching full and
    thumbnail display sizes. Score photographic realism, collector appeal and Sports Cave style

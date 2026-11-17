@@ -27,13 +27,11 @@ def build_edit_prompt(workflow, source, details):
         'if an edit wins, stage and verify it, back up and replace the exact original revision, '
         'verify the saved replacement and update its matching JSON as needed → '
     )
-    signature_check = (
-        'Restore each verified signature exactly once on a separate visible layer. Transform its mask '
-        'and linked components together when moving or scaling it. Inspect the rendered, assembled PSD '
-        'at full size and as a thumbnail. Confirm each signature is visible, clean, correctly placed '
-        'and free of ghosting or duplicates, and that the original plaque and editable edition number '
-        'both appear once and align. Repair a hidden or displaced asset and render again. A layer '
-        'listed as visible alone does not verify the rendered result.'
+    collector_check = (
+        'Inspect the rendered, assembled PSD at full size and as a thumbnail. Confirm the '
+        'original plaque and editable edition number both appear once and align. Repair a '
+        'hidden or displaced collector asset and render again. A layer listed as visible '
+        'alone does not verify the rendered result.'
     )
 
     def replace_section(start, end, content):
@@ -80,7 +78,7 @@ def build_edit_prompt(workflow, source, details):
     replace_section('Step 3. Define the composition', '**Border and print safety', (
         'Step 3. Define the composition for this collector artwork. Whenever the title changes '
         'or text, dates or statistics are removed, reassess the whole layout. Rebalance the '
-        'subject, headline, name, signature, plaque and negative space. Adjust placement, size, '
+        'subject, headline, name, plaque and negative space. Adjust placement, size, '
         'tracking, line breaks and gaps so the elements read together. At thumbnail and full '
         'size, check for disconnected text, crowding and excessive empty space. Leave '
         'intentional breathing room and use only essential text and effects. Preserve explicit '
@@ -94,17 +92,10 @@ def build_edit_prompt(workflow, source, details):
     ).replace(
         'identify what makes it effective and explicitly lock those strengths before generating again:',
         'identify what makes it effective before generating again:', 1,
-    ).replace(
-        'Step 4. For each featured person, search both web and image results.',
-        'Step 4. Check the original PSD and project assets first. Keep each existing verified '
-        'signature unless the user requests removal or evidence shows it is incorrect. Carry '
-        'the exact asset and its mask forward even if new sources are unavailable. For each '
-        'featured person without a usable verified asset, search both web and image results.',
-        1,
     )
     replace_section('Step 7. Place the first complete artwork', '**STEP 8', (
         'Step 7. Place the first newly generated pass on a working copy of the selected PSD. '
-        f'{signature_check} Record any pending fixes in REVIEW NOTES. Save a unique, '
+        f'{collector_check} Record any pending fixes in REVIEW NOTES. Save a unique, '
         f'create-only trial: {trial}. If that name is occupied, use a unique suffix for this run '
         'and record its exact file ID, path and revision. If the save remains unavailable, keep '
         'the first pass and notes. Continue immediately to Step 8 in either case.'
@@ -171,7 +162,7 @@ def build_edit_prompt(workflow, source, details):
         'If the current design wins, skip 8E and go directly to its cleanup in 8F. If an edit '
         'wins, place it in FINAL POLISHED ARTWORK. Keep the pre-edit artwork in hidden ORIGINAL '
         'REVIEW SOURCE and the winning edit’s editable source layers in hidden ORIGINAL EDITABLE '
-        'ARTWORK. Keep verified signatures on separate visible layers. '
+        'ARTWORK. '
         'Maintain the selected original PSD’s dimensions and colour profile. Apply the shared '
         'border and print-safety rules and use Step 3 to balance the final layout.\n\n'
         'If the required source layers or either pass remain unavailable, preserve the completed '
@@ -183,9 +174,9 @@ def build_edit_prompt(workflow, source, details):
         'record the exact staging file ID, path and revision. Retry a pending trial first if '
         'access has returned. If the trial still cannot be saved, verify staging independently '
         'and report the trial checkpoint as pending. Reopen or download the saved staging '
-        'revision. Check that the visible artwork, hidden references, signatures, dimensions, '
+        'revision. Check that the visible artwork, hidden references, dimensions, '
         'colour profile and original layers match the intended replacement. '
-        f'{signature_check} Recheck photographic authenticity on the rendered PSD. If any '
+        f'{collector_check} Recheck photographic authenticity on the rendered PSD. If any '
         'discrepancy remains unverified, keep the previous PSD, record the specific problem and '
         'continue the existing delivery steps.\n\n'
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '

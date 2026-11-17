@@ -501,9 +501,9 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "wall-art reproduction and compositing" not in result
     assert "If a required operation is unavailable or fails" not in result
     assert "10/10" not in result
-    assert "three distinct credible sources" in result
-    assert "failed in REVIEW NOTES, and continue" in result
-    signature = result.index("Keep the original letterforms and strokes.")
+    assert "three distinct credible sources" not in result
+    assert "SIGNATURE-FREE COLLECTOR COMPOSITION" in result
+    signature = result.index("SIGNATURE-FREE COLLECTOR COMPOSITION")
     first_generation = result.index("Step 5. Use the image generation tool")
     first_review = result.index("Step 6. Inspect the generated artwork")
     first_save = result.index("Step 7. Place the first complete artwork")
@@ -516,7 +516,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert signature < first_generation < first_review < first_save < second_pass
     assert pending_trial < second_generation < final_save < cleanup < display
     assert "If master PSD retrieval or a Dropbox save fails after reasonable recovery attempts" in result
-    assert "verified signature extraction and placement, photographic corrections, final inspection" in result
+    assert "both full artwork generations, photographic corrections, final inspection" in result
     assert "only after exhausting authorised recovery methods and finishing all independent work" in result
     assert "Continue to the final display and status in Step 8F." in result[second_generation:final_save]
     assert "Never invent or replace the master badge or editable edition-number layer." in result
@@ -524,7 +524,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "After Dropbox confirms the trial save and before the second generation" not in result
     assert "skip it without prompting and use an authorised alternative" in result
     assert "at most two additional image-generation attempts total across both passes" in result
-    assert "up to the three strongest accessible references per featured person" in result
+    assert "up to the three strongest accessible references per featured person" not in result
     assert "search beyond the first three sources" not in result
     assert "After each pass, use source-photo compositing" in result
     assert "attempt the second pass independently" in result[second_pass:second_generation]
@@ -542,8 +542,8 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "If the first artwork still wins, use it." in result[second_generation:final_save]
     assert "Place the strongest inspected artwork in **FINAL POLISHED ARTWORK**" in result[second_generation:final_save]
     assert "Generate a visibly different" not in result
-    assert "download and inspect the strongest authentic candidates" in result[signature:first_generation]
-    assert "Never generate, redraw, or reconstruct" in result[signature:first_generation]
+    assert "Do not search for, source, generate, trace, reproduce or include athlete signatures" in result[signature:first_generation]
+    assert "Preserve the exact official badge asset and edition number." in result[signature:first_generation]
     assert "at 100% magnification to this first generation" in result[first_review:first_save]
     assert "Restore visible discrepancies with original photograph pixels and a precise mask" in result[second_generation:final_save]
     assert "smallest coherent source region" in result[second_generation:final_save]

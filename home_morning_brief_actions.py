@@ -7,6 +7,8 @@ import re
 from urllib.parse import urlencode
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_signature_free import SIGNATURE_FREE_COMPOSITION
+from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_subject_authenticity import AUTHENTICITY_CHECK, CREATE_DESIGN_AUTHENTICITY_CHECK
 from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, display_markets, product_handle
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
@@ -41,7 +43,7 @@ _EDIT_DESIGN_BORDER_RULES = (
     "Target an even border inset of 2% of the canvas’s shorter dimension. Calculate it once "
     "and use the same pixel distance on all four sides. Keep the margin modest so the subject "
     "stays large and impactful. Extend the background fully to the canvas edges. Keep the "
-    "decorative border and all important subject details, text, signatures and the official "
+    "decorative border and all important subject details, text and the official "
     "badge inside the framing-safe area. Use only expendable background in the outer margin.\n\n"
     f"{_BORDER_STYLE_GUIDANCE} "
     "Preserve the existing composition and subject scale wherever possible. Make only the "
@@ -69,8 +71,7 @@ _CREATE_DESIGN_COLLECTOR_FINISH = (
     "- **Subject-first hierarchy.** Make the athlete, vehicle or meaningful interaction read "
     "first at thumbnail size. Adjust title scale, line breaks and spacing if text competes "
     "with the subject. Avoid oversized filler words. Choose a layout that suits this design.\n"
-    "- **Purposeful placement.** Arrange the title, signature and official badge deliberately. "
-    "Place signatures against quiet, contrasting space and preserve their actual strokes. "
+    "- **Purposeful placement.** Arrange the title and official badge deliberately. "
     "Keep collector details subordinate and readable.\n"
     "- **Believable environment.** Match the sport’s real surface, perspective and lighting. "
     "Reduce reflections, artificial glow and decorative effects that weaken realism or compete "
@@ -80,27 +81,7 @@ _CREATE_DESIGN_COLLECTOR_FINISH = (
     "its retry limits and report any unresolved defects honestly.\n\n"
 )
 
-_CREATE_DESIGN_COLLECTOR_BACKGROUND = (
-    "**SPORTS CAVE COLLECTOR BACKGROUND — BOTH GENERATIONS**\n\n"
-    "Transform the photographic environment into a distinctive, dark Sports Cave collector "
-    "backdrop. Keep the source setting’s recognisable structure, perspective and sporting "
-    "context visible. Reduce its brightness, saturation and distracting detail so it reads as "
-    "subtle atmosphere with believable depth.\n\n"
-    "Build a restrained charcoal-and-black treatment with soft tonal gradients, fine material "
-    "texture and low-contrast abstract patterns informed by the team, sport or era. Choose "
-    "only treatments that suit this artwork. Keep meaningful team-colour accents controlled. "
-    "Subdue bright turf, crowds, signage and advertising while keeping the original setting "
-    "quietly visible beneath the treatment. Avoid repeating logos, obvious wallpaper patterns, "
-    "heavy grunge, smoke, sparks and decorative clutter.\n\n"
-    "Apply the treatment only to the background. Preserve the athlete’s authentic photographic "
-    "details, natural skin, uniform colours and equipment. Match the background lighting to "
-    "the subject and blend edges subtly. Keep the treatment’s darkening and texture off the "
-    "athlete.\n\n"
-    "When applying or refining the backdrop, preserve the successful composition, subject "
-    "scale, title, signature and safe border placement. Judge the treatment "
-    "at thumbnail size. The subject reads first, the title second, and the background "
-    "supports both.\n\n"
-)
+_CREATE_DESIGN_COLLECTOR_BACKGROUND = COLLECTOR_BACKGROUND
 
 
 def _story_without_meta_ad(text):
@@ -132,10 +113,11 @@ def _prompt(title, story, *, edit=None):
             "the collector background guidance above. "
         )
     else:
-        background_guide = second_background = ""
+        background_guide = COLLECTOR_BACKGROUND
+        second_background = ""
         first_background = (
-            "Build a cohesive vintage background with subtle textures and details from the sport "
-            "or venue and restrained team colours. "
+            "Apply the collector background guidance only within the authorised edit scope. "
+            "Preserve locked backgrounds and all other approved elements. "
         )
         background_effects = "Use natural contact shadows and keep glow, sparks, smoke and haze restrained. "
     workflow = (
@@ -173,8 +155,7 @@ def _prompt(title, story, *, edit=None):
         "\n"
         "Complete every checkpoint. If master PSD retrieval or a Dropbox save fails after reasonable "
         "recovery attempts, preserve completed work and finish every independent step without waiting "
-        "for access or approval. This includes both full artwork generations, verified signature "
-        "extraction and placement, photographic corrections, final inspection, and display in chat. "
+        "for access or approval. This includes both full artwork generations, photographic corrections, final inspection, and display in chat. "
         "Defer only steps that require the original PSD layers or the unavailable Dropbox operation. "
         "Follow this recovery order if the project guide suggests requesting the master earlier. "
         "Report the specific missing master file or access dependency only after exhausting authorised "
@@ -191,7 +172,7 @@ def _prompt(title, story, *, edit=None):
         "**MANDATORY CONTINUATION AND RECOVERY**\n"
         "\n"
         "Execute the entire workflow autonomously. Do not stop for ordinary design imperfections, "
-        "low-resolution search results, unsuccessful generations, missing signatures or a failed "
+        "low-resolution search results, unsuccessful generations, a failed "
         "first attempt.\n"
         "Perform every design review and correction yourself. Continue through every executable step "
         "without waiting for approval "
@@ -229,9 +210,6 @@ def _prompt(title, story, *, edit=None):
         "saved file identity and contents before retrying. Keep the trial until the final PSD "
         "is verified.\n"
         "\n"
-        "**Missing signatures must not stop the artwork.** Follow the source search and bounded "
-        "extraction checks in Step 4 before omitting a signature. "
-        "Never generate or redraw a signature.\n"
         "\n"
         "A blocker in a later step must not stop earlier executable steps. Generate and inspect the "
         "first full artwork and attempt the trial PSD save before addressing final-stage verification "
@@ -365,6 +343,7 @@ def _prompt(title, story, *, edit=None):
         "recognisable faces, uniforms, and event details. Follow the project’s Collector Series "
         "references for typography, colour, depth, and visual hierarchy. Refer to the project "
         "instructions in Sports Cave Designs for how Sports Cave designs are structured.\n\n"
+        f"{BACKGROUND_RESEARCH}"
         "Step 2. Inspect designs-canvas.psd in Dropbox for the exact pixel dimensions, orientation, "
         "safe margins, and limited-edition badge. Preserve the "
         "original limited-edition badge and edition-number layer. If retrieval remains blocked after "
@@ -375,23 +354,7 @@ def _prompt(title, story, *, edit=None):
         "a strong focal point and clear visual hierarchy. Plan a readable position and scale for "
         "the official badge and its editable number within the safe border.\n\n"
         f"{_CREATE_DESIGN_BORDER_RULES if edit is None else _EDIT_DESIGN_BORDER_RULES}"
-        "Step 4. For each featured person, search both web and image results. Check at least "
-        "three distinct credible sources when accessible before skipping a signature. Use a clear, "
-        "verified example and place it on a separate layer where it fits naturally with the artwork "
-        "and typography. Keep the original letterforms and strokes. Refine the placement, "
-        "scale, and ink finish for a premium collector look. A textured background alone is no "
-        "reason to omit an autograph. Search for clearer flat references, scans or photographs of "
-        "verified signed items, download and inspect the strongest authentic candidates, and attempt "
-        "faithful extraction once each on up to the three strongest accessible references per "
-        "featured person. A page without a signature image counts as a search result only. If "
-        "fewer references are accessible after that search, use what is available and continue. "
-        "If the best verified source is low resolution but the strokes "
-        "can be faithfully extracted, use it on a separate layer in the final collector design. "
-        "Improve legibility with precise masking, contrast, and a suitable display size and ink "
-        "finish. Keep all original stroke shapes and gaps. Never generate, redraw, or reconstruct "
-        "the signature or fill in missing strokes. Omit it if the search and extraction checks "
-        "produce no faithful result. Record the sources checked, extraction attempted, and exact "
-        "reason it failed in REVIEW NOTES, and continue.\n\n"
+        f"Step 4. {SIGNATURE_FREE_COMPOSITION}\n\n"
         f"{background_guide}"
         "Step 5. Use the image generation tool to generate the first complete Sports Cave "
         "Collector Series artwork. "
@@ -399,7 +362,7 @@ def _prompt(title, story, *, edit=None):
         "Keep decorative texture, grain, distressing and artificial sharpening off the athlete. "
         "Integrate the original "
         "hero photo through matching light, colour, and depth while preserving the athlete’s face, "
-        "anatomy, pose, and uniform. Keep any verified signature as a separate asset and show the "
+        "anatomy, pose, and uniform. Show the "
         "first complete artwork in the chat before placing it on the PSD.\n\n"
         "Step 6. Inspect the generated artwork against the original photo. Check that the person "
         "looks realistic and that their face, body, and uniform are free of unintended cropping, "
@@ -408,7 +371,7 @@ def _prompt(title, story, *, edit=None):
         "needed. Make practical corrections and record remaining concerns for "
         "Step 8. Once you have inspected a complete first artwork, proceed to the review save.\n\n"
         "Step 7. Place the first complete artwork on a copy of designs-canvas.psd as a review draft. "
-        "Include any verified signatures on separate layers and document remaining concerns in a "
+        "Document remaining concerns in a "
         "hidden REVIEW NOTES layer. Save a new file named **`[Product Title] - TRIAL.psd`** "
         "using the intended online product title. The final name is **`[Product Title].psd`**. "
         f"Save both PSDs directly in the same Dropbox review folder at {REVIEW_FOLDER}/. "
@@ -472,7 +435,7 @@ def _prompt(title, story, *, edit=None):
         "in the photo and keep the setting and period details recognisable.\n"
         "\n"
         "Use deep black, charcoal and warm white as the foundation, with restrained gold for "
-        "titles, fine borders and small dividers. Preserve meaningful colours in uniforms, flags, "
+        "titles, fine borders, small dividers and restrained background transitions. Preserve meaningful colours in uniforms, flags, "
         "vehicle liveries and equipment. Match the background to the subject's lighting and "
         "perspective. "
         f"{background_effects}"
@@ -491,8 +454,7 @@ def _prompt(title, story, *, edit=None):
         "Keep original camera angles, legible lettering and numbers, and accurate vehicle, trophy "
         "and equipment details. Plan around the visible source crop and avoid mirrored details. "
         "Plan the placement and scale of the badge and edition number together within the safe "
-        "border. Place a verified signature near its subject or title "
-        "with a restrained ink finish and readable original strokes. Check the hierarchy, text "
+        "border. Check the hierarchy, text "
         "and badge placement at full size and as a thumbnail.\n"
         "\n"
         "Make a **new image-generation call** using both:\n"
@@ -509,7 +471,7 @@ def _prompt(title, story, *, edit=None):
         "a change. Choose another verified photo that fits the chosen story only if it fixes a source "
         "problem such as an obstructed crop or weak story fit. Keep event-specific imagery accurate.\n"
         "\n"
-        "Exclude the official badge, edition number and any verified signatures from generation. "
+        "Exclude the official badge and edition number from generation. "
         "Restore the existing assets afterward on separate layers.\n"
         "\n"
         "**8C. Inspect and correct**\n"
@@ -537,8 +499,7 @@ def _prompt(title, story, *, edit=None):
         "Use the strongest inspected result and continue directly to the final PSD.\n\n"
         "**8D. Prepare the separate final PSD**\n"
         "\n"
-        "If the master is still unavailable, retain both finished artworks, verified signature assets "
-        "and placements, and review notes. Mark master-dependent assembly, saves, verification and "
+        "If the master is still unavailable, retain both finished artworks and review notes. Mark master-dependent assembly, saves, verification and "
         "trial cleanup as pending where applicable. Continue to the final display and status in Step 8F.\n"
         "\n"
         "If either artwork pass remains unavailable after recovery, preserve any completed artwork "
@@ -548,7 +509,7 @@ def _prompt(title, story, *, edit=None):
         "order. Keep the first artwork intact in a hidden **ORIGINAL EDITABLE ARTWORK** group, even "
         "if a copy is selected for the final. Preserve other useful versions in separate hidden groups.\n"
         "\n"
-        "Keep any verified signatures on separate visible layers. Preserve the master dimensions "
+        "Preserve the master dimensions "
         "and colour profile.\n\n"
         f"{COLLECTOR_ASSET_PLACEMENT}"
         "**8E. Save and verify the final PSD**\n"
