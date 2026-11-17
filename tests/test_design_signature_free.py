@@ -3,7 +3,7 @@ from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from home_design_refresh import _refresh_prompt
-from home_morning_brief_actions import _prompt
+from home_morning_brief_actions import _prompt, _CREATE_DESIGN_TYPOGRAPHY, _CREATE_DESIGN_COLLECTOR_BACKGROUND
 
 
 def test_all_design_handoffs_use_the_same_signature_free_composition():
@@ -15,7 +15,7 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
     refresh = _refresh_prompt(dict(title='Collector', product_id='123', sessions=40,
                                    suggestion='Improve hierarchy'), 'https://example.com/product')
     for prompt in (new, edit, refresh):
-        assert prompt.count(SIGNATURE_FREE_COMPOSITION) == 1
+        assert prompt.count(_CREATE_DESIGN_TYPOGRAPHY if prompt is new else SIGNATURE_FREE_COMPOSITION) == 1
         assert 'remove an existing signature only when requested' in prompt
         assert 'Preserve all other approved elements.' in prompt
         for obsolete in ('search both web and image results', 'verified signature assets',
@@ -26,7 +26,7 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'SC_EDITION_NUMBER' in prompt
         assert 'SMART UPLOAD' in prompt or 'Smart Upload JSON' in prompt
         assert prompt.count(BACKGROUND_RESEARCH) == 1
-        assert prompt.count(COLLECTOR_BACKGROUND) == 1
+        assert prompt.count(_CREATE_DESIGN_COLLECTOR_BACKGROUND if prompt is new else COLLECTOR_BACKGROUND) == 1
         assert prompt.count(COLLECTOR_TITLE_GUIDANCE) == 1
         assert 'four to six short candidates' in prompt
         assert 'one sentence explaining its connection' in prompt
@@ -52,6 +52,6 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'Do not repeat the same sweep, stadium placement or fade' in prompt
         assert 'Apply the treatment only to the background.' not in prompt
         assert 'Build a cohesive vintage background' not in prompt
-    assert new.index(BACKGROUND_RESEARCH) < new.index('Step 3. Define the composition')
+    assert new.index(BACKGROUND_RESEARCH) < new.index('Step 3. **Compose the complete collector artwork.')
     assert edit.index(BACKGROUND_RESEARCH) < edit.index('Step 3. Define the composition')
     assert refresh.index(BACKGROUND_RESEARCH) < refresh.index('3. Generate and inspect two complete designs')

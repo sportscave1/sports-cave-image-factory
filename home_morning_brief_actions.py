@@ -6,6 +6,10 @@ from pathlib import Path
 import re
 from urllib.parse import urlencode
 
+from design_new_composition import (
+    COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
+    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
+)
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
@@ -82,7 +86,22 @@ _CREATE_DESIGN_COLLECTOR_FINISH = (
     "its retry limits and report any unresolved defects honestly.\n\n"
 )
 
-_CREATE_DESIGN_COLLECTOR_BACKGROUND = COLLECTOR_BACKGROUND
+_CREATE_DESIGN_COLLECTOR_BACKGROUND = COLLECTOR_BACKGROUND.replace(
+    "Use abstract treatment selectively:\n"
+    "- Broad charcoal tonal shapes.\n"
+    "- Fine, restrained material texture.\n"
+    "- Soft directional transitions.\n"
+    "- Small gold or meaningful team-colour accents.\n\n"
+    "Choose only what benefits the particular composition. Do not add every effect to every artwork.",
+    PURPOSEFUL_ABSTRACT,
+)
+
+_CREATE_DESIGN_TYPOGRAPHY = SIGNATURE_FREE_COMPOSITION.replace(
+    "Treat the subject, title, name, supporting context and edition badge as one coordinated composition. "
+    "Refine their scale, alignment, line spacing and separation so every element feels deliberately placed "
+    "and remains readable at thumbnail size and intended print size.",
+    COLLECTOR_TYPOGRAPHY,
+)
 
 
 def _story_without_meta_ad(text):
@@ -121,6 +140,10 @@ def _prompt(title, story, *, edit=None):
             "Preserve locked backgrounds and all other approved elements. "
         )
         background_effects = "Use natural contact shadows and keep glow, sparks, smoke and haze restrained. "
+    composition_guide = (COMPLETE_COMPOSITION if edit is None else
+         "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
+         "a strong focal point and clear visual hierarchy. Plan a readable position and scale for "
+         "the official badge and its editable number within the safe border. Plan their relationship to the subject and typography before generation using the shared collector-asset rules.\n\n")
     workflow = (
         f"Sports Cave event: {title}\n\n"
         "**EXECUTION AUTHORITY — START NOW**\n"
@@ -284,6 +307,7 @@ def _prompt(title, story, *, edit=None):
         "wave, walk away or embrace and give the gesture breathing room. When a genuine photo "
         "captures the relationship, preserve the interaction. These are optional directions.\n"
         "\n"
+        f"{COMPLEMENTARY_IMAGES if edit is None else ''}"
         "Collection cues for the same search:\n"
         "- UFC / boxing: belt celebration, iconic victory gesture or decisive exchange.\n"
         "- V8 Supercars / historic racing: correct period car and livery, circuit action, "
@@ -346,11 +370,9 @@ def _prompt(title, story, *, edit=None):
         "reasonable recovery attempts, keep the master-dependent PSD work pending. Use verified "
         "master dimensions if available. Otherwise keep the layout provisional and reserve space "
         "for the original badge and editable number to be restored from the master.\n\n"
-        "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
-        "a strong focal point and clear visual hierarchy. Plan a readable position and scale for "
-        "the official badge and its editable number within the safe border. Plan their relationship to the subject and typography before generation using the shared collector-asset rules.\n\n"
+        f"{composition_guide}"
         f"{_CREATE_DESIGN_BORDER_RULES if edit is None else _EDIT_DESIGN_BORDER_RULES}"
-        f"Step 4. {SIGNATURE_FREE_COMPOSITION}\n\n"
+        f"Step 4. {_CREATE_DESIGN_TYPOGRAPHY if edit is None else SIGNATURE_FREE_COMPOSITION}\n\n"
         f"{background_guide}"
         "Step 5. Use the image generation tool to generate the first complete Sports Cave "
         "Collector Series artwork. "
@@ -402,6 +424,7 @@ def _prompt(title, story, *, edit=None):
         "weakness. Recheck whether the chosen headline and its position still read well at thumbnail "
         "size and fit the collector story. Preserve what works and apply any needed correction.\n"
         "\n"
+        f"{REVIEW_RELATIONSHIPS if edit is None else ''}"
         "**8B. Second full generation — preserve what works**\n"
         "\n"
         "**Sports Cave design rules for every final generation**\n"
@@ -507,6 +530,7 @@ def _prompt(title, story, *, edit=None):
         "\n"
         "Preserve the master dimensions "
         "and colour profile.\n\n"
+        f"{BADGE_PLACEMENT_VERIFICATION if edit is None else ''}"
         f"{COLLECTOR_ASSET_PLACEMENT}"
         "**8E. Save and verify the final PSD**\n"
         "\n"
