@@ -48,7 +48,7 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'without introducing an extra approval stage' in prompt
         assert 'Do not source or replace a background when the background is locked.' in prompt
         assert 'Never fade or obscure the face, hands' in prompt
-        assert 'appropriate basis for use' in prompt
+        assert 'record the source and verified location' in prompt
         assert 'Do not repeat the same sweep, stadium placement or fade' in prompt
         assert 'Apply the treatment only to the background.' not in prompt
         assert 'Build a cohesive vintage background' not in prompt

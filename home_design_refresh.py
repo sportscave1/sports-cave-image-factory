@@ -11,7 +11,7 @@ from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
-from design_subject_authenticity import AUTHENTICITY_CHECK
+from design_subject_authenticity import AUTHENTICITY_CHECK, IDENTITY_OVERRIDES_CONTINUITY
 from home_morning_brief_actions import PROJECT_URL
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER, ROOT as LIVE_FOLDER
 from sports_sales_calendar import sydney_date
@@ -39,6 +39,7 @@ def _refresh_prompt(row, product_url):
     return f"""Create a complete new Sports Cave collector design for the verified existing product.
 Use the New Product / Create Design research and creative process for both full artwork passes.
 
+{IDENTITY_OVERRIDES_CONTINUITY}Start now. Use the project guide for reusable standards and the recommendation as research context.
 Product: {row["title"]}
 Shopify product ID: {row["product_id"]}
 Product page: {product_url}
@@ -50,8 +51,10 @@ that the artwork caused poor sales.
 
 1. Find the current master PSD in Dropbox Live: {LIVE_FOLDER}/
    Match it to this product using the product ID or handle, filename and live artwork.
-   Exclude the Review folder, drafts, mockups and previous refreshes. If you cannot verify the
-   match or visually inspect the PSD, ask for the exact PSD or a usable preview and stop.
+   Exclude the Review folder, drafts, mockups and previous refreshes. If the exact master or
+   render is unavailable, continue independent research, both artwork passes and display using
+   verified sources. Defer any comparison, master-dependent assembly or replacement that cannot
+   be verified, and report the exact missing input.
    Open the original for read-only reference. Record its path and revision if available,
    inspect its artwork and preserve its canvas dimensions, orientation and print settings.
 
@@ -91,17 +94,15 @@ that the artwork caused poor sales.
    composition. Generate the artwork itself without a frame, wall or room.
 
    Inspect Pass 1. In a separate full image-generation call, make Pass 2 a refinement of that
-   new design. Use Pass 1 as the creative reference and the selected original photographs as
-   the authority for identity and sporting details. Resolve visible weaknesses within the fresh
+   new design. Use Pass 1 for successful composition and styling. Resolve visible weaknesses within the fresh
    concept and keep the surrounding artwork free to evolve. Do not revert to the old layout.
    If Pass 1 was unavailable after recovery, use the chosen fresh concept and verified photos
    for Pass 2. Use the New Product allowance of at most two additional generation attempts
    total across both passes, including recovery. Preserve the strongest inspected work and
    report any incomplete pass.
 
-   In both passes, preserve the identity, expression, anatomy, pose, uniform, team details and
-   era shown in the selected verified photographs. Preserve official logos. Add the original official plaque with the permitted editable tonal styling and original editable edition-number layer during PSD
-   assembly.
+   Apply the source-photo checklist after each pass, correction and final assembly. Add the original
+   plaque and original editable edition-number layer during PSD assembly.
 
 {SIGNATURE_FREE_COMPOSITION}
 
@@ -112,8 +113,8 @@ that the artwork caused poor sales.
    - Subject hierarchy and emotional impact.
    - Composition and photographic integration.
    - Typography, spacing and collector finish.
-   Choose the strongest eligible redesign, whether Pass 1 or Pass 2. Authenticity and clear
-   improvement are required regardless of score. If neither pass qualifies, make any feasible
+   Choose the strongest eligible redesign from either pass. Facial identity and clear improvement
+   are required regardless of score. If neither pass qualifies, make any feasible
    finishing corrections and compare again, keeping any additional generation within the
    existing retry cap. If issues remain, retain the current version and
    mark any staged result needs_attention with the specific problems in review_notes.

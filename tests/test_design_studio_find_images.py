@@ -5,6 +5,7 @@ import unittest
 
 import design_studio_page as page
 import design_studio_styles as styles
+from design_subject_authenticity import IDENTITY_OVERRIDES_CONTINUITY
 
 
 BASELINE = json.loads((Path(__file__).parent / "fixtures" / "design_studio_non_find_images_baseline.json").read_text(encoding="utf-8"))
@@ -50,7 +51,7 @@ class ShortFindImagesTests(unittest.TestCase):
                 assert_short_find_images(self, prompt)
                 self.assertNotIn("FULL RESEARCH RESPONSE", prompt)
 
-    def test_research_signature_and_review_are_byte_for_byte_unchanged(self):
+    def test_research_signature_and_remaining_review_instructions_are_unchanged(self):
         for case in BASELINE["styles"]:
             for stage, method in (("research", "research"), ("signature_placement", "signature_placement"), ("review", "harsh_review")):
                 with self.subTest(style=case["style"], stage=stage):
@@ -58,6 +59,9 @@ class ShortFindImagesTests(unittest.TestCase):
                     if stage != "research":
                         args.append(case["assets"])
                     output = getattr(styles, f"build_{method}_prompt")(*args)
+                    if stage == "review":
+                        self.assertEqual(output.count(IDENTITY_OVERRIDES_CONTINUITY), 1)
+                        output = output.replace(IDENTITY_OVERRIDES_CONTINUITY, "", 1)
                     self.assertEqual(hashlib.sha256(output.encode()).hexdigest(), case["hashes"][stage])
         for stage in ("research",):
             output = getattr(page, f"build_design_{stage}_prompt")(BASELINE["legacy"]["task"])

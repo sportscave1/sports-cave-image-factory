@@ -104,7 +104,7 @@ def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
         assert 'exact Shopify product' in prompt and 'its Product GID as the same ID' in prompt
         assert (EDIT_AUTHENTICITY_CHECK if prompt is edit else AUTHENTICITY_CHECK) in prompt
         assert prompt.count(AUTHENTICITY_HEADING) == 1
-        assert prompt.index(AUTHENTICITY_HEADING) < prompt.index('**FALLBACK COLLECTOR FINISH**')
+        assert prompt.index('**IDENTITY OVERRIDES GENERATION CONTINUITY**') < prompt.index(AUTHENTICITY_HEADING)
         assert 'AI warping' in prompt and 'needs_attention' in prompt
 
 
@@ -301,13 +301,13 @@ def test_edit_review_replacement_allows_preserved_subject_with_inherited_limitat
         'metadata': metadata,
     })
     assert EDIT_AUTHENTICITY_CHECK in prompt
-    assert 'comparison with the exact pre-edit PSD' in prompt
-    assert 'Missing original source photographs alone must not prevent' in prompt
-    assert 'does not certify photographic authenticity, print readiness or permission to publish' in prompt
+    assert 'compare the revision with the exact pre-edit PSD' in prompt
+    assert 'If the edit wins and required PSD and collector-layer checks pass, continue verified replacement' in prompt
+    assert 'The pre-edit PSD establishes preservation only.' in prompt
     assert 'unresolved or unverified facial fidelity is ineligible' not in prompt
     assert 'If any discrepancy remains unverified' not in prompt
     assert 'preserve any verified PSD it was meant to replace' not in prompt
-    assert 'Visible deterioration, altered protected facial features' in prompt
+    assert 'If preservation cannot be verified, a discrepancy is visible' in prompt
     assert 'needs_attention' in prompt
     if refresh:
         assert 'Once the staged pair is verified and ready_for_review' not in prompt

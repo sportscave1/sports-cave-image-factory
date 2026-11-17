@@ -90,9 +90,6 @@ def build_edit_prompt(workflow, source, details):
         'minimum adjustments needed for safe spacing.',
         'Keep the Step 3 layout within the safe area. If the border alone needs a correction, '
         'use the smallest adjustment that restores clearance.', 1,
-    ).replace(
-        'identify what makes it effective and explicitly lock those strengths before generating again:',
-        'identify what makes it effective before generating again:', 1,
     )
     replace_section('Step 7. Place the first complete artwork', '**STEP 8', (
         'Step 7. Place the first newly generated pass on a working copy of the selected PSD. '
@@ -101,46 +98,24 @@ def build_edit_prompt(workflow, source, details):
         'and record its exact file ID, path and revision. If the save remains unavailable, keep '
         'the first pass and notes. Continue immediately to Step 8 in either case.'
     ))
-    workflow = workflow.replace(
-        'If the first version is strong, keep its visual foundation and make subtle corrections. '
-        'Reserve larger changes for specific weaknesses that make the first composition ineffective.',
-        'Carry forward strengths that still serve the revised content. Reassess title placement '
-        'and spacing using Step 3 whenever the wording or supporting text changes.', 1,
-    ).replace(
-        'keeping the strengths locked in 8A.',
-        'preserving the strengths identified in 8A.', 1,
-    ).replace(
-        'including the strengths locked in 8A',
-        'including the strengths identified in 8A', 1,
-    ).replace(
-        '**8B. Second full generation — preserve what works**',
-        '**8B. Second full generation — refine the composition**', 1,
-    ).replace(
-        'Keep a successful primary composition. If a structural weakness warrants a change, choose '
-        'one that suits the story and source photographs:',
-        'Choose the composition that best serves the revised title, story and source photographs:', 1,
-    ).replace(
-        'A new layout is optional. Keep the athlete\'s successful scale and position, title treatment, '
-        'background and accents unless a specific issue warrants a change.',
-        'Reapply the Step 3 layout check after title or supporting-text changes. Adjust the layout '
-        'as needed while preserving successful elements and explicit locks.', 1,
-    ).replace(
-        'Restore the existing assets afterward on separate layers.',
-        'Restore the exact assets during PSD assembly and perform the rendered checks in Steps 7 and 8E.', 1,
-    )
+    replace_section('**8A.', '**8C.', (
+        '**8A. Review Pass 1**\n\n'
+        'Use REVIEW NOTES to identify the three most visible weaknesses. Carry forward the successful '
+        'elements that serve the revised content. Use Step 3 to rebalance changes to title or supporting text.\n\n'
+        '**8B. Second full generation — refine the composition**\n\n'
+        'Make a **new image-generation call** for a complete refinement using the first artwork as a '
+        'composition reference and the original photos as authority for identity. If Pass 1 remains '
+        'unavailable, use the available verified references and planned composition. Honour explicit '
+        'locks and the shared artwork specifications. Restore the original plaque and editable number '
+        'during PSD assembly. Preserve successful typography and layout during source-based restoration.'
+    ))
     replace_section('**MANDATORY ACCEPTANCE CHECK', AUTHENTICITY_HEADING, (
         '**Review corrections before scoring**\n\n'
-        'Apply the photographic authenticity and integration check below to both passes. '
-        'Preserve successful typography and layout during source-based restoration. Reassess the '
-        'corrected versions before scoring in 8D.'
+        'Apply the photographic authenticity and integration check to both passes, every correction '
+        'and the assembled PSD. Check identity, sporting details and venue, integration, subject '
+        'prominence, typography, framing clearance and plaque placement at 100% and thumbnail size. '
+        'Reassess corrected versions before scoring in 8D.'
     ))
-    workflow = workflow.replace(
-        'If the strongest candidate still has visible subject defects or a disconnect between',
-        'If a promising candidate still has visible subject defects or a disconnect between', 1,
-    ).replace(
-        'Use the strongest inspected result and continue directly to the final PSD.',
-        'Use the strongest inspected results in the three-design comparison in 8D.', 1,
-    )
     replace_section('**8D. Prepare', COLLECTOR_ASSET_HEADING, (
         '**8D. Score all three designs and select one winner**\n\n'
         'After completing and inspecting both new passes, compare the rendered current design, '
@@ -153,7 +128,8 @@ def build_edit_prompt(workflow, source, details):
         'and choose autonomously, without asking for a rating or approval.\n\n'
         'Reject any edit that looks less realistic than the current design, degrades a faithful '
         'likeness or sporting detail, or introduces visible AI artefacts or warping, regardless '
-        'of its overall score. Apply REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED: missing '
+        'of its overall score. Reject any face that differs recognisably from a verified original. '
+        'Apply REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED: missing '
         'original source photographs alone do not make an edit ineligible when existing protected '
         'facial features are demonstrably preserved and all required replacement checks pass. '
         'Unverified preservation against the pre-edit PSD still makes a candidate ineligible. '

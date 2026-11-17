@@ -42,7 +42,10 @@ def insert_suggestion(cur, day, section, item):
         f'Include morning_design_job_id = "{key}" in the final .upload.json handoff. '
         'Keep this exact field even if the final title changes. Do not put it in the artwork. '
         'Save only to Design Studio Review; do not publish a product. '
-        'If the workflow cannot finish, end your response with SC_DESIGN_BLOCKED: followed by the exact reason.\n')
+        'Report Review delivery and artwork quality separately. Mark unresolved identity or other visual '
+        'concerns needs_attention in the matching JSON even if delivery succeeds. After completing '
+        'independent work, end your response with SC_DESIGN_BLOCKED: followed by the exact incomplete '
+        'required workflow checkpoint, if one remains. Omit the marker for visual concerns alone.\n')
     cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
         VALUES(%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING''',
         (key, day, section, item['title'], prompt))

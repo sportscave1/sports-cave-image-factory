@@ -58,6 +58,8 @@ def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     assert len(queue.list_jobs()) == 5
     for job in first:
         assert f'morning_design_job_id = "{job["id"]}"' in job['prompt']
+        assert 'IDENTITY OVERRIDES GENERATION CONTINUITY' in job['prompt']
+        assert 'Omit the marker for visual concerns alone.' in job['prompt']
     queue.tick(token, [dict(id=job['id'], state='submitted') for job in first])
     assert {j['stage'] for j in queue.list_jobs() if j['id'] in {r['id'] for r in first}} == {2}
     # A fresh morning is independent, but cannot exceed the occupied slots.

@@ -1,4 +1,5 @@
 from sports_categories import sport_family
+from design_subject_authenticity import IDENTITY_OVERRIDES_CONTINUITY
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -1468,26 +1469,21 @@ For rivalry or group designs, choose photographs that can coexist naturally in o
 
 COMMON_FIND_IMAGES_RULES = COMMON_FIND_IMAGES_PROMPT
 
-FINAL_GENERATION_EXECUTION_CONTRACT = """
+FINAL_GENERATION_EXECUTION_CONTRACT = f"""
 FINAL OUTPUT MODE: GENERATE ARTWORK
 
-The photographs selected in the previous Find Images stage are REFERENCE/SOURCE IMAGES ONLY, never the final deliverable.
-YOU MUST USE IMAGE GENERATION to create a NEW, fully composed Sports Cave limited-edition collector artwork. Invoke the available image-generation tool with the selected image inputs and display the generated artwork directly in ChatGPT as the first useful output. Do not merely describe what you would create.
+SELECTED PHOTOGRAPHS ARE REFERENCE/SOURCE IMAGES ONLY, never the final deliverable.
+YOU MUST USE IMAGE GENERATION with the actual selected image inputs to create a NEW, fully composed Sports Cave collector artwork and display the generated artwork directly in ChatGPT.
 
-Quickly select the strongest already-found primary reference and only genuinely useful supporting references. Preserve the approved Research concept, exact moment, subjects, era and selected Design Type. Stop searching once its explicit image requirements are satisfied; do not restart Research or seek marginal alternatives.
+{IDENTITY_OVERRIDES_CONTINUITY}Use the strongest selected hero and useful supporting assets. Preserve the approved concept, moment, subjects, era and selected Design Type. Stop searching once its required inputs are satisfied.
+PRIMARY HERO REFERENCE: the mapped original controls identity, action, era, uniform and equipment.
+SECONDARY / ENVIRONMENT REFERENCE: use each source only for its mapped role. If metadata is empty, use suitable selected photos already in the conversation.
 
-PRIMARY HERO REFERENCE: use the mapped principal photograph for authentic identity, face, pose/action, uniform, equipment, era and event details.
-SECONDARY / ENVIRONMENT REFERENCE: use mapped supporting photographs only for their assigned celebration, opponent, venue, crowd or environmental context. Keep all source references, subject associations and use modes intact; these describe inputs, not outputs. Pass available photographs as actual image inputs, not just webpage URLs. When metadata is empty, use the recommended images already available in this conversation without inventing new references.
+Compose complete landscape 4:3 wall art unless the template specifies otherwise. Build foreground/background depth, purposeful type, collector finish and safe border containment. Generate the surrounding design within all source, restoration and edit-only restrictions.
 
-Generate a complete premium collector WALL ART DESIGN: deliberate subject placement, foreground/background depth, controlled atmospheric blending, restrained cinematic grading, integrated title hierarchy and subtle border containment. Use landscape 4:3 unless the selected template explicitly requires otherwise. Preserve each Design Type's own composition, authentic likeness and photographic skin/texture; no plastic skin, generic AI sports illustration, accidental border cropping or oversized floating heads.
+The exact supplied plaque is an ASSET WITHIN THE ARTWORK. Simply adding a title, plaque, signature, border or small overlay to a source photo is insufficient. Use verified signatures where the selected contract permits them. Omit an unavailable signature for an unsigned photographic proof unless that type requires it. Never fabricate one.
 
-Source-preservation and compositing instructions below protect the real subject's identity and authentic details WITHIN the generated composition; they do not permit replacing image generation with a source-file export. Non-generative restrictions on source anatomy do not prohibit generating the surrounding artwork. Preserve explicit restoration/edit-only limits when that is the selected task.
-
-The supplied Sports Cave Limited Edition plaque is an ASSET WITHIN THE ARTWORK, not the artwork. Preserve its exact design and integrate it in the selected template's location/style. Simply adding a title, plaque, signature, border or small overlay to the original photograph is insufficient. Generate the complete composition around these assets.
-
-Use only verified authentic signatures, white where the selected contract permits. Never fabricate a missing signature. Unless the selected contract explicitly blocks generation for a missing required asset, omit an unavailable signature and continue generating; do not stop at an unsigned photographic proof.
-
-A link, attachment, local file path, source-image preview, downloadable photograph or textual description DOES NOT satisfy this task. Do not return, export or reproduce the source photograph as the answer. Do not substitute Python/PIL or simple file compositing for image generation unless the task explicitly requests a precise non-generative edit. Success requires the actual image-generation action and displayed completed artwork. If the tool is unavailable, state that limitation honestly; never claim a source file is generated artwork.
+A link, attachment, local file path, source-image preview or text description DOES NOT satisfy this task. Use Python/PIL compositing alone only for an explicitly non-generative edit. If generation is unavailable, report the limitation honestly.
 """.strip()
 
 
@@ -1521,6 +1517,8 @@ Before finalising future generated artwork, inspect every visible transition bet
 def finalize_generation_handoff(prompt):
     """Apply execution semantics only to generation, never research or review."""
     prompt = str(prompt).strip().replace(FINAL_GENERATION_EXECUTION_CONTRACT, "").strip()
+    identity = IDENTITY_OVERRIDES_CONTINUITY.strip()
+    prompt = prompt.replace(identity, "").strip()
     command = "Generate the completed artwork now."
     if prompt.endswith(command):
         prompt = prompt[:-len(command)].rstrip()
@@ -1818,6 +1816,7 @@ def build_harsh_review_prompt(style_slug, task_text, details=None, selected_asse
         section
         for section in (
             _selected_design_type_block(style),
+            IDENTITY_OVERRIDES_CONTINUITY.strip(),
             review_rules,
             STYLE_FIRST_REVIEW_GATE,
             _design_type_contract_block(style),
@@ -1861,6 +1860,7 @@ def build_targeted_correction_prompt(
         section
         for section in (
             TARGETED_CORRECTION_EDIT_LOCK,
+            IDENTITY_OVERRIDES_CONTINUITY.strip(),
             _selected_design_type_block(style),
             f"SPECIFIC CORRECTION: {issue}",
             _design_type_contract_block(style),
