@@ -59,7 +59,7 @@ def test_edit_uses_canonical_prompt_with_exclusive_edit_checkpoints():
     assert '8. **Title and placement.**' in edit
     assert 'headline longevity and placement' in edit.replace('\n', ' ')
     assert 'design_title at the canonical PSD path' in edit
-    assert edit.index('use the authorised Shopify connection in read-only mode') < edit.index('Consider a few short, cinematic headline options')
+    assert edit.index('use the authorised Shopify connection in read-only mode') < edit.index('**STORY-LED COLLECTOR TITLES**')
     assert 'remove an existing signature only when requested' in edit
     assert 'Transform its mask and linked components together' not in edit
     assert edit.count('Inspect the rendered, assembled PSD') == 2

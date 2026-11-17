@@ -82,7 +82,7 @@ def build_edit_prompt(workflow, source, details):
         'tracking, line breaks and gaps so the elements read together. At thumbnail and full '
         'size, check for disconnected text, crowding and excessive empty space. Leave '
         'intentional breathing room and use only essential text and effects. Preserve explicit '
-        'user locks and authentic details.'
+        'user locks and authentic details. Plan the badge and editable number placement with the subject and typography before generation using the shared collector-asset rules.'
     ))
     workflow = workflow.replace(
         'Preserve the existing composition and subject scale wherever possible. Make only the '
@@ -182,7 +182,7 @@ def build_edit_prompt(workflow, source, details):
         'Photoshop is optional. Use Photoshop or a capable PSD parser plus a rendered preview '
         'to verify the original editable SC_EDITION_NUMBER layer, its exact name, text data, '
         'live transform and alignment inside SC_EDITION_PLAQUE at the chosen scale and position. '
-        'Verify that the original plaque was preserved. A flattened preview alone cannot verify the text layer. '
+        'Verify that the original plaque design and layer identity were preserved, allowing the editable tonal styling specified in the collector-asset rules. A flattened preview alone cannot verify the text layer. '
         'Once these checks pass, proceed to the replacement instructions in 8F. If a required property '
         'cannot be verified after recovery, retain the original and available temporary files '
         'and report the exact pending check while delivering the artwork.'

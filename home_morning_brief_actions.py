@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
+from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_subject_authenticity import AUTHENTICITY_CHECK, CREATE_DESIGN_AUTHENTICITY_CHECK
 from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, display_markets, product_handle
@@ -242,11 +243,11 @@ def _prompt(title, story, *, edit=None):
         "references. Treat unranked products as style references only. Record the evidence or gap in "
         "REVIEW NOTES and continue immediately with the available references and rules below.\n\n"
         "Use the brief and recent events to decide who to feature and when to promote them. Treat its "
-        "event label and any suggested title as research context. Default to timeless player, team, "
-        "rivalry or sporting identity artwork. Ask whether fans would still want to display it in "
+        "event label and any suggested title as research context. Preserve the verified reason for the "
+        "edition while expressing it with lasting collector appeal. Ask whether fans would still want to display it in "
         "five years. A strong match, a single century, a weekly stat line or a narrowly defined record "
         "can justify featuring the subject. Use an enduring story for the print and omit match statistics, "
-        "scores and dates. If in doubt, use the athlete’s or team’s name and omit match statistics and dates.\n\n"
+        "scores and dates. When a statistic or date is uncertain, omit it without losing the verified emotional story.\n\n"
         "Build an edition around an event only when the verified achievement has lasting collector "
         "significance, such as a championship, league or season MVP, player of the year, player of a "
         "completed landmark series such as the Ashes, an established all-time achievement, or an iconic "
@@ -254,12 +255,7 @@ def _prompt(title, story, *, edit=None):
         "Use a single concise verified statistic or accolade only if it tells that lasting story. Use a "
         "year only if it identifies the achievement or era, and a full date only when the day itself "
         "matters. Avoid live rankings, ongoing averages, changing totals and unsupported GOAT claims.\n\n"
-        "Consider a few short, cinematic headline options and pick the most distinctive one the photo "
-        "and sporting story can support. Think ‘The King of Spin’ for Shane Warne or ‘Six Laps Ahead’ "
-        "where the racing story earns it. Keep the subject recognisable, the headline readable in one "
-        "glance, and the layout focused on why a fan would display the print. Let the title and photo "
-        "reinforce each other, with quiet space for the title and only essential supporting text. "
-        "Carry the chosen title and direction into photo selection and both generations.\n\n"
+        f"{COLLECTOR_TITLE_GUIDANCE}"
         "List the best possible images. Show the photos in this chat first. Use web image search to "
         "aim for 4–8 images that fit the chosen subject and story. If fewer are usable after checking the original source "
         "pages, show the candidates that meet the Step 1 standard. Focus on photo authenticity, image "
@@ -268,7 +264,7 @@ def _prompt(title, story, *, edit=None):
         "permissions, or usage rights.\n\n"
         "**STORY-FIRST IMAGE SELECTION**\n"
         "\n"
-        "Use these cues within the existing image search. Start with the title and the exact "
+        "Use these cues within the existing image search. Develop the title alongside the exact "
         "sporting moment or emotional reason to own the artwork. Search the named achievement, "
         "gesture, event or era alongside the subject. Where available, compare distinct authentic "
         "action, celebration, achievement and identity photos. For timeless artwork, consider the "
@@ -329,7 +325,7 @@ def _prompt(title, story, *, edit=None):
         "or presenting unrelated events as one moment. Check that the story reads at thumbnail "
         "size and that the image still communicates it with the title hidden.\n"
         "\n"
-        "Step 1. **Hero photo selection — title first.** Compare candidates for subject prominence, "
+        "Step 1. **Hero photo selection — story and title together.** Compare candidates for subject prominence, "
         "emotional relevance, clarity and compositional potential. Choose the photo that best tells "
         "the named subject's collector story. In an individual-player edition, the named athlete "
         "must dominate immediately at thumbnail size. Reject photos where teammates, opponents, "
@@ -352,7 +348,7 @@ def _prompt(title, story, *, edit=None):
         "for the original badge and editable number to be restored from the master.\n\n"
         "Step 3. Define the composition for a realistic Sports Cave Collector Series design with "
         "a strong focal point and clear visual hierarchy. Plan a readable position and scale for "
-        "the official badge and its editable number within the safe border.\n\n"
+        "the official badge and its editable number within the safe border. Plan their relationship to the subject and typography before generation using the shared collector-asset rules.\n\n"
         f"{_CREATE_DESIGN_BORDER_RULES if edit is None else _EDIT_DESIGN_BORDER_RULES}"
         f"Step 4. {SIGNATURE_FREE_COMPOSITION}\n\n"
         f"{background_guide}"
@@ -448,7 +444,7 @@ def _prompt(title, story, *, edit=None):
         "story-specific title in elegant serif or restrained cinematic type, with smaller tracked "
         "uppercase text where appropriate. Follow the collector title, date and statistics rules above. Use a "
         "fine, controlled collector border where it suits the composition. Keep important details "
-        "clear of the border and reserve quiet space where the original badge fits the design. "
+        "clear of the border and compose the original badge with the subject and typography. "
         "Keep the artwork free of mockup framing, walls and rooms.\n"
         "\n"
         "Keep original camera angles, legible lettering and numbers, and accurate vehicle, trophy "

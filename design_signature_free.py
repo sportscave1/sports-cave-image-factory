@@ -8,7 +8,7 @@ Create the premium limited-edition collector feel through the existing title hie
 
 Treat the subject, title, name, supporting context and edition badge as one coordinated composition. Refine their scale, alignment, line spacing and separation so every element feels deliberately placed and remains readable at thumbnail size and intended print size.
 
-Do not reserve an empty “signature slot.” Use the available space by thoughtfully arranging the existing elements. Where beneficial, reposition the official edition badge in relation to the typography, keeping it subordinate to the subject and title, comfortably separated from neighbouring elements, and inside the established safe area. Preserve the exact official badge asset and edition number.
+Do not reserve an empty “signature slot.” Use the available space by thoughtfully arranging the existing elements. Where beneficial, reposition the official edition badge in relation to the typography, keeping it subordinate to the subject and title, comfortably separated from neighbouring elements, and inside the established safe area. Use the original official badge asset and preserve its design and edition number, with editable tonal styling as allowed by the shared collector-asset rules.
 
 Do not automatically fill space with additional wording, repeated names, statistics, quotes, oversized numbers, extra portraits, decorative symbols or substitute seals. Add supporting context only when it strengthens the sporting story and meets the existing verification requirements. Leave breathing room where it improves the design.
 

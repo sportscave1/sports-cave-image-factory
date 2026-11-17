@@ -8,6 +8,7 @@ import re
 
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
+from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from design_subject_authenticity import AUTHENTICITY_CHECK
@@ -75,10 +76,10 @@ that the artwork caused poor sales.
    readable pose, composition potential and source quality at print size. For a promised event
    or rivalry, keep the imagery faithful to it. Reuse a photo from the existing PSD only when
    it wins the comparison. Consider stronger alternatives even when the existing photo is
-   technically sound. Compare headline options against the shortlisted photos. Briefly state
+   technically sound. Develop the headline alongside the shortlisted photos using the title guidance below. Briefly state
    the strongest hero, story, title treatment and creative direction before generating.
 
-{BACKGROUND_RESEARCH}{COLLECTOR_BACKGROUND}
+{COLLECTOR_TITLE_GUIDANCE}{BACKGROUND_RESEARCH}{COLLECTOR_BACKGROUND}
 
 3. Generate and inspect two complete designs with ChatGPT image generation.
    Pass 1 must be a complete new flat design, with a materially new composition and visual
@@ -99,7 +100,7 @@ that the artwork caused poor sales.
    report any incomplete pass.
 
    In both passes, preserve the identity, expression, anatomy, pose, uniform, team details and
-   era shown in the selected verified photographs. Preserve official logos. Add the exact official plaque and original editable edition-number layer during PSD
+   era shown in the selected verified photographs. Preserve official logos. Add the original official plaque with the permitted editable tonal styling and original editable edition-number layer during PSD
    assembly.
 
 {SIGNATURE_FREE_COMPOSITION}

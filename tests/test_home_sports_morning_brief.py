@@ -474,11 +474,11 @@ def test_create_design_uses_recent_performance_as_context_for_a_timeless_title()
     assert 'Execution decision: Create “Tom Banton — The Adelaide Century” now.' not in result
     assert 'does not override this instruction to create the artwork now' in result
     research = result.index('use the authorised Shopify connection in read-only mode')
-    title = result.index('Consider a few short, cinematic headline options')
+    title = result.index('**STORY-LED COLLECTOR TITLES**')
     assert research < title < result.index('Use web image search')
     assert 'closest comparable sport or collector collection' in result
     assert 'Treat unranked products as style references only' in result
-    assert 'If in doubt, use the athlete’s or team’s name and omit match statistics and dates' in result
+    assert 'Use the athlete’s name alone only when that is a deliberate creative choice' in result
     assert 'completed landmark series such as the Ashes' in result
     assert 'Use a single concise verified statistic or accolade only if it tells that lasting story' in result
 
@@ -543,7 +543,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Place the strongest inspected artwork in **FINAL POLISHED ARTWORK**" in result[second_generation:final_save]
     assert "Generate a visibly different" not in result
     assert "Do not search for, source, generate, trace, reproduce or include athlete signatures" in result[signature:first_generation]
-    assert "Preserve the exact official badge asset and edition number." in result[signature:first_generation]
+    assert "Use the original official badge asset and preserve its design and edition number" in result[signature:first_generation]
     assert "at 100% magnification to this first generation" in result[first_review:first_save]
     assert "Restore visible discrepancies with original photograph pixels and a precise mask" in result[second_generation:final_save]
     assert "smallest coherent source region" in result[second_generation:final_save]
