@@ -263,6 +263,7 @@ def render_outputs(app,result,row,user,name):
     path=app.get_asset_full_resolution_path(black) if black else None
     url=register(result,black,source,path) if path else ''
     handoff={'pending': True}
+    staff_job = st.query_params.get('staff_upload_job')
     core_receipt=result.get('product_upload_core_receipt') or {}
     core_saved = (len(core_receipt.get('successes', ())) == 5
                   and not core_receipt.get('cancelled') and not core_receipt.get('failures'))
@@ -275,13 +276,19 @@ def render_outputs(app,result,row,user,name):
                 raise ValueError('The confirmed Dropbox save belongs to earlier product details.')
             if warnings:
                 raise ValueError('Saved prompt storage is unavailable. Refresh Product Uploads to retry the handoff.')
-            handoff=prepare(result,row,core_receipt,prompt)
+            handoff=prepare(result,row,core_receipt,prompt,
+                            staff_job=staff_job if core_receipt.get('generation_receipt') else None)
+            mapping = handoff.pop('staff_mapping', None)
+            if mapping:
+                from product_upload_staff_mapping import arm
+                from product_upload_api import connect
+                if not arm(connect, str(row['id']), user['id'], mapping):
+                    handoff=prepare(result,row,core_receipt,prompt)
         except ValueError as error:
             handoff={'error': str(error)}
         except Exception:
             handoff={'error': 'Upload needs all five WebPs confirmed in Dropbox.'}
     automatic_handoff = bool(handoff.get('automatic') and handoff.get('prompt'))
-    staff_job = st.query_params.get('staff_upload_job')
     if staff_job:
         from product_upload_staff_queue import advance
         failure = handoff.get('error')

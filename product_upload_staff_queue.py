@@ -55,8 +55,11 @@ def list_jobs(actor=None):
 
 def public(row):
     stage = row['stage']
-    return dict(id=str(row['id']), title=row['title'], stage=stage, label=LABELS[stage],
-                percent=PERCENT[stage], detail=row['message'], storefront=row['storefront'],
+    label, percent = LABELS[stage], PERCENT[stage]
+    if stage == 5 and row['storefront']:
+        label, percent = 'Shopify published · Upload Companion handling PSD', 96
+    return dict(id=str(row['id']), title=row['title'], stage=stage, label=label,
+                percent=percent, detail=row['message'], storefront=row['storefront'],
                 updated_at=row['updated_at'].isoformat())
 
 
@@ -128,9 +131,9 @@ def advance(key, actor, stage, message='', *, intake=None, storefront='', allowe
         cur.execute('''UPDATE product_upload_staff_jobs SET stage=%s, message=%s, storefront=%s,
             intake_id=COALESCE(intake_id,%s),updated_at=now()
             WHERE id=%s AND worker_actor=%s AND stage BETWEEN 1 AND 5 AND stage<=%s
-            AND (stage<>%s OR message<>%s OR (intake_id IS NULL AND %s::uuid IS NOT NULL))
+            AND (stage<>%s OR message<>%s OR storefront<>%s OR (intake_id IS NULL AND %s::uuid IS NOT NULL))
             AND (%s::smallint[] IS NULL OR stage=ANY(%s::smallint[]))''',
-            (stage, message[:1600], storefront, intake, key, actor, stage, stage, message[:1600], intake,
+            (stage, message[:1600], storefront, intake, key, actor, stage, stage, message[:1600], storefront, intake,
              allowed, allowed))
 
 
@@ -148,6 +151,20 @@ def verify(job):
     key = str(job['intake_id'])
     intake = Intakes(connect).read(key, job['worker_actor'])
     if not intake:
+        return
+    if intake['data'].get('staff_mapping'):
+        from product_upload_staff_mapping import run
+
+        def progress(message, storefront):
+            advance(job['id'], job['worker_actor'], 5, message, storefront=storefront, allowed=[5])
+        try:
+            storefront = run(connect, job, intake, progress)
+        except (ValueError, PermissionError) as error:
+            advance(job['id'], job['worker_actor'], 7, str(error), storefront=job['storefront'], allowed=[5])
+            return
+        if storefront:
+            advance(job['id'], job['worker_actor'], 6, 'Original PSD mapped · handed to Auto Editions',
+                    storefront=storefront, allowed=[5])
         return
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT shopify_product_gid FROM product_psd_mappings
@@ -220,11 +237,13 @@ def tick(token, event):
             verify(job)
         except Exception:
             LOG.warning('Desktop upload verification could not read live state', exc_info=True)
-    if not worker_job(str(key), actor):
+    current = worker_job(str(key), actor)
+    if not current:
         return {}
     timeout = timedelta(hours=2 if stage == 5 else 1)
-    if stage == job['stage'] and job['updated_at'] < datetime.now(timezone.utc) - timeout:
-        advance(key, actor, 7, f'{LABELS[stage]} timed out. Check the open ChatGPT conversation and Product Uploads.',
+    if current['updated_at'] < datetime.now(timezone.utc) - timeout:
+        detail = f"{current['message'] or LABELS[stage]} · timed out. Review Product Uploads and the ChatGPT conversation."
+        advance(key, actor, 7, detail, storefront=current['storefront'],
                 allowed=[stage])
         return {}
     return dict(job=dict(id=str(key), stage=stage))
