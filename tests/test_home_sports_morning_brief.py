@@ -518,7 +518,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     pending_trial = result.index("If the trial save is pending, use the retained first artwork", second_pass)
     second_generation = result.index("Make a **new image-generation call**")
     final_save = result.index("**8E. Save and verify the final PSD**")
-    cleanup = result.index("Only after successful final verification")
+    cleanup = result.index("After the final save and technical PSD checks pass")
     display = result.index("Display the inspected final artwork after cleanup")
     assert signature < first_generation < first_review < first_save < second_pass
     assert pending_trial < second_generation < final_save < cleanup < display
@@ -563,6 +563,9 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Do not search for, source, generate, trace, reproduce or include athlete signatures" in result[signature:first_generation]
     assert "Use the original official badge asset and preserve its design and edition number" in result[signature:first_generation]
     assert "at 100% magnification to this first generation" in result[first_review:first_save]
+    assert "and at thumbnail size" in result[first_review:first_save]
+    assert "VISIBLE COLLECTOR TRANSFORMATION" in result[signature:first_generation]
+    assert "visible abstract depth, premium title and coordinated plaque placement" in result[second_generation:final_save]
     assert "Restore visible discrepancies with original photograph pixels and a precise mask" in result[second_generation:final_save]
     assert "smallest coherent source region" in result[second_generation:final_save]
     assert "contact shadows only at actual points of contact" in result[second_generation:final_save]
@@ -572,12 +575,14 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "A failed or unverified identity never wins as an accepted final design" in result[second_generation:final_save]
     assert "save the strongest inspected candidate for Review with needs_attention" in result[second_generation:final_save]
     assert "save the final PSD as a new file" in result[final_save:cleanup]
+    assert "the first artwork remains hidden" in result[final_save:cleanup]
     assert "Retain the trial" in result[final_save:cleanup]
     assert "Photoshop is optional" in result[final_save:cleanup]
     assert "parser plus a rendered preview" in result[final_save:cleanup]
     assert "report the specific unverified property" in result[final_save:cleanup]
     assert "Photoshop live-number check pending" not in result
     assert "recoverable delete" in result[cleanup:display]
+    assert "even when artwork quality is marked needs_attention" in result[cleanup:display]
     assert "failure as pending" in result[cleanup:display]
     metadata_start = result.index("**SMART UPLOAD HANDOFF METADATA**", final_save)
     metadata_end = result.index("**8F.", metadata_start)

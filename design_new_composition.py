@@ -32,13 +32,11 @@ Relate the text arrangement to the photograph's silhouette, movement and availab
 
 Assess the title, subject name and plaque together at full size and thumbnail size. Refine their spacing and relative scale until they read as one intentional collector composition."""
 
-PURPOSEFUL_ABSTRACT = """PURPOSEFUL ABSTRACT TREATMENT
+PURPOSEFUL_ABSTRACT = """VISIBLE COLLECTOR TRANSFORMATION
 
-Derive the direction and placement of abstract elements from the athlete's movement, a meaningful sporting trajectory, venue geometry, team-colour relationships or the typography's alignment.
+Make the collector treatment visible at thumbnail size. Use charcoal tonal shapes, fine material texture and selective accents to build depth around the authentic subject. Let movement, venue geometry or team colours guide the overlay. Keep effects clear of skin and protected sporting details.
 
-Use selected charcoal tonal shapes, fine material texture, soft directional transitions and small gold or meaningful team-colour accents to separate layers, connect photographic transitions and guide attention between the subject and title. Where useful, let an environmental line or abstract accent lead toward the title group or resolve near the official plaque. Keep the relationship subtle and leave quiet space around readable text.
-
-With supporting imagery, use tonal transitions to establish depth and distinguish separate photographic moments while preserving recognisable faces, anatomy and equipment. Assess each prominent effect for its contribution to hierarchy, depth or story. Reduce decorative elements that compete with the subject or repeat generic corner treatments. Choose only the effects that benefit this composition."""
+Keep a verified venue recognisable through defining features. Blend it into the composition instead of isolating it in a blurred strip or inset. Use tonal transitions to distinguish separate photographic moments. Connect the premium title to the planned plaque position through alignment, scale, spacing and surrounding tones. Add the official plaque during assembly."""
 
 REVIEW_RELATIONSHIPS = """Lock elements positively assessed as successful. Treat disconnected title-and-plaque spacing, weak supporting-image hierarchy, unexplained empty areas and generic decorative placement as unresolved composition issues. Within the existing second pass and finishing work, adjust the affected relationships and rebalance neighbouring elements while preserving successful identity, story and visual qualities. Compare the complete assembled artwork, including the original plaque, with the strongest previous version using the existing acceptance and recovery rules. This review adds no approval stage or generation requirement.
 
@@ -46,6 +44,6 @@ REVIEW_RELATIONSHIPS = """Lock elements positively assessed as successful. Treat
 
 BADGE_PLACEMENT_VERIFICATION = """**Verify asset identity and the chosen placement separately.** The original plaque artwork, layer names, live edition text and internal plaque/number alignment remain protected. Their original canvas coordinates and proportional scale are starting values, not fixed layout requirements. During assembly, compare the planned placement with the actual title and subject. If detached, move or proportionally resize the plaque and live number together, or refine nearby spacing within the existing safe-area and collector-asset rules. Retain the original position only when it produces the strongest relationship in this artwork.
 
-Verify that both original layers received the corresponding placement transform, that the number remains editable and aligned inside the plaque, and that the final rendered placement works with the typography. A valid move or proportional resize must not fail verification merely because coordinates or transforms differ from the master. Preserve the original asset design and text, and inspect the chosen final layout rather than requiring unchanged master coordinates.
+Verify both original layers received the matching transform and the number remains editable and aligned inside the plaque. Accept a valid move or proportional resize. Preserve the original asset design and text. Assess its relationship to the typography in the visual review.
 
 """
