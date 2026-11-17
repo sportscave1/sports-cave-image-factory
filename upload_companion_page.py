@@ -23,13 +23,13 @@ def _markup(value):
     st.markdown(value, unsafe_allow_html=True)
 
 
-def _summary(jobs, *, designs):
+def _summary(jobs, *, designs, paused=False):
     active = sum(1 <= j['stage'] <= (3 if designs else 5) for j in jobs)
     waiting = sum(j['stage'] == 0 for j in jobs)
     saved = sum(bool(j.get('file_path')) if designs else j['stage'] == 6 for j in jobs)
     attention = sum(j['stage'] == (5 if designs else 7) and not j.get('file_path') for j in jobs)
     cards = [('Running', active, 'One active job', 'blue'),
-             ('Waiting', waiting, 'Starts automatically', 'gold'),
+             ('Waiting', waiting, 'Paused · press Play' if paused else 'Starts automatically', 'gold'),
              ('Completed' if designs else 'Published', saved, 'Verified output', 'green'),
              ('Needs attention', attention, 'Does not block the queue', 'amber')]
     _markup('<div class="cq-metrics">' + ''.join(
@@ -53,7 +53,7 @@ def estimated_progress(job):
     return percent, f'About {int(elapsed)} min elapsed · time-based estimate, not measured completion'
 
 
-def _jobs(jobs, *, designs):
+def _jobs(jobs, *, designs, paused=False):
     import streamlit as st
     active_end = 3 if designs else 5
     active = [j for j in jobs if 1 <= j['stage'] <= active_end]
@@ -61,7 +61,9 @@ def _jobs(jobs, *, designs):
     finished = [j for j in jobs if j['stage'] > active_end]
     _markup('<div class="cq-section"><h3>Running now</h3></div>')
     if not active:
-        _markup('<div class="cq-empty">No job running. The companion starts automatically when work is available.</div>')
+        message = ('Queue paused. Press Play to start the next job.' if paused else
+                   'No job running. The companion starts automatically when work is available.')
+        _markup(f'<div class="cq-empty">{message}</div>')
     for job in active:
         with st.container(border=True):
             _markup(f'<div class="cq-job"><h4>{_html(job["title"])}</h4><span class="cq-badge blue">{_html(job["label"])}</span></div>')
@@ -145,17 +147,26 @@ def render_design_queue():
             st.warning('Could not load the design queue. Retrying automatically.')
             return
         _connection(online)
-        _summary(jobs, designs=True)
+        _summary(jobs, designs=True, paused=not control['enabled'])
         with st.container(border=True):
             left, right = st.columns([2, 1])
             with left:
                 _markup('<div class="cq-eyebrow">MORNING AUTOMATION</div><h3 class="cq-control-title">New ideas. Automatically in motion.</h3>')
                 st.caption('New morning suggestions join the queue automatically. Pausing stops new starts; running jobs continue.')
             with right:
-                enabled = st.toggle('Automatically create morning designs', value=control['enabled'], key='cq-auto-designs')
-                if enabled != control['enabled']:
-                    settings(enabled)
-                _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Automation enabled" if enabled else "Automation paused"}</span>')
-        _jobs(jobs, designs=True)
+                enabled = control['enabled']
+                play, pause = st.columns(2)
+                with play:
+                    if st.button('Play', icon=':material/play_arrow:', disabled=enabled, key='cq-design-play',
+                                 help='Resume starting queued designs. Current work is never restarted.'):
+                        settings(True)
+                        st.rerun()
+                with pause:
+                    if st.button('Pause', icon=':material/pause:', disabled=not enabled, key='cq-design-pause',
+                                 help='Hold the next design. The current ChatGPT job keeps running.'):
+                        settings(False)
+                        st.rerun()
+                _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
+        _jobs(jobs, designs=True, paused=not control['enabled'])
         st.caption('Up to 100 jobs · active jobs first · Edge must stay open and signed in; keep the computer awake.')
     history()

@@ -169,3 +169,35 @@ def test_saved_artwork_with_review_concerns_releases_slot(store, monkeypatch):
     saved = next(j for j in queue.list_jobs() if j['id'] == first['id'])
     assert saved['label'] == 'Uploaded · needs review'
     assert saved['file_path'] == '/Review/Final.psd'
+
+def test_pause_keeps_current_chat_and_holds_next_until_play(store, monkeypatch):
+    cur, token = store
+    publish(cur, count=2)
+    first = queue.tick(token, [])['jobs'][0]
+    queue.settings(False)
+    running = queue.tick(token, [dict(id=first['id'], state='submitted')])
+    assert running['enabled'] is False
+    assert [(j['id'], j['stage']) for j in running['jobs']] == [(first['id'], 2)]
+    assert sum(j['stage'] == 0 for j in queue.list_jobs()) == 1
+    monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {first['id']: dict(stage=4, message='',
+        source=dict(id='id:paused-final', rev='R1', path_display='/Review/Final.psd'))})
+    assert queue.tick(token, [])['jobs'] == []
+    assert queue.tick(token, [])['jobs'] == []
+    assert next(j for j in queue.list_jobs() if j['id'] == first['id'])['stage'] == 4
+    assert sum(j['stage'] == 0 for j in queue.list_jobs()) == 1
+    queue.settings(True)
+    resumed = queue.tick(token, [])['jobs']
+    assert len(resumed) == 1 and resumed[0]['id'] != first['id']
+
+
+@pytest.mark.parametrize('status,icon,tone', [
+    ('Completed · uploaded', '✓', 'complete'), ('Ready for review', '✓', 'complete'),
+    ('Uploaded · needs review', '!', 'attention'), ('Needs attention', '!', 'attention'),
+    ('Generating', '◌', 'running'), ('Pending', '○', 'pending'),
+])
+def test_home_status_icons_preserve_honest_labels(status, icon, tone):
+    from home_morning_brief_actions import article_html
+    html = article_html(dict(title='A Champion', recommendation='Fixture', links=[]), design_status=status)
+    assert f'sc-brief-status {tone}' in html
+    assert f'aria-hidden="true">{icon}</i>' in html
+    assert status in html

@@ -608,8 +608,20 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         f'<a href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
         f'data-prompt="{prompt}" title="Open Sports Cave Designs and copy the prompt">Create Design</a>'
     )
-    status_label = (f'<small class="sc-brief-secondary" role="status">{escape(design_status)}</small>'
-                    if design_status else '')
+    status_label = ''
+    if design_status:
+        icon, tone = {
+            'Completed · uploaded': ('✓', 'complete'),
+            'Ready for review': ('✓', 'complete'),
+            'Uploaded · needs review': ('!', 'attention'),
+            'Needs attention': ('!', 'attention'),
+            'Generating': ('◌', 'running'),
+            'Opening ChatGPT': ('◌', 'running'),
+            'Uploaded · checking review metadata': ('◌', 'running'),
+        }.get(design_status, ('○', 'pending'))
+        status_label = (f'<small class="sc-brief-secondary sc-brief-status {tone}" role="status">'
+                        f'<i class="sc-brief-status-icon" aria-hidden="true">{icon}</i> '
+                        f'{escape(design_status)}</small>')
     handle = product_handle(item)
     if allow_ads and handle:
         url = "/?" + urlencode({"page": "ads", PRODUCT_QUERY: handle})

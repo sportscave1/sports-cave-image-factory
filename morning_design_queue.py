@@ -52,6 +52,7 @@ def insert_suggestion(cur, day, section, item):
 def settings(enabled=None):
     with connect() as conn, conn.cursor() as cur:
         if enabled is not None:
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
             cur.execute('''UPDATE morning_design_control SET enabled=%s,
                 activated_at=CASE WHEN %s THEN COALESCE(activated_at,now()) ELSE activated_at END
                 WHERE singleton''', (bool(enabled), bool(enabled)))
