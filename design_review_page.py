@@ -133,7 +133,11 @@ def _edit_link(source, title):
     endpoint = '/api/design-review/edit-prompt?' + urlencode(dict(id=source['id'], rev=source['rev']))
     st.html(f'<a class="sc-review-edit" href="{PROJECT_URL}" target="_blank" rel="noopener noreferrer" '
             f'data-design-review-prompt="{escape(endpoint, quote=True)}" '
-            f'title="{escape(f"Edit {title} in Sports Cave Designs", quote=True)}">Edit</a>')
+            f'aria-label="{escape(f"Edit {title}", quote=True)}" '
+            f'title="{escape(f"Edit {title} in Sports Cave Designs", quote=True)}">'
+            '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" '
+            'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg></a>')
 
 
 def _staged_replacement(user, source, key):
@@ -302,10 +306,10 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         chosen_sport = (row or {}).get('data', {}).get('review_sport')
         needs_sport = not (published or editing or staged or resumable or chosen_sport or details.get('sport'))
         if selectable and not staged:
-            check, name, edit_button, publish = st.columns((1, 4, 1, 2), vertical_alignment='center', gap='small')
+            check, name, edit_button, publish, publish_ad = st.columns((.5, 4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
             check.checkbox(f'Select {title}', key=_selection_key(source), label_visibility='collapsed')
         else:
-            name, edit_button, publish = st.columns((4, 1, 2), vertical_alignment='center', gap='small')
+            name, edit_button, publish, publish_ad = st.columns((4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
         label = 'Needs attention' if reason and current in ('In review', 'Ready to publish') else current
         if cleanup_pending:
@@ -317,7 +321,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                      if cleanup_pending or reason or current not in ('In review', 'Ready to publish') else ''))
         with edit_button:
             if resumable or staged:
-                st.button('Edit', key=key+'-edit', disabled=True)
+                st.button('', icon=':material/edit:', key=key+'-edit', disabled=True, help='Edit '+title)
             else:
                 _edit_link(source, title)
         sport_picker = st.empty() if needs_sport else None
@@ -331,7 +335,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                                      disabled=published or editing or staged, help=f'Publish {title}')
             from os_accounts import can_access_page
             if all(can_access_page(user, page) for page in ('Ads', 'Posting', 'Files')):
-                ad_clicked = publish.button('Publish + ad', key=key+'-approved-ad',
+                ad_clicked = publish_ad.button('Publish + ad', key=key+'-approved-ad',
                                              disabled=published or editing or staged,
                                              help='Publish the design and create a paused Meta Instant Experience campaign.')
         if ad_clicked:

@@ -22,6 +22,13 @@ from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, display_m
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
 
 PROJECT_URL = "https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project"
+REVIEW_SAVE_NAMING = """**Review filename and website product title**
+
+Before saving, form the full website product title: [ARTWORK NAME] – [VERIFIED SUBJECT] Wall Art. Preserve the emotional headline, add the verified athlete/team/rivalry/event, and use one spaced en dash. Example: Forever Panda – Pablo Sandoval Wall Art. Use readable spaces, never a URL slug or headline-only filename. Keep the emotional headline on the artwork.
+
+Use that full title for the PSD stem and JSON design_title; match the JSON basename to the saved PSD, including collision suffixes. Verify filename, JSON, Dropbox ID, revision and path together. Apply the website’s 60-character title rule without truncating or inventing identity.
+
+"""
 TEMPLATE = Path(__file__).parent / "components" / "morning_brief_actions.html"
 
 
@@ -119,6 +126,8 @@ Retry a transient tool failure once per authorised method. Retry image generatio
 **5. Assemble, save and verify one final Review PSD**
 
 On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
+
+{REVIEW_SAVE_NAMING}
 
 {BADGE_PLACEMENT_VERIFICATION}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 

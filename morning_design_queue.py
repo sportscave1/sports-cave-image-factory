@@ -61,7 +61,8 @@ def _waiting_prompt(job):
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
         from design_new_composition import PURPOSEFUL_ABSTRACT
-        if NEW_DESIGN_TITLE_GUIDANCE in prompt and PURPOSEFUL_ABSTRACT in prompt:
+        from home_morning_brief_actions import REVIEW_SAVE_NAMING
+        if NEW_DESIGN_TITLE_GUIDANCE in prompt and PURPOSEFUL_ABSTRACT in prompt and REVIEW_SAVE_NAMING in prompt:
             return prompt
         _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
         _, _, body = body.partition('\n\n')  # Existing workflow introduction.

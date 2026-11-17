@@ -97,6 +97,13 @@ def test_bulk_queue_requires_upload_access(ui, monkeypatch):
     enqueue.assert_not_called()
 
 
+def test_publish_actions_are_in_separate_columns_on_the_same_card_row(ui):
+    app, *_ = ui
+    columns = app.get('column')
+    assert any([button.label for button in column.button] == ['Publish now'] for column in columns)
+    assert any([button.label for button in column.button] == ['Publish + ad'] for column in columns)
+
+
 def test_bulk_queue_missing_sport_requires_selection(ui):
     app, entries, details, enqueue, _, _ = ui
     details[0].pop('sport')

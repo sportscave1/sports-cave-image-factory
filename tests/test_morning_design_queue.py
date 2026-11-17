@@ -137,6 +137,18 @@ def test_waiting_creative_upgrade_preserves_original_story_and_retry_receipt():
     assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
 
 
+def test_waiting_filename_upgrade_keeps_job_story_and_receipt():
+    from home_morning_brief_actions import REVIEW_SAVE_NAMING
+    key = queue.identity('2026-11-18', 'legends', {'title':'Panda'})
+    story = 'A verified Pablo Sandoval tribute. Preserve the chosen Forever Panda headline.'
+    prompt = queue._job_prompt(key, 'Panda', story)
+    saved = prompt.replace(REVIEW_SAVE_NAMING, '')
+    job = dict(id=key, title='Panda', prompt=saved)
+    upgraded = queue._waiting_prompt(job)
+    assert REVIEW_SAVE_NAMING in upgraded and story in upgraded
+    assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
+
+
 def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     cur, token = store
     publish(cur)
