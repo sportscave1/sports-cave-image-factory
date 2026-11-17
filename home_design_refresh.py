@@ -107,8 +107,9 @@ that the artwork caused poor sales.
    - Composition and photographic integration.
    - Typography, spacing and collector finish.
    Choose the strongest eligible redesign, whether Pass 1 or Pass 2. Authenticity and clear
-   improvement are required regardless of score. If neither pass qualifies, use the existing
-   correction allowance and compare again. If issues remain, retain the current version and
+   improvement are required regardless of score. If neither pass qualifies, make any feasible
+   finishing corrections and compare again, keeping any additional generation within the
+   existing retry cap. If issues remain, retain the current version and
    mark any staged result needs_attention with the specific problems in review_notes.
 
 5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.

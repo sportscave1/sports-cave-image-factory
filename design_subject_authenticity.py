@@ -4,8 +4,10 @@ AUTHENTICITY_HEADING = "**MANDATORY PHOTOGRAPHIC AUTHENTICITY AND INTEGRATION CH
 _SOURCE_COMPARISON = (
     f"{AUTHENTICITY_HEADING}\n\n"
     "Apply this check after each full-artwork generation, after any subject restoration, and "
-    "on the assembled PSD. Use the verified original photograph as the authority. Work within "
-    "the existing correction allowance, retry limits and continuation rules.\n\n"
+    "on the assembled PSD. Use the verified original photograph as the authority. The existing "
+    "retry cap applies to image-generation calls. Masking, alignment, edge cleanup, tonal matching "
+    "and placement are ordinary finishing work and can continue after that cap. Follow the "
+    "existing continuation rules.\n\n"
     "Compare the source photograph and artwork side by side at 100% and at normal viewing "
     "size. Prioritise facial identity and expression, then natural skin, then anatomy, uniform "
     "and equipment. Check the eyes and gaze, eyelids, eyebrows, nose, mouth and teeth, jaw, ears, "
@@ -14,6 +16,16 @@ _SOURCE_COMPARISON = (
     "excessive smoothing and artificial sharpening on the face, neck, arms and hands. Judge "
     "realism by fidelity to the source. Compare visible sponsors, logos, lettering and equipment "
     "directly with the source for AI warping, redrawing or lost details.\n\n"
+)
+
+_MASK_FINISH = (
+    "Refine the mask along the outer silhouette and throughout visible openings, such as gaps "
+    "between fingers or in equipment. Remove the original background from those gaps while "
+    "preserving real edges and fine detail such as hair, straps and equipment bars. Clean up any "
+    "displaced generated edges beneath the repair so the subject has one coherent outline. "
+    "Refine complex edges beyond a rough selection, broad feather or colour threshold. Inspect "
+    "at full size against the final scene and use temporary light and dark backgrounds to reveal "
+    "residue when available. Remove temporary inspection backgrounds before saving.\n\n"
 )
 
 _SOURCE_RESTORATION = (
@@ -29,10 +41,9 @@ _SOURCE_RESTORATION = (
 )
 
 _RESTORATION_RECOVERY = (
-    "If faithful restoration is difficult, use the remaining correction allowance to improve "
-    "the source mask, find a clearer verified original, or compose around authenticated visible "
-    "details. Preserve the strongest composition and authentic expression. Avoid repeated "
-    "facial regeneration and approximate likenesses.\n\n"
+    "If faithful restoration is difficult, refine the source mask, find a clearer verified "
+    "original, or compose around authenticated visible details. Preserve the strongest composition "
+    "and authentic expression. Avoid repeated facial regeneration and approximate likenesses.\n\n"
 )
 
 _FALLBACK_FINISH = (
@@ -45,7 +56,8 @@ _FALLBACK_FINISH = (
 )
 
 _UNRESOLVED_REVIEW = (
-    "If authenticity still cannot be verified within the existing limits, retain the strongest "
+    "Give visible masking and blending defects a focused finishing pass where the tools and source "
+    "allow. If authenticity or integration still cannot be verified, retain the strongest "
     "faithful version and record the specific discrepancy in REVIEW NOTES. Continue the existing "
     "saves, verification and delivery steps for the available work. Mark the unresolved candidate "
     "needs_attention in review metadata where saved, and preserve any verified PSD it was meant "
@@ -55,7 +67,8 @@ _UNRESOLVED_REVIEW = (
 )
 
 AUTHENTICITY_CHECK = (
-    _SOURCE_COMPARISON + _SOURCE_RESTORATION + _RESTORATION_RECOVERY + _FALLBACK_FINISH + _UNRESOLVED_REVIEW
+    _SOURCE_COMPARISON + _SOURCE_RESTORATION + _MASK_FINISH + _RESTORATION_RECOVERY
+    + _FALLBACK_FINISH + _UNRESOLVED_REVIEW
 )
 
 CREATE_DESIGN_AUTHENTICITY_CHECK = (
@@ -67,6 +80,7 @@ CREATE_DESIGN_AUTHENTICITY_CHECK = (
     "when needed for seamless integration. Keep successful pose, uniform detail, composition "
     "and body integration unless a visible error warrants a change. Avoid a full-athlete "
     "source cutout as the default fix and keep rectangular photo overlays out of the artwork.\n\n"
+    f"{_MASK_FINISH}"
     "Match exposure, colour, contrast, shadow, texture and sharpness with restrained photographic "
     "grading. Preserve facial features, natural skin, genuine marks and the source perspective. "
     "Match texture through photographic detail and consistent tones. Keep decorative grunge, "
@@ -87,11 +101,9 @@ CREATE_DESIGN_AUTHENTICITY_CHECK = (
     "darkness, blur, smoke or heavy grain to conceal them. Keep a correction only when "
     "it improves the intended defect without weakening authenticity, integration or composition. "
     "If a more faithful face introduces a worse cutout or disconnected body, revert it and use "
-    "a smaller repair or another targeted correction within the existing allowance.\n\n"
+    "a smaller repair or another targeted finishing correction.\n\n"
     f"{_RESTORATION_RECOVERY}{_FALLBACK_FINISH}"
-    "Complete the digital integration review before selecting the final artwork. Address visible "
-    "cutout defects within the existing correction allowance. If an integration defect remains "
-    "at the retry limit, follow the needs_attention and continuation guidance below. Physical "
-    "print proofing is separate from digital artwork inspection.\n\n"
+    "Complete the digital integration review before selecting the final artwork. Physical print "
+    "proofing is separate from digital artwork inspection.\n\n"
     f"{_UNRESOLVED_REVIEW}"
 )
