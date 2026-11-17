@@ -68,7 +68,7 @@ REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
 WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql', '20261006084655_wall_preview_engagement.sql')
 EDITION_MIGRATIONS = ('20261008041452_edition_version_transitions.sql', '20261008045733_edition_version_guard_hardening.sql', '20261008065000_explicit_edition_cursor_override.sql', '20261008090000_edition_admin_cursor_repair.sql')
 REVIEWED_MIGRATION_SHA256 = {
-    '20261117150000_morning_design_queue.sql': 'c4e474994726f4d5c1c87b1c18b6de95f3e297c8ff27a8c8fb3848c751e569da',
+    '20261117150000_morning_design_queue.sql': '2a2cb46778cc536f133f735279ebfde11ab6739d22f9726804d2eb6f84fb7d0c',
     '20261117110000_product_upload_staff_queue.sql': '7b4df2b1b79d05d16ef51308eeaa7391032efa6c2f69c044ae162e28d998fd0b',
     '20261020001929_task_recorder_device_relay.sql': '9ab200bab139b07fe0b5f2b0d33fd3ee15baab4396bde10d3738d2e70f4f6b9b',
     '20261017001547_auto_editions_technical_completion.sql': '07cad75344b5df4d522a2b161e7093bf109d20eebf8961d477f347dd2cd4c7e3',
