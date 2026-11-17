@@ -14,10 +14,7 @@
     finally { field.remove(); }
   };
 
-  document.addEventListener('click', async (event) => {
-    const action = event.target.closest('a[data-design-review-prompt]');
-    if (!action) return;
-    event.preventDefault();
+  const applyEdit = async (action, comments) => {
     if (action.getAttribute('aria-busy') === 'true') return;
     action.setAttribute('aria-busy', 'true');
     const card = action.closest('[class*="st-key-design-review-card-"]');
@@ -34,7 +31,12 @@
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok || !data.prompt) throw new Error(data.error || 'Could not load the edit prompt.');
-        return data.prompt;
+        return data.prompt + '\n\n**USER-REQUESTED DESIGN CHANGES**\n'
+          + (comments || 'No additional changes specified. Follow the existing edit instructions.')
+          + '\n\nAddress the requested changes alongside all existing edit instructions.'
+          + '\n\n**FACIAL FEATURES MUST NEVER CHANGE**\n'
+          + 'Preserve every person’s existing facial features, identity, expression, eyes, gaze, nose, mouth, teeth and facial proportions exactly. '
+          + 'Do not regenerate, reshape, beautify or otherwise alter any face. This constraint takes precedence over any conflicting requested change or edit instruction.';
       });
     // Start clipboard access during the click. The prompt is fetched only for this design.
     const copied = window.ClipboardItem && navigator.clipboard?.write
@@ -81,6 +83,63 @@
     } finally {
       action.removeAttribute('aria-busy');
     }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .sc-review-edit-dialog { box-sizing:border-box; width:min(440px, calc(100vw - 32px)); padding:24px; border:1px solid #e3dace; border-radius:14px; background:#fffdfa; color:#191919; box-shadow:0 16px 60px #0003; font:16px/1.5 system-ui,sans-serif; }
+    .sc-review-edit-dialog::backdrop { background:#0006; }
+    .sc-review-edit-dialog label { display:block; margin-bottom:12px; font-size:17px; font-weight:600; }
+    .sc-review-edit-dialog textarea { box-sizing:border-box; width:100%; min-height:120px; padding:10px 12px; border:1px solid #d8d0c5; border-radius:8px; background:#fff; color:#191919; font:inherit; resize:vertical; }
+    .sc-review-edit-dialog textarea:focus-visible, .sc-review-edit-dialog button:focus-visible { outline:2px solid #a87922; outline-offset:2px; }
+    .sc-review-edit-dialog footer { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+    .sc-review-edit-dialog button { padding:7px 16px; border:1px solid #ddd3c5; border-radius:8px; background:#fff; color:#191919; font:inherit; cursor:pointer; }
+    .sc-review-edit-dialog button[type=submit] { background:#d5a340; border-color:#d5a340; }
+  `;
+  document.head.append(style);
+  let dialog;
+  document.addEventListener('click', (event) => {
+    const action = event.target.closest('a[data-design-review-prompt]');
+    if (!action) return;
+    event.preventDefault();
+    if (action.getAttribute('aria-busy') === 'true' || dialog?.open) return;
+    dialog = document.createElement('dialog');
+    dialog.className = 'sc-review-edit-dialog';
+    dialog.setAttribute('aria-labelledby', 'sc-review-edit-label');
+    const form = document.createElement('form');
+    const label = document.createElement('label');
+    label.id = 'sc-review-edit-label';
+    label.htmlFor = 'sc-review-edit-comments';
+    label.textContent = 'What needs changing?';
+    const comments = document.createElement('textarea');
+    comments.id = 'sc-review-edit-comments';
+    comments.placeholder = 'Describe what’s wrong or how to improve this design…';
+    const footer = document.createElement('footer');
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => dialog.close());
+    const apply = document.createElement('button');
+    apply.type = 'submit';
+    apply.textContent = 'Apply';
+    footer.append(cancel, apply);
+    form.append(label, comments, footer);
+    dialog.append(form);
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      action.focus();
+    }, {once:true});
+    form.addEventListener('submit', (submitEvent) => {
+      submitEvent.preventDefault();
+      if (apply.disabled) return;
+      apply.disabled = true;
+      const instructions = comments.value.trim();
+      dialog.close();
+      void applyEdit(action, instructions);
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    comments.focus();
   });
 })();
 </script>
