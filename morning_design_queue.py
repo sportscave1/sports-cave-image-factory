@@ -42,9 +42,9 @@ def discover(cur):
                     continue
                 insert_suggestion(cur, edition['date'], section, item)
 
-def _job_prompt(key, title, recommendation):
+def _job_prompt(key, title, recommendation, *, primary_market=""):
     from home_morning_brief_actions import _prompt
-    return _prompt(title, recommendation) + (
+    return _prompt(title, recommendation, primary_market=primary_market) + (
         '\n\nAUTOMATIC DESIGN QUEUE RECEIPT\n'
         f'Include morning_design_job_id = "{key}" in the final .upload.json handoff. '
         'Keep this exact field even if the final title changes. Do not put it in the artwork. '
@@ -85,7 +85,10 @@ def _waiting_prompt(job):
 
 def insert_suggestion(cur, day, section, item):
     key = identity(day, section, item)
-    prompt = _job_prompt(key, item['title'], item['recommendation'])
+    from home_brief_calendar import display_markets
+    markets = display_markets(item)
+    prompt = _job_prompt(key, item['title'], item['recommendation'],
+                         primary_market=markets[0] if markets else '')
     cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
         VALUES(%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING''',
         (key, day, section, item['title'], prompt))

@@ -9,6 +9,7 @@ const latest = 'uploadCompanionLast';
 let queue = Promise.resolve();
 importScripts('staff-queue.js');
 importScripts('design-queue.js');
+importScripts('ad-queue.js');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const keyFor = id => 'upload:' + id;
 
@@ -25,11 +26,12 @@ function promptIsValid(prompt) {
 async function run(id, prompt, job) {
   try {
     if (job.cancelled) return;
-    const tab = await chrome.tabs.create({url: job.project || project, active: true});
+    const tab = await chrome.tabs.create({url: job.project || project, active: !job.adJob});
     job.tab = tab.id;
     if (!Number.isInteger(job.tab)) throw new Error();
     if (job.staffJob) await rememberChatTab(job.staffJob, job.tab);
     if (job.designJob) await rememberDesignTab(job.designJob, job.tab);
+    if (job.adJob) await rememberAdTab(job.adJob, job.tab);
     const deadline = Date.now() + 18000;
     let ready;
     do {
@@ -45,7 +47,7 @@ async function run(id, prompt, job) {
     }
     if (job.cancelled) return;
     const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
-      freshUpload:!job.designJob, reference:job.reference}, {frameId:0});
+      freshUpload:!job.designJob && !job.adJob, reference:job.reference}, {frameId:0});
     if (job.cancelled) return;
     if (result?.sent && job.sending) {
       await save(id, 'submitted');

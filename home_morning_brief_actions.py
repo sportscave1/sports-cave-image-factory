@@ -71,12 +71,14 @@ def _story_without_meta_ad(text):
     return "\n".join(lines).strip()
 
 
-def _prompt(title, story, *, edit=None):
+def _prompt(title, story, *, edit=None, primary_market=""):
     context = _story_without_meta_ad(story)
     if edit is not None:
         from design_review_prompt import build_edit_prompt
         return build_edit_prompt(title, context, edit["source"], edit["metadata"])
 
+    market_note = (f' Include primary_market = "{primary_market}" in the design JSON for downstream ad targeting.'
+                   if primary_market in {'AUS', 'USA', 'UK', 'CA', 'CAN', 'NZ'} else '')
     return f"""Sports Cave event: {title}
 
 **Start the authorised new-design job**
@@ -122,7 +124,7 @@ On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Pre
 
 **6. Write the Smart Upload JSON and deliver**
 
-After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.
+After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.{market_note}
 
 Display the inspected final artwork, or the best available provisional result if a required checkpoint is pending. Report verified PSD and JSON paths, any pending checkpoint and quality concerns separately. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
 

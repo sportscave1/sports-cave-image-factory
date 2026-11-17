@@ -8,8 +8,8 @@ from meta_posting_jobs import JOBS
 from ads_posting_progress import track
 
 
-def references(ad_type):
-    overview, refs, overview_error, refs_error = posting._meta_state(ad_type=ad_type)
+def references(ad_type, *, state=None):
+    overview, refs, overview_error, refs_error = posting._meta_state(ad_type=ad_type, state=state)
     if overview_error or refs_error or not overview.get('posting_ready'):
         raise ValueError(overview_error or refs_error or 'Meta setup is unavailable. Refresh Meta in Posting.')
     if not (refs.get('dataset_resolution') or {}).get('resolved'):

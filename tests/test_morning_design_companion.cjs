@@ -13,9 +13,9 @@ function fixture(records = new Map()) {
     alarms:{get:async()=>null,create:async()=>{},onAlarm:{addListener(){}}},
     storage:{local:{get:async key=>({[key]:records.get(key)}),set:async values=>{
       for (const [key,value] of Object.entries(values)) records.set(key,value);
-    }}},
+    }, remove:async key=>records.delete(key)}},
     tabs:{
-      create:async ({url})=>{const tab={id:opened.length+1,url};opened.push(tab);tabs.set(tab.id,tab);return tab;},
+      create:async ({url,active})=>{const tab={id:opened.length+1,url,active};opened.push(tab);tabs.set(tab.id,tab);return tab;},
       get:async id=>tabs.get(id),
       sendMessage:async (id,message)=>{
         if(message.type==='project:ready')return {ready:true};
@@ -94,6 +94,27 @@ test('a second queued design starts only when the server advances after completi
   await f.run('designQueueTick()'); await f.run('queue');
   assert.equal(f.sent.length,2);
   assert.deepEqual(Object.keys(f.records.get('morningDesignJobs')),[job(2).id]);
+});
+
+test('the ad queue opens a background project once and reports a matching receipt', async () => {
+  const f = fixture();
+  const id = job(1).id;
+  const ad = {id,stage:'opening',receipt:'a'.repeat(64),
+              project:'https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/project',
+              prompt:'Sports Cave automatic ad job '+id+'\nGenerate the ad.'};
+  f.respond({job:ad});
+  await f.run('adQueueTick()');
+  await f.run('queue');
+  assert.equal(f.opened[0].active,false);
+  assert.equal(f.sent[0].prompt,ad.prompt);
+  await f.run('adQueueTick()');
+  await f.run('queue');
+  assert.equal(f.events().id,id);
+  assert.equal(f.events().state,'submitted');
+  assert.equal(f.opened.length,1);
+  f.respond({});
+  await f.run('adQueueTick()');
+  assert.equal(f.records.has('publishAdJob'),false);
 });
 
 test('an explicitly requeued design uses a fresh receipt and submits exactly once',async()=>{
