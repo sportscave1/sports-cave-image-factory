@@ -19,7 +19,7 @@ function fixture(records = new Map()) {
       get:async id=>tabs.get(id),
       sendMessage:async (id,message)=>{
         if(message.type==='project:ready')return {ready:true};
-        if(message.type==='project:progress')return {blocked:false};
+        if(message.type==='project:progress')return {blocked:false,chat_url:job(1).project.replace('/project','/c/00000000-0000-0000-0000-000000000099')};
         const sender={url:tabs.get(id).url,frameId:0,tab:{id}};
         const permission=await new Promise(resolve=>listeners[0]({type:'project:permit',id:message.id},sender,resolve));
         assert.equal(permission.ok,true);
@@ -55,6 +55,7 @@ test('one design submits through the existing mutex and never resubmit on repeat
   await f.run('queue');
   assert.equal(f.sent.length,1);
   assert.equal(f.events().events.filter(e=>e.state==='submitted').length,1);
+  assert.ok(f.events().events[0].chat_url.endsWith('/c/00000000-0000-0000-0000-000000000099'));
   const restart=fixture(f.records);
   restart.respond({jobs});
   await restart.run('designQueueTick()');

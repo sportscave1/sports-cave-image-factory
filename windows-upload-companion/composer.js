@@ -120,7 +120,7 @@
       const body = last?.matches('h4') ? last.nextElementSibling : last;
       const generating = document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"]');
       const match = !generating && body?.innerText.match(/(?:^|\n)SC_DESIGN_BLOCKED: ([^\n]+)\s*$/);
-      reply({blocked:Boolean(match), reason:match?.[1]?.slice(0, 1600) || ''});
+      reply({blocked:Boolean(match), reason:match?.[1]?.slice(0, 1600) || '', chat_url:location.href});
       return;
     }
     if (!inProject()) return;
