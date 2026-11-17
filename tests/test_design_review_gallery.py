@@ -345,6 +345,7 @@ else:
     import product_upload_staff_queue as queue
     cursor = env[1]
     cursor.execute((Path(gallery.__file__).parent / 'migrations/20261117110000_product_upload_staff_queue.sql').read_text(encoding='utf-8'))
+    cursor.execute((Path(gallery.__file__).parent / 'migrations/20261118070000_product_upload_manual_restart.sql').read_text(encoding='utf-8'))
     cursor.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     monkeypatch.setattr(queue, 'connect', store.connect)
     next(button for button in ui.button if button.label == 'Publish now').click().run()

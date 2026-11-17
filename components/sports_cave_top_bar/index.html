@@ -235,6 +235,11 @@
     #sc-os-staff-upload-list p {color:#d9cdb4;font-size:12px;line-height:1.3;margin:2px 0;overflow-wrap:anywhere;}
     .sc-os-staff-upload-links {display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;}
     #sc-os-staff-upload-list a {color:#f3ce7e;}
+    .sc-os-upload-reset {width:24px;height:24px;flex:none;padding:3px;border:1px solid #63512d;border-radius:5px;background:transparent;color:#f3ce7e;cursor:pointer;font:18px/1 Arial,sans-serif;}
+    .sc-os-upload-reset[hidden] {display:none;}
+    .sc-os-upload-reset:hover {background:#3b3020;}
+    .sc-os-upload-reset:disabled {opacity:.5;cursor:wait;}
+    #sc-os-staff-upload-list .sc-os-upload-reset {float:right;margin:0 0 4px 6px;}
     #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-search-wrap {justify-self:start;max-width:500px;}
     #${ROOT_ID}.sc-has-staff-upload.sc-has-posting {
       grid-template-columns:var(--sc-sidebar-width) auto auto minmax(0,1fr) auto auto auto;
@@ -984,6 +989,7 @@
           <div id="sc-os-staff-upload-list" aria-label="Your product uploads"></div>
         </div>
       </details>
+      <button id="sc-os-staff-upload-reset" class="sc-os-upload-reset" type="button" hidden aria-label="Restart failed upload" title="Restart this failed upload">↻</button>
       ${["design", "upload"].map(queue =>
         `<button id="sc-os-queue-${queue}" class="sc-os-queue-control" type="button" hidden></button>`
       ).join("")}
@@ -1096,6 +1102,39 @@
     let queueRevision = 0;
     const pendingQueues = new Set();
     let lastStaffStatus = "";
+    const pendingRestarts = new Set();
+    const summaryReset = root.querySelector("#sc-os-staff-upload-reset");
+    const bindRestart = (button, item) => {
+      button.hidden = item?.stage !== 7 || item?.restartable === false;
+      button.disabled = pendingRestarts.has(item?.id);
+      button.onclick = async event => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        if (item?.stage !== 7 || pendingRestarts.has(item.id)) return;
+        pendingRestarts.add(item.id);
+        button.disabled = true;
+        const scope = state.config.uploadScope;
+        try {
+          const response = await parentWindow.fetch("/api/staff-product-uploads/restart", {
+            method:"POST", credentials:"same-origin", signal:listenerController.signal,
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({id:item.id, updated_at:item.updated_at}),
+          });
+          if (!response.ok) throw new Error("Restart failed");
+          if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
+          lastStaffStatus = "";
+          await refreshStaffProgress();
+        } catch (_error) {
+          if (!listenerController.signal.aborted && scope === state.config.uploadScope) {
+            showUploadNotice({id:`restart-${item.id}-${item.updated_at}`, kind:"error",
+              text:"Could not restart this upload. Refresh its status and try again."});
+          }
+        } finally {
+          pendingRestarts.delete(item.id);
+          button.disabled = false;
+        }
+      };
+    };
     let uploadOverlayRevision = 0;
     const dismissUploadOverlays = () => {
       uploadOverlayRevision++;
@@ -1191,11 +1230,13 @@
         lastStaffStatus = serialized;
         if (!jobs.length) {
           staffProgress.open = false;
+          summaryReset.hidden = true;
           return;
         }
         const label = job => job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
         const job = jobs[0];
+        bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
         uploadSummary.title = job.title + " · " + label(job);
         root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
@@ -1208,6 +1249,16 @@
           const entry = doc.createElement("article");
           const title = doc.createElement("strong");
           title.textContent = item.title;
+          if (item.stage === 7 && item.restartable !== false) {
+            const reset = doc.createElement("button");
+            reset.type = "button";
+            reset.className = "sc-os-upload-reset";
+            reset.textContent = "↻";
+            reset.title = "Restart this failed upload";
+            reset.setAttribute("aria-label", "Restart upload: " + item.title);
+            bindRestart(reset, item);
+            entry.append(reset);
+          }
           const progress = doc.createElement("p");
           progress.textContent = label(item);
           entry.append(title, progress);

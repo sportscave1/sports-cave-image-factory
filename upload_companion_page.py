@@ -53,12 +53,32 @@ def estimated_progress(job):
     return percent, f'About {int(elapsed)} min elapsed · time-based estimate, not measured completion'
 
 
-def _jobs(jobs, *, designs, paused=False):
+def _jobs(jobs, *, designs, paused=False, user=None):
     import streamlit as st
     active_end = 3 if designs else 5
     active = [j for j in jobs if 1 <= j['stage'] <= active_end]
     waiting = [j for j in jobs if j['stage'] == 0]
     finished = [j for j in jobs if j['stage'] > active_end]
+    if not designs:
+        failed = [j for j in finished if j['stage'] == 7]
+        if failed:
+            _markup('<div class="cq-section"><h3>Needs attention</h3></div>')
+        for job in failed:
+            with st.container(border=True):
+                text, action = st.columns([12, 1])
+                with text:
+                    _markup(f'<div class="cq-job"><h4>{_html(job["title"])}</h4></div>')
+                    st.caption(job.get('detail') or job['label'])
+                with action:
+                    if st.button('', icon=':material/restart_alt:', key='cq-upload-reset-'+job['id'],
+                                 help='Restart this failed upload', disabled=user is None):
+                        from product_upload_staff_queue import restart
+                        try:
+                            restart(job['id'], user, job['updated_at'])
+                            st.rerun()
+                        except (ValueError, PermissionError) as error:
+                            st.error(str(error))
+        finished = [j for j in finished if j['stage'] != 7]
     _markup('<div class="cq-section"><h3>Running now</h3></div>')
     if not active:
         message = ('Queue paused. Press Play to start the next job.' if paused else
@@ -103,7 +123,7 @@ def render_page(user):
         with designs:
             render_design_queue()
         with uploads:
-            render_queue()
+            render_queue(user)
 
 
 def _connection(online):
@@ -112,7 +132,7 @@ def _connection(online):
             '<span>Updates every 10 seconds</span></div>')
 
 
-def render_queue():
+def render_queue(user=None):
     import streamlit as st
     from product_upload_staff_queue import list_jobs, settings
 
@@ -147,7 +167,7 @@ def render_queue():
                 _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
         _markup('<div class="cq-notice"><b>Add uploads from Design Studio</b><span>Press Publish now on each artwork. '
                 'They wait here and run one at a time while the queue is playing.</span></div>')
-        _jobs(status['jobs'], designs=False, paused=not control['enabled'])
+        _jobs(status['jobs'], designs=False, paused=not control['enabled'], user=user)
         st.caption('Showing the latest 20 upload jobs. Keep Edge open and the computer awake.')
     history()
 

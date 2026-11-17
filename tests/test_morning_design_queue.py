@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def store(database, monkeypatch):
     db, cur = database
-    for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql'):
+    for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql', '20261118070000_product_upload_manual_restart.sql'):
         cur.execute((ROOT / 'migrations' / name).read_text(encoding='utf8'))
     cur.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     cur.execute('''CREATE TABLE IF NOT EXISTS shopify_products (

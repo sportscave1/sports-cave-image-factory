@@ -149,3 +149,8 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
     assert recreated_id != handoff['companion_id']
     assert recreated_id == prepare(result, row, {**recreated, 'recreated_folder': False}, creative)['reference_companion_id']
     assert recreated_id == prepare(result, row, recreated, creative)['companion_id']
+    row['data']['staff_upload_attempt'] = 'manual-restart-fixture'
+    retry = prepare(result, row, receipt, creative)
+    assert retry['companion_id'] != handoff['companion_id']
+    assert retry['companion_id'] == prepare(result, row, receipt, creative)['companion_id']
+    assert str(row['id']) in retry['prompt']  # stable upload correlation

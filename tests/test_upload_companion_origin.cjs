@@ -105,6 +105,15 @@ async function main() {
   await context.staffQueueTick();
   assert.equal(requests.at(-1).state,'submitted');
   assert.equal(tabs.length,1);
+  // A server-authorised manual reset has a fresh delivery ID. The installed
+  // companion opens it despite the previous tab and submitted receipt.
+  const retryJob='8a89bf11-c607-4995-9361-acd988272cbc';
+  claim={id:retryJob,stage:1};
+  await context.staffQueueTick();
+  assert.equal(tabs.length,2);
+  assert.equal(new URL(tabs[1].url).searchParams.get('staff_upload_job'),retryJob);
+  assert.equal(await context.rememberStaffReceipt(queued,'d'.repeat(64),tabId+1),false);
+  assert.equal(await context.rememberStaffReceipt(retryJob,'d'.repeat(64),tabId+2),true);
   console.log('Upload Companion accepts the live Streamlit iframe URL and rejects other origins, paths and top-level frames.');
 }
 main().catch(error => {

@@ -16,6 +16,17 @@ class Jobs:
     def __init__(self):
         self.pool=ThreadPoolExecutor(max_workers=2,thread_name_prefix='product-upload')
         self.lock=RLock();self.preparation=Lock();self.jobs={}
+        self.staff_attempts={}
+
+    def begin_staff_attempt(self,key,actor,attempt):
+        """A clicked reset clears terminal errors once; polling never clears a new failure."""
+        identity=(str(actor),str(key))
+        with self.lock:
+            if self.staff_attempts.get(identity)==attempt:return
+            self.staff_attempts[identity]=attempt
+            for task,job in list(self.jobs.items()):
+                if task[:2]==identity and job['state'] in ('Failed','Cancelled'):
+                    del self.jobs[task]
 
     def submit(self,key,actor,operation,fingerprint,work):
         identity=(str(actor),str(key),operation)

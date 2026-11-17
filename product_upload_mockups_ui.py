@@ -57,6 +57,9 @@ def render_page(app):
                 advance(staff_key, user['id'], 7, 'Could not open the original PSD. Check Dropbox and Design Studio.', allowed=[1])
                 return
         requested = str(staff_job['intake_id'])
+        if staff_job.get('dispatch_id'):
+            from product_upload_jobs import JOBS
+            JOBS.begin_staff_attempt(requested, user['id'], str(staff_job['dispatch_id']))
         if st.session_state.get('_product_upload_active') != requested:
             review_launch = requested
         desktop_progress(staff_key, requested, user['id'])
