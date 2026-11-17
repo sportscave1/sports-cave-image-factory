@@ -5,6 +5,10 @@ import logging
 import os
 import signal
 import threading
+import hashlib
+from copy import deepcopy
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import home_design_refresh as refresh
 import home_meta_morning_brief as meta
@@ -15,6 +19,7 @@ from supabase_backend import connect, get_app_setting
 
 LOG = logging.getLogger(__name__)
 PREFIX = "hosted_daily_brief:"
+MAX_ATTEMPTS = 30
 BRIEFS = {
     "sports": (sports.parse_edition, sports.publish, sports.MAX_PAYLOAD),
     "meta": (meta.parse_edition, meta.publish, meta.MAX_PAYLOAD),
@@ -28,9 +33,53 @@ def enabled():
     return os.getenv("SPORTS_CAVE_HOSTED_BRIEFS", "").strip() == "1"
 
 
+def normalize(kind, edition):
+    """Only shorten presentation copy; never alter IDs, counts, dates or evidence."""
+    edition = deepcopy(edition)
+    if kind == "design_refresh" and isinstance(edition.get("candidates"), list):
+        for row in edition["candidates"]:
+            if isinstance(row, dict) and isinstance(row.get("suggestion"), str):
+                text = row["suggestion"].strip()
+                if len(text) > 220:
+                    text = text[:217].rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
+                row["suggestion"] = text
+    return edition
+
+
+def publication(kind, today):
+    """Read and validate the actual Home record, independently of the queue."""
+    current = get_app_setting(LATEST_KEYS[kind], ensure_schema_first=False) or {}
+    if current.get("date") != str(today):
+        return None
+    raw = json.dumps(current, ensure_ascii=False)
+    try:
+        if kind == "meta":
+            parsed = meta.parse_edition(raw, today, stored=True)
+            if not parsed.get("summary"):
+                return None
+            # These metrics are independently enriched by the Home publisher.
+            parsed.pop("ga4_orders", None)
+            parsed["roas"] = None
+        elif kind == "design_refresh":
+            parsed = refresh.parse(json.dumps({k: current[k] for k in ("date", "candidates")}), today)
+        else:
+            parsed = sports.parse_edition(raw, today)
+            if not parsed.get("full_brief"):
+                return None
+        return parsed
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def digest(edition):
+    return hashlib.sha256(json.dumps(edition, sort_keys=True, ensure_ascii=False,
+                                    separators=(",", ":")).encode()).hexdigest()
+
+
 def enqueue(kind, edition, claims):
     if kind not in BRIEFS or not isinstance(edition, dict):
         raise ValueError("Choose a brief type and supply a completed edition object.")
+    edition = normalize(kind, edition)
     parse, _, limit = BRIEFS[kind]
     today = sydney_date()
     raw = json.dumps(edition, ensure_ascii=False)
@@ -62,10 +111,68 @@ def enqueue(kind, edition, claims):
 def status(kind):
     if kind not in BRIEFS:
         raise ValueError("Choose a known brief type.")
-    today = str(sydney_date())
+    day = sydney_date()
+    today = str(day)
     job = get_app_setting(f"{PREFIX}{today}:{kind}", ensure_schema_first=False) or {}
-    return {"brief": kind, "date": today, "status": job.get("status", "awaiting_report"),
-            "attempts": job.get("attempts", 0)}
+    published = publication(kind, day)
+    verified = published is not None
+    state = job.get("status", "awaiting_report")
+    if state == "completed" and not verified:
+        state = "publication_missing"
+    result = {"brief": kind, "date": today,
+              "status": "completed" if verified else state,
+              "attempts": job.get("attempts", 0), "verified": verified,
+              "publication_date": published["date"] if verified else None,
+              "stage": "published" if verified else "research_or_submission" if not job else
+                       job.get("error_stage", "publication"),
+              "retryable": not verified and job.get("status") in ("scheduled", "running", "retrying")}
+    if verified:
+        result["publication_sha256"] = digest(published)
+        result["matches_submission"] = (published == BRIEFS[kind][0](
+            json.dumps(job["edition"], ensure_ascii=False), day)) if job else None
+    elif job.get("error"):
+        result["error"] = job["error"]
+    return result
+
+
+def reconcile_morning(now=None):
+    """Durable ten-minute reconciliation; cloud tasks recover missing research."""
+    now = now or datetime.now(ZoneInfo("Australia/Sydney"))
+    minute = now.hour * 60 + now.minute
+    # Include the final slot even if a restart happens just after 06:30.
+    if not 330 <= minute < 400:
+        return False
+    slot = minute // 10 * 10
+    day = now.date()
+    key = f"hosted_daily_brief_health:{day}"
+    previous = get_app_setting(key, ensure_schema_first=False) or {}
+    if previous.get("slot") == slot:
+        return False
+    states = {kind: status(kind) for kind in BRIEFS}
+    for kind, state in states.items():
+        if state["verified"]:
+            continue
+        # Restore a lost Home write only from the original accepted edition.
+        # Do not retry deterministic authorization/validation failures.
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """UPDATE app_settings SET
+                       value=jsonb_set(value, '{status}', '\"retrying\"'::jsonb),
+                       updated_at=now()-interval '2 minutes'
+                   WHERE key=%s AND value->>'status'='completed'
+                     AND (value->>'attempts')::integer < %s""",
+                (f"{PREFIX}{day}:{kind}", MAX_ATTEMPTS),
+            )
+    health = {"date": str(day), "slot": slot, "checked_at": now.isoformat(),
+              "briefs": states, "ready": all(s["verified"] for s in states.values()),
+              "deadline_reached": slot >= 390}
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES (%s,%s::jsonb,now())
+                       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()""",
+                    (key, json.dumps(health)))
+    LOG.info("daily_brief_reconciliation date=%s slot=%s ready=%s deadline=%s",
+             day, slot, health["ready"], health["deadline_reached"])
+    return True
 
 
 def process_one():
@@ -102,28 +209,45 @@ def process_one():
         if job["kind"] != "sports" and not meta.can_view(owner):
             raise PermissionError("reporting access changed")
         current = get_app_setting(LATEST_KEYS[job["kind"]], ensure_schema_first=False) or {}
-        if current.get("date", "") < job["date"]:
-            if job["attempts"] > 3:
+        if current.get("date", "") > job["date"]:
+            raise ValueError("newer edition already published")
+        published_here = False
+        if current.get("date", "") < job["date"] or publication(job["kind"], today) is None:
+            if job["attempts"] > MAX_ATTEMPTS:
                 raise ValueError("retry limit reached")
             _, publish, _ = BRIEFS[job["kind"]]
             publish(json.dumps(job["edition"], ensure_ascii=False), owner)
+            published_here = True
         elif (job["kind"] == "sports" and current.get("date") == job["date"]
               and not current.get("legends") and job["edition"].get("legends")):
             # The desktop fallback may have already published today's sports copy.
             # Add the new section without replacing that edition's sports content.
             edition = sports.parse_edition(json.dumps(job["edition"], ensure_ascii=False), today)
             if edition.get("legends"):
-                if job["attempts"] > 3:
+                if job["attempts"] > MAX_ATTEMPTS:
                     raise ValueError("retry limit reached")
                 sports.publish_legends(edition, today, overwrite=False)
+        actual = publication(job["kind"], today)
+        if actual is None:
+            raise RuntimeError("Home readback did not verify publication")
+        expected = BRIEFS[job["kind"]][0](json.dumps(job["edition"], ensure_ascii=False), today)
+        if published_here:
+            # Sports may preserve an existing, independently verified Legends section.
+            compared = {k: actual.get(k) for k in expected}
+            if compared != expected:
+                raise ValueError("published content differs from the accepted edition")
+        job["publication_sha256"] = digest(actual)
+        job["verified"] = True
     except (ValueError, PermissionError) as error:
-        job.update(status="failed", error=type(error).__name__)
+        job.update(status="failed", error=type(error).__name__,
+                   error_stage="authorization" if isinstance(error, PermissionError) else "validation")
     except Exception as error:
-        job.update(status="retrying" if job["attempts"] < 3 else "failed",
-                   error=type(error).__name__)
+        job.update(status="retrying" if job["attempts"] < MAX_ATTEMPTS else "failed",
+                   error=type(error).__name__, error_stage="publication")
     else:
         job.update(status="completed")
         job.pop("error", None)
+        job.pop("error_stage", None)
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             """UPDATE app_settings SET value=%s::jsonb, updated_at=now()
@@ -140,6 +264,10 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
     while not stop.is_set():
+        try:
+            reconcile_morning()
+        except Exception as error:
+            LOG.warning("daily_brief_reconciliation_failed type=%s", type(error).__name__)
         try:
             if process_one():
                 continue

@@ -245,6 +245,18 @@ def recent_ids(today):
 
 
 def parse(raw, today):
+    # Keep actionable field errors outside the legacy generic error handler.
+    try:
+        preview = json.loads(raw)
+    except (ValueError, TypeError, RecursionError):
+        preview = None
+    if isinstance(preview, dict) and isinstance(preview.get("candidates"), list):
+        for index, row in enumerate(preview["candidates"]):
+            if isinstance(row, dict):
+                for field, limit in (("title", 160), ("evidence", 220), ("suggestion", 220)):
+                    value = row.get(field)
+                    if isinstance(value, str) and len(value.strip()) > limit:
+                        raise ValueError(f"candidates[{index}].{field} exceeds {limit} characters; shorten and resubmit.")
     try:
         edition = json.loads(raw)
         if (not isinstance(edition, dict) or set(edition) != {"date", "candidates"}

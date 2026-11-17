@@ -101,7 +101,7 @@ def test_hosted_legends_fills_an_already_published_sports_edition(database, monk
         monkeypatch.setattr(module, "connect", jobs.connect)
     monkeypatch.setattr(os_accounts.DEFAULT_STORE, "get_user", lambda _: {**OWNER, "session_version": 1})
     monkeypatch.setattr(os_accounts, "can_access_page", lambda *_: True)
-    prior = brief.publish(edition(), OWNER)
+    prior = brief.publish(json.dumps({**json.loads(edition()), "full_brief": "Complete local edition."}), OWNER)
     payload = {**json.loads(edition(recommendation="Hosted story")), "full_brief": "Complete edition.",
                "legends": [legend()]}
     worker.enqueue("sports", payload, {"sub": "owner", "version": "1"})
