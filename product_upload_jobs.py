@@ -96,7 +96,10 @@ def _prepare_artwork(connect, key, actor, provider_factory, progress, *, retry_t
     with JOBS.preparation:
         while True:
             try:
-                return process(connect, None, key, actor, provider_factory=provider_factory, progress=progress)
+                row = process(connect, None, key, actor, provider_factory=provider_factory, progress=progress)
+                if row['data'].get('server_artwork', {}).get('state') == 'Preparing':
+                    raise PreparationBusyError('Waiting for the existing source preparation.', status_code=409)
+                return row
             except PreparationBusyError:
                 progress('Waiting for source preparation')
                 if monotonic() >= deadline:
@@ -148,7 +151,7 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                     created_run=kwargs.get('run_dir')
                     completed+=1
                     progress('Generating mockups',completed,5,record['preview_path'])
-                with prepared(row,connect,provider) as (ready_row,folder):
+                with prepared(row,connect,provider,progress=progress) as (ready_row,folder):
                     progress('Generating mockups',0,5)
                     from product_upload_lifestyle import individual_prompt_items
                     result=factory.generate_product_images(name,sport,folder/'artwork.png',base_dir=base_dir,
