@@ -16,6 +16,14 @@ def store(database, monkeypatch):
     for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql'):
         cur.execute((ROOT / 'migrations' / name).read_text(encoding='utf8'))
     cur.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
+    cur.execute('''CREATE TABLE IF NOT EXISTS shopify_products (
+        shopify_product_id text PRIMARY KEY,status text,online_store_url text);
+        CREATE TABLE IF NOT EXISTS product_psd_mappings (
+        shopify_product_gid text PRIMARY KEY,dropbox_file_id text UNIQUE,file_path text);
+        CREATE TABLE IF NOT EXISTS product_upload_mapping_holds (
+        operation_id uuid,product_gid text PRIMARY KEY,file_id text);
+        CREATE OR REPLACE FUNCTION public.product_upload_mapping_complete(uuid,text,text)
+        RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;''')
     cur.execute("UPDATE morning_design_control SET enabled=true,start_date='2026-11-17',activated_at='2026-11-17T00:00:00Z'")
     monkeypatch.setattr(queue, 'connect', db.connect)
     monkeypatch.setattr(uploads, 'connect', db.connect)
@@ -47,6 +55,48 @@ def test_header_counts_waiting_jobs_and_reads_both_control_states(store):
         'design': {'waiting': 4, 'enabled': False},
         'upload': {'waiting': 1, 'enabled': False},
     }
+
+
+def test_home_publication_badges_use_current_mapping_and_verified_upload(store):
+    from psd_directory import REVIEW_FOLDER, ROOT
+    cur, _ = store
+    publish(cur, count=2)
+    queue.discover(cur)
+    cur.execute('SELECT id FROM morning_design_jobs ORDER BY title')
+    original, replacement = [row['id'] for row in cur.fetchall()]
+    same_psd = 'Forever a Brewer - Ken Sanders Wall Art.psd'
+    original_psd = 'The Heart of Oil Country - Connor McDavid Wall Art.psd'
+    alternate_psd = 'The Heart of Oil Country – Connor McDavid Wall Art.psd'
+    cur.execute('UPDATE morning_design_jobs SET stage=5,file_id=%s,file_path=%s WHERE id=%s',
+                ('id:brewer', REVIEW_FOLDER + '/' + same_psd, original))
+    cur.execute('UPDATE morning_design_jobs SET stage=5,file_id=%s,file_path=%s WHERE id=%s',
+                ('id:review', REVIEW_FOLDER + '/' + original_psd, replacement))
+    products = ['gid://shopify/Product/101', 'gid://shopify/Product/102']
+    for number, (gid, file_id, asset) in enumerate(zip(products, ['id:brewer', 'id:alternate'], [same_psd, alternate_psd])):
+        cur.execute('INSERT INTO shopify_products (shopify_product_id,status,online_store_url) VALUES (%s,%s,%s)',
+                    (gid, 'ACTIVE', f'https://example.test/products/art-{number}'))
+        cur.execute('INSERT INTO product_psd_mappings (shopify_product_gid,dropbox_file_id,file_path) VALUES (%s,%s,%s)',
+                    (gid, file_id, ROOT + '/' + asset))
+
+    def badges():
+        return [job['label'] for job in sorted(queue.list_jobs('2026-11-17'), key=lambda job: job['title'])]
+
+    assert badges() == ['Completed · uploaded', 'Uploaded · needs review']
+    cur.execute('''INSERT INTO product_upload_staff_jobs (id,source_id,source_rev,title,stage,storefront,created_at)
+        VALUES ('7da624bc-0dab-4580-942f-8343406fada9','id:alternate','R2','Artwork',6,
+                'https://example.test/products/art-1',now()-interval '1 day')''')
+    assert badges() == ['Completed · uploaded', 'Uploaded · needs review']
+    cur.execute("UPDATE product_upload_staff_jobs SET created_at=now() WHERE source_id='id:alternate'")
+    assert badges() == ['Completed · uploaded', 'Completed · uploaded']
+
+    cur.execute('INSERT INTO product_upload_mapping_holds VALUES (%s,%s,%s)',
+                ('7da624bc-0dab-4580-942f-8343406fada9', products[1], 'id:alternate'))
+    cur.execute("UPDATE shopify_products SET status='ARCHIVED' WHERE shopify_product_id=%s", (products[0],))
+    assert badges() == ['Uploaded · needs review', 'Uploaded · needs review']
+    cur.execute('DELETE FROM product_upload_mapping_holds')
+    cur.execute('INSERT INTO product_psd_mappings (shopify_product_gid,dropbox_file_id,file_path) VALUES (%s,%s,%s)',
+                ('gid://shopify/Product/103', 'id:ambiguous', ROOT + '/' + original_psd))
+    assert badges() == ['Uploaded · needs review', 'Uploaded · needs review']
 
 
 def test_claim_upgrades_waiting_legacy_prompt_without_replacing_active_prompt(store):

@@ -2,6 +2,7 @@
 import hashlib
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath
 from uuid import UUID, uuid5, NAMESPACE_URL
 
 from product_upload_staff_queue import connect, digest
@@ -84,16 +85,71 @@ def settings(enabled=None):
         return cur.fetchone()
 
 
-def list_jobs(day=None):
+def _live_artwork_key(path):
+    from psd_directory import REVIEW_FOLDER, ROOT
+    file = PurePosixPath(path)
+    if file.parent.as_posix() not in (ROOT, REVIEW_FOLDER) or file.suffix.lower() != '.psd':
+        return ''
+    return (ROOT + '/' + file.name).lower().translate(str.maketrans('–—', '--'))
+
+
+def _published_designs(cur, jobs):
     from psd_directory import ROOT
+    saved = [job for job in jobs if job['file_id'] and job['file_path']]
+    if not saved:
+        return set()
+    cur.execute('''SELECT m.dropbox_file_id, m.file_path,
+            translate(lower(m.file_path), '–—', '--') AS artwork_key,
+            s.status, s.online_store_url,
+            h.operation_id IS NOT NULL AND NOT COALESCE(
+                public.product_upload_mapping_complete(h.operation_id,h.product_gid,h.file_id), false
+            ) AS pending_mapping,
+            (SELECT max(u.created_at) FROM product_upload_staff_jobs u
+             WHERE u.source_id=m.dropbox_file_id AND u.stage=6
+               AND u.storefront=s.online_store_url) AS publish_upload_created
+        FROM product_psd_mappings m
+        LEFT JOIN shopify_products s ON s.shopify_product_id=m.shopify_product_gid
+        LEFT JOIN product_upload_mapping_holds h ON h.product_gid=m.shopify_product_gid
+        WHERE m.dropbox_file_id=ANY(%s)
+           OR translate(lower(m.file_path), '–—', '--')=ANY(%s)''',
+        (list({job['file_id'] for job in saved}),
+         list({_live_artwork_key(job['file_path']) for job in saved} - {''})))
+    by_file, by_title = {}, {}
+    for mapping in cur.fetchall():
+        by_file[mapping['dropbox_file_id']] = mapping
+        by_title.setdefault(mapping['artwork_key'], []).append(mapping)
+
+    published = set()
+    for job in saved:
+        mapping = by_file.get(job['file_id'])
+        if mapping is None:
+            # A separately saved PSD can fulfil the same design brief. Require
+            # one exact artwork filename and a successful upload started after
+            # that brief entered the queue.
+            candidates = by_title.get(_live_artwork_key(job['file_path']), [])
+            if len(candidates) != 1:
+                continue
+            mapping = candidates[0]
+            receipt = mapping['publish_upload_created']
+            if not receipt or receipt < job['created_at']:
+                continue
+        if (mapping['status'] == 'ACTIVE' and mapping['online_store_url'] and not mapping['pending_mapping']
+                and PurePosixPath(mapping['file_path']).parent.as_posix() == ROOT):
+            published.add(job['id'])
+    return published
+
+
+def list_jobs(day=None):
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
             ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
+        jobs = cur.fetchall()
+        published = _published_designs(cur, jobs)
         return [dict(id=str(r['id']), title=r['title'],
-                     label=('Completed · uploaded' if r['file_path'].rsplit('/', 1)[0] == ROOT
+                     label=('Completed · uploaded' if r['id'] in published
                             else 'Uploaded · needs review' if r['stage'] == 5 and r['file_path'] else LABELS[r['stage']]), stage=r['stage'],
                      chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path'],
-                     updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in cur.fetchall()]
+                     updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in jobs]
 
 
 def verify_outputs(jobs):
