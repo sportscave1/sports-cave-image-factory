@@ -8,25 +8,48 @@ const source = fs.readFileSync(path.join(__dirname, '../windows-upload-companion
 const project = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
 const conversation = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b-sc-mockups-uploads/c/01234567-0123-0123-0123-0123456789ab';
 
-function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '', initialFiles = [], design = false} = {}) {
+function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '',
+  initialFiles = [], design = false, start = 3, total = 6, canSet = true, powerAvailable = true,
+  resetAfterPaste = false} = {}) {
   const location = {href:design ? 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project' : project};
   const files = [...initialFiles];
   const sent = [];
+  const thinking = [];
   let inserted = '', current = false, listener, permitted = 0;
   let now = 0;
+  let selected = start, expanded = false;
+  const trigger = {
+    focus() {},
+    getAttribute: name => name === 'aria-controls' ? 'picker' : String(expanded),
+    dispatchEvent(event) {if (event.key === 'Enter') expanded = !expanded;},
+  };
+  const power = {
+    focus() {},
+    getAttribute: () => 'Power',
+    dispatchEvent(event) {
+      if (event.key === 'Escape') expanded = false;
+      if (canSet && event.key === 'ArrowRight') selected = Math.min(total, selected + 1);
+      if (canSet && event.key === 'ArrowLeft') selected = Math.max(1, selected - 1);
+    },
+  };
+  const menu = {matches: () => true, querySelectorAll: query => query === '[role="menuitem"]'
+    ? (powerAvailable ? [power] : []) : [{textContent:`Some setting, ${selected} of ${total}.`}]};
   const button = {isConnected:true, get disabled() {return now < attachmentReadyAfter;}, getAttribute:() => null, click() {
     sent.push(inserted);
+    thinking.push({selected, expanded});
     current = true;
     location.href = design ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a1e449948e881919c1e345006d63654-sports-cave-designs') : conversation;
   }};
-  const form = {querySelector:() => button, querySelectorAll:() => []};
-  const replacementForm = {querySelector:() => button, querySelectorAll:() => files};
+  const querySelector = query => query.includes('Select ChatGPT model') ? trigger : button;
+  const form = {querySelector, querySelectorAll:() => []};
+  const replacementForm = {querySelector, querySelectorAll:() => files};
   let editor;
 
   const node = {innerText:initialDraft, closest:() => form, matches:() => work, focus() {
     document.activeElement = this;
   }, dispatchEvent(event) {
     inserted = event.clipboardData.getData('text/plain');
+    if (resetAfterPaste) selected = 1;
     if (asAttachment) {
       files.push({getAttribute:() => 'Remove pasted text attachment', parentElement:{
         querySelector:() => ({getAttribute:() => inserted.replace(/\s+/g, ' ').slice(0, 78) + '…'}),
@@ -40,12 +63,14 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
   const body = {get innerText() {return asAttachment ? '' : inserted;}, querySelector:() => asAttachment ? {} : null};
   const document = {
     activeElement:null,
+    getElementById: () => expanded ? menu : null,
     querySelector(query) {
       if (query.includes('data-message-author-role'))return current ? {} : null;
       if (query.startsWith('[role='))return work ? editor : null;
       return work ? null : node;
     },
     querySelectorAll(query) {
+      if (query.includes('Select ChatGPT model')) return [trigger];
       if (!current)return [];
       if (query.startsWith('h4'))return work ? [{nextElementSibling:body}] : [];
       return work ? [] : [{querySelector:() => body}];
@@ -64,12 +89,13 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
     constructor(_type, options) {this.clipboardData = options.clipboardData;}
   }
   vm.runInNewContext(source, {location, document, chrome, DataTransfer:Transfer, ClipboardEvent:Paste,
+    KeyboardEvent:class {constructor(_type, options) {this.key = options.key;}},
     Date:{now:() => now}, setTimeout(callback, ms) {now += ms; queueMicrotask(callback);},
   });
   function invoke(message) {
     return new Promise(resolve => listener(message,{id:'companion'},resolve));
   }
-  return {invoke, sent, permitted:() => permitted};
+  return {invoke, sent, thinking, inserted:() => inserted, permitted:() => permitted};
 }
 
 test('Work waits for the delayed upload, submits the full pasted-text attachment and confirms its user turn', async () => {
@@ -78,6 +104,7 @@ test('Work waits for the delayed upload, submits the full pasted-text attachment
   assert.equal((await browser.invoke({type:'project:ready'})).ready,true);
   assert.equal((await browser.invoke({type:'project:send',id:'receipt',prompt})).sent,true);
   assert.deepEqual(browser.sent,[prompt]);
+  assert.deepEqual(browser.thinking,[{selected:5, expanded:false}]);
   assert.equal(browser.permitted(),1);
 });
 
@@ -104,6 +131,30 @@ test('Design project uses the same verified paste and submit flow for inline and
     const result = await app.invoke({type:'project:send', id:'design-job', prompt});
     assert.equal(result.sent, true);
     assert.deepEqual(app.sent, [prompt]);
+    assert.deepEqual(app.thinking,[{selected:6, expanded:false}]);
     assert.equal(app.permitted(), 1);
+  }
+});
+
+test('Reads the number of stops from the picker and rechecks after a composer replacement', async () => {
+  for (const [config, expected] of [
+    [{design:true, total:8, start:3, resetAfterPaste:true, asAttachment:true},8],
+    [{total:4, start:4},3],
+  ]) {
+    const browser = fixture(config);
+    const result = await browser.invoke({type:'project:send', id:'receipt', prompt:'Complete design or upload prompt.'});
+    assert.equal(result.sent,true);
+    assert.deepEqual(browser.thinking,[{selected:expected, expanded:false}]);
+  }
+});
+
+test('An unavailable or unverified level leaves the composer untouched and never permits send', async () => {
+  for (const config of [{canSet:false}, {powerAvailable:false}, {start:1, total:1}]) {
+    const browser = fixture(config);
+    const result = await browser.invoke({type:'project:send', id:'receipt', prompt:'A prompt'});
+    assert.equal(result.sent,false);
+    assert.match(result.reason,/Could not verify one step below maximum/);
+    assert.equal(browser.inserted(),'');
+    assert.equal(browser.permitted(),0);
   }
 });

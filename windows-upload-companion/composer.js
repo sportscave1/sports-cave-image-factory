@@ -16,6 +16,8 @@
   const existingTurn = () => document.querySelector('[data-message-author-role="user"], [data-message-author-role="assistant"], h4[data-conversation-role="user"], h4[data-conversation-role="assistant"]');
   const attachments = form => Array.from(form?.querySelectorAll('button[aria-label^="Remove file"], button[aria-label^="Remove image"], button[aria-label="Remove pasted text attachment"], button[data-testid*="attachment"]') || []);
   const pastedText = 'Remove pasted text attachment';
+  const pickerSelector = 'button[aria-label="Select ChatGPT model"]';
+  const stepsFromMaximum = design ? 0 : 1;
   async function waitFor(check, ms) {
     const end = Date.now() + ms;
     do {
@@ -25,6 +27,64 @@
     } while (Date.now() < end);
     return null;
   }
+  const keyDown = (element, key) => element.dispatchEvent(
+    new KeyboardEvent('keydown', {key, code:key, bubbles:true, cancelable:true}));
+  function powerControl(trigger) {
+    const controlled = trigger.getAttribute('aria-controls');
+    if (trigger.getAttribute('aria-expanded') === 'false') return null;
+    const menu = (controlled && document.getElementById(controlled)) ||
+      document.querySelector('[role="menu"][aria-label="Select ChatGPT model"]');
+    if (!menu?.matches('[role="menu"]')) return null;
+    const power = Array.from(menu.querySelectorAll('[role="menuitem"]')).find(item =>
+      (item.getAttribute('aria-label') || item.textContent.trim()) === 'Power');
+    const steps = Array.from(menu.querySelectorAll('[role="status"], [aria-live]'))
+      .map(status => status.textContent.match(/(?:^|\D)(\d+)\s+of\s+(\d+)\.?\s*$/i))
+      .find(Boolean);
+    if (!power || !steps) return null;
+    const [, current, total] = steps.map(Number);
+    if (current < 1 || current > total || total <= stepsFromMaximum) return null;
+    return {power, current, total};
+  }
+  async function setThinkingLevel() {
+    const trigger = await waitFor(() => {
+      if (!inProject() || existingTurn()) return null;
+      const inside = formFor(input())?.querySelector(pickerSelector);
+      const pickers = document.querySelectorAll(pickerSelector);
+      return inside || (pickers.length === 1 ? pickers[0] : null);
+    }, 3500);
+    if (!trigger) return false;
+    if (trigger.getAttribute('aria-expanded') !== 'true') {
+      trigger.focus();
+      keyDown(trigger, 'Enter');
+    }
+    try {
+      let control = await waitFor(() => powerControl(trigger), 1800);
+      if (!control) return false;
+      const target = control.total - stepsFromMaximum;
+      while (inProject() && control.current !== target) {
+        const {power, current, total} = control;
+        const direction = current < target ? 1 : -1;
+        power.focus();
+        keyDown(power, direction > 0 ? 'ArrowRight' : 'ArrowLeft');
+        control = await waitFor(() => {
+          const next = powerControl(trigger);
+          return next?.current === current + direction && next.total === total ? next : null;
+        }, 900);
+        if (!control) return false;
+      }
+      if (!inProject() || control.current !== target) return false;
+    } finally {
+      if (trigger.getAttribute('aria-expanded') === 'true') {
+        keyDown(powerControl(trigger)?.power || trigger, 'Escape');
+        await waitFor(() => trigger.getAttribute('aria-expanded') !== 'true', 800);
+      }
+    }
+    return trigger.getAttribute('aria-expanded') !== 'true';
+  }
+  const thinkingUnavailable = () => ({
+    sent:false,
+    reason:`Could not verify ${design ? 'the maximum' : 'one step below maximum'} thinking level in the ChatGPT project composer.`,
+  });
   async function fill(node, form, prompt) {
     // Work turns long pastes into a text attachment, just like Ctrl+V.
     if (node.matches(workEditor)) {
@@ -55,8 +115,12 @@
     if (!inProject() || busy || typeof prompt !== 'string') return {sent:false};
     busy = true;
     try {
-      const node = await waitFor(() => inProject() && input(), 7500);
-      const form = formFor(node);
+      let node = await waitFor(() => inProject() && input(), 7500);
+      let form = formFor(node);
+      if (!node || !form || existingTurn() || attachments(form).length || node.innerText.trim()) return {sent:false};
+      if (!await setThinkingLevel()) return thinkingUnavailable();
+      node = input();
+      form = formFor(node);
       if (!node || !form || existingTurn() || attachments(form).length || node.innerText.trim()) return {sent:false};
 
       node.focus();
@@ -86,6 +150,9 @@
       if (!await waitFor(ready, isWork ? 25000 : 4500)) {
         return {sent:false, reason:'ChatGPT did not make the pasted prompt ready to send.'};
       }
+      // Work may replace the composer when it attaches a long paste.
+      if (!await setThinkingLevel()) return thinkingUnavailable();
+      if (!ready()) return {sent:false};
       const permission = await chrome.runtime.sendMessage({type:'project:permit', id});
       const current = ready();
       if (!permission?.ok || !current) return {sent:false};

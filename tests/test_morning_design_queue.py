@@ -49,6 +49,26 @@ def test_header_counts_waiting_jobs_and_reads_both_control_states(store):
     }
 
 
+def test_claim_upgrades_waiting_legacy_prompt_without_replacing_active_prompt(store):
+    cur, token = store
+    edition = publish(cur, count=2)
+    queue.discover(cur)
+    first, waiting = [queue.identity(edition['date'], 'recommendations', item)
+                      for item in edition['recommendations']]
+    cur.execute("UPDATE morning_design_jobs SET stage=2,prompt=%s WHERE id=%s", ('a chat already submitted this', first))
+    old = ('Old workflow. Report PSD and JSON delivery separately from successful visual checks.\n\n'
+           'Use the original selected story.\n\n**CHOOSE THE COLLECTOR TITLE AND DESIGN DIRECTION**\n\nOld rules')
+    cur.execute("UPDATE morning_design_jobs SET prompt=%s WHERE id=%s", (old, waiting))
+    assert queue.tick(token, [])['jobs'][0]['prompt'] == 'a chat already submitted this'
+    cur.execute("UPDATE morning_design_jobs SET stage=4 WHERE id=%s", (first,))
+    claim = queue.tick(token, [])['jobs'][0]
+    assert claim['id'] == waiting
+    assert 'Use the original selected story.' in claim['prompt']
+    assert f'morning_design_job_id = "{waiting}"' in claim['prompt']
+    assert 'Generate the complete flat artwork once' in claim['prompt']
+    assert 'Old rules' not in claim['prompt']
+
+
 def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     cur, token = store
     publish(cur)
@@ -58,7 +78,8 @@ def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     assert len(queue.list_jobs()) == 5
     for job in first:
         assert f'morning_design_job_id = "{job["id"]}"' in job['prompt']
-        assert 'IDENTITY OVERRIDES GENERATION CONTINUITY' in job['prompt']
+        assert 'Use the original photos as the authority' in job['prompt']
+        assert 'Generate the complete flat artwork once' in job['prompt']
         assert 'Omit the marker for visual concerns alone.' in job['prompt']
     queue.tick(token, [dict(id=job['id'], state='submitted') for job in first])
     assert {j['stage'] for j in queue.list_jobs() if j['id'] in {r['id'] for r in first}} == {2}

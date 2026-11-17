@@ -34,10 +34,9 @@ def discover(cur):
                     continue
                 insert_suggestion(cur, edition['date'], section, item)
 
-def insert_suggestion(cur, day, section, item):
+def _job_prompt(key, title, recommendation):
     from home_morning_brief_actions import _prompt
-    key = identity(day, section, item)
-    prompt = _prompt(item['title'], item['recommendation']) + (
+    return _prompt(title, recommendation) + (
         '\n\nAUTOMATIC DESIGN QUEUE RECEIPT\n'
         f'Include morning_design_job_id = "{key}" in the final .upload.json handoff. '
         'Keep this exact field even if the final title changes. Do not put it in the artwork. '
@@ -46,6 +45,28 @@ def insert_suggestion(cur, day, section, item):
         'concerns needs_attention in the matching JSON even if delivery succeeds. After completing '
         'independent work, end your response with SC_DESIGN_BLOCKED: followed by the exact incomplete '
         'required workflow checkpoint, if one remains. Omit the marker for visual concerns alone.\n')
+
+
+def _waiting_prompt(job):
+    """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
+    prompt = job['prompt']
+    if '\n\n**Start the authorised new-design job**\n\n' in prompt:
+        return prompt
+    # Both legacy versions put the selected brief between these fixed sections.
+    for boundary in (
+        'Report PSD and JSON delivery separately from successful visual checks.',
+        'Never label failed or unverified quality or production checks as passed.',
+    ):
+        _, found, body = prompt.partition(boundary + '\n\n')
+        brief, end, _ = body.partition('\n\n**CHOOSE THE COLLECTOR TITLE AND DESIGN DIRECTION**')
+        if found and end:
+            return _job_prompt(str(job['id']), job['title'], brief)
+    raise ValueError('The original design brief could not be recovered from the waiting prompt.')
+
+
+def insert_suggestion(cur, day, section, item):
+    key = identity(day, section, item)
+    prompt = _job_prompt(key, item['title'], item['recommendation'])
     cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
         VALUES(%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING''',
         (key, day, section, item['title'], prompt))
@@ -177,10 +198,19 @@ def tick(token, events):
         cur.execute('SELECT enabled FROM morning_design_control WHERE singleton')
         enabled = cur.fetchone()['enabled']
         cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
-        slots = 1 - cur.fetchone()['n']
-        if enabled and slots > 0:
-            cur.execute('''UPDATE morning_design_jobs SET stage=1,updated_at=now() WHERE id IN
-                (SELECT id FROM morning_design_jobs WHERE stage=0 ORDER BY edition_date,created_at,id LIMIT %s)''', (slots,))
+        if enabled and cur.fetchone()['n'] == 0:
+            cur.execute('''SELECT id,title,prompt FROM morning_design_jobs
+                WHERE stage=0 ORDER BY edition_date,created_at,id LIMIT 1 FOR UPDATE''')
+            waiting = cur.fetchone()
+            if waiting:
+                try:
+                    prompt = _waiting_prompt(waiting)
+                except ValueError as error:
+                    cur.execute('''UPDATE morning_design_jobs SET stage=5,message=%s,updated_at=now()
+                        WHERE id=%s AND stage=0''', (str(error), waiting['id']))
+                else:
+                    cur.execute('''UPDATE morning_design_jobs SET stage=1,prompt=%s,updated_at=now()
+                        WHERE id=%s AND stage=0''', (prompt, waiting['id']))
         cur.execute('SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 ORDER BY created_at,id')
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL

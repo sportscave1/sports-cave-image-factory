@@ -233,11 +233,11 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     markup = st.html.call_args.args[0]
     assert "Create Design" in markup and "Create Ad" in markup
     assert "Sports Cave event: Fixture release" in markup
-    assert "Show the photos in this chat first" in markup
-    assert "Hero photo selection" in markup
+    assert "Use web image search to show" in markup
+    assert "the named subject must dominate at thumbnail size" in markup
     assert "designs-canvas.psd" in markup
-    assert "Step 3. **Compose the complete collector artwork." in markup
-    assert "MANDATORY CONTINUATION AND RECOVERY" in markup
+    assert "**Compose the complete collector artwork." in markup
+    assert "Defer dependent steps and finish independent work" in markup
     assert "<h4>Fixture release</h4>" not in markup
     assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
@@ -478,16 +478,16 @@ def test_create_design_uses_recent_performance_as_context_for_a_timeless_title()
     result = _prompt("Tom Banton — The Adelaide Century",
                      "Decision: Monitor the decider before starting another cricket print.")
     assert 'Execution decision: Create “Tom Banton — The Adelaide Century” now.' not in result
-    assert 'Monitor or Wait language as research context' in result
-    assert 'EXECUTION AUTHORITY — START NOW' in result
-    research = result.index('use the authorised Shopify connection in read-only mode')
+    assert 'Monitor or Wait in the brief as research context' in result
+    assert '**Start the authorised new-design job**' in result
+    research = result.index('Use authorised read-only Shopify reports')
     title = result.index('**STORY-LED COLLECTOR TITLES**')
     assert research < title < result.index('Use web image search')
     assert 'closest comparable sport or collector collection' in result
     assert 'Treat unranked products as style references only' in result
     assert 'Use the athlete’s name alone only when that is a deliberate creative choice' in result
-    assert 'completed landmark series such as the Ashes' in result
-    assert 'Use a single concise verified statistic or accolade only if it tells that lasting story' in result
+    assert 'choose a story supporters would still want to display in five years' in result.lower()
+    assert 'Include an accolade, statistic or year only when essential and verified' in result
 
 
 def test_full_edition_and_selected_story_design_prompt(monkeypatch):
@@ -503,98 +503,35 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Design decision: Feature Reece Walsh." in result
     assert "Timing: Before Sunday's final." in result
     assert "Hide this" not in result and "Recommended Meta ad" not in result
-    assert result.index("Use web image search") < result.index("Step 1.") < result.index("Step 2.") < result.index("Step 3.")
-    assert "photographer or agency credit" not in result
-    assert "wall-art reproduction and compositing" not in result
-    assert "If a required operation is unavailable or fails" not in result
-    assert "10/10" not in result
-    assert "three distinct credible sources" not in result
-    assert "SIGNATURE-FREE COLLECTOR COMPOSITION" in result
-    signature = result.index("SIGNATURE-FREE COLLECTOR COMPOSITION")
-    first_generation = result.index("Step 5. Use the image generation tool")
-    first_review = result.index("Step 6. Inspect the generated artwork")
-    first_save = result.index("Step 7. Place the first complete artwork")
-    second_pass = result.index("**STEP 8")
-    pending_trial = result.index("If the trial save is pending, use the retained first artwork", second_pass)
-    second_generation = result.index("Make a **new image-generation call**")
-    final_save = result.index("**8E. Save and verify the final PSD**")
-    cleanup = result.index("After the final save and technical PSD checks pass")
-    display = result.index("Display the inspected final artwork after cleanup")
-    assert signature < first_generation < first_review < first_save < second_pass
-    assert pending_trial < second_generation < final_save < cleanup < display
-    assert "A missing master or failed trial save still allows both generations" in result
-    assert "Defer only the failed operation and its dependants" in result
-    assert "pending checkpoint and retained work" in result
-    assert "Continue to the final display and status in Step 8F." in result[second_generation:final_save]
-    assert "Never write a handoff for the trial or overwrite an existing file." in result
-    assert "Dropbox must have confirmed the trial save" not in result
-    assert "After Dropbox confirms the trial save and before the second generation" not in result
-    assert "skip it without prompting and use an authorised alternative" in result
-    assert "at most two additional image-generation attempts total across both passes" in result
-    assert "up to the three strongest accessible references per featured person" not in result
-    assert "search beyond the first three sources" not in result
-    assert "Source-pixel finishing is outside that allowance." in result
-    recovery = result[result.index("**Failure handling"):result.index("Track delivery separately")]
-    for rule in (
-        "**Technical:**", "**Access:**", "**Moderation:**",
-        "Record the exact error and any stated reason",
-        "Never disguise it or switch tools to bypass moderation",
-        "Otherwise mark that generation pending",
-        "preserve verified sources, master inspection, composition plan and REVIEW NOTES",
-        "Never save an empty PSD or count a photo fallback as generation",
+    sections = (
+        "Research the story, sources and master", "Prepare the complete composition before generation",
+        "Generate the complete flat artwork once", "Inspect and finish at 100% and thumbnail size",
+        "Assemble, save and verify one final Review PSD", "Write the Smart Upload JSON and deliver",
+    )
+    positions = [result.index(heading) for heading in sections]
+    assert positions == sorted(positions)
+    for obsolete in ("- TRIAL.psd", "second pass", "second-pass", "recoverable delete"):
+        assert obsolete.lower() not in result.lower()
+    for guard in (
+        "Use the original photos as the authority",
+        "Retry image generation once only if a technical failure produced no usable output",
+        "use original photo pixels and PSD adjustments for corrections",
+        "never retry by disguising or bypassing a rejection",
+        "Keep master-dependent assembly, saves and verification pending",
+        "Keep a photo-only fallback clearly provisional",
+        "Do not search for, source, generate, trace, reproduce or include athlete signatures",
+        "VISIBLE COLLECTOR TRANSFORMATION",
+        "Restore visible discrepancies with original photograph pixels and a precise mask",
+        "contact shadows only at actual points of contact",
+        "Mark unresolved quality or identity as needs_attention",
+        "ORIGINAL EDITABLE ARTWORK", "FINAL POLISHED ARTWORK", "REVIEW NOTES",
+        "create-only mode", "Reopen that saved revision", "parser plus a rendered preview",
+        "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/JSON/", "intended_collections", "dropbox_revision",
+        "Read the JSON back and verify it points to that exact saved PSD",
+        "Completion requires one full generation", "Shopify publication is a separate action",
     ):
-        assert rule in recovery
-    assert "attempt the second pass independently" in result[second_pass:second_generation]
-    assert "only if the failure rules permit it" in result[second_pass:second_generation]
-    assert "display the strongest available result as provisional" in result
-    assert "as a review draft" in result[first_save:second_pass]
-    assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/" in result[first_save:second_pass]
-    assert "hidden REVIEW NOTES layer" in result[first_save:second_pass]
-    assert "Continue immediately to Step 8 in either case." in result[first_save:second_pass]
-    assert "[Product Title] - TRIAL.psd" in result[first_save:second_pass]
-    assert "[Product Title] - v2 - TRIAL.psd" in result[first_save:second_pass]
-    assert "[Product Title] - v2.psd" in result[first_save:second_pass]
-    assert "ORIGINAL EDITABLE ARTWORK" in result[second_generation:final_save]
-    assert "lock the effective composition and styling before generating again" in result[second_pass:second_generation]
-    assert "A new layout is optional." in result[second_generation:final_save]
-    assert "If the first artwork still wins, use it." in result[second_generation:final_save]
-    assert "Place the winner from 8C, or its provisional Review candidate, in **FINAL POLISHED ARTWORK**" in result[second_generation:final_save]
-    assert "Generate a visibly different" not in result
-    assert "Do not search for, source, generate, trace, reproduce or include athlete signatures" in result[signature:first_generation]
-    assert "Use the original official badge asset and preserve its design and edition number" in result[signature:first_generation]
-    assert "at 100% magnification to this first generation" in result[first_review:first_save]
-    assert "and at thumbnail size" in result[first_review:first_save]
-    assert "VISIBLE COLLECTOR TRANSFORMATION" in result[signature:first_generation]
-    assert "visible abstract depth, premium title and coordinated plaque placement" in result[second_generation:final_save]
-    assert "Restore visible discrepancies with original photograph pixels and a precise mask" in result[second_generation:final_save]
-    assert "smallest coherent source region" in result[second_generation:final_save]
-    assert "contact shadows only at actual points of contact" in result[second_generation:final_save]
-    assert "subject visibly separated from the ground" in result[second_generation:final_save]
-    assert "Complete the digital integration review before selecting the artwork." in result[second_generation:final_save]
-    assert "REVIEW DRAFT, keep the trial" not in result
-    assert "A failed or unverified identity never wins as an accepted final design" in result[second_generation:final_save]
-    assert "save the strongest inspected candidate for Review with needs_attention" in result[second_generation:final_save]
-    assert "save the final PSD as a new file" in result[final_save:cleanup]
-    assert "the first artwork remains hidden" in result[final_save:cleanup]
-    assert "Retain the trial" in result[final_save:cleanup]
-    assert "Photoshop is optional" in result[final_save:cleanup]
-    assert "parser plus a rendered preview" in result[final_save:cleanup]
-    assert "report the specific unverified property" in result[final_save:cleanup]
-    assert "Photoshop live-number check pending" not in result
-    assert "recoverable delete" in result[cleanup:display]
-    assert "even when artwork quality is marked needs_attention" in result[cleanup:display]
-    assert "failure as pending" in result[cleanup:display]
-    metadata_start = result.index("**SMART UPLOAD HANDOFF METADATA**", final_save)
-    metadata_end = result.index("**8F.", metadata_start)
-    metadata = result[metadata_start:metadata_end]
-    assert "Never write a handoff for the trial or overwrite an existing file." in metadata
-    assert "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/JSON/" in metadata
-    assert "intended_collections" in metadata and "dropbox_revision" in metadata
-    assert "needs_attention for failed or unverified identity" in metadata
-    identity = "**IDENTITY OVERRIDES GENERATION CONTINUITY**"
-    assert result.count(identity) == 1 and result.index(identity) < first_generation
-    assert len(result.split()) < 5300
-    assert "overwrite" not in (result[:metadata_start] + result[metadata_end:]).lower()
+        assert guard in result
+    assert len(result.split()) < 3500
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)

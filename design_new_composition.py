@@ -12,7 +12,7 @@ Rebalance the environment, text and accents around supporting imagery instead of
 
 """
 
-COMPLETE_COMPOSITION = """Step 3. **Compose the complete collector artwork.** Before the first generation, compare two brief internal layout approaches using the selected sources, not additional image-generation calls. Choose the approach that best connects the hero, any supporting imagery, environment, collector title, subject name and official plaque across the actual master canvas.
+COMPLETE_COMPOSITION = """**Compose the complete collector artwork.** Before generation, compare two brief internal layout approaches using the selected sources, not additional image-generation calls. Choose the approach that best connects the hero, any supporting imagery, environment, collector title, subject name and official plaque across the actual master canvas.
 
 Establish the visual hierarchy, direction of movement or gaze, main text alignment and intended plaque position and scale. Include the full plaque footprint and live number in the layout plan, within the safe border, while excluding both from image generation under the shared collector-asset rules.
 
@@ -38,7 +38,7 @@ Make the collector treatment visible at thumbnail size. Use charcoal tonal shape
 
 Keep a verified venue recognisable through defining features. Blend it into the composition instead of isolating it in a blurred strip or inset. Use tonal transitions to distinguish separate photographic moments. Connect the premium title to the planned plaque position through alignment, scale, spacing and surrounding tones. Add the official plaque during assembly."""
 
-REVIEW_RELATIONSHIPS = """Lock elements positively assessed as successful. Treat disconnected title-and-plaque spacing, weak supporting-image hierarchy, unexplained empty areas and generic decorative placement as unresolved composition issues. Within the existing second pass and finishing work, adjust the affected relationships and rebalance neighbouring elements while preserving successful identity, story and visual qualities. Compare the complete assembled artwork, including the original plaque, with the strongest previous version using the existing acceptance and recovery rules. This review adds no approval stage or generation requirement.
+REVIEW_RELATIONSHIPS = """Preserve successful identity, story and styling. Check title-and-plaque spacing, supporting-image hierarchy, negative space and decorative placement. Use layer and source-pixel adjustments to rebalance only the relationships that need attention. Recheck the complete assembled artwork with the original plaque.
 
 """
 
