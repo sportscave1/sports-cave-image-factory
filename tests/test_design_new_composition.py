@@ -5,6 +5,7 @@ from design_new_composition import (
     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
 )
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_motorsport import MOTORSPORT_ARTWORK
 
 
 def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
@@ -13,6 +14,8 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
                      PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION):
         assert prompt.count(guidance) == 1
     assert prompt.index(COMPLEMENTARY_IMAGES) < prompt.index('Step 1.')
+    assert prompt.count(MOTORSPORT_ARTWORK) == 1
+    assert prompt.index(MOTORSPORT_ARTWORK) < prompt.index('Step 1.')
     assert prompt.index(COMPLETE_COMPOSITION) < prompt.index('Step 5.')
     assert prompt.index(REVIEW_RELATIONSHIPS) < prompt.index('**8B.')
     assert prompt.index('**8D.') < prompt.index(BADGE_PLACEMENT_VERIFICATION) < prompt.index('**8E.')
@@ -34,5 +37,6 @@ def test_new_creative_rules_do_not_leak_into_edits():
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
     })
     for guidance in (COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
-                     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION):
+                     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, BADGE_PLACEMENT_VERIFICATION,
+                     MOTORSPORT_ARTWORK):
         assert guidance not in prompt

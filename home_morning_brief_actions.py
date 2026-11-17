@@ -14,6 +14,7 @@ from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
+from design_motorsport import MOTORSPORT_ARTWORK
 from design_subject_authenticity import (
     CREATE_DESIGN_AUTHENTICITY_CHECK, IDENTITY_OVERRIDES_CONTINUITY,
 )
@@ -155,12 +156,12 @@ def _prompt(title, story, *, edit=None):
         "family that fits the photograph and title. Defining action needs a readable movement "
         "and room in its direction. For achievement, look for visible evidence such as a belt, trophy, "
         "decisive action or unmistakable reaction. A paired legends or rivalry title can give "
-        "both named subjects comparable weight within one coherent composition. For heritage "
-        "racing, consider the correct period machine in the lower foreground with its driver "
-        "or historical context above or beside it. For farewell or legacy, look for a real bow, "
+        "both named subjects comparable weight within one coherent composition. "
+        "For farewell or legacy, look for a real bow, "
         "wave, walk away or embrace and give the gesture breathing room. When a genuine photo "
         "captures the relationship, preserve the interaction. These are optional directions.\n"
         "\n"
+        f"{MOTORSPORT_ARTWORK}\n\n"
         f"{COMPLEMENTARY_IMAGES}"
         "Use evidence relevant to this sport: readable action or celebration, the genuine trophy or "
         "equipment, and period-correct uniforms, silks, vehicles and livery. Use accurate context for "

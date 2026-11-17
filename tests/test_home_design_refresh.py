@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import crm_growth_reporting
 from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
+from design_motorsport import MOTORSPORT_ARTWORK
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from home_design_refresh import RECOMMENDATION_GUIDANCE, _render_candidate
 
@@ -27,6 +28,8 @@ def test_home_handoff_commissions_two_new_artwork_passes():
     )
     offsets = [copy.index(checkpoint) for checkpoint in checkpoints]
     assert offsets == sorted(offsets)
+    assert prompt.count(MOTORSPORT_ARTWORK) == 1
+    assert prompt.index(MOTORSPORT_ARTWORK) < prompt.index('Run a fresh web image search')
     assert 'Reuse a photo from the existing PSD only when' in prompt
     assert 'Do not revert to the old layout' in prompt
     assert 'original editable edition-number layer' in prompt

@@ -175,7 +175,9 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                 }.get(slug, 15000)
                 finish_rules = design_studio_styles.COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES
                 self.assertEqual(prompt.count(finish_rules), 1)
-                original_prompt = prompt.replace("\n\n" + finish_rules, "")
+                original_prompt = prompt.replace("\n\n" + finish_rules, "").replace(
+                    design_studio_styles.MOTORSPORT_ARTWORK + "\n\n", "",
+                )
                 self.assertLess(len(original_prompt), max_length + len(design_studio_styles.FINAL_GENERATION_EXECUTION_CONTRACT))
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
@@ -200,6 +202,19 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                     STYLE_DETAILS[slug],
                 )
                 self.assertIn(expected, prompt)
+
+    def test_motorsport_vehicle_rule_covers_other_styles_and_excludes_targeted_edits(self):
+        for sport in ("V8 Supercars", "NASCAR", "Formula One", "Rally", "MotoGP"):
+            with self.subTest(sport=sport):
+                details = {"sport": sport, "principal_subject_one": "Featured racer"}
+                prompt = design_studio_styles.build_generation_prompt("nostalgic_tribute", "Career tribute", details)
+                self.assertEqual(prompt.count(design_studio_styles.MOTORSPORT_ARTWORK), 1)
+                edit = design_studio_styles.build_generation_prompt("update_existing", "Fix the title", details)
+                self.assertNotIn(design_studio_styles.MOTORSPORT_ARTWORK, edit)
+        basketball = design_studio_styles.build_generation_prompt(
+            "nostalgic_tribute", "Career tribute", {"sport": "NBA", "principal_subject_one": "Featured player"},
+        )
+        self.assertNotIn(design_studio_styles.MOTORSPORT_ARTWORK, basketball)
 
     def test_update_existing_preserves_proven_mapping_and_skips_general_search(self):
         style = design_studio_styles.get_design_style("update_existing")

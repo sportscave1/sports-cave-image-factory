@@ -204,10 +204,10 @@
         }
       ],
       "hashes": {
-        "research": "9e33d75ef514c2418805b7a447d171e593034f11d9b482408d70990fcb025fc5",
+        "research": "f31a63f044546a5c4c5a26c95fdcf5c950e3f756a6e3340f5c5e5541bb4014a8",
         "generation": "09186433d07e050795e29609be2d599f5e5a1a714fdd9a0928dd1b3058fc97ac",
-        "signature_placement": "b738182fad0c00bf19fa5d18be784e4906799309791a463a6972ce08dfaf57db",
-        "review": "a8e4fe213d1145e149ab018bb27971bb431aed6e9a50bc753f7d89264bf67055"
+        "signature_placement": "746b0b669d048d6428638392dbdcd41d7daaf0bd8b03ab3f3d69f661c67e7c57",
+        "review": "e64944b3dfe4cb4b7cd7459be9fc7796986220f0eeafe4ea76946199108e3aef"
       },
       "old_find_words": 1362,
       "old_find_characters": 9496

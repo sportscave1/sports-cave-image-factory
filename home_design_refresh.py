@@ -10,6 +10,7 @@ from design_collector_assets import COLLECTOR_ASSET_PLACEMENT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
 from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
+from design_motorsport import MOTORSPORT_ARTWORK
 from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
 from design_subject_authenticity import AUTHENTICITY_CHECK, IDENTITY_OVERRIDES_CONTINUITY
 from home_morning_brief_actions import PROJECT_URL
@@ -71,6 +72,8 @@ that the artwork caused poor sales.
    is available. Inspect the actual artwork for story, hierarchy, typography and use of space.
    Use approved Sports Cave Collector Series examples when sales evidence is unavailable.
    Use those examples as style references.
+
+{MOTORSPORT_ARTWORK}
 
    Run a fresh web image search before designing. Aim to inspect 4–8 suitable candidates on
    their original source pages and show the strongest usable references in chat as a progress

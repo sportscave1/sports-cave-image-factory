@@ -97,7 +97,7 @@ class ShortFindImagesTests(unittest.TestCase):
             assert_short_find_images(self, prompt)
             for value in details.values():
                 self.assertIn(value, prompt)
-            self.assertEqual(prompt.count("Prioritise accurate driver, car/livery and event-era photographs."), 1)
+            self.assertEqual(prompt.count(styles.MOTORSPORT_SOURCE_SEARCH), 1)
 
     def test_jersey_references_keep_both_subjects_and_jersey_identity(self):
         prompt = styles.build_find_images_prompt("legends_jersey_display", "Legends jerseys", {"principal_subject_one": "Shohei Ohtani", "principal_subject_two": "Aaron Judge", "uniform_equipment_livery": "Ohtani #17; Judge #99"})

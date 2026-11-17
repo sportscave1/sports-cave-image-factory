@@ -1,4 +1,5 @@
 from sports_categories import sport_family
+from design_motorsport import MOTORSPORT_ARTWORK, MOTORSPORT_SOURCE_SEARCH
 from design_subject_authenticity import IDENTITY_OVERRIDES_CONTINUITY
 from dataclasses import dataclass
 from functools import lru_cache
@@ -638,13 +639,13 @@ Make the finished piece feel like an authentic memory from its era. Use one domi
         ("driver_photo", "vehicle_exact_photo"),
         ("venue_reference", "equipment_reference", "historical_reference", "signature_asset"),
         """
-Select one verified driver-and-car story, then lock the driver, season, race, team, exact chassis/model, race number, sponsors, suit, helmet, wheels, body shape, livery, circuit and result as one historically matched set. Explain whether the commercial hero is the car, the driver, or their relationship. Specify compatible genuine camera angles and scale without fabricating a shared pose or mixing seasons.
+Select one verified driver-and-vehicle story using the motorsport source rules. Explain whether the commercial hero is the machine, the driver or rider, or their relationship. Specify compatible genuine camera angles and scale.
 """,
-        'Prioritise accurate driver, car/livery and event-era photographs.',
+        MOTORSPORT_SOURCE_SEARCH,
         """
-Create a historically exact driver-and-machine portrait using one authentic driver source and one authentic photograph of the verified car from the same verified season, race, team and livery. The car may be the largest visual object, with the driver providing human authority; neither should look pasted into an impossible shared moment. Preserve sponsor typography, race number, bodywork, wheels, helmet and suit. Use restrained pit-lane, garage, circuit or mountain-road atmosphere appropriate to the event. Never modernise, reliver, mirror or regenerate the car, and never pair a driver from one season with another season's machine.
+Create a historically accurate driver-and-machine portrait using the matched motorsport sources. For a specific race, use the same verified season, race, team and livery. The vehicle may be the largest visual object, with the driver or rider providing human authority. Use restrained pit-lane, garage, circuit or mountain-road atmosphere appropriate to the story. Preserve original suit and helmet details. Never modernise, relivery, mirror or regenerate the vehicle.
 """,
-        "First test whether this reads immediately as the verified driver with the exact defining car, not a generic motorsport poster. Verify car model, bodywork, livery, race number, sponsors, wheels, suit, helmet, race, season and circuit. Reject and cap at 6/10 for any cross-era pairing, invented sponsor detail, reliveried car, synthetic vehicle surface or generic racing background that overwhelms the matched driver-and-car story.",
+        "Verify that both the driver or rider and their actual vehicle read clearly at thumbnail size. Check model, bodywork, livery, race number, sponsors, wheels, suit and helmet against the verified career period or specific event. Cap at 6/10 for a missing subject, unverified or cross-era pairing, invented vehicle detail or distracting background.",
         minimum=1,
         exact=1,
     ),
@@ -751,7 +752,7 @@ Build one emotionally specific remembrance from genuine period photography, unif
 """.strip(),
         "motorsport_driver_car": """
 MOTORSPORT DRIVER AND CAR TYPE CONTRACT - ONE HISTORICALLY MATCHED MACHINE
-Pair one verified driver with the exact car that defines the selected race, season or achievement. Lock the car model/body shape, livery, race number, sponsors, wheels, team, circuit, driver suit and helmet to the same historical set. Let the car carry mechanical scale and the driver carry human authority, using compatible genuine sources without pretending they shared an unphotographed pose. Use restrained garage, pit-lane, track or mountain-road atmosphere. Never modernise, reliver, mirror, rebuild or cross-pair the driver and car across seasons.
+Pair one verified driver or rider with their actual race vehicle from the same verified career period. For a specific event, match its exact vehicle and livery. Give both a clear role in the collector story and compose them from compatible genuine sources.
 """.strip(),
         "minimalist_hero": """
 MINIMALIST HERO TYPE CONTRACT - ONE SUBJECT, ONE IDEA, CONTROLLED SPACE
@@ -1005,7 +1006,7 @@ def validate_design_request(style_slug, details=None, task_text=""):
 
 SPORT_ADAPTERS = MappingProxyType(
     {
-        "motorsport": "Verify the exact season, race, circuit, car, livery, race number, sponsors, suit and helmet as one matched historical set.",
+        "motorsport": "Verify the driver or rider and their race vehicle as a matched historical pairing. Verify the exact event details when the design commemorates a specific event.",
         "basketball": "Verify the exact team, season, jersey number, arena and game or achievement; preserve authentic jersey lettering and footwear.",
         "football": "Verify the exact club or country, competition, season, kit, shirt number, stadium and match context.",
         "cricket": "Verify the exact team, series, venue, whites or coloured kit, equipment and score or match context.",
@@ -1514,7 +1515,7 @@ Before finalising future generated artwork, inspect every visible transition bet
 """.strip()
 
 
-def finalize_generation_handoff(prompt):
+def finalize_generation_handoff(prompt, *, include_motorsport=True):
     """Apply execution semantics only to generation, never research or review."""
     prompt = str(prompt).strip().replace(FINAL_GENERATION_EXECUTION_CONTRACT, "").strip()
     identity = IDENTITY_OVERRIDES_CONTINUITY.strip()
@@ -1540,6 +1541,8 @@ def finalize_generation_handoff(prompt):
         prompt = prompt.replace(old, "If a verified signature is unavailable, omit it and generate the artwork unless the selected Design Type explicitly requires that asset before generation. Never fabricate a signature.")
     if COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES not in prompt:
         prompt = "\n\n".join((prompt, COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES))
+    if include_motorsport and MOTORSPORT_ARTWORK not in prompt:
+        prompt = "\n\n".join((MOTORSPORT_ARTWORK, prompt))
     return "\n\n".join((FINAL_GENERATION_EXECUTION_CONTRACT, prompt, command))
 
 
@@ -1633,7 +1636,7 @@ def build_research_prompt(style_slug, task_text, details=None):
         base_rules = COMMON_RESEARCH_RULES
         source_contract = HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT
     return "\n\n".join(
-        (
+        section for section in (
             _selected_design_type_block(style),
             base_rules,
             _design_type_contract_block(style),
@@ -1643,7 +1646,9 @@ def build_research_prompt(style_slug, task_text, details=None):
             _style_task_variables(style, task_text, details, subjects),
             f"STYLE RESEARCH FOCUS - {style.label}\n{style.research_rules}",
             _adapter_block(adapter),
+            MOTORSPORT_SOURCE_SEARCH if adapter == "motorsport" and style.slug != "update_existing" else "",
         )
+        if section
     )
 
 
@@ -1677,9 +1682,10 @@ def build_shared_find_images_prompt(task_text, details=None, *, style=None):
     sport_context = f"{task_text} {context}"
     if re.search(r"\b(horse|horses|jockey|equestrian|winx|black caviar)\b", sport_context, re.I):
         sections.append("Ensure each horse/rider is correctly identified; use genuine separate photographs and do not substitute one horse for another.")
-    elif select_sport_adapter((details or {}).get("sport"), task_text, style.slug if style else "") == "motorsport":
-        if not style or style.slug != "motorsport_driver_car":
-            sections.append("Prioritise accurate driver, car/livery and event-era photographs.")
+    elif not style or style.slug not in {"motorsport_driver_car", "update_existing"}:
+        sport = (details or {}).get("sport")
+        if not sport_family(sport) or select_sport_adapter(sport, task_text) == "motorsport":
+            sections.append(MOTORSPORT_SOURCE_SEARCH)
     if context:
         sections.append("COMPACT RESEARCH CONTEXT — defer to the approved Research above\n" + context)
     return "\n\n".join(sections)
@@ -1746,6 +1752,8 @@ def build_generation_prompt(style_slug, task_text, details=None, selected_assets
             collector_mapping,
         )
         if section
+    ), include_motorsport=style.slug != "update_existing" and (
+        adapter == "motorsport" or not sport_family((details or {}).get("sport"))
     ))
 
 
