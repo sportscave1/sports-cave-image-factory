@@ -122,7 +122,7 @@ async function staffQueueTick() {
     });
     if (!response.ok) return;
     const {job, stop} = await response.json();
-    if (stop?.id === local?.id && !await stopStaffJob(local)) return;
+    if (stop?.id && stop.id === local?.id && !await stopStaffJob(local)) return;
     if (!job || !queueId.test(job.id) || job.stage >= 5) return;
     const url = new URL('/', osOrigin);
     url.searchParams.set('page', 'product_uploads');
