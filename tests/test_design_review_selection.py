@@ -47,12 +47,12 @@ gallery._gallery(app, user)
 
 def test_selecting_designs_shows_both_actions_and_queues_every_selected_design(ui):
     app, entries, _, enqueue, _, _ = ui
-    assert not any(button.key == 'design-review-trash' for button in app.button)
+    assert app.button(key='design-review-trash').disabled
     app.checkbox(key=gallery._selection_key(entries[0])).check().run()
     app.checkbox(key=gallery._selection_key(entries[1])).check().run()
     assert not app.exception
     assert app.button(key='design-review-trash').proto.icon == ':material/delete:'
-    assert app.button(key='design-review-enqueue').proto.icon == ':material/playlist_add:'
+    assert app.button(key='design-review-enqueue').label == 'Add to queue'
     assert any(item.value == '2 selected' for item in app.caption)
     enqueue.assert_not_called()
     app.button(key='design-review-enqueue').click().run()

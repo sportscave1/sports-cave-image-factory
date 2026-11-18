@@ -135,9 +135,7 @@ def _edit_link(source, title):
             f'data-design-review-prompt="{escape(endpoint, quote=True)}" '
             f'aria-label="{escape(f"Edit {title}", quote=True)}" '
             f'title="{escape(f"Edit {title} in Sports Cave Designs", quote=True)}">'
-            '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" '
-            'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg></a>')
+            'Edit</a>')
 
 
 def _staged_replacement(user, source, key):
@@ -190,6 +188,11 @@ def _keep_original(user, source, key):
                 _folder.clear(str(user['id']))
                 st.session_state['_review_keep_result'] = (source['name'], warnings)
                 st.rerun()
+
+
+def _selection_changed():
+    # Checkbox changes reuse this session's displayed data, without Dropbox/SQL I/O.
+    st.session_state['_review_selection_only'] = True
 
 
 def _selection_key(source):
@@ -307,7 +310,8 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         needs_sport = not (published or editing or staged or resumable or chosen_sport or details.get('sport'))
         if selectable and not staged:
             check, name, edit_button, publish, publish_ad = st.columns((.5, 4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
-            check.checkbox(f'Select {title}', key=_selection_key(source), label_visibility='collapsed')
+            check.checkbox(f'Select {title}', key=_selection_key(source), label_visibility='collapsed',
+                           on_change=_selection_changed)
         else:
             name, edit_button, publish, publish_ad = st.columns((4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
@@ -321,7 +325,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                      if cleanup_pending or reason or current not in ('In review', 'Ready to publish') else ''))
         with edit_button:
             if resumable or staged:
-                st.button('', icon=':material/edit:', key=key+'-edit', disabled=True, help='Edit '+title)
+                st.button('Edit', key=key+'-edit', disabled=True, help='Edit '+title)
             else:
                 _edit_link(source, title)
         sport_picker = st.empty() if needs_sport else None
@@ -496,9 +500,9 @@ def _selection_actions(user, selected):
             fallback = st.selectbox('Sport for designs without a sport', CANONICAL_SPORT_CATEGORIES,
                                     index=None, placeholder='Choose a sport', key='design-review-bulk-sport')
         missing_sport = any(not details.get('sport') for _, details in selected) and not fallback
-        if queue.button('', icon=':material/playlist_add:', key='design-review-enqueue',
+        if queue.button('Add to queue', key='design-review-enqueue',
                         help=f'Add {len(selected)} selected designs to the Upload Companion queue',
-                        disabled=missing_sport):
+                        disabled=not selected or missing_sport):
             try:
                 with st.spinner('Adding selected designs to the upload queue'):
                     queued, warnings = _enqueue_selected(user, selected, fallback)
@@ -513,7 +517,8 @@ def _selection_actions(user, selected):
                 st.session_state['_review_queue_result'] = (len(queued), warnings)
                 st.rerun()
         if can_delete_files(user) and trash.button('', icon=':material/delete:', key='design-review-trash',
-                                                  help=f'Delete {len(selected)} selected designs from Dropbox Review'):
+                                                  help=f'Delete {len(selected)} selected designs from Dropbox Review',
+                                                  disabled=not selected):
             st.session_state['_review_delete_selection'] = [
                 (source, details.get('design_name') or PurePosixPath(source['name']).stem)
                 for source, details in selected]
@@ -523,6 +528,8 @@ def _selection_actions(user, selected):
 def _gallery(app, user):
     from product_upload_api import connect
     actor = str(user['id'])
+    selection_only = st.session_state.pop('_review_selection_only', False)
+    snapshot = st.session_state.get('_review_gallery_snapshot')
     with st.container(key='design-review-header'):
         heading, sync, refresh = st.columns((5, 1.5, 1), vertical_alignment='center')
         heading.title('Design Studio')
@@ -570,8 +577,11 @@ def _gallery(app, user):
     picked = sport.selectbox('Sport', ('All sports', *CANONICAL_SPORT_CATEGORIES), label_visibility='collapsed')
     if refresh.button('Refresh', help='Check Dropbox for new designs and revisions.'):
         _folder.clear(actor)
+        selection_only = False
+    context = (actor, view, query, picked)
+    reuse = bool(selection_only and snapshot and snapshot['context'] == context)
     try:
-        designs, synced = _folder(actor)
+        designs, synced = (snapshot['designs'], snapshot['synced']) if reuse else _folder(actor)
     except Exception:
         logging.getLogger(__name__).exception('Design Review gallery unavailable')
         st.warning('Review folder sync failed. Select Refresh to try again.')
@@ -590,13 +600,16 @@ def _gallery(app, user):
         selected = [(entry, details)
                     for entry, details, _, _ in matched
                     if final_psd(entry) and st.session_state.get(_selection_key(entry))]
-        if selected:
-            _selection_actions(user, selected)
+        # Keep this container mounted: inserting it on selection shifts Streamlit's
+        # delta paths and can temporarily apply toolbar styles to the artwork grid.
+        _selection_actions(user, selected)
         pending_delete = st.session_state.get('_review_delete_selection')
         if pending_delete:
             _confirm_delete(user, pending_delete)
     sources = {review_key(entry): entry for entry, *_ in matched}
-    rows = Intakes(connect).read_review_gallery(actor, sources)
+    rows = snapshot['rows'] if reuse else Intakes(connect).read_review_gallery(actor, sources)
+    st.session_state['_review_gallery_snapshot'] = dict(
+        context=context, designs=designs, synced=synced, rows=rows)
     keys = list(sources)
     with st.container(key='design-review-grid'):
         for offset in range(0, len(matched), 2):

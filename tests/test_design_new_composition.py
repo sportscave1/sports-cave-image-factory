@@ -97,7 +97,7 @@ def test_generation_foundation_lettering_border_and_badge_views():
     prompt = _prompt('Australia in Papaya', 'Keep the approved title.')
     layout, generation = prompt.split('**3.', 1)
     generation, finishing = generation.split('**4.', 1)
-    assert 'Keep approved wording, including Australia in Papaya when locked' in layout
+    assert 'Keep approved wording.' in layout
     assert 'Generate the finished title treatment in generation 1' in layout
     assert 'real plaque and live number visible, then hide both' in layout
     assert '3% of the shorter canvas dimension' in layout
@@ -111,3 +111,21 @@ def test_generation_foundation_lettering_border_and_badge_views():
     assert 'stray question marks' in finishing
     assert 'generation 1 beside the final render at equal 250 px widths' in finishing
     assert 'Restore surroundings from generation 1' in finishing
+
+
+def test_fan_titles_and_visible_layout_decisions_reach_first_generation():
+    prompt = _prompt('Collector', 'Suggested title: New Chapter')
+    layout, rest = prompt.split('**3.', 1)
+    for requirement in ('What do fans actually call this athlete', 'original wordplay joining two verified meanings',
+                        "Treat the brief's suggested title as one candidate unless explicitly locked",
+                        'Test the strongest suitable source in the actual layout',
+                        'Compare the abstract layer on and off at 250 px',
+                        'Test without glow, shadow or reflection',
+                        'Inspect actual title lettering, visible abstraction, hero integration'):
+        assert requirement in layout
+    assert "Replace the brief's suggested title only when" not in prompt
+    assert 'For Australia in Papaya' not in prompt
+    assert 'natural hair and fabric edges and internal gaps' in rest
+    assert 'without blurring the silhouette, repainting skin or fading anatomy' in rest
+    assert 'one creative image-generation call' in rest
+    assert 'never triggers another generation' in rest
