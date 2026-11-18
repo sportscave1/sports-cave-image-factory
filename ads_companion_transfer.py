@@ -103,6 +103,7 @@ def progress(value):
 
 def delivery(value):
     return dict(id=value['upload'], stage=value['stage'], receipt=ads._source_token(value['upload']),
+                repair=value.get('attachment_repair'),
                 recover=bool(value.get('collect_only')),resume_token=value.get('resume_token'),response_ids=value.get('response_ids') or {},
                 chat_url=value.get('chat_url'),
                 missing=[name for name in FILES if name not in (value.get('artifacts') or {})])
@@ -126,6 +127,8 @@ def resume(job_id, user, settings=None):
             raise ValueError('Ad job not found.')
         value = row['value']
         value.pop('catalog_retry', None)
+        if value.get('attachment_repair'):
+            value.setdefault('attachment_repair_history', []).append(value.pop('attachment_repair'))
         if settings is not None:
             if value['stage'] != 'failed':
                 raise ValueError('Targeting can be corrected after the job stops for review.')

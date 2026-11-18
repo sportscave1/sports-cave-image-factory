@@ -65,12 +65,13 @@ def test_pagination_exhaustion_is_not_missing_membership(monkeypatch):
         client.product_set_members('set', product={'product_id':'123'})
 
 
-def test_download_failure_stops_before_meta_and_retains_saved_chat(monkeypatch):
+def test_download_failure_repairs_before_meta_and_retains_saved_chat(monkeypatch):
     _, _, value, calls = setup(monkeypatch)
-    with pytest.raises(ValueError, match='Restore the files'):
-        ads._step('key', value, {}, {'transfer_failed': True}, 0)
+    value['chat_url']='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+value['upload']
+    result=ads._step('key', value, {}, {'transfer_failed': True}, 0)
+    assert result['repair']['state']=='ready'
     assert calls == []
-    assert value['chat_url'] == 'saved-chat'
+    assert result['chat_url']==value['chat_url']
     assert 'posting_id' not in value
 
 

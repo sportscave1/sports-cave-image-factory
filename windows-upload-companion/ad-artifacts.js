@@ -28,7 +28,7 @@
     });
   }
   const chat=/^https:\/\/chatgpt\.com\/g\/g-p-6a6bd98cd6f081918788b544dcdecfc2(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/;
-  async function locate(job,name,response,recover=false,boundChat='') {
+  async function locate(job,name,response,recover=false,boundChat='',repair='') {
     if(!chat.test(location.href)||!names.includes(name)||!/^[a-f0-9-]{36}$/.test(job))throw Error('Invalid ad artifact request');
     const messages=[...document.querySelectorAll('[data-message-author-role],h4[data-conversation-role]')]
       .filter(node=>!node.matches('h4') || !node.closest('[data-message-author-role]'))
@@ -40,6 +40,11 @@
     if(recover && !response)messages.forEach((turn,index)=>{
       if(turn.role==='user' && turn.body?.textContent.includes('Sports Cave automatic ad job '+job))start=index;
     });
+    if(repair) {
+      start=messages.findIndex(turn=>turn.role==='user' && turn.body?.textContent.includes('SC_AD_REPAIR: '+repair) &&
+        turn.body.textContent.includes('Sports Cave automatic ad job '+job));
+      if(start<0)throw Error('Waiting for the saved attachment repair response');
+    }
     // The server records this exact chat only after the send journal confirms
     // submission. Long briefs appear as Pasted text, hiding their job marker.
     const users=messages.filter(turn=>turn.role==='user');
@@ -52,7 +57,7 @@
       throw Error('ChatGPT is still generating; waiting for finished attachments');
     const matches=[],seen=new Set();
     for(const message of messages.slice(start+1)) {
-      if(message.role==='user'){if(recover)continue;break;}
+      if(message.role==='user'){if(recover && !repair)continue;break;}
       if(message.role!=='assistant' || !message.body)continue;
       // Work's headings have no message ID. Pin a content fingerprint rather
       // than a positional index, which changes when history is virtualized.
@@ -96,7 +101,7 @@
     if(sender.id===chrome.runtime.id && message?.type==='project:ad-blob') {
       if(!String(message.url).startsWith('blob:https://chatgpt.com/'))return;
       (async()=>{
-        await locate(message.job,message.name,message.response,message.recover,message.chat);
+        await locate(message.job,message.name,message.response,message.recover,message.chat,message.repair);
         let response;
         try {response=await fetch(message.url);} catch(error) {
           reply(await downloadBridge('read',message.job,message.name,message.url));return;
@@ -111,7 +116,7 @@
     }
     if(sender.id!==chrome.runtime.id || message?.type!=='project:ad-artifact')return;
     (async()=>{
-      const found=await locate(message.job,message.name,message.response,message.recover,message.chat);
+      const found=await locate(message.job,message.name,message.response,message.recover,message.chat,message.repair);
       await downloadBridge('arm',message.job,message.name);
       downloadAttempt={job:message.job,name:message.name,response:found.response};
       // Use the site's existing authenticated download action, including sandbox links.

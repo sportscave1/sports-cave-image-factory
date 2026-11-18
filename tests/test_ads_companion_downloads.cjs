@@ -8,17 +8,18 @@ const chat='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+id;
 function fixture(records=new Map()) {
   const calls=[],opens=[],messages=[],reloads=[];
   const job={id,receipt:'a'.repeat(64),chat_url:chat,missing:['ad_copy.csv']};
-  let downloads=[],valid=true,downloadError='';
+  let downloads=[],valid=true,downloadError='',claim=null;
   const chrome={runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{onAlarm:{addListener(){}}},
     tabs:{get:async()=>({id:1,url:chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:1,...options};},
-      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return message.type==='project:ad-download-status'?{error:downloadError}:{clicked:true,response:'response-1',chat};}},
+      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return message.type==='project:ad-download-status'?{error:downloadError}:message.type==='project:ad-repair-status'?{ready:true,found:false}:{clicked:true,response:'response-1',chat};}},
     downloads:{search:async()=>downloads}};
   const context=vm.createContext({chrome,setTimeout,clearTimeout,URL,URLSearchParams,AbortSignal,Uint8Array,Date,
     queueId:/^[a-f0-9-]{36}$/,suppliedReceipt:/^[a-f0-9]{64}$/,staffAlarm:'alarm',osOrigin:'https://os.test',
     staffRead:async key=>records.get(key),staffWrite:async(key,value)=>records.set(key,value),
     fetch:async(url,options)=>{
       calls.push({url,options});
+      if(url.endsWith('/ad-tick') && claim)return claim();
       if(url.startsWith('https://os.test'))return {ok:true,json:async()=>({received:'ad_copy.csv'})};
       return {ok:valid,url,body:new ReadableStream({start(c){c.enqueue(new Uint8Array([1,2,3]));c.close();}})};
     }});
@@ -26,8 +27,30 @@ function fixture(records=new Map()) {
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/ad-queue.js'),'utf8'),context);
   context.job=job;
   return {records,calls,opens,messages,reloads,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),
-    downloads:value=>downloads=value,valid:value=>valid=value,downloadError:value=>downloadError=value};
+    downloads:value=>downloads=value,valid:value=>valid=value,downloadError:value=>downloadError=value,claim:value=>claim=value};
 }
+
+test('only a fresh server permit can send a repair; lost claim response never resends',async()=>{
+  const f=fixture();await f.run();
+  f.job.repair={id,attempt:1,state:'ready',names:['ad_copy.csv']};
+  let claimed=false;
+  f.claim(async()=>{
+    const granted=!claimed;claimed=true;
+    return {ok:true,json:async()=>({job:{...f.job,repair:{...f.job.repair,state:'sending'},repair_send:granted}})};
+  });
+  await f.run();await f.run();
+  assert.equal(f.messages.filter(m=>m.type==='project:ad-repair-send').length,1);
+  assert.equal(f.messages.find(m=>m.type==='project:ad-repair-send').chat,chat);
+  const restart=fixture(f.records);
+  restart.job.repair={...f.job.repair,state:'sending'};
+  await restart.run();assert.equal(restart.calls.length,0);
+  assert.equal(restart.messages.filter(m=>m.type==='project:ad-repair-send').length,0);
+  const lost=fixture();await lost.run();lost.job.repair=f.job.repair;
+  lost.claim(async()=>{throw Error('reply lost after server persisted permit');});
+  await assert.rejects(lost.run(),/reply lost/);
+  lost.job.repair={...lost.job.repair,state:'sending'};
+  await lost.run();assert.equal(lost.messages.filter(m=>m.type==='project:ad-repair-send').length,0);
+});
 test('background tab, durable native download journal, verified receipt and no prompt resend',async()=>{
   const f=fixture();await f.run();assert.equal(f.opens[0].active,false);
   await f.run();assert.equal(f.messages.length,1);assert.equal(f.messages[0].type,'project:ad-artifact');
