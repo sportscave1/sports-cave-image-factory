@@ -27,7 +27,7 @@ async function collectAd(job, token) {
   if(transfer?.name!==name)transfer=null;
   if(!transfer) {
     const started=new Date().toISOString();
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-artifact',job:job.id,name,response:job.response_ids?.[name],recover:job.recover},{frameId:0});
+    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-artifact',job:job.id,name,response:job.response_ids?.[name],recover:job.recover,chat:job.chat_url},{frameId:0});
     if(!result?.clicked) {
       await staffWrite(adStorage,{...local,transfer:null,transferError:result?.reason||'Waiting for downloadable attachments'});return;
     }
@@ -49,8 +49,10 @@ async function collectAd(job, token) {
   const url=new URL(item.finalUrl||item.url);
   let data;
   if(url.protocol==='blob:' && url.origin==='https://chatgpt.com') {
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,url:url.href},{frameId:0});
-    if(!result?.data)throw Error(result?.error||'Original blob unavailable');
+    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,chat:job.chat_url,url:url.href},{frameId:0});
+    if(!result?.data) {
+      await staffWrite(adStorage,{...local,transfer:null,transferError:result?.error||'Original download expired; retrying the same attachment'});return;
+    }
     data=Uint8Array.from(atob(result.data),char=>char.charCodeAt(0));
   } else {
     if(url.protocol!=='https:' || url.username || url.password ||

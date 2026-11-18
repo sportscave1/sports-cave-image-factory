@@ -284,7 +284,7 @@
     const last = turns[turns.length - 1];
     const body = last?.matches('h4') ? last.nextElementSibling : last;
     const text = body?.innerText || '';
-    const generating = Boolean(document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"]'));
+    const generating = Boolean(document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"], button[aria-label="Stop"]'));
     const clean = text.replace(/[*`]/g, '');
     const marker = !generating && clean.match(ad ? /(?:^|\n)\s*SC_AD_BLOCKED:\s*([^\n]+)/ : design ? /(?:^|\n)\s*SC_DESIGN_BLOCKED:\s*([^\n]+)/ : /(?:^|\n)\s*SC_UPLOAD_BLOCKED:\s*([A-Z_]+)/);
     const alert = [...document.querySelectorAll('[role="alert"]')].find(node =>
@@ -316,7 +316,7 @@
     if (sender.id !== chrome.runtime.id) return;
     if (message?.type === 'project:cancel' && (inProject() || conversation.test(location.href))) {
       cancelled = true;
-      const stop = document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"]');
+      const stop = document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"], button[aria-label="Stop"]');
       stop?.click();
       reply({stopped:true});
       return;

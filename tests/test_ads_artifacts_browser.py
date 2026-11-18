@@ -19,6 +19,7 @@ def test_edge_attachment_matching_waits_and_isolates_the_original_turn():
             window.clicked=[];
             document.addEventListener('click',event=>{event.preventDefault();clicked.push(event.target.textContent);});
         }""")
+        page.add_script_tag(content=script.with_name('ad-downloads.js').read_text(encoding='utf8'))
         page.add_script_tag(content=script.read_text(encoding='utf8'))
         def request(name, **extra):
             return page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
@@ -47,4 +48,63 @@ def test_edge_attachment_matching_waits_and_isolates_the_original_turn():
         assert not request('ad_copy.csv',recover=True,response='wrong')['clicked']
         page.evaluate("""() => document.body.insertAdjacentHTML('afterbegin','<div data-message-author-role="user">Sports Cave automatic ad job 00000000-0000-0000-0000-000000000099</div>')""")
         assert 'different queued job' in request('ad_copy.csv',recover=True)['reason']
+        browser.close()
+
+
+def test_work_pasted_brief_requires_bound_chat_and_finished_original_files():
+    job='00000000-0000-0000-0000-000000000001'
+    url='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+job
+    script=Path(__file__).resolve().parents[1]/'windows-upload-companion/ad-artifacts.js'
+    with playwright.sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        page=browser.new_page()
+        page.route('**/*',lambda route:route.fulfill(status=200,content_type='text/html',body='<html><body></body></html>'))
+        page.goto(url)
+        page.evaluate("""() => {
+            window.chrome={runtime:{id:'fixture',onMessage:{addListener:fn=>window.listener=fn}}};
+            window.clicked=[];
+            document.addEventListener('click',event=>{event.preventDefault();clicked.push(event.target.textContent);});
+            document.body.innerHTML='<h4 data-conversation-role="user">You said:</h4><div><button aria-label="Pasted text(1)">Brief</button></div>'+
+                '<h4 data-conversation-role="assistant">ChatGPT said:</h4><div><a href="/file">ad_copy.csv Spreadsheet</a><a href="/image">man-cave.jpg Image</a></div>';
+        }""")
+        page.add_script_tag(content=script.with_name('ad-downloads.js').read_text(encoding='utf8'))
+        page.add_script_tag(content=script.read_text(encoding='utf8'))
+        def request(**extra):
+            return page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
+                                 dict(type='project:ad-artifact',job=job,name='ad_copy.csv',**extra))
+        assert not request()['clicked']
+        assert not request(chat=url+'wrong')['clicked']
+        first=request(chat=url)
+        assert first['clicked'] and first['response'].startswith('work-')
+        page.evaluate("""() => document.body.insertAdjacentHTML('beforeend','<button aria-label="Stop">Stop</button>')""")
+        assert 'still generating' in request(chat=url)['reason']
+        page.evaluate("""() => document.querySelector('[aria-label="Stop"]').remove()""")
+        assert request(chat=url,response=first['response'])['clicked']
+        assert not request(chat=url,response='wrong')['clicked']
+        # Work's filename button opens the viewer; only its own Download file
+        # button may be invoked, never another card's action.
+        page.evaluate("""() => {document.querySelector('h4[data-conversation-role="assistant"]').nextElementSibling.innerHTML=
+            '<div><button aria-label="Open preview of ad_copy.csv">ad_copy.csv Spreadsheet</button><button aria-label="Download file">CSV download</button></div>'+
+            '<div><button aria-label="Open preview of man-cave.jpg">man-cave.jpg Image</button><button aria-label="Download file">Image download</button></div>';}""")
+        first=request(chat=url)
+        assert first['clicked']
+        assert page.evaluate('clicked.at(-1)')=='CSV download'
+        # ChatGPT creates and promptly revokes a blob for the native download.
+        # The next alarm can still transfer its original bytes.
+        page.evaluate("""() => {
+            window.originalURL=URL.createObjectURL(new Blob(['original csv bytes'],{type:'text/csv'}));
+            URL.revokeObjectURL(originalURL);
+        }""")
+        blob=page.evaluate("""m=>new Promise(resolve=>listener({...m,url:originalURL},{id:'fixture'},resolve))""",
+                           dict(type='project:ad-blob',job=job,name='ad_copy.csv',chat=url,response=first['response']))
+        import base64
+        assert base64.b64decode(blob['data'])==b'original csv bytes'
+        wrong=page.evaluate("""m=>new Promise(resolve=>listener({...m,url:originalURL},{id:'fixture'},resolve))""",
+                           dict(type='project:ad-blob',job=job,name='man-cave.jpg',chat=url,response=first['response']))
+        assert 'error' in wrong
+        # The fingerprint survives re-rendering and removal of the original prompt.
+        page.evaluate("""() => {document.querySelector('h4').nextElementSibling.remove();document.querySelector('h4').remove();document.body.innerHTML=document.body.innerHTML;}""")
+        assert request(recover=True,response=first['response'])['clicked']
+        page.evaluate("""() => document.body.insertAdjacentHTML('afterbegin','<h4 data-conversation-role="user">You said:</h4><div>Sports Cave automatic ad job 00000000-0000-0000-0000-000000000099</div>')""")
+        assert 'different queued job' in request(recover=True)['reason']
         browser.close()

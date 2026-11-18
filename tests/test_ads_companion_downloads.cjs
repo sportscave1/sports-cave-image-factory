@@ -30,6 +30,7 @@ function fixture(records=new Map()) {
 test('background tab, durable native download journal, verified receipt and no prompt resend',async()=>{
   const f=fixture();await f.run();assert.equal(f.opens[0].active,false);
   await f.run();assert.equal(f.messages.length,1);assert.equal(f.messages[0].type,'project:ad-artifact');
+  assert.equal(f.messages[0].chat,chat);
   const restart=fixture(f.records);
   restart.downloads([{referrer:'https://chatgpt.com/',filename:'C:\\Downloads\\ad_copy (1).csv',state:'in_progress',url:'https://files.oaiusercontent.com/original'}]);
   await restart.run();assert.equal(restart.calls.length,0);
@@ -53,4 +54,16 @@ test('unrelated and ambiguous downloads never upload; expired links re-request o
   f.downloads([item,item]);await f.run();assert.equal(f.calls.length,0);
   f.downloads([item]);f.valid(false);await f.run();assert.equal(f.records.get('publishAdJob').transfer,null);
   await f.run();assert.equal(f.messages.length,2);
+});
+
+test('expired blob after a restart retries the original attachment instead of remaining stuck',async()=>{
+  const f=fixture();await f.run();await f.run();
+  f.downloads([{referrer:chat,filename:'ad_copy.csv',state:'complete',url:'blob:https://chatgpt.com/expired'}]);
+  await f.run();
+  assert.equal(f.messages.at(-1).type,'project:ad-blob');
+  assert.equal(f.messages.at(-1).chat,chat);
+  assert.equal(f.records.get('publishAdJob').transfer,null);
+  assert.equal(f.calls.length,0);
+  await f.run();
+  assert.equal(f.messages.at(-1).type,'project:ad-artifact');
 });

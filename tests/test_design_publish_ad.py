@@ -134,7 +134,7 @@ def test_post_request_imports_originals_in_route_order(country, code, monkeypatc
     value = dict(result=result, folder=folder, handle='fixture-product', upload=upload)
     monkeypatch.setattr(ads, 'write', lambda *_: None)
     monkeypatch.setattr(ads_posting_page, 'MetaPostingClient', lambda: SimpleNamespace(
-        product_set_health=lambda key: {'products':[{'url':result['product_url']}] if key=='21' else []}))
+        product_set_members=lambda key: [{'url':result['product_url']}] if key=='21' else []))
     request = ads._post_request(value)
     assert request.country == code
     assert request.product_set_id == '21'

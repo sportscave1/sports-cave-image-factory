@@ -1833,6 +1833,14 @@ class MetaPostingClient:
             or ()
         )
 
+    def product_set_members(self, product_set_id):
+        """Read only the identifiers needed to verify catalogue membership."""
+        return tuple(_paged_get(
+            f"{str(product_set_id or '').strip()}/products",
+            params={"fields": "id,retailer_id,url", "limit": 100},
+            config=self.config,
+        ).get("rows") or ())
+
     def product_set_health(self, product_set_id):
         """Read Product Set metadata and products without mutating the catalogue."""
         clean_id = str(product_set_id or "").strip()

@@ -21,6 +21,7 @@ def contains_product(products, result):
 
 def select(refs, result, *, client, saved=None):
     import ads_posting_page as posting
+    from meta_ads_client import MetaAdsApiError
     from posting_import_csv import canonical_posting_country
 
     explicit = saved or result.get('posting_settings') or {}
@@ -37,8 +38,17 @@ def select(refs, result, *, client, saved=None):
             raise ValueError('The selected product set is no longer in the configured catalog.')
     chosen = None
     for row in ranked:
-        health = client.product_set_health(str(row['id']))
-        if contains_product(health.get('products') or [], result):
+        try:
+            products = client.product_set_members(str(row['id']))
+        except MetaAdsApiError as error:
+            if str(error.error_code) in ('3', '10', '190', '200') and not error.is_transient:
+                raise ValueError(
+                    'Meta denied product-set membership verification '
+                    f'(code {error.error_code}). All imported files are saved. '
+                    'Check the Meta app and catalogue access, then Resume import.'
+                ) from error
+            raise
+        if contains_product(products, result):
             chosen = row
             break
     if not chosen:
