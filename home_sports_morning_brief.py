@@ -1,13 +1,14 @@
 """Publish one dated Sports Updates brief to the owner’s OS Home."""
 
-from datetime import date
+from datetime import date, timedelta
 import json
 import logging
 import re
+import unicodedata
 from urllib.parse import urlsplit
 
 import os_accounts
-from home_brief_calendar import HISTORY_PREFIX, MARKETS, article_fields, shop_product_handle
+from home_brief_calendar import HISTORY_PREFIX, article_fields, shop_product_handle
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -46,7 +47,7 @@ def _link(item):
 def _recommendations(items):
     recommendations = []
     for item in items:
-        if not isinstance(item, dict) or set(item) - {"title", "recommendation", "links", "sport", "markets", "primary_market", "start_date", "end_date", "product_url"}:
+        if not isinstance(item, dict) or set(item) - {"title", "recommendation", "links", "sport", "markets", "primary_market", "start_date", "end_date", "product_url", "subject", "sales_rationale", "opportunity_status"}:
             raise ValueError("Each item needs a title and recommendation, with optional links.")
         links = item.get("links", [])
         if not isinstance(links, list) or len(links) > 5:
@@ -66,6 +67,9 @@ def _recommendations(items):
                     raise ValueError("Include the recommended product within the five links.")
                 article["links"].append(recommended)
         article.update(article_fields({**item, **article}))
+        for field, limit in (("subject", 160), ("sales_rationale", 1200), ("opportunity_status", 40)):
+            if field in item:
+                article[field] = _text(item[field], limit, field)
         recommendations.append(article)
     return recommendations
 
@@ -77,12 +81,33 @@ def _legends(items):
     if any(not raw.get("links") or not article["sport"] or not article["markets"]
            for raw, article in zip(items, articles)):
         raise ValueError("Each legend needs a source link, sport and market.")
-    # Earlier editions had only a list of applicable markets and remain readable.
-    if len(items) > 4 or any("primary_market" in item for item in items):
-        primaries = [article.get("primary_market") for article in articles]
-        if any(market not in MARKETS for market in primaries) or any(primaries.count(market) > 2 for market in MARKETS):
-            raise ValueError("Assign each legend a primary market and use up to two entries per AUS, USA or UK.")
     return articles
+
+
+def subject_key(item):
+    subject = item.get("subject") or re.split(r"\s+[—–-]\s+", item["title"])[0]
+    return " ".join(re.findall(r"[a-z0-9]+", unicodedata.normalize("NFKD", subject).encode("ascii", "ignore").decode().casefold()))
+
+
+def design_sections(edition):
+    return ("design_recommendations",) if "design_recommendations" in edition else ("recommendations", "legends")
+
+
+def validate_fresh_designs(edition, cursor):
+    if "design_recommendations" not in edition:
+        return
+    day = date.fromisoformat(edition["date"])
+    cursor.execute("""SELECT value FROM app_settings WHERE (starts_with(key, %s) OR key='home_sports_morning_brief')
+                      AND value->>'date' >= %s AND value->>'date' < %s""",
+                   (HISTORY_PREFIX, (day - timedelta(days=7)).isoformat(), day.isoformat()))
+    previous = [row["value"] for row in cursor.fetchall()]
+    excluded = {subject_key(item) for old in previous for section in design_sections(old)
+                for item in old.get(section, [])}
+    for item in edition["design_recommendations"]:
+        key = subject_key(item)
+        if key in excluded:
+            raise ValueError(f"Design subject already recommended in the last seven days: {item['subject']}")
+        excluded.add(key)
 
 
 def parse_edition(raw, today):
@@ -92,7 +117,7 @@ def parse_edition(raw, today):
         data = json.loads(raw)
     except (ValueError, RecursionError):
         raise ValueError("Enter valid Morning Brief JSON.") from None
-    if not isinstance(data, dict) or not {"date", "recommendations"} <= set(data) <= {"date", "recommendations", "full_brief", "legends"}:
+    if not isinstance(data, dict) or not {"date", "recommendations"} <= set(data) <= {"date", "recommendations", "full_brief", "legends", "summary", "design_recommendations", "rivalries"}:
         raise ValueError("Include the Sydney date and a list of recommendations.")
     raw_day = data["date"]
     if not isinstance(raw_day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_day):
@@ -110,6 +135,28 @@ def parse_edition(raw, today):
     edition = {"date": day.isoformat(), "recommendations": recommendations}
     if "full_brief" in data:
         edition["full_brief"] = _text(data["full_brief"], 50000, "Full brief")
+    if "summary" in data:
+        edition["summary"] = _text(data["summary"], 1800, "Daily summary")
+    if "design_recommendations" in data:
+        if not edition.get("summary") or not edition.get("full_brief"):
+            raise ValueError("Include summary and full_brief with design recommendations.")
+        picks = data["design_recommendations"]
+        if not isinstance(picks, list) or len(picks) > 4:
+            raise ValueError("Include only the top four design recommendations.")
+        edition["design_recommendations"] = _recommendations(picks)
+        for item in edition["design_recommendations"]:
+            if not all(item.get(field) for field in ("subject", "sport", "markets", "links", "sales_rationale")):
+                raise ValueError("Each design needs subject, sport, markets, source links and sales_rationale.")
+            if item.get("opportunity_status") not in {"Create now", "Research first", "Watch"}:
+                raise ValueError("Use Create now, Research first or Watch for opportunity_status.")
+        if len({subject_key(item) for item in edition["design_recommendations"]}) != len(picks):
+            raise ValueError("Each design must have a distinct subject.")
+    if "rivalries" in data:
+        if not isinstance(data["rivalries"], list) or len(data["rivalries"]) > 3:
+            raise ValueError("Include up to three verified current rivalries.")
+        edition["rivalries"] = _recommendations(data["rivalries"])
+        if any(not item["links"] or not item["sport"] or not item["markets"] for item in edition["rivalries"]):
+            raise ValueError("Each rivalry needs sources, sport and markets.")
     if "legends" in data:
         try:
             edition["legends"] = _legends(data["legends"])
@@ -141,6 +188,9 @@ def publish(raw, user):
     edition = parse_edition(raw, today)
     with connect() as conn:
         with conn.cursor() as cursor:
+            # Serialize daily editions so concurrent publishers cannot bypass history checks.
+            cursor.execute("SELECT pg_advisory_xact_lock(73190421)")
+            validate_fresh_designs(edition, cursor)
             # Preserve the pre-archive edition before replacing the latest pointer.
             cursor.execute(
                 """

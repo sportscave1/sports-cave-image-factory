@@ -29,6 +29,11 @@ LATEST_KEYS = {"sports": sports.SETTING_KEY, "meta": meta.SETTING_KEY,
                "design_refresh": refresh.KEY}
 
 
+def contract_upgrade(kind, previous, incoming):
+    field = {"sports": "design_recommendations", "meta": "ad_recommendations"}.get(kind)
+    return bool(field and field in incoming and field not in previous)
+
+
 def enabled():
     return os.getenv("SPORTS_CAVE_HOSTED_BRIEFS", "").strip() == "1"
 
@@ -86,6 +91,12 @@ def enqueue(kind, edition, claims):
     if len(raw) > limit or edition.get("date") != today.isoformat():
         raise ValueError("Send today's completed Sydney edition within the brief size limit.")
     validated = parse(raw, today)
+    if kind == "sports" and "design_recommendations" in validated:
+        with connect() as conn, conn.cursor() as cur:
+            sports.validate_fresh_designs(validated, cur)
+    if kind == "meta" and "ad_recommendations" in validated:
+        from home_brief_opportunities import validate_ad_products
+        validate_ad_products(validated['ad_recommendations'], today)
     if kind == "sports" and not validated.get("full_brief"):
         raise ValueError("Include the complete Sports Morning Brief.")
     if kind == "meta" and not validated.get("summary"):
@@ -101,8 +112,12 @@ def enqueue(kind, edition, claims):
                VALUES (%s, %s::jsonb, now()) ON CONFLICT DO NOTHING""",
             (key, json.dumps(job)),
         )
-        cur.execute("SELECT value FROM app_settings WHERE key=%s", (key,))
+        cur.execute("SELECT value FROM app_settings WHERE key=%s FOR UPDATE", (key,))
         existing = cur.fetchone()["value"]
+        if existing["status"] == "completed" and contract_upgrade(kind, existing["edition"], edition):
+            cur.execute("UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s",
+                        (json.dumps(job), key))
+            existing = job
         if existing["edition"] != edition:
             raise ValueError("An edition already exists for this brief and date.")
     return {"date": str(today), "brief": kind, "status": existing["status"]}
@@ -127,6 +142,8 @@ def status(kind):
                        job.get("error_stage", "publication"),
               "retryable": not verified and job.get("status") in ("scheduled", "running", "retrying")}
     if verified:
+        result['format_version'] = 2 if (kind == 'sports' and 'design_recommendations' in published
+                                         or kind == 'meta' and 'ad_recommendations' in published) else 1
         result["publication_sha256"] = digest(published)
         result["matches_submission"] = (published == BRIEFS[kind][0](
             json.dumps(job["edition"], ensure_ascii=False), day)) if job else None
@@ -212,7 +229,8 @@ def process_one():
         if current.get("date", "") > job["date"]:
             raise ValueError("newer edition already published")
         published_here = False
-        if current.get("date", "") < job["date"] or publication(job["kind"], today) is None:
+        if (current.get("date", "") < job["date"] or publication(job["kind"], today) is None
+                or contract_upgrade(job['kind'], current, job['edition'])):
             if job["attempts"] > MAX_ATTEMPTS:
                 raise ValueError("retry limit reached")
             _, publish, _ = BRIEFS[job["kind"]]

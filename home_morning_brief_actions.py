@@ -207,6 +207,9 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         f'{escape(link["label"])}</a>' for link in item["links"]
     )
     paragraphs = []
+    for field, caption in (("opportunity_status", "Recommendation"), ("sales_rationale", "Sales potential")):
+        if item.get(field):
+            paragraphs.append(f'<p><strong>{caption}:</strong> {escape(item[field])}</p>')
     for line in item["recommendation"].splitlines():
         if not line.strip():
             continue
@@ -290,11 +293,16 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
         return design_statuses.get(identity(edition['date'], section, item), 'Needs attention')
     def key(section, item):
         return identity(edition['date'], section, item)
-    rows = "".join(
-        article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads, design_status=status("recommendations", item), design_key=key("recommendations", item))
-        for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
-    )
-    full_brief = (edition or {}).get("full_brief")
+    saved = edition or {}
+    summary = saved.get("summary")
+    if not summary:
+        # Earlier editions remain readable immediately, before the next scheduled run.
+        text = saved.get("full_brief", "")
+        summary = next((p.strip() for p in text.split('\n\n') if len(p.strip()) > 100 and not p.lstrip().startswith(('#', '{'))), '')
+        summary = summary[:1800] or ' '.join(item['title'] for item in saved.get('recommendations', ()))
+    rows = f'<p class="sc-daily-summary">{escape(summary)}</p>' if summary else ''
+    full_brief = saved.get("full_brief") or '\n\n'.join(
+        f'{item["title"]}\n{item["recommendation"]}' for item in saved.get('recommendations', ()))
     legends = _ranked_legends((edition or {}).get("legends", ()))
     if full_brief:
         if legends:
@@ -303,6 +311,12 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
                     f'{link["label"]}: {link["url"]}' for link in item['links'])
                 for label, item in legends
             )
+        for section, caption in (("rivalries", "Rivalries Brief"), ("design_recommendations", "Design recommendations")):
+            if saved.get(section) and caption.casefold() not in full_brief.casefold():
+                full_brief += '\n\n' + caption + '\n\n' + '\n\n'.join(
+                    f'{rank}. {item["title"]}\n{item["recommendation"]}\n'
+                    + '\n'.join(f'{link["label"]}: {link["url"]}' for link in item['links'])
+                    for rank, item in enumerate(saved[section], 1))
         rows += (
             '<button type="button" class="sc-full-brief" aria-haspopup="dialog">Read the full Morning Brief</button>'
             '<dialog class="sc-cal-dialog sc-sports-full" aria-label="Full Sports Morning Brief">'
@@ -311,11 +325,13 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
         )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
-    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True, design_status=status("legends", item), design_key=key("legends", item))
-                          for label, item in legends)
+    picks = saved.get("design_recommendations", ())
+    legend_rows = "".join(article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads,
+                          design_status=status("design_recommendations", item), design_key=key("design_recommendations", item))
+                          for rank, item in enumerate(picks[:4], 1))
     if not legend_rows:
-        legend_rows = '<p class="sc-legends-empty">No Legends Brief entries for this edition.</p>'
-    legend_section = ('<section class="sc-sports-stories sc-legends" aria-label="Legends Brief">'
-                      f'<h3>Legends Brief</h3>{legend_rows}</section>')
+        legend_rows = '<p class="sc-legends-empty">Fresh design recommendations are pending for this edition.</p>'
+    legend_section = ('<section class="sc-sports-stories sc-legends" aria-label="Design recommendations">'
+                      f'<h3>Design recommendations</h3>{legend_rows}</section>')
     return (_template().replace("<!-- CALENDARS -->", tables)
             .replace("<!-- LEGENDS -->", legend_section).replace("<!-- RECOMMENDATIONS -->", stories))

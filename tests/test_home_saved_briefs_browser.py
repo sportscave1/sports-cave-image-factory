@@ -6,6 +6,7 @@ from playwright.sync_api import sync_playwright, expect
 import home_meta_morning_brief as meta
 import home_sports_morning_brief as sports
 import os_accounts
+from tests.test_brief_opportunity_upgrade import edition, ad
 
 
 def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_path):
@@ -16,13 +17,12 @@ def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_pat
     for module in (sports, meta):
         monkeypatch.setattr(module, 'get_app_setting', Mock(side_effect=AssertionError('render attempted storage')))
     st = Mock()
-    sports.render(st, {}, today, snapshot=dict(saved={
-        'date':str(today), 'recommendations':[dict(title='Synthetic sports story',
-        recommendation='Review this saved opportunity.', links=[])]}, editions=[], statuses={}))
+    saved_sports = dict(edition(), date=str(today))
+    sports.render(st, {}, today, snapshot=dict(saved=saved_sports, editions=[], statuses={}))
     # Old reporting data previously triggered provider reads automatically on Home.
     meta.render(st, {}, today, snapshot=dict(saved=dict(date='2026-11-16',report_date='2026-11-15',
         roas=None,orders=None,actions=[],summary='Review the saved recommendations.',
-        recommendations=['Review delivery.', 'Check the creative.']),refresh=''))
+        recommendations=[],ad_recommendations=[ad()]),refresh=''))
     fragments = ''.join(call.args[0] for call in st.html.call_args_list)
     html = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:12px;font:14px Arial}*{box-sizing:border-box}</style>'+fragments
     with sync_playwright() as p:
@@ -39,6 +39,12 @@ def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_pat
             page.route('**/*',route)
             page.goto('http://fixture.test/')
             expect(page.locator('.sc-meta-review')).to_contain_text('Review the saved recommendations.')
+            expect(page.locator('.sc-legends .sc-brief-row')).to_have_count(4)
+            expect(page.locator('.sc-daily-summary')).to_contain_text('A concise summary')
+            expect(page.locator('.sc-meta-review')).to_contain_text('Test Star Wall Art')
+            page.get_by_role('button',name='Read the full Morning Brief').click()
+            expect(page.get_by_role('dialog',name='Full Sports Morning Brief')).to_contain_text('Rivalries Brief')
+            page.get_by_role('dialog',name='Full Sports Morning Brief').get_by_role('button',name='Close',exact=True).click()
             for width in (1600, 820, 390, 320):
                 page.set_viewport_size(dict(width=width,height=900))
                 assert page.evaluate('document.documentElement.scrollWidth') <= width

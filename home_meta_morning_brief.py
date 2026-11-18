@@ -90,7 +90,7 @@ def parse_edition(raw, today, *, stored=False):
         edition = json.loads(raw)
     except (ValueError, RecursionError):
         raise ValueError("Enter valid Meta Morning Brief JSON.") from None
-    optional = {"insights"} | ({"ga4_orders"} if stored else set())
+    optional = {"insights", "ad_recommendations"} | ({"ga4_orders"} if stored else set())
     if (not isinstance(edition, dict) or not FIELDS <= set(edition) <= FIELDS | REVIEW_FIELDS | optional
             or set(edition) & REVIEW_FIELDS not in (set(), REVIEW_FIELDS)):
         raise ValueError("Include date, report_date, roas, orders and actions. Add summary and recommendations together.")
@@ -114,7 +114,7 @@ def parse_edition(raw, today, *, stored=False):
     if "summary" in edition:
         edition["summary"] = _home_text(edition["summary"], 240, "Summary")
         items = edition["recommendations"]
-        if not isinstance(items, list) or not 1 <= len(items) <= MAX_RECOMMENDATIONS:
+        if not isinstance(items, list) or not (0 if "ad_recommendations" in edition else 1) <= len(items) <= MAX_RECOMMENDATIONS:
             raise ValueError(f"Include one to {MAX_RECOMMENDATIONS} recommendations.")
         edition["recommendations"] = [_home_text(item, 190, "Recommendation") for item in items]
         distinct = {}
@@ -124,6 +124,8 @@ def parse_edition(raw, today, *, stored=False):
         if not stored and len(distinct) != len(items):
             raise ValueError("Each recommendation must be distinct.")
         edition["recommendations"] = list(distinct.values())
+    if "ad_recommendations" in edition:
+        edition["ad_recommendations"] = _ad_recommendations(edition["ad_recommendations"])
     if "insights" in edition:
         insights = edition["insights"]
         if not isinstance(insights, dict) or not set(insights) <= INSIGHT_LABELS.keys():
@@ -147,6 +149,37 @@ def parse_edition(raw, today, *, stored=False):
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError("Invalid saved GA4 time zone.") from None
     return edition
+
+
+def _ad_recommendations(items):
+    from home_sports_morning_brief import _link
+    from home_brief_calendar import shop_product_handle
+    from sports_categories import normalize_sport_category
+    from urllib.parse import urlsplit
+    fields = {"sport", "market", "event_title", "product_title", "product_url", "collection_url",
+              "rationale", "performance_evidence", "action"}
+    if not isinstance(items, list) or len(items) > 4:
+        raise ValueError("Include up to four calendar-led live product ad recommendations.")
+    result = []
+    for item in items:
+        if not isinstance(item, dict) or set(item) != fields:
+            raise ValueError("Each ad needs sport, market, event_title, product_title, product_url, collection_url, rationale, performance_evidence and action.")
+        row = {field: _text(item[field], 1200 if field.endswith('_url') else 500, field) for field in fields}
+        for field in ('rationale', 'performance_evidence', 'action'):
+            row[field] = _home_text(row[field], 500, field)
+        if normalize_sport_category(row['sport']) != row['sport'] or row['market'] not in {'AUS', 'USA', 'UK'}:
+            raise ValueError("Use a canonical ad sport and AUS, USA or UK market.")
+        for field in ('product_url', 'collection_url'):
+            _link(dict(label=field, url=row[field]))
+        collection = urlsplit(row['collection_url'])
+        if (not shop_product_handle(row['product_url']) or collection.hostname not in
+                {'www.sportscaveshop.com', 'sportscaveshop.com', 'www.sportscave.com.au', 'sportscave.com.au'}
+                or not re.fullmatch(r'/collections/[a-z0-9][a-z0-9-]*/?', collection.path)):
+            raise ValueError("Use exact Sports Cave product and collection URLs.")
+        if any(prior['sport'] == row['sport'] or prior['product_url'] == row['product_url'] for prior in result):
+            raise ValueError("Recommend one best product per distinct live sport.")
+        result.append(row)
+    return result
 
 
 def account_roas(day, end=None):
@@ -218,6 +251,9 @@ def publish(raw, user):
     edition = parse_edition(raw, today)
     if edition["date"] != today.isoformat():
         raise ValueError("Publish only today's Sydney Meta brief.")
+    if "ad_recommendations" in edition:
+        from home_brief_opportunities import validate_ad_products
+        validate_ad_products(edition['ad_recommendations'], today)
     try:
         edition["roas"] = account_roas(_day(edition["report_date"]))
     except (meta_ads_client.MetaAdsApiError, TimeoutError, OSError, ValueError, ZoneInfoNotFoundError) as error:
@@ -280,10 +316,20 @@ def render(st, user, today, *, snapshot=None):
     )
     review = ""
     if edition and edition.get("summary"):
-        items = [
-            f"<li>{escape(PRIORITY_PREFIX.sub('', item) or item)}</li>"
-            for item in edition["recommendations"]
-        ]
+        items = []
+        for item in edition.get('ad_recommendations', []):
+            from home_brief_calendar import PRODUCT_QUERY, shop_product_handle
+            from urllib.parse import urlencode
+            create_url = '/?' + urlencode(dict(page='ads', **{PRODUCT_QUERY: shop_product_handle(item['product_url'])}))
+            items.append(f'<li><strong>{escape(item["sport"])} · {escape(item["market"])}</strong> — '
+                         f'<a href="{escape(item["product_url"], quote=True)}">{escape(item["product_title"])}</a>'
+                         f'<br>{escape(item["event_title"])}. {escape(item["rationale"])}'
+                         f'<br>{escape(item["performance_evidence"])}<br>{escape(item["action"])} '
+                         f'<a href="{escape(create_url, quote=True)}">Create Ad</a></li>')
+        if 'ad_recommendations' not in edition:
+            items = ['<li>Calendar-led live product recommendations are pending.</li>']
+        elif not items:
+            items = ['<li>No verified live product opportunity meets today’s calendar and evidence checks.</li>']
         extra = items[VISIBLE_RECOMMENDATIONS:]
         more = (
             '<button type="button" class="sc-meta-more" aria-haspopup="dialog">More recommendations</button>'

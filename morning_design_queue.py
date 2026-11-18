@@ -43,7 +43,8 @@ def discover(cur):
     existing = {str(row['id']) for row in cur.fetchall()}
     for row in editions:
         edition = row['value']
-        for section in ('recommendations', 'legends'):
+        from home_sports_morning_brief import design_sections
+        for section in design_sections(edition):
             for item in edition.get(section, []):
                 key = identity(edition['date'], section, item)
                 if key in existing:
@@ -456,13 +457,13 @@ ROUTES = (('/api/morning-designs/tick', tick_route, ('POST',)),)
 
 
 def current_suggestions():
-    from home_sports_morning_brief import SETTING_KEY
+    from home_sports_morning_brief import SETTING_KEY, design_sections
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (SETTING_KEY,))
         row = cur.fetchone()
     edition = row['value'] if row else {}
     return [dict(id=identity(edition['date'], section, item), date=edition['date'], section=section, item=item)
-            for section in ('recommendations', 'legends') for item in edition.get(section, [])]
+            for section in design_sections(edition) for item in edition.get(section, [])]
 
 
 def enqueue_selected(key):
