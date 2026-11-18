@@ -1,15 +1,24 @@
 """Morning design jobs, using the existing paired Edge desktop credential."""
 import hashlib
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
-from uuid import UUID, uuid5, NAMESPACE_URL
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
 from product_upload_staff_queue import connect, digest
 
 LABELS = ('Pending', 'Opening ChatGPT', 'Generating', 'Uploaded · checking review metadata',
           'Ready for review', 'Needs attention')
 CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?/c/[a-f0-9-]{36}')
+LOG = logging.getLogger(__name__)
+
+
+def _receipt(job):
+    # Keep existing send journals valid; explicit retries get a fresh journal.
+    retry = re.search(r'\nQueue retry receipt: ([a-f0-9-]{36})\n', job['prompt'])
+    suffix = ':' + retry[1] if retry else ''
+    return hashlib.sha256(('design:' + str(job['id']) + suffix).encode()).hexdigest()
 
 
 def identity(day, section, item):
@@ -35,9 +44,9 @@ def discover(cur):
                     continue
                 insert_suggestion(cur, edition['date'], section, item)
 
-def _job_prompt(key, title, recommendation):
+def _job_prompt(key, title, recommendation, *, primary_market=""):
     from home_morning_brief_actions import _prompt
-    return _prompt(title, recommendation) + (
+    return _prompt(title, recommendation, primary_market=primary_market) + (
         '\n\nAUTOMATIC DESIGN QUEUE RECEIPT\n'
         f'Include morning_design_job_id = "{key}" in the final .upload.json handoff. '
         'Keep this exact field even if the final title changes. Do not put it in the artwork. '
@@ -52,7 +61,20 @@ def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
-        return prompt
+        from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+        from design_new_composition import PURPOSEFUL_ABSTRACT
+        from home_morning_brief_actions import REVIEW_SAVE_NAMING
+        from design_motorsport import MOTORSPORT_JSON
+        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, REVIEW_SAVE_NAMING, MOTORSPORT_JSON)):
+            return prompt
+        _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
+        _, _, body = body.partition('\n\n')  # Existing workflow introduction.
+        brief, found, _ = body.partition('\n\n**1. Research the story, sources and master**')
+        if found:
+            upgraded = _job_prompt(str(job['id']), job['title'], brief)
+            retry = re.search(r'\nQueue retry receipt: [a-f0-9-]{36}\n', prompt)
+            return upgraded + (retry[0] if retry else '')
+        return prompt  # Preserve unfamiliar snapshots rather than guessing at their brief.
     # Both legacy versions put the selected brief between these fixed sections.
     for boundary in (
         'Report PSD and JSON delivery separately from successful visual checks.',
@@ -67,7 +89,10 @@ def _waiting_prompt(job):
 
 def insert_suggestion(cur, day, section, item):
     key = identity(day, section, item)
-    prompt = _job_prompt(key, item['title'], item['recommendation'])
+    from home_brief_calendar import display_markets
+    markets = display_markets(item)
+    prompt = _job_prompt(key, item['title'], item['recommendation'],
+                         primary_market=markets[0] if markets else '')
     cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
         VALUES(%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING''',
         (key, day, section, item['title'], prompt))
@@ -139,15 +164,64 @@ def _published_designs(cur, jobs):
     return published
 
 
+def _release_delivered(cur):
+    """Legacy stage 3 already holds a verified PSD/receipt, not ongoing generation."""
+    cur.execute("""UPDATE morning_design_jobs SET stage=5,
+        message=concat_ws(' ', NULLIF(message,''),
+            'PSD delivered to Design Studio Review. Upload metadata needs review; generation is complete and the queue continues.'),
+        updated_at=now()
+        WHERE stage=3 AND file_id<>'' AND file_rev<>'' AND file_path<>'' """)
+
+
+def _deleted_designs(jobs, published):
+    """Only confirmed absence permits redo; IDs survive Dropbox moves/renames."""
+    from product_upload_services import Dropbox
+    from psd_directory import ROOT
+    candidates = [job for job in jobs if job['id'] not in published
+                  and job['stage'] in (4, 5) and (job['file_id'] or job['file_path'])]
+    if not candidates:
+        return set()
+    missing = set()
+    try:
+        provider = Dropbox()
+        for job in candidates:
+            paths = [job['file_id'], job['file_path']]
+            if job['file_path']:
+                paths.append(ROOT + '/' + PurePosixPath(job['file_path']).name)
+            if all(provider.metadata_if_present(path) is None for path in dict.fromkeys(paths) if path):
+                missing.add(job['id'])
+    except Exception as error:
+        LOG.warning('design_deletion_check_unavailable type=%s', type(error).__name__)
+        return set()
+    return missing
+
+
+def _posted_designs(cur, jobs, published):
+    """Retain successful publication receipts even if a product is later archived."""
+    saved = [job for job in jobs if job['file_id']]
+    if not saved:
+        return published
+    cur.execute('''SELECT source_id FROM product_upload_staff_jobs
+        WHERE stage=6 AND source_id=ANY(%s)''', ([job['file_id'] for job in saved],))
+    posted = {row['source_id'] for row in cur.fetchall()}
+    return published | {job['id'] for job in saved if job['file_id'] in posted}
+
+
 def list_jobs(day=None):
     with connect() as conn, conn.cursor() as cur:
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        _release_delivered(cur)
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
             ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
         jobs = cur.fetchall()
         published = _published_designs(cur, jobs)
-        return [dict(id=str(r['id']), title=r['title'],
+        posted = _posted_designs(cur, jobs, published)
+    # Network checks must not hold the desktop claim lock.
+    deleted = _deleted_designs(jobs, posted)
+    return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
-                            else 'Uploaded · needs review' if r['stage'] == 5 and r['file_path'] else LABELS[r['stage']]), stage=r['stage'],
+                            else 'Deleted · ready to redo' if r['id'] in deleted
+                            else 'Uploaded · needs review' if r['stage'] == 5 and (r['file_id'] or r['file_path']) else LABELS[r['stage']]), stage=r['stage'],
                      chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path'],
                      updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in jobs]
 
@@ -157,16 +231,26 @@ def verify_outputs(jobs):
     from product_upload_services import Dropbox
     from design_review_page import _folder_entries, final_psd
     from design_review_metadata import _read_sidecar, _handoff_details, handoff_paths
-    from psd_directory import REVIEW_METADATA_FOLDER
+    from psd_directory import REVIEW_METADATA_FOLDER, REVIEW_FOLDER
     if not jobs:
         return {}
     wanted = {str(job['id']) for job in jobs}
     created = [job['created_at'] for job in jobs if isinstance(job.get('created_at'), datetime)]
     cutoff = min(created) - timedelta(minutes=5) if created else None
-    provider, results = Dropbox(), {}
-    for metadata in _folder_entries(provider, REVIEW_METADATA_FOLDER):
+    provider, results, candidates = Dropbox(), {}, []
+    for folder in (REVIEW_METADATA_FOLDER, REVIEW_FOLDER):
+        try:
+            candidates.extend(_folder_entries(provider, folder))
+        except Exception as error:
+            LOG.warning('design_receipt_folder_unavailable type=%s', type(error).__name__)
+    seen = set()
+    for metadata in candidates:
         if not metadata.get('name', '').endswith('.upload.json'):
             continue
+        stamp = tuple(metadata.get(field) for field in ('id', 'rev', 'path_display', 'name'))
+        if stamp in seen:
+            continue
+        seen.add(stamp)
         # Old sidecars cannot contain a newly allocated job receipt. Listing is
         # paginated, but only recent candidates need file-content downloads.
         modified = metadata.get('server_modified')
@@ -187,19 +271,31 @@ def verify_outputs(jobs):
                 continue
             if actual.get('path_display') not in handoff_paths(source['path_display']):
                 continue
-            details = _handoff_details(value, source)
-            stage = 4 if details['review_status'] == 'ready_for_review' else 3
-            # A completed handoff can honestly flag artwork quality for review.
-            # It must release the generation slot without claiming visual approval.
-            if (value.get('review_status') == 'needs_attention' and details['design_name']
-                    and details['intended_collections'] and details['sport']):
+            if any(value.get(field) != source.get(key) for field, key in (
+                    ('dropbox_file_id', 'id'), ('dropbox_revision', 'rev'), ('dropbox_path', 'path_display'))):
+                continue
+            # Delivery completes generation. Publication metadata and artwork
+            # quality remain review concerns, never a reason to occupy this slot.
+            try:
+                details = _handoff_details(value, source)
+                stage = 4 if details['review_status'] == 'ready_for_review' else 5
+                message = details.get('review_notes', '')
+                if stage == 5:
+                    message = ('PSD delivered to Design Studio Review. Generation is complete; '
+                               'check artwork and upload metadata before publishing. ' + message).strip()
+            except ValueError as error:
                 stage = 5
-            result = dict(stage=stage, source=source, message=details.get('review_notes', ''))
-            if key in results and (results[key]['stage'] == 5 or results[key]['source']['id'] != source['id']):
+                message = 'PSD delivered to Design Studio Review. Upload metadata needs review: ' + str(error)
+            result = dict(stage=stage, source=source, message=message)
+            if key in results and results[key]['source']['id'] != source['id']:
                 result = dict(stage=5, source=source, message='Multiple final PSDs claim this job. Review them manually.')
+            elif key in results and results[key]['stage'] == 5:
+                result = results[key]
             results[key] = result
         except ValueError:
             continue
+        except Exception as error:
+            LOG.warning('design_receipt_unavailable type=%s', type(error).__name__)
     return results
 
 
@@ -212,6 +308,7 @@ def tick(token, events):
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
         if not cur.fetchone():
             raise PermissionError('Pair the existing Upload Companion first.')
+        _release_delivered(cur)
         cur.execute("SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 OR (stage=5 AND updated_at>now()-interval '1 day')")
         active = cur.fetchall()
     # Provider calls are deliberately outside the claim transaction.
@@ -271,7 +368,7 @@ def tick(token, events):
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL
     return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], project=PROJECT_URL,
-        prompt=r['prompt'], receipt=hashlib.sha256(('design:'+str(r['id'])).encode()).hexdigest()) for r in jobs])
+        prompt=r['prompt'], receipt=_receipt(r)) for r in jobs])
 
 
 async def tick_route(request):
@@ -309,4 +406,22 @@ def enqueue_selected(key):
     if not suggestion:
         raise ValueError('The suggestion changed. Refresh the current Morning Brief.')
     with connect() as conn, conn.cursor() as cur:
+        # Serialize with desktop claims and competing homepage clicks.
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        cur.execute('SELECT * FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
+        job = cur.fetchone()
+        if job:
+            posted = _posted_designs(cur, [job], _published_designs(cur, [job]))
+            deleted = job['id'] in _deleted_designs([job], posted)
+            if job['id'] in posted or (not deleted and (job['stage'] != 5 or job['file_id'] or job['file_path'])):
+                return False
+            # Catch a late delivery before explicitly restarting failed work.
+            if verify_outputs([job]):
+                raise ValueError('This design has already been uploaded. Wait for its status to refresh.')
+            prompt = _job_prompt(key, suggestion['item']['title'], suggestion['item']['recommendation'])
+            prompt += f'\nQueue retry receipt: {uuid4()}\n'
+            cur.execute('''UPDATE morning_design_jobs SET stage=0,prompt=%s,message='',
+                chat_url='',file_id='',file_rev='',file_path='',updated_at=now() WHERE id=%s''', (prompt, key))
+            return True
         insert_suggestion(cur, suggestion['date'], suggestion['section'], suggestion['item'])
+        return True

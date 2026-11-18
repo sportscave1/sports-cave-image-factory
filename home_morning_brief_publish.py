@@ -170,7 +170,30 @@ async def refresh_history(request):
     return JSONResponse({"excluded_product_ids": ids}, headers=HEADERS)
 
 
+async def enqueue_design(request):
+    if not request.headers.get('origin') or not _same_origin(request):
+        return JSONResponse({'error': 'Invalid request origin.'}, status_code=403, headers=HEADERS)
+    try:
+        user = await run_in_threadpool(_request_user, request, required_page='dashboard')
+    except FilesUploadError:
+        user = None
+    if not os_accounts.is_reporting_owner(user):
+        return JSONResponse({'error': 'Owner access required.'}, status_code=403, headers=HEADERS)
+    from morning_design_queue import enqueue_selected
+    try:
+        from uuid import UUID
+        key = str(UUID(request.path_params['key']))
+        added = await run_in_threadpool(enqueue_selected, key)
+        return JSONResponse({'added': added}, headers=HEADERS)
+    except ValueError as error:
+        return JSONResponse({'error': str(error)}, status_code=409, headers=HEADERS)
+    except Exception as error:
+        LOG.warning('home_design_enqueue_failed type=%s', type(error).__name__)
+        return JSONResponse({'error': 'Queue unavailable. Try again.'}, status_code=503, headers=HEADERS)
+
+
 ROUTES = [(PATH, publication, ("GET", "POST")),
+          ('/ops/morning-brief/designs/{key}/enqueue', enqueue_design, ('POST',)),
           (meta.PATH, publication, ("GET", "POST")),
           (refresh.PATH, publication, ("GET", "POST")),
           ("/ops/design-refresh/history", refresh_history, ("GET",)),

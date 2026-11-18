@@ -49,7 +49,7 @@ def test_legends_has_its_own_rows_and_uses_existing_actions_before_calendar():
     assert html.index('<section class="sc-sports-stories"') < html.index('aria-label="Legends Brief"') < html.index('<section class="sc-cal">')
     rows = html.split('aria-label="Legends Brief"', 1)[1].split('</section>', 1)[0]
     assert 'USA 1. A hall of fame tribute' in rows
-    assert 'data-prompt=' in rows and 'Create Design' in rows and 'Create Ad' in rows
+    assert 'data-design-key=' in rows and 'Add to Queue' in rows and 'Create Ad' in rows
     assert 'brief_product=tribute-edition' in rows
     assert 'Fixture release' not in rows
     invalid = {**payload, "legends": [legend()] * 7}
@@ -231,15 +231,9 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     brief.render(st, OWNER, TODAY)
     assert "Today's brief is pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
-    assert "Create Design" in markup and "Create Ad" in markup
-    assert "Sports Cave event: Fixture release" in markup
-    assert "Use web image search to show" in markup
-    assert "the named subject must dominate at thumbnail size" in markup
-    assert "designs-canvas.psd" in markup
-    assert "**Compose the complete collector artwork." in markup
-    assert "Defer dependent steps and finish independent work" in markup
+    assert "Add to Queue" in markup and "Create Ad" in markup
+    assert 'data-design-key=' in markup
     assert "<h4>Fixture release</h4>" not in markup
-    assert "/g/g-p-6a1e449948e881919c1e345006d63654/project" in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
     assert "Morning Brief JSON" not in markup
     assert "Sports calendar" in markup and "News / updates" in markup
@@ -279,6 +273,36 @@ def test_publisher_route_rejects_cross_origin_and_nonowners(monkeypatch):
     assert response.status_code == 200
     assert "Published the 2026-11-13 Morning Brief." in response.text
     publish.assert_called_once_with(edition(), OWNER)
+
+
+def test_home_enqueue_requires_owner_same_origin_and_current_eligible_job(monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import home_morning_brief_publish as route
+    import morning_design_queue as queue
+    user = Mock(return_value=OWNER)
+    enqueue = Mock(return_value=True)
+    monkeypatch.setattr(route, '_request_user', user)
+    monkeypatch.setattr(queue, 'enqueue_selected', enqueue)
+    client = TestClient(Starlette(routes=[Route(path, endpoint, methods=methods)
+                                         for path, endpoint, methods in route.ROUTES]))
+    key = queue.identity('2026-11-13', 'recommendations', {'title': 'Champion'})
+    path = f'/ops/morning-brief/designs/{key}/enqueue'
+    origin = {'Origin': 'http://testserver'}
+    assert client.get(path).status_code == 405
+    assert client.post(path).status_code == 403
+    assert client.post(path, headers={'Origin': 'https://other.test'}).status_code == 403
+    user.return_value = {**OWNER, 'role': 'worker'}
+    assert client.post(path, headers=origin).status_code == 403
+    enqueue.assert_not_called()
+    user.return_value = OWNER
+    assert client.post(path, headers=origin).json() == {'added': True}
+    enqueue.assert_called_once_with(key)
+    enqueue.return_value = False
+    assert client.post(path, headers=origin).json() == {'added': False}
+    enqueue.side_effect = ValueError('The suggestion changed.')
+    assert client.post(path, headers=origin).status_code == 409
 
 
 
@@ -485,7 +509,8 @@ def test_create_design_uses_recent_performance_as_context_for_a_timeless_title()
     assert research < title < result.index('Use web image search')
     assert 'closest comparable sport or collector collection' in result
     assert 'Treat unranked products as style references only' in result
-    assert 'Use the athlete’s name alone only when that is a deliberate creative choice' in result
+    assert 'For each, identify the visible photographic detail or verified story that earns its wording.' in result
+    assert 'Keep numbers out of headlines' in result
     assert 'choose a story supporters would still want to display in five years' in result.lower()
     assert 'Include an accolade, statistic or year only when essential and verified' in result
 
@@ -505,8 +530,8 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Hide this" not in result and "Recommended Meta ad" not in result
     sections = (
         "Research the story, sources and master", "Prepare the complete composition before generation",
-        "Generate the complete flat artwork once", "Inspect and finish at 100% and thumbnail size",
-        "Assemble, save and verify one final Review PSD", "Write the Smart Upload JSON and deliver",
+        "Generate the collector treatment once", "Inspect and finish the assembled PSD",
+        "Save and verify one final Review PSD", "Write the Smart Upload JSON and deliver",
     )
     positions = [result.index(heading) for heading in sections]
     assert positions == sorted(positions)
@@ -520,12 +545,12 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Keep a photo-only fallback clearly provisional",
         "Do not search for, source, generate, trace, reproduce or include athlete signatures",
         "VISIBLE COLLECTOR TRANSFORMATION",
-        "Keep the generation as the visual baseline",
-        "Keep the repair only if it improves authenticity",
-        "Review can end with no creative changes",
-        "correct only the border if clearance fails",
+        "Build every visible athlete and sporting object from the verified original photographs",
+        "Completely cover generated renditions",
+        "If it passes, proceed directly to the final save",
+        "Correct only the border if clearance fails",
         "contact shadows only at actual points of contact",
-        "mark unresolved quality or identity as needs_attention",
+        "Record unresolved quality or identity as needs_attention",
         "ORIGINAL EDITABLE ARTWORK", "FINAL POLISHED ARTWORK", "REVIEW NOTES",
         "create-only mode", "Reopen that saved revision", "parser plus a rendered preview",
         "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/JSON/", "intended_collections", "dropbox_revision",
@@ -533,7 +558,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Completion requires one full generation", "Shopify publication is a separate action",
     ):
         assert guard in result
-    assert len(result.split()) < 3500
+    assert len(result.split()) < 3900
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)

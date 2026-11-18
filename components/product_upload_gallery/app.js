@@ -46,6 +46,34 @@
   const project='https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b/project';
   const companionChannel='sports-cave-upload-companion-v1';
   const automaticAttempts=new Set();
+  async function referenceFile(reference,version){
+    if(!reference)return undefined;
+    const address=new URL(reference.url,location.origin);
+    if(address.origin!==location.origin || address.pathname!=='/api/product-uploads/asset' ||
+       !reference.name?.endsWith('.webp') || /[/\\]/.test(reference.name) ||
+       !Number.isInteger(reference.size) || reference.size<1 || reference.size>16*1024*1024 ||
+       !/^[a-f0-9]{64}$/.test(reference.sha256||''))throw Error('Invalid original image attachment.');
+    let response;
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        response=await fetch(address.href,{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+        if(response.ok)break;
+        if(response.status<500)break;
+      }catch(error){if(controller.signal.aborted || attempt===1)throw error;}
+    }
+    if(!response?.ok)throw Error('The original image is unavailable. Reopen the saved mockups.');
+    const bytes=new Uint8Array(await response.arrayBuffer());active(version);
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+    if(bytes.length!==reference.size || hash!==reference.sha256)throw Error('The original image attachment failed verification.');
+    const chunks=[];
+    for(let i=0;i<bytes.length;i+=8192)chunks.push(String.fromCharCode(...bytes.subarray(i,i+8192)));
+    const {url:unused,...metadata}=reference;
+    return {...metadata,data:btoa(chunks.join(''))};
+  }
+  const supportsReference=version=>{
+    const parts=String(version||'').split('.').map(Number);
+    return parts[0]>1 || (parts[0]===1 && (parts[1]>3 || (parts[1]===3 && parts[2]>=3)));
+  };
   function companionRequest(action, payload={}, timeout=1000){
     if(!globalThis.crypto?.randomUUID)return Promise.resolve(null);
     const id=crypto.randomUUID();
@@ -156,6 +184,13 @@
       try{
         const copying=copyUploadPrompt(automatic);
         if(handoff.companion_id){
+          if(handoff.reference){
+            const companion=await companionRequest('health');
+            if(!supportsReference(companion?.version)){
+              stage(95,'Update Edge Companion to 1.3.3 to attach the verified original image. The saved mockups are retained.');
+              return;
+            }
+          }
           let receipt=handoff.companion_id;
           const reference=handoff.reference_companion_id;
           const savedAt=Date.parse(handoff.reference_saved_at);
@@ -164,7 +199,8 @@
             active(version);
             if(previous?.state==='submitted' && previous.time>0 && previous.time<savedAt)receipt=reference;
           }
-          const payload={receipt,prompt:handoff.prompt,staffJob:handoff.staff_job};
+          const referenceFilePayload=await referenceFile(handoff.reference,version);
+          const payload={receipt,prompt:handoff.prompt,staffJob:handoff.staff_job,reference:referenceFilePayload};
           let result=await companionRequest('start',payload,2200);
           if(automatic && !signal.aborted && !result)result=await companionRequest('start',payload,2200);
           if(result?.accepted && !result.busy)markDispatched();
@@ -204,9 +240,9 @@
           status.append(projectLink());
           resize();
         }
-      }catch{
+      }catch(error){
         if(signal.aborted)return;
-        status.textContent=automatic ? 'Click Upload to copy the prompt and open ChatGPT.' :
+        status.textContent=handoff.reference && error?.message ? error.message : automatic ? 'Click Upload to copy the prompt and open ChatGPT.' :
           'Could not copy the upload prompt. Click Upload again to retry.';
       }finally{
         if(!signal.aborted){upload.disabled=false;resize();}

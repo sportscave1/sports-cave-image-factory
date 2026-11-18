@@ -14499,6 +14499,10 @@ def render_supported_result(result, *, source_matches=True):
 
 
 def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
+    if st.query_params.get('ads_queue_job'):
+        from ads_companion_draft import render
+        render(str(st.query_params['ads_queue_job']), current_ads_user())
+        return
     import ads_google_ui
     workflow_mode = normalize_ads_workflow_mode(workflow_mode)
     st.session_state[ADS_ACTIVE_WORKFLOW_MODE_KEY] = workflow_mode
@@ -14825,11 +14829,20 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         and isinstance(result, dict) and result.get("campaign_type") == "Instant Experience" and result.get("master_prompt")
         and st.button("Fresh pack", key="ads-ie-fresh-pack")
     )
-    submitted = st.button(
+    submit_area, queue_area = st.columns(2) if not is_google and not is_creative_refresh else (st, None)
+    submitted = submit_area.button(
         "Submit",
         type="primary",
         use_container_width=True,
     ) or fresh_ie_pack or (bool(creative_refresh_context) and deliberate_new)
+    queued = False
+    if queue_area is not None:
+        queued = queue_area.button(
+            "Add to queue", key="ads-add-to-queue", use_container_width=True,
+            disabled=campaign_type != "Instant Experience",
+            help="Automatically generate and save three covers and ad copy, then create paused Meta ads for review. Instant Experience only.",
+        )
+    submitted = submitted or queued
 
     if is_google:
         if submitted:
@@ -14988,6 +15001,21 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                     result["context_key"] += "::pack::" + result["variation_token"]
                 _reset_ads_image_workflow(result)
             st.session_state[result_state_key] = result
+            if queued:
+                try:
+                    from ads_companion_queue import enqueue
+                    receipt = enqueue(current_ads_user(), result, product_selection)
+                    st.link_button('View queued ad draft', '/?page='+os_accounts.page_key_for_route('Ads')+'&ads_queue_job='+receipt['id'])
+                    if receipt['active']:
+                        st.success("Added to the companion Ads queue. It will run when the companion is online and the queue is playing.")
+                    elif receipt['posting_id'] and not receipt['detail']:
+                        st.info("This draft has already completed. Open Developer → Companion Queues → Ads queue to review it.")
+                    else:
+                        st.warning(receipt['detail'] or receipt['label'])
+                    st.caption("Track progress in Developer → Companion Queues → Ads queue. Meta ads are created paused for review.")
+                except Exception as error:
+                    logging.warning("New Ads queue request failed: %s", error)
+                    st.error(f"Could not add to queue: {error}")
             if campaign_type == "Instant Experience":
                 update_recent_instant_experience_fingerprints(
                     result.get("instant_experience_fingerprints")

@@ -15,8 +15,10 @@
 .sc-brief-status.running .sc-brief-status-icon {color:#376da5}
 .sc-brief-status.pending .sc-brief-status-icon {color:#777}
 .sc-brief-actions {position:absolute;top:0;right:.15rem;height:42px;display:flex;align-items:center;gap:.28rem}
-.sc-brief-actions a,.sc-brief-actions span {text-decoration:none;color:inherit;border:1px solid #b8aa8a;border-radius:6px;padding:.16rem .42rem;font-size:.72rem;font-weight:600;white-space:nowrap}
-.sc-brief-actions span {opacity:.48}
+.sc-brief-actions a,.sc-brief-actions span,.sc-brief-actions button {text-decoration:none;color:inherit;border:1px solid #b8aa8a;border-radius:6px;padding:.16rem .42rem;font:inherit;font-size:.72rem;font-weight:600;white-space:nowrap;background:transparent}
+.sc-brief-actions button {cursor:pointer}
+.sc-brief-actions span,.sc-brief-actions button:disabled {opacity:.48;cursor:default}
+.sc-brief-actions button:enabled:hover {background:#c29a43;color:#17130c}
 .sc-brief-actions a:hover {background:#c29a43;color:#17130c}
 .sc-brief-row :focus-visible {outline:2px solid #956810;outline-offset:2px}
 .sc-brief-body {padding:.55rem .9rem .8rem;font-size:.875rem;line-height:1.5;overflow-wrap:anywhere;border-top:1px solid #d6cdbb}
@@ -131,7 +133,35 @@
     dialog.addEventListener("close", () => pending?.abort());
     const toast = panel.querySelector(".sc-brief-toast");
     let hideToast;
-    panel.addEventListener("click", event => {
+    panel.addEventListener("click", async event => {
+      const enqueue = event.target.closest('button[data-design-key]');
+      if (enqueue) {
+        if (enqueue.disabled) return;
+        enqueue.disabled = true;
+        try {
+          const response = await fetch('/ops/morning-brief/designs/' + encodeURIComponent(enqueue.dataset.designKey) + '/enqueue', {
+            method:'POST', credentials:'same-origin', signal:AbortSignal.timeout(20000),
+          });
+          const result = await response.json();
+          if (!response.ok) throw Error(result.error || 'Could not add this design.');
+          enqueue.title = 'Already queued or made';
+          toast.textContent = result.added ? 'Added to the Design Companion queue.' : 'This design is already queued or made.';
+          if (result.added) {
+            const label = enqueue.closest('.sc-brief-row').querySelector('.sc-brief-status');
+            if (label) {
+              label.className = 'sc-brief-secondary sc-brief-status pending';
+              label.textContent = '○ Pending';
+            }
+          }
+        } catch (error) {
+          // A lost response may follow a successful enqueue. Refresh before retrying.
+          toast.textContent = (error.name === 'TimeoutError' ? 'Queue request timed out.' : error.message) + ' Refresh Home to check its status.';
+        }
+        toast.hidden = false;
+        clearTimeout(hideToast);
+        hideToast = setTimeout(() => { toast.hidden = true; }, 6000);
+        return;
+      }
       const fullBrief = event.target.closest(".sc-full-brief");
       if (fullBrief) {
         panel.querySelector(".sc-sports-full").showModal();

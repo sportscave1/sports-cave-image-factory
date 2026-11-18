@@ -39,20 +39,23 @@ _REVIEW_STATUS = (
 AUTHENTICITY_CHECK = f"{AUTHENTICITY_HEADING}\n\n{_SOURCE_COMPARISON}{_SOURCE_FINISH}{_REVIEW_STATUS}"
 
 CREATE_DESIGN_AUTHENTICITY_CHECK = (
-    f"{AUTHENTICITY_HEADING}\n\n{_SOURCE_COMPARISON}"
-    "Keep the generation as the visual baseline. Repair a specific visible defect only when a "
-    "verified original has enough detail at the intended placed size. Mask the smallest coherent "
-    "region on a separate editable masked layer, clean its edges and match the surrounding sharpness, lighting, colour and texture. "
-    "Mask closely around the repaired subject. Include surrounding photographic pixels only for "
-    "necessary genuine contact details, such as a tyre meeting the track; preserve the artwork beyond them. "
-    "Compare before and after at 100% and thumbnail size. Keep the repair only if it improves authenticity without "
-    "introducing softness, halos or mismatched edges; otherwise revert it. If identity remains "
-    "unverified or visibly wrong, keep the strongest candidate provisional.\n\n"
+    f"{AUTHENTICITY_HEADING}\n\n"
+    "Build every visible athlete and sporting object from the verified original photographs, "
+    "on separate editable PSD layers. Preserve the original face, expression, hair, body, hands, "
+    "pose, uniform, lettering, equipment, vehicle and ball. Use precise masking, proportional "
+    "scaling, local colour matching and edge integration; never redraw missing detail. Choose a "
+    "clearer source or reduce its placed size when source detail is insufficient. Completely "
+    "cover generated renditions and remove their exposed outlines, limbs and objects. Clean "
+    "halos and source-background remnants without obscuring photographic details or covering successful surrounding artwork.\n\n"
+    + _SOURCE_COMPARISON
+    + "Inspect the rendered PSD beside the sources at 100%, then at 250 px wide. Verify original "
+      "photographic detail throughout the visible subjects, not just facial resemblance. For "
+      "action, apply contact shadows only at actual points of contact and keep an airborne "
+      "subject visibly separated from the ground. Match directional lighting and depth. "
+      "Correct source integration during the existing finishing pass.\n\n"
     + _REVIEW_STATUS
-    + "For action, apply contact shadows only at actual points of contact and keep an airborne "
-      "subject visibly separated from the ground. Match directional lighting and depth. Complete "
-      "the digital integration review before selecting the artwork.\n\n"
 )
+
 
 REVIEW_SUBJECT_PRESERVATION = (
     "**REVIEW REPLACEMENT — EXISTING SUBJECT PRESERVED**\n\n"

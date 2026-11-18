@@ -8,6 +8,17 @@ from product_upload_lifestyle import (
 
 
 class ProductUploadMasterV6Tests(unittest.TestCase):
+    def test_recovery_contract_survives_saved_master_and_resume(self):
+        from product_upload_lifestyle import sequential_instructions
+        old = 'AUTOMATIC START — old\nStart again.\nEND AUTOMATIC START\nSaved office: oak desk.'
+        migrated = sequential_instructions(old)
+        self.assertEqual(sequential_instructions(migrated), migrated)
+        self.assertIn('Saved office: oak desk.', migrated)
+        for instruction in ('SC_UPLOAD_BLOCKED: MODERATION', 'at most two retries',
+                            'verify and reuse completed files', 'last verified stage',
+                            'verify their actual receipts', 'approval requirements'):
+            self.assertIn(instruction, migrated)
+
     def test_finished_contract_in_master_saved_overrides_and_each_card(self):
         scene = 'Selected room: coastal study\nSelected camera angle: low three-quarter\nOnce Card 1 has been generated, stop and wait.'
         prompt = compose('Custom saved master: protect all artwork.', [scene] * 3)

@@ -120,7 +120,9 @@ def test_automatic_handoff_keeps_creative_rules_and_uses_one_live_workflow(monke
     assert handoff['automatic']
     assert 'Unverified print bleed' not in prompt
     assert creative in prompt
-    assert 'Retrieve only the original black-frame WebP' in prompt
+    assert 'as a file attachment alongside this prompt' in prompt
+    assert 'A matching attachment satisfies the reference requirement' in prompt
+    assert 'without downloading it again' in prompt
     assert 'report the exact pending action and required approval' in prompt
     assert 'pause the affected step and any later steps' not in prompt
     assert 'retry the affected operation up to twice' in prompt

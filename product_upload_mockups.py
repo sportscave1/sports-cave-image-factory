@@ -21,6 +21,8 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
     import image_factory as factory
     factory.require_complete_product_image_manifest(result['product_image_manifest'])
     with Intakes(connect).locked(result['_product_upload_intake'], actor) as (row, cur):
+        if result.get('_staff_full_restart') != row['data'].get('staff_full_restart'):
+            raise ValueError('These mockups belong to an earlier reset. Regenerate the current attempt.')
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
             raise ValueError('Export belongs to a previous PSD; it cannot unlock this Shopify handoff.')
         token = result.get('_product_upload_save_token')
@@ -64,6 +66,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
     fingerprint=hashlib.sha256(json.dumps([entries,parent_identity or parent,folder_name,conflict],sort_keys=True).encode()).hexdigest()
     store=Intakes(connect);key=result['_product_upload_intake'];api=provider.api
     with store.locked(key,actor) as (row,cur):
+        if result.get('_staff_full_restart') != row['data'].get('staff_full_restart'):
+            raise ValueError('These mockups belong to an earlier reset. Regenerate the current attempt.')
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
             raise ValueError('Selected mockups belong to a previous PSD.')
         if result.get('_product_upload_source') and row['data']['source'] != result['_product_upload_source']:

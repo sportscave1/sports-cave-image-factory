@@ -50,7 +50,8 @@ def recover_review_attempt(row, result, choice, name):
     data = row['data']
     source = data['source']
     key = str(row['id'])
-    if (not result or not choice or data.get('product_gid') or data.get('mockups_exported')
+    if (not result or not choice or (data.get('product_gid') and not data.get('staff_full_restart')) or data.get('mockups_exported')
+            or result.get('_staff_full_restart') != data.get('staff_full_restart')
             or (data.get('design_review') or {}).get('decision') not in ('approved', 'preparing')
             or result.get('_product_upload_intake') != key
             or result.get('_product_upload_source_hash') != source['content_hash']
