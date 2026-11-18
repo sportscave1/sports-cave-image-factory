@@ -24,7 +24,6 @@
 <p data-list-status role="status"></p><button type="button" data-retry hidden>Retry refresh list</button><p data-status role="status"></p>
 </dialog></template>
 <script>{
-const open=[...document.querySelectorAll('.sc-refresh-open')].at(-1);
 const template=document.getElementById('sc-refresh-template');
 let dialog=document.getElementById('sc-refresh-dialog');
 if(!dialog){
@@ -82,7 +81,11 @@ if(!dialog){
  dialog.querySelector('[data-close]').onclick=()=>dialog.close();
  dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX < r.left||event.clientX>r.right||event.clientY < r.top||event.clientY>r.bottom)dialog.close();}});
  dialog.refresh=()=>load(0);
+ // Home replaces its HTML on periodic refresh; delegate to the persistent document.
+ document.addEventListener('click',event=>{
+  if(!event.target.closest('.sc-refresh-open'))return;
+  dialog.showModal();dialog.refresh();
+ });
 }
-if(open&&!open.dataset.ready){open.dataset.ready='1';open.onclick=()=>{dialog.showModal();dialog.refresh();};}
 template?.remove();
 }</script>

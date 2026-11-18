@@ -162,6 +162,13 @@ def test_popup_recovers_cold_cache_and_retains_rows_on_failure():
         page.get_by_role('button',name='Retry refresh list').click()
         expect(page.get_by_role('button',name='Retry refresh list')).not_to_be_visible()
         expect(page.locator('.sc-refresh-list .sc-refresh-row')).to_have_count(1)
+        page.get_by_role('button',name='Close designs to refresh').click()
+        # Streamlit periodically replaces the Home HTML, leaving the body-level dialog alive.
+        page.evaluate('''() => {const old=document.querySelector('.sc-refresh-open');
+            old.replaceWith(old.cloneNode(true));}''')
+        page.get_by_role('button',name='Designs to Refresh').click()
+        expect(page.get_by_role('dialog')).to_be_visible()
+        expect(page.locator('.sc-refresh-list .sc-refresh-row')).to_have_count(1)
         browser.close()
 
 
