@@ -18,11 +18,14 @@ let payload={online:true,jobs:[]};
 let queueResponse;
 let disconnected=false;
 const writes=[];
-const context={state, URLSearchParams, icon:name=>name,
+const context={state, timers:new Set(), URLSearchParams, icon:name=>name,
  doc:{createElement:()=>new Element(),addEventListener:(event,callback)=>documentEvents[event]=callback},
  root:{querySelector:id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},classList:{toggle(){}}},
- listenerController:new AbortController(), listenerOptions:{}, later:(fn,ms)=>timers.push({fn,ms}),
- parentWindow:{addEventListener:(event,callback)=>windowEvents[event]=callback,
+ listenerController:new AbortController(), listenerOptions:{}, later:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
+ parentWindow:{AbortController,
+ setTimeout:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
+ clearTimeout:timer=>{const i=timers.indexOf(timer);if(i>=0)timers.splice(i,1);},
+ addEventListener:(event,callback)=>windowEvents[event]=callback,
  sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},
  fetch:async(url,options)=>{
    if(disconnected)throw Error('offline');
@@ -62,9 +65,7 @@ install();
  payload.jobs[0]={...payload.jobs[0],stage:7,detail:'Dropbox unavailable'};
  await context.refresh();
  assert.equal(status.open,false);
- assert.equal(region.children.length,1);
- assert.match(region.children[0].children[0].textContent,/Dropbox unavailable/);
- region.children[0].children[1].events.click();
+ assert.equal(region.children.length,0,'polling failures stay in the status panel');
  assert.match(nodes.get('#sc-os-staff-upload-list').children[0].children[3].textContent,/Dropbox unavailable/);
  assert.equal(writes.length,0,'status polling never restarts a failed upload');
  const summaryReset=nodes.get('#sc-os-staff-upload-reset');
@@ -165,9 +166,12 @@ install();
  await context.refresh();
  assert.equal(nodes.get('#sc-os-ads-status').dataset.state,'failed');
  assert.equal(nodes.get('#sc-os-ads-status').open,false,'polling cannot force open the popup');
+ assert.equal(region.children.length,0,'historical companion failures never create popups');
+ const originalRow=nodes.get('#sc-os-ads-list').children[0];
  const notices=region.children.length;
  await context.refresh();assert.equal(region.children.length,notices,'failure notice is not repeated');
  assert.ok(nodes.get('#sc-os-ads-list').children[0].children.some(child=>child.textContent==='Ad needs attention · Missing cover'));
+ assert.equal(nodes.get('#sc-os-ads-list').children[0],originalRow,'unchanged snapshots retain DOM and handlers');
  disconnected=true;await context.refresh();
  assert.equal(nodes.get('#sc-os-design-status').dataset.stale,'true');
  assert.equal(nodes.get('#sc-os-design-stage').textContent,'Status unavailable · retrying');
@@ -177,6 +181,6 @@ install();
  payload.queues={};await context.refresh();
  assert.equal(nodes.get('#sc-os-design-card').hidden,true);
  assert.equal(nodes.get('#sc-os-ads-card').hidden,true);
- state.config.staffUploadProgress=false;const prior=timers.length;await context.refresh();assert.equal(timers.length,prior);
+ state.config.staffUploadProgress=false;const prior=timers.length;await context.refresh();assert.equal(timers.length,prior-1);
  console.log('Upload overlays: one-shot notices, click-only status, dismissal on navigation and remount, progress and queue controls passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
