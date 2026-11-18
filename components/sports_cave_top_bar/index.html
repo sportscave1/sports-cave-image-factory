@@ -1240,7 +1240,7 @@
                   const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update job');
                   if(scope!==state.config.uploadScope)return;
                   root.querySelector('#sc-ad-message').textContent=action==='play'?'Resuming saved job':action==='cancel'?'Job cancelled':'Removed from queue';
-                  await refreshStaffProgress();
+                  await refreshStaffProgress(false);
                 }catch(error){if(scope===state.config.uploadScope)root.querySelector('#sc-ad-message').textContent=error.message;}
                 finally{button.disabled=!allowed;}
               };actions.append(button);
@@ -1294,7 +1294,7 @@
         const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({product:matches[0].id,country:root.querySelector('#sc-ad-country').value,sport:root.querySelector('#sc-ad-sport').value,type:root.querySelector('#sc-ad-type').value,request_id:adRequest})});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Could not add ad');
         if(scope!==state.config.uploadScope)return;
-        adMessage.textContent='Added to Ads queue';await refreshStaffProgress();
+        adMessage.textContent='Added to Ads queue';await refreshStaffProgress(false);
       }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
       finally{button.disabled=false;}
     },listenerOptions);
@@ -1322,7 +1322,7 @@
           }
           if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
           lastStaffStatus = '';
-          await refreshStaffProgress();
+          await refreshStaffProgress(false);
         } catch (error) {
           if (!listenerController.signal.aborted && scope === state.config.uploadScope) {
             showUploadNotice({id:`cancel-${item.id}-${item.updated_at}`,kind:'error',text:error.message});
@@ -1352,7 +1352,7 @@
           if (!response.ok) throw new Error("Restart failed");
           if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
           lastStaffStatus = "";
-          await refreshStaffProgress();
+          await refreshStaffProgress(false);
         } catch (_error) {
           if (!listenerController.signal.aborted && scope === state.config.uploadScope) {
             showUploadNotice({id:`restart-${item.id}-${item.updated_at}`, kind:"error",
@@ -1448,7 +1448,7 @@
         }
       }, listenerOptions);
     }
-    const refreshStaffProgress = async () => {
+    const refreshStaffProgress = async (schedule = true) => {
       const scope = state.config.uploadScope;
       const revision = queueRevision;
       if (!state.config.staffUploadProgress) {staffProgressStarted = false; return;}
@@ -1571,7 +1571,7 @@
         staffProgress.dataset.stale='true';
         root.querySelector('#sc-os-staff-upload-stage').textContent='Status unavailable · retrying';
       } finally {
-        if (!listenerController.signal.aborted) later(refreshStaffProgress, 6000);
+        if (schedule && !listenerController.signal.aborted) later(refreshStaffProgress, 6000);
       }
     };
     const state = {
