@@ -65,7 +65,7 @@ def test_new_design_replaces_generation_conflicts_without_blocking_review():
     for requirement in ('separate editable masked layers',
                         'Do not automatically paste whole source cutouts over them.',
                         'Reject assumed feelings, invented relationships with a city',
-                        'A plain rectangle alone is insufficient',
+                        'Corner ornaments are optional, never the default.',
                         'Continue authorised review saves and delivery',
                         'continue without pausing for approval'):
         assert requirement in prompt
@@ -105,7 +105,7 @@ def test_generation_foundation_lettering_border_and_badge_views():
     assert '3% of the shorter canvas dimension' in layout
     assert '60 px on the 2835 × 2004 master' in layout
     assert 'Scale that inset proportionally for the generation resolution' in layout
-    assert 'repeat the border geometry above, including all four sides' in generation
+    assert 'repeat the selected border geometry above, including all four sides' in generation
     assert 'Exclude plaque, number, placeholder outlines and seals' in generation
     assert 'visible working copy' in generation
     assert 'stretched samples, generic shapes or broad photographic strips' in generation
@@ -131,3 +131,22 @@ def test_fan_titles_and_visible_layout_decisions_reach_first_generation():
     assert 'without blurring the silhouette, repainting skin or fading anatomy' in rest
     assert 'one creative image-generation call' in rest
     assert 'never triggers another generation' in rest
+
+
+def test_dark_arena_direction_survives_prompt_assembly_and_finishing():
+    prompt = _prompt('Collector', 'Verified hockey or NBA story')
+    research, rest = prompt.split('**2.', 1)
+    layout, rest = rest.split('**3.', 1)
+    generation, rest = rest.split('**4.', 1)
+    finishing, saving = rest.split('**5.', 1)
+    assert 'For hockey and NBA, retain the chosen venue feature and placement' in research
+    assert prompt.count('**HOCKEY AND NBA — DARK ABSTRACT COLLECTOR DIRECTION**') == 1
+    assert 'greater visual presence than the subdued arena layer' in layout
+    assert 'selected venue feature retained subtly in place' in generation
+    assert 'predominantly dark abstract setting, sparse team-colour marks' in finishing
+    assert 'retaining the reviewed dark abstract hierarchy and subdued venue' in saving
+    assert 'For sports other than hockey and NBA' in layout
+    assert 'one creative image-generation call' in generation
+    assert 'never generate again for visual criticism' in finishing
+    assert 'Do not restore malformed generated corners over a corrected border' in saving
+    assert 'short inner corner returns derived from the sporting story' not in prompt
