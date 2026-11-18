@@ -315,20 +315,9 @@ def publish(raw, user):
 
 
 def render_html(today):
-    saved = get_app_setting(KEY, ensure_schema_first=False) or {}
-    handoff = ""
-    if saved.get("date") != today.isoformat():
-        body = "<p>Today's shortlist is pending.</p>"
-    else:
-        items = "".join(_render_candidate(row) for row in saved["candidates"])
-        body = f"<ul>{items}</ul>" if items else "<p>No eligible designs were verified today.</p>"
-        if items:
-            body += '<p class="sc-refresh-status" role="status"></p>'
-            handoff = REFRESH_HANDOFF
-    return (
-        '<details class="sc-meta-insight sc-design-refresh">'
-        f'<summary>Designs to Refresh</summary>{body}</details>{handoff}'
-    )
+    # No catalogue, companion or prompt work until the popup is opened.
+    from pathlib import Path
+    return (Path(__file__).parent / 'components/home_refresh_queue.html').read_text(encoding='utf-8')
 
 
 def _render_evidence(row):

@@ -1,0 +1,77 @@
+<style>
+.sc-refresh-open{width:100%;text-align:left;border:1px solid #dedbd2;border-radius:16px;padding:.7rem 1rem;background:var(--background-color,#fff);color:inherit;font:inherit;font-weight:650;cursor:pointer}
+#sc-refresh-dialog{box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-height:80dvh;border:1px solid #dedbd2;border-radius:14px;padding:1rem;background:var(--background-color,#fff);color:var(--text-color,#222);font:14px system-ui}
+#sc-refresh-dialog::backdrop{background:#0006}
+#sc-refresh-dialog header,.sc-refresh-row{display:flex;align-items:center;justify-content:space-between;gap:.7rem}
+#sc-refresh-dialog h3{font-size:1rem;margin:0}
+#sc-refresh-dialog button,#sc-refresh-dialog input{font:inherit;color:inherit;border:1px solid #dedbd2;border-radius:6px;padding:.35rem .5rem;background:transparent}
+#sc-refresh-dialog button{cursor:pointer;white-space:nowrap}
+#sc-refresh-dialog button:disabled{opacity:.55;cursor:default}
+#sc-refresh-dialog input{box-sizing:border-box;width:100%;margin:.65rem 0}
+#sc-refresh-dialog .sc-refresh-list{max-height:48dvh;overflow:auto;overscroll-behavior:contain}
+#sc-refresh-dialog .sc-refresh-picker-list{max-height:24dvh;overflow:auto}
+.sc-refresh-row{padding:.45rem 0;border-bottom:1px solid #dedbd255;font-size:.8rem}
+.sc-refresh-row span{overflow-wrap:anywhere}
+#sc-refresh-dialog p{font-size:.75rem;opacity:.8;margin:.5rem 0}
+#sc-refresh-dialog details{margin:.6rem 0}
+</style>
+<div class="sc-design-refresh"><button type="button" class="sc-refresh-open" aria-haspopup="dialog">▸ Designs to Refresh</button></div>
+<template id="sc-refresh-template"><dialog id="sc-refresh-dialog" aria-label="Designs to Refresh">
+<header><h3>Designs to Refresh</h3><button type="button" data-close aria-label="Close designs to refresh">Close</button></header>
+<details><summary>Add a design</summary><input data-picker-search type="search" placeholder="Search all designs" aria-label="Search all designs" maxlength="160"><div class="sc-refresh-picker-list"></div><button type="button" data-picker-more hidden>More designs</button></details>
+<input data-search type="search" placeholder="Search refresh list" aria-label="Search refresh list" maxlength="160">
+<p data-count></p><div class="sc-refresh-list"></div><button type="button" data-more hidden>More designs</button>
+<p data-status role="status"></p><button type="button" data-retry hidden>Retry</button>
+</dialog></template>
+<script>{
+const open=[...document.querySelectorAll('.sc-refresh-open')].at(-1);
+const template=document.getElementById('sc-refresh-template');
+let dialog=document.getElementById('sc-refresh-dialog');
+if(!dialog){
+ document.body.append(template.content.cloneNode(true));dialog=document.getElementById('sc-refresh-dialog');
+ const status=dialog.querySelector('[data-status]'), retry=dialog.querySelector('[data-retry]');
+ const states=[{list:dialog.querySelector('.sc-refresh-list'),search:dialog.querySelector('[data-search]'),more:dialog.querySelector('[data-more]')},
+ {list:dialog.querySelector('.sc-refresh-picker-list'),search:dialog.querySelector('[data-picker-search]'),more:dialog.querySelector('[data-picker-more]')}];
+ const labels=['Queued','Opening ChatGPT','Generating','Checking delivery','Ready for review','Needs attention'];
+ async function api(params,method='GET'){
+   const response=await fetch('/ops/design-refresh/queue?'+new URLSearchParams(params),{method,credentials:'same-origin',signal:AbortSignal.timeout(15000)});
+   const data=await response.json();if(!response.ok)throw Error(data.error||'Unable to load designs.');return data;
+ }
+ async function load(which,more=false){
+  const state=states[which],version=state.version=(state.version||0)+1;
+  state.more.disabled=true;retry.hidden=true;
+  if(!more){state.list.replaceChildren();state.more.hidden=true;status.textContent='Loading designs…';}
+  try{
+   const data=await api({all:which,q:state.search.value,offset:more?state.next:0});
+   if(version!==state.version)return;
+   for(const row of data.rows){
+    const line=document.createElement('div');line.className='sc-refresh-row';
+    const title=document.createElement('span');title.textContent=row.title;
+    const button=document.createElement('button');button.type='button';
+    button.textContent=which?'Add to list':row.stage==null?'Add to queue':labels[row.stage];
+    button.disabled=!which&&row.stage!=null;
+    button.addEventListener('click',async()=>{
+     button.disabled=true;
+     try{const result=await api({id:row.product_id,action:which?'add':'enqueue'},'POST');
+       button.textContent=which?'Added':labels[result.stage];
+       status.textContent=which?'Design added to refresh list.':'Design saved in the existing design queue.';
+       if(which)await load(0);
+     }catch(error){status.textContent=error.message;button.disabled=false;}
+    });
+    line.append(title,button);state.list.append(line);
+   }
+   state.next=data.next_offset;state.more.hidden=state.next==null;
+   if(!which){dialog.querySelector('[data-count]').textContent=data.total+' designs · unverified designs and your selections';}
+   status.textContent=data.freshness?.state==='stale'?'Showing last checked companion status. Reopen to refresh.':data.total?'':'No matching designs.';
+  }catch(error){if(version===state.version){status.textContent=error.message;retry.hidden=false;retry.onclick=()=>load(which);}}
+  finally{if(version===state.version)state.more.disabled=false;}
+ }
+ states.forEach((state,i)=>{let timer;state.search.addEventListener('input',()=>{state.version=(state.version||0)+1;clearTimeout(timer);timer=setTimeout(()=>load(i),250);});state.more.addEventListener('click',()=>load(i,true));});
+ dialog.querySelector('details').addEventListener('toggle',event=>{if(event.target.open)load(1);});
+ dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+ dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}});
+ dialog.refresh=()=>load(0);
+}
+if(open&&!open.dataset.ready){open.dataset.ready='1';open.onclick=()=>{dialog.showModal();dialog.refresh();};}
+template?.remove();
+}</script>

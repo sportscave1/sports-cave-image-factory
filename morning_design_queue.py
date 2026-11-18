@@ -66,6 +66,8 @@ def _job_prompt(key, title, recommendation, *, primary_market=""):
 def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
+    if prompt.startswith('SPORTS CAVE EXISTING DESIGN REFRESH\n'):
+        return prompt
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
         from design_new_composition import PURPOSEFUL_ABSTRACT

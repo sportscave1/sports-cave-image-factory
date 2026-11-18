@@ -192,7 +192,10 @@ async def enqueue_design(request):
         return JSONResponse({'error': 'Queue unavailable. Try again.'}, status_code=503, headers=HEADERS)
 
 
-ROUTES = [(PATH, publication, ("GET", "POST")),
+from home_refresh_queue import api as refresh_queue_api
+
+ROUTES = [('/ops/design-refresh/queue', refresh_queue_api, ('GET', 'POST')),
+          (PATH, publication, ("GET", "POST")),
           ('/ops/morning-brief/designs/{key}/enqueue', enqueue_design, ('POST',)),
           (meta.PATH, publication, ("GET", "POST")),
           (refresh.PATH, publication, ("GET", "POST")),
