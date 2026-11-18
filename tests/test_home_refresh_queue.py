@@ -190,3 +190,103 @@ def test_failed_first_snapshot_does_not_seed_empty_list(store,monkeypatch):
     store.execute('SELECT value FROM app_settings WHERE key=%s',(refresh.SEED_KEY,))
     assert store.fetchone() is None
     assert refresh.listing(all_designs=True)['total'] == 322
+
+
+def finished_refresh(store, stage=5):
+    from product_upload_dropbox import REVIEW
+    refresh.change('212', 'enqueue')
+    key = refresh.job_id('212')
+    store.execute("""UPDATE morning_design_jobs SET stage=%s,file_id='id:deleted-refresh',file_rev='R1',
+        file_path=%s,chat_url='old-chat',message='Old review status' WHERE id=%s""",
+        (stage, REVIEW + '/Final.psd', key))
+    return key
+
+
+@pytest.mark.parametrize('stage', [4, 5])
+def test_deleted_refresh_can_be_queued_again_with_a_fresh_output_receipt(store, monkeypatch, stage):
+    import product_upload_services
+    import design_deletion_status
+    import morning_design_queue as queue
+    from psd_directory import ROOT
+    key = finished_refresh(store, stage)
+    # The existing product's older PSD must not masquerade as the deleted refresh.
+    provider = type('Provider', (), {'metadata_if_present': lambda self, path:
+        {'id': 'id:older-live-product'} if path == ROOT + '/Final.psd' else None})()
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: provider)
+    monkeypatch.setattr(design_deletion_status, 'snapshot', lambda jobs, posted, **kw:
+        dict(deleted=queue._deleted_designs(jobs, posted, exact_live_identity=True), state='ready'))
+    displayed = next(row for row in refresh.listing()['rows'] if row['product_id'] == '212')
+    assert displayed['can_requeue'] and displayed['stage'] == stage
+    store.execute('SELECT * FROM morning_design_jobs WHERE id=%s', (key,))
+    old = store.fetchone()
+    assert refresh.change('212', 'enqueue') == {'added': True, 'stage': 0}
+    store.execute('SELECT * FROM morning_design_jobs WHERE id=%s', (key,))
+    new = store.fetchone()
+    assert new['id'] == old['id']
+    assert all(not new[field] for field in ('file_id', 'file_rev', 'file_path', 'chat_url', 'message'))
+    assert queue._output_key(new) != key and queue._receipt(new) != queue._receipt(old)
+    assert 'gid://shopify/Product/212' in new['prompt']
+    assert 'existing_product_refresh' in new['prompt']
+    assert queue._waiting_prompt(new) == new['prompt']
+    assert refresh.change('212', 'enqueue') == {'added': False, 'stage': 0}
+    store.execute('SELECT count(*) AS n FROM morning_design_jobs')
+    assert store.fetchone()['n'] == 1
+
+
+@pytest.mark.parametrize('present', ['id', 'review', 'live', 'unavailable'])
+def test_refresh_requeue_checks_dropbox_again_and_keeps_existing_output(store, monkeypatch, present):
+    import product_upload_services
+    from product_upload_dropbox import REVIEW
+    from psd_directory import ROOT
+    key = finished_refresh(store)
+    def metadata(path):
+        if present == 'unavailable':
+            raise TimeoutError('Dropbox unavailable')
+        expected = {'id': 'id:deleted-refresh', 'review': REVIEW + '/Final.psd', 'live': ROOT + '/Final.psd'}[present]
+        return {'id': 'id:deleted-refresh'} if path == expected else None
+    provider = type('Provider', (), {'metadata_if_present': lambda self, path: metadata(path)})()
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: provider)
+    assert refresh.change('212', 'enqueue') == {'added': False, 'stage': 5}
+    store.execute('SELECT file_id,stage FROM morning_design_jobs WHERE id=%s', (key,))
+    assert store.fetchone() == {'file_id': 'id:deleted-refresh', 'stage': 5}
+
+
+def test_refresh_requeue_does_not_reset_a_job_changed_during_the_file_check(store, monkeypatch):
+    import product_upload_services
+    key = finished_refresh(store)
+    def metadata(path):
+        store.execute('UPDATE morning_design_jobs SET stage=2 WHERE id=%s', (key,))
+        return None
+    provider = type('Provider', (), {'metadata_if_present': lambda self, path: metadata(path)})()
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: provider)
+    assert refresh.change('212', 'enqueue') == {'added': False, 'stage': 2}
+
+
+def test_popup_reenables_only_the_deleted_finished_design(tmp_path):
+    from home_design_refresh import render_html
+    html = '<!doctype html><meta charset="utf-8">' + render_html(None)
+    posts = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge', headless=True)
+        page = browser.new_page()
+        def route(r):
+            if r.request.url == 'http://fixture.test/':
+                return r.fulfill(body=html, content_type='text/html')
+            if r.request.method == 'POST':
+                posts.append(r.request.url)
+                return r.fulfill(json={'added': True, 'stage': 0})
+            return r.fulfill(json={'rows': [
+                dict(product_id='212', title='Deleted Moffat refresh', stage=5, can_requeue=True),
+                dict(product_id='213', title='Existing Edwards refresh', stage=4, can_requeue=False),
+                dict(product_id='214', title='Running refresh', stage=2, can_requeue=False),
+            ], 'total': 3, 'next_offset': None})
+        page.route('**/*', route)
+        page.goto('http://fixture.test/')
+        page.get_by_role('button', name='Designs to Refresh').click()
+        expect(page.get_by_role('button', name='Add to queue', exact=True)).to_be_enabled()
+        expect(page.get_by_role('button', name='Ready for review', exact=True)).to_be_disabled()
+        expect(page.get_by_role('button', name='Generating', exact=True)).to_be_disabled()
+        page.get_by_role('button', name='Add to queue', exact=True).click()
+        expect(page.get_by_role('button', name='Queued', exact=True)).to_be_disabled()
+        assert len(posts) == 1 and 'id=212' in posts[0]
+        browser.close()

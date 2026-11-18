@@ -221,7 +221,7 @@ def _release_delivered(cur):
         WHERE stage=3 AND file_id<>'' AND file_rev<>'' AND file_path<>'' """)
 
 
-def _deleted_designs(jobs, published):
+def _deleted_designs(jobs, published, *, exact_live_identity=False):
     """Only confirmed absence permits redo; IDs survive Dropbox moves/renames."""
     from product_upload_services import Dropbox
     from psd_directory import ROOT
@@ -234,10 +234,14 @@ def _deleted_designs(jobs, published):
         provider = Dropbox()
         for job in candidates:
             paths = [job['file_id'], job['file_path']]
+            if any(provider.metadata_if_present(path) is not None for path in dict.fromkeys(paths) if path):
+                continue
             if job['file_path']:
-                paths.append(ROOT + '/' + PurePosixPath(job['file_path']).name)
-            if all(provider.metadata_if_present(path) is None for path in dict.fromkeys(paths) if path):
-                missing.add(job['id'])
+                live = provider.metadata_if_present(ROOT + '/' + PurePosixPath(job['file_path']).name)
+                # An older live product PSD is not the deleted refresh output.
+                if live and (not exact_live_identity or not job['file_id'] or live.get('id') == job['file_id']):
+                    continue
+            missing.add(job['id'])
     except Exception as error:
         LOG.warning('design_deletion_check_unavailable type=%s', type(error).__name__)
         return set()

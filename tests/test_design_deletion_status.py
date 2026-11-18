@@ -30,3 +30,31 @@ def test_nonblocking_shared_check_and_invalidation(monkeypatch):
         assert status.deleted([{**job,'file_rev':'r2'}],set())==set()
     finally:
         release.set();cache.close()
+
+
+def test_refresh_reopen_forces_a_fresh_nonblocking_deletion_check(monkeypatch):
+    import morning_design_queue
+    cache = Snapshots(workers=1, limit=8, ttl=30, max_age=60)
+    monkeypatch.setattr(status, 'CACHE', cache)
+    job = dict(id=uuid4(), stage=5, file_id='saved', file_rev='r1', file_path='/Review/Final.psd')
+    missing = set()
+    def check(jobs, posted, **kwargs):
+        assert kwargs['exact_live_identity']
+        return set(missing)
+    monkeypatch.setattr(morning_design_queue, '_deleted_designs', check)
+    def settle():
+        end = perf_counter() + 2
+        while any(r['loading'] for r in cache.rows.values()) and perf_counter() < end:
+            sleep(.005)
+    try:
+        status.snapshot([job], set(), refresh=True)
+        settle()
+        assert not status.snapshot([job], set(), refresh=True)['deleted']
+        missing.add(job['id'])
+        # A warm cached observation still says present until the popup requests a refresh.
+        assert not status.snapshot([job], set(), refresh=True)['deleted']
+        status.snapshot([job], set(), refresh=True, force=True)
+        settle()
+        assert status.snapshot([job], set(), refresh=True)['deleted'] == missing
+    finally:
+        cache.close()

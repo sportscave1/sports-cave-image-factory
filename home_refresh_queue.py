@@ -2,7 +2,7 @@
 import json
 import logging
 import re
-from uuid import uuid5, NAMESPACE_URL
+from uuid import uuid4, uuid5, NAMESPACE_URL
 
 from supabase_backend import connect
 
@@ -39,7 +39,7 @@ def companion():
     return {product_id(j['id']) for j in data['jobs'] if j['completed']}, data['freshness']
 
 
-def listing(query='', offset=0, all_designs=False):
+def listing(query='', offset=0, all_designs=False, verify=False):
     freshness = None
     with connect() as conn, conn.cursor() as cur:
         rows = catalog(cur)
@@ -59,20 +59,41 @@ def listing(query='', offset=0, all_designs=False):
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (KEY,))
         saved = cur.fetchone()
         manual = set(saved['value'] if saved else [])
-        cur.execute("SELECT id,stage FROM morning_design_jobs WHERE section='refresh'")
-        jobs = {str(r['id']): r['stage'] for r in cur.fetchall()}
-    rows = [dict(r, stage=jobs.get(job_id(r['product_id']))) for r in rows
+        cur.execute("SELECT id,stage,file_id,file_rev,file_path FROM morning_design_jobs WHERE section='refresh'")
+        jobs = {str(r['id']): dict(r) for r in cur.fetchall()}
+    rows = [dict(r, stage=(jobs.get(job_id(r['product_id'])) or {}).get('stage')) for r in rows
             if (all_designs or r['product_id'] in selected or r['product_id'] in manual)
             and query.casefold() in (r['title'] + ' ' + r['product_id']).casefold()]
-    return dict(rows=rows[offset:offset+PAGE_SIZE], total=len(rows),
-                next_offset=offset+PAGE_SIZE if offset+PAGE_SIZE < len(rows) else None,
-                freshness=freshness)
+    page = rows[offset:offset+PAGE_SIZE]
+    from design_deletion_status import snapshot
+    observed = snapshot([jobs[job_id(row['product_id'])] for row in page
+                         if not all_designs and job_id(row['product_id']) in jobs], set(), refresh=True, force=verify)
+    for row in page:
+        job = jobs.get(job_id(row['product_id']))
+        row['can_requeue'] = bool(job and job['id'] in observed['deleted'])
+    result = dict(rows=page, total=len(rows),
+                  next_offset=offset+PAGE_SIZE if offset+PAGE_SIZE < len(rows) else None,
+                  freshness=freshness)
+    if observed['state'] in ('loading', 'busy', 'stale'):
+        result.update(state='loading', message='Checking deleted refresh artwork…')
+    return result
 
 
 def change(pid, action):
     pid = product_id(pid)
     if action not in ('add', 'enqueue'):
         raise ValueError('Unknown action.')
+    # Dropbox reads must not hold the desktop claim lock. Recheck this snapshot
+    # under that lock before authorising a new attempt.
+    observed = None
+    if action == 'enqueue':
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT * FROM morning_design_jobs WHERE id=%s AND section='refresh'", (job_id(pid),))
+            previous = cur.fetchone()
+        if previous:
+            from morning_design_queue import _deleted_designs
+            if previous['id'] in _deleted_designs([previous], set(), exact_live_identity=True):
+                observed = dict(previous)
     with connect() as conn, conn.cursor() as cur:
         # Serialize queue clicks with existing companion claims.
         cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
@@ -87,21 +108,28 @@ def change(pid, action):
         if action == 'add':
             return dict(added=True)
         key = job_id(pid)
-        cur.execute('SELECT stage FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
+        cur.execute('SELECT * FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
         existing = cur.fetchone()
-        if existing:
+        if existing and (observed is None or dict(existing) != observed):
             return dict(added=False, stage=existing['stage'])
+        receipt = str(uuid4()) if existing else key
         from home_design_refresh import _refresh_prompt
         from sports_sales_calendar import sydney_date
         prompt = _refresh_prompt(dict(row, suggestion='Research a complete redesign for this selected existing design.',
             evidence='Selected from Designs to Refresh. Companion verification is a technical status, not an artwork quality judgement.'),
             'https://www.sportscaveshop.com/products/' + row['handle'])
         prompt = 'SPORTS CAVE EXISTING DESIGN REFRESH\n' + prompt + (
-            f'\nInclude morning_design_job_id = "{key}" in the final .upload.json handoff. '
+            f'\nInclude morning_design_job_id = "{receipt}" in the final .upload.json handoff. '
             'Save to Design Studio Review only; do not publish or alter the live product.\n')
-        cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
-            VALUES(%s,%s,'refresh',%s,%s) ON CONFLICT(id) DO NOTHING''',
-            (key, sydney_date(), row['title'], prompt))
+        if existing:
+            prompt += f'\nQueue retry receipt: {receipt}\nQueue output receipt: {receipt}\n'
+            cur.execute('''UPDATE morning_design_jobs SET stage=0,prompt=%s,title=%s,edition_date=%s,
+                message='',chat_url='',file_id='',file_rev='',file_path='',updated_at=now() WHERE id=%s''',
+                (prompt, row['title'], sydney_date(), key))
+        else:
+            cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
+                VALUES(%s,%s,'refresh',%s,%s) ON CONFLICT(id) DO NOTHING''',
+                (key, sydney_date(), row['title'], prompt))
         return dict(added=True, stage=0)
 
 
@@ -125,7 +153,7 @@ async def api(request):
             query = params.get('q', '')
             if not 0 <= offset <= 10000 or len(query) > 160:
                 raise ValueError('Invalid search.')
-            result = await run_in_threadpool(listing, query, offset, params.get('all') == '1')
+            result = await run_in_threadpool(listing, query, offset, params.get('all') == '1', params.get('verify') == '1')
         return JSONResponse(result, headers=headers)
     except (PermissionError, FilesUploadError):
         return JSONResponse({'error': 'Owner access required.'}, status_code=403, headers=headers)

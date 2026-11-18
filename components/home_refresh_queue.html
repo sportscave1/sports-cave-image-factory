@@ -42,14 +42,14 @@ if(!dialog){
   state.more.disabled=true;retry.hidden=true;
   note.textContent=state.list.children.length?'Updating designs; showing previous results…':'Loading designs…';
   try{
-   const params={all:which,q:state.search.value,offset:more?state.next:0};
+   const params={all:which,q:state.search.value,offset:more?state.next:0,verify:!which&&!more?'1':'0'};
    let data;
    for(let attempt=0;attempt < 21;attempt++){
-    data=await api(params);
+    data=await api(params);delete params.verify;
     if(version!==state.version||!dialog.open)return;
     if(data.state!=='loading')break;
-    note.textContent=state.list.children.length?'Checking verification; showing previous results…':'Checking companion verification…';
-    if(attempt===20)throw Error('Companion verification is still loading. Retry shortly.');
+    note.textContent=data.message||(state.list.children.length?'Checking verification; showing previous results…':'Checking companion verification…');
+    if(attempt===20)throw Error('Design verification is still loading. Retry shortly.');
     await new Promise(resolve=>setTimeout(resolve,1000));
     if(version!==state.version||!dialog.open)return;
    }
@@ -58,13 +58,13 @@ if(!dialog){
     const line=document.createElement('div');line.className='sc-refresh-row';
     const title=document.createElement('span');title.textContent=row.title;
     const button=document.createElement('button');button.type='button';
-    button.textContent=which?'Add to list':row.stage==null?'Add to queue':labels[row.stage];
-    button.disabled=!which&&row.stage!=null;
+    button.textContent=which?'Add to list':row.stage==null||row.can_requeue?'Add to queue':labels[row.stage];
+    button.disabled=!which&&row.stage!=null&&!row.can_requeue;
     button.addEventListener('click',async()=>{
      button.disabled=true;
      try{const result=await api({id:row.product_id,action:which?'add':'enqueue'},'POST');
        button.textContent=which?'Added':labels[result.stage];
-       status.textContent=which?'Design added to refresh list.':'Design saved in the existing design queue.';
+       status.textContent=which?'Design added to refresh list.':result.added?'Design saved in the existing design queue.':'This design is already queued or its artwork has not been confirmed deleted.';
        if(which)await load(0);
      }catch(error){status.textContent=error.message;button.disabled=false;}
     });
