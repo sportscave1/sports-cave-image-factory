@@ -13,10 +13,8 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
     })
     refresh = _refresh_prompt(dict(title='Collector', product_id='123', sessions=40,
                                    suggestion='Improve hierarchy'), 'https://example.com/product')
-    assert 'Keep established signature-free treatment. Remove an existing signature only when requested.' in edit
-    assert 'Honour requested wording, existing locks' in edit
-    assert 'Look for a better verified hero or venue only when useful to the authorised change.' in edit
-    for prompt in (new, refresh):
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in edit
+    for prompt in (new, refresh, edit):
         assert prompt.count(_CREATE_DESIGN_TYPOGRAPHY) == 1
         assert 'remove an existing signature only when requested' in prompt
         assert 'Preserve all other approved elements.' in prompt

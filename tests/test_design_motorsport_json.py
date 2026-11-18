@@ -11,7 +11,7 @@ import morning_design_queue as queue
 import product_upload_sport as selector
 
 
-def test_motorsport_rule_is_at_json_step_and_does_not_leak_into_targeted_edits():
+def test_motorsport_rule_is_at_json_step_and_is_shared_with_edits():
     prompt = _prompt('Silver & Soul', 'Verified Formula One tribute.')
     assert prompt.count(MOTORSPORT_JSON) == 1
     assert prompt.index('**6. Write the Smart Upload JSON') < prompt.index(MOTORSPORT_JSON)
@@ -19,7 +19,7 @@ def test_motorsport_rule_is_at_json_step_and_does_not_leak_into_targeted_edits()
         'source':dict(id='id:art',rev='R1',path_display='/Review/Art.psd'),
         'metadata':{},
     })
-    assert MOTORSPORT_JSON not in edited
+    assert MOTORSPORT_JSON in edited
 
 
 def test_waiting_job_gets_series_rule_without_changing_story_or_send_receipt():
@@ -77,7 +77,7 @@ def test_motorsport_integration_reaches_shared_stages_and_waiting_jobs():
         assert 'never invent missing detail or accept a lookalike' in prompt
     edited = _prompt('Moffat', 'A targeted edit', edit={
         'source':dict(id='id:art',rev='R1',path_display='/Review/Art.psd'), 'metadata':{}})
-    assert all(rule not in edited for rule in (MOTORSPORT_PLACEMENT, MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK))
+    assert all(rule in edited for rule in (MOTORSPORT_PLACEMENT, MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK))
     key = queue.identity('2026-11-19', 'legends', {'title':'Moffat'})
     current = queue._job_prompt(key, 'Moffat', 'Keep the verified original sources.')
     job = dict(id=key, title='Moffat', prompt=current.replace(MOTORSPORT_INTEGRATION, ''))

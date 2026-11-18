@@ -40,7 +40,7 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert 'Refine their scale, alignment, line spacing and separation' not in prompt
 
 
-def test_new_creative_rules_do_not_leak_into_edits():
+def test_edit_inherits_shared_creative_rules():
     prompt = _prompt('Collector', 'Verified story', edit={
         'source': {'id': 'id:Original', 'rev': 'abcdef123', 'path_display': '/Review/Collector.psd'},
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
@@ -48,8 +48,8 @@ def test_new_creative_rules_do_not_leak_into_edits():
     for guidance in (COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
                      PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, NEW_BADGE_LAYOUT,
                      MOTORSPORT_ARTWORK):
-        assert guidance not in prompt
-    assert 'Preserve the existing badge position and size unless the user requests a change' in prompt
+        assert prompt.count(guidance) == 1
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in prompt
 
 
 def test_new_design_replaces_generation_conflicts_without_blocking_review():
