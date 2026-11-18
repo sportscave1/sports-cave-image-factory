@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import threading
 from unittest.mock import Mock
 import pytest
 from tests.test_auto_editions_jobs import database
@@ -12,6 +13,100 @@ import shopify_product_onboarding as onboarding
 
 ROOT = Path(__file__).resolve().parents[1]
 PID = 'gid://shopify/Product/15428753948979'
+
+
+def test_shutdown_releases_lease_and_preserves_unstarted_receipts(state, monkeypatch):
+    sql, _, _ = state
+    for name in ('first', 'second'):
+        db.claim_product_create_webhook_receipt({'id': '123'}, name, 'products/create')
+    stop = threading.Event()
+    seen = []
+    def process(row, database, config):
+        seen.append(row['webhook_id'])
+        database._update_webhook_event_status(row['webhook_id'], 'processed')
+        stop.set()
+    monkeypatch.setattr(onboarding, 'process_receipt', process)
+    scan = Mock()
+    monkeypatch.setattr(onboarding, 'reconcile', scan)
+    onboarding.tick(db=db, scan=True, stop=stop)
+    assert len(seen) == 1
+    scan.assert_not_called()
+    assert sorted(r['status'] for r in rows(sql, 'webhook_events')) == ['processed', 'received']
+    # Replacement can claim immediately; no ten-minute lease wait.
+    stop.clear()
+    onboarding.tick(db=db, stop=stop)
+    assert len(seen) == 2 and len(set(seen)) == 2
+
+
+def test_shutdown_mid_scan_replays_page_without_duplicates(state, monkeypatch):
+    sql, _, api = state
+    stop = threading.Event()
+    api.return_value = ({'products': {'nodes': [
+        {'id': PID, 'updatedAt': '2026-11-18T00:00:00Z'},
+        {'id': 'gid://shopify/Product/999', 'updatedAt': '2026-11-18T00:00:00Z'}],
+        'pageInfo': {'hasNextPage': False}}}, '2026-04')
+    claim = db.claim_product_create_webhook_receipt
+    def interrupted(*args, **kwargs):
+        result = claim(*args, **kwargs)
+        stop.set()
+        return result
+    monkeypatch.setattr(db, 'claim_product_create_webhook_receipt', interrupted)
+    onboarding.reconcile(db, stop=stop)
+    assert len(rows(sql, 'webhook_events')) == 1
+    assert not db.get_app_setting(onboarding.CHECKPOINT, {}, ensure_schema_first=False)
+    monkeypatch.setattr(db, 'claim_product_create_webhook_receipt', claim)
+    onboarding.reconcile(db)
+    assert len(rows(sql, 'webhook_events')) == 2
+    assert db.get_app_setting(onboarding.CHECKPOINT, {}, ensure_schema_first=False)['checkpoint']
+
+
+def test_fresh_deliveries_do_not_starve_older_uploads(state, monkeypatch):
+    sql, _, _ = state
+    sql.execute("INSERT INTO webhook_events(webhook_id,topic,status,payload,received_at) VALUES('older-upload','products/create','received','{}',now()-interval '1 minute'),('new-upload','products/create','received','{}',now())")
+    seen = []
+    monkeypatch.setattr(onboarding, 'process_receipt', lambda row, *a: seen.append(row['webhook_id']))
+    onboarding.drain(db, limit=1)
+    assert seen == ['older-upload']
+
+
+def test_blocked_lease_does_not_postpone_recovery_scan(monkeypatch):
+    stop = threading.Event()
+    calls = []
+    monkeypatch.setattr(onboarding, 'inspect_subscriptions', lambda: None)
+    monkeypatch.setattr(onboarding.time, 'monotonic', lambda: 100)
+    def tick(**kwargs):
+        calls.append(kwargs['scan'])
+        if len(calls) == 2:
+            stop.set()
+            return True
+        return None
+    monkeypatch.setattr(onboarding, 'tick', tick)
+    monkeypatch.setattr(stop, 'wait', lambda _: None)
+    onboarding.run(stop)
+    assert calls == [True, True]
+
+
+def test_product_process_handles_shutdown_signal_and_restores_handler(monkeypatch):
+    import signal
+    previous = signal.getsignal(signal.SIGTERM)
+    def run(stop):
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        assert stop.is_set()
+    monkeypatch.setattr(onboarding, 'run', run)
+    assert onboarding.main() == 0
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_tick_bounds_scan_and_keeps_continuation_due(state, monkeypatch):
+    _, _, _ = state
+    db.set_app_setting(onboarding.CHECKPOINT, {'after': 'next-page'}, ensure_schema_first=False)
+    drain, scan = Mock(return_value=0), Mock()
+    monkeypatch.setattr(onboarding, 'drain', drain)
+    monkeypatch.setattr(onboarding, 'reconcile', scan)
+    assert onboarding.tick(db=db, scan=True) == 'scan_pending'
+    assert drain.call_args.kwargs['limit'] == 5
+    assert scan.call_args.kwargs['max_pages'] == 1
+    assert scan.call_args.kwargs['page_size'] == 10
 
 @pytest.fixture
 def state(database, monkeypatch):

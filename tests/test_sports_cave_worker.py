@@ -16,20 +16,22 @@ class SupervisorTests(unittest.TestCase):
     def child(self):
         return Mock(pid=123, poll=Mock(return_value=None))
 
-    def test_only_operational_crm_starts_with_unchanged_environment(self):
+    def test_operational_children_start_with_unchanged_environment(self):
         crm = self.child()
         supervisor = worker.Supervisor()
         with patch.object(worker.subprocess, 'Popen', return_value=crm) as launch:
             supervisor.check_children()
             supervisor.check_children()
-        self.assertEqual(supervisor.children, {'crm': crm})
-        launch.assert_called_once_with([sys.executable, '-u', 'crm_worker.py'], cwd=worker.ROOT)
-        self.assertEqual(worker.WORKERS, {'crm': ('crm_worker.py',)})
+        self.assertEqual(set(supervisor.children), {'crm', 'product-onboarding'})
+        self.assertEqual(launch.call_count, 2)
+        launch.assert_any_call([sys.executable, '-u', 'crm_worker.py'], cwd=worker.ROOT)
+        launch.assert_any_call([sys.executable, '-u', 'shopify_product_onboarding.py'], cwd=worker.ROOT)
 
     def test_crm_restarts_after_original_five_second_delay(self):
         supervisor = worker.Supervisor()
         failed, replacement = self.child(), self.child()
         supervisor.children['crm'] = failed
+        supervisor.children['product-onboarding'] = self.child()
         failed.poll.return_value = 1
         with patch.object(worker.time, 'monotonic', return_value=100), self.assertLogs(level='WARNING'):
             supervisor.check_children()
@@ -49,7 +51,20 @@ class SupervisorTests(unittest.TestCase):
         self.assertNotIn('secret-value', '\n'.join(logs.output))
         with patch.object(worker.time, 'monotonic', return_value=105), patch.object(worker.subprocess, 'Popen', return_value=self.child()) as launch:
             supervisor.check_children()
-            launch.assert_called_once()
+            self.assertEqual(launch.call_count, 2)
+
+    def test_product_crash_restarts_without_restarting_crm(self):
+        supervisor = worker.Supervisor()
+        crm, failed, replacement = self.child(), self.child(), self.child()
+        supervisor.children = {'crm': crm, 'product-onboarding': failed}
+        failed.poll.return_value = 1
+        with patch.object(worker.time, 'monotonic', return_value=100):
+            supervisor.check_children()
+        with patch.object(worker.time, 'monotonic', return_value=105), patch.object(worker.subprocess, 'Popen', return_value=replacement) as launch:
+            supervisor.check_children()
+        launch.assert_called_once_with([sys.executable, '-u', 'shopify_product_onboarding.py'], cwd=worker.ROOT)
+        self.assertIs(supervisor.children['crm'], crm)
+        self.assertIs(supervisor.children['product-onboarding'], replacement)
 
     def test_shutdown_signals_both_before_wait_and_reaps_them(self):
         supervisor = worker.Supervisor()
