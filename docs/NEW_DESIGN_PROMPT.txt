@@ -2,7 +2,7 @@ Sports Cave event: [VERIFIED SUBJECT / EVENT]
 
 **Start the authorised new-design job**
 
-Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Use the current brief, the matching job instructions and the guide's shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, one full artwork generation, inspection and finishing, then one verified final PSD and matching JSON in Design Studio Review. Display references and the artwork in chat and continue without pausing for approval.
+Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Use the current brief, the matching job instructions and the guide's shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references and the artwork in chat and continue without pausing for approval.
 
 [INSERT VERIFIED DESIGN BRIEF AND SOURCE CONTEXT]
 
@@ -48,21 +48,19 @@ Complete the focused search within the existing research allowance. If no suitab
 
 **AUTHENTIC BACKGROUND RESEARCH**
 
-After choosing the hero, assess its setting and compare two or three real-location alternatives where available. Use the actual venue and era for event editions. A verified associated ground, circuit or period setting can support a career or club tribute. Select for story fit, identifiable features, angle, perspective, lighting, image quality and quiet space for type. Prefer supplied or already approved assets when suitable and record the source and verified location.
-
-Choose one foundation. If no verified option suits the design, continue with the original setting or a non-specific abstract environment without introducing an extra approval stage. Keep any symbolic montage clear of false event claims.
+Choose a verified setting that supports the story: the actual venue and era for an event, or an associated ground or circuit for a tribute. Compare available views for perspective, lighting and source detail; record the source and verified location. Identify one real feature to retain, such as a court marking, stand profile, roof structure or track section. Use the hero's original background when it supplies that feature. If no suitable verified view is available, continue with an abstract fallback and record which venue detail could not be established, without introducing an extra approval stage. Never invent identifying architecture or imply an unverified event.
 
 Inspect the actual designs-canvas.psd for dimensions, orientation, resolution, colour profile, framing clearance, guides and collector layers. Work from a copy. If access remains unavailable, use verified dimensions where available, reserve the plaque footprint and continue independently. Keep master-dependent assembly, saves and verification pending.
 
 **2. Prepare the complete composition before generation**
 
-**Compose the complete collector artwork.** Before generation, compare two brief internal layout approaches using the selected sources, not additional image-generation calls. Choose the approach that best connects the hero, any supporting imagery, environment, collector title, subject name and official plaque across the actual master canvas.
+**Compose the complete collector artwork.** Before generation, build a scaled layout using actual photographs and exact title. Use a master copy and original plaque pair when accessible; otherwise use verified dimensions and a reserved plaque footprint. Test abstract treatment and border with simple shapes, not additional image-generation calls.
 
 Make the hero the first thing seen at 250 px wide. When both faces are visible, start with the supporting face smaller than the hero's face; judge facial scale and contrast, not figure area alone. Crop the supporting image to the expression or gesture that adds meaning. Integrate it as a subtle part of the stadium, crowd or track and abstract artwork, rather than a second feature above the title.
 
-Bring supporting highlights toward the surrounding venue tones and blend non-essential outer edges into architecture and abstract marks. Keep its authentic expression readable, with selective softness only on non-essential transitions. Give the hero the strongest contrast and sharpest detail. If the supporting image attracts attention first, reduce its scale or contrast, reposition it or omit it. Preserve useful breathing room around the title and plaque instead of filling every gap.
+Bring supporting highlights toward the surrounding venue tones and blend non-essential outer edges into architecture and abstract marks. Keep its authentic expression readable, with selective softness only on non-essential transitions. Give the hero the strongest contrast and sharpest detail. If the supporting image attracts attention first, test a smaller crop, lower contrast and a blend within the venue before omitting it if it still competes. Preserve useful breathing room around the title and plaque instead of filling every gap.
 
-Arrange the title, name and plaque as a coordinated group where appropriate, or connect them through a clear shared alignment elsewhere. Choose the arrangement for the photograph and story rather than repeating a fixed left-title/right-player layout. Record the chosen composition and any supporting image's role briefly in the existing REVIEW NOTES, then proceed through the existing workflow.
+Coordinate title, name and plaque through grouping or shared alignment suited to the photograph and story. Avoid a fixed left-title/right-player layout. Record the composition and supporting image's role in REVIEW NOTES, then proceed.
 
 **Border and print safety for generation and the final layout**
 
@@ -98,35 +96,41 @@ Final check: no autograph or simulated signing; clear typography hierarchy; bala
 
 All existing source checks, subject-authenticity protections, master-canvas requirements, official badge rules, production specifications and delivery steps remain in force.
 
-Before generation, reserve a realistically sized footprint for the official plaque and edition number beside or beneath the intended typography, inside the safe border. Exclude both assets from image generation and add them during PSD assembly.
+**COMPOSE THE BADGE INTO THE ARTWORK**
+
+Treat the title, subject identification and official badge as one collector composition. Choose the footprint on the scaled photographic layout before generation. Use the master badge’s size and position as asset starting values and actively choose both for the composition. When placing the badge below the title, start by testing a width around 65–85% of the main title block’s width. Adjust for the badge shape, available space, title hierarchy and subject clearance.
+
+Use a shared centreline or edge alignment with the title group. The gap to the nearest related text should generally be smaller than the badge’s height. Avoid isolated corners or excessive empty space around the badge. Use restrained, editable tonal or colour adjustments to match the surrounding finish. Keep the badge legible and avoid blur, added glow and extra backing boxes.
+
+Use the original official asset and preserve its mark, lettering, geometry and edition information. Restrained, non-destructive tonal, colour and finish adjustments are permitted. Move or proportionally resize SC_EDITION_PLAQUE and SC_EDITION_NUMBER together on their original separate layers. Keep each visible once and the number aligned inside the plaque. Keep SC_EDITION_NUMBER as the original editable text layer with the same name and apply the matching live text transform. Use compatible editable styling for contrast, but never change its edition text, rasterise it or redraw the original assets.
+
+**Layout check.** With master access, run these original-layer checks before generation. Otherwise review the reserved footprint provisionally and run them once the master is available, before saving the final PSD. Compare at least two badge arrangements that test different sizes and positions using PSD transforms only. Inspect the complete artwork at full size and thumbnail size and retain the strongest arrangement. Honour explicit locks. Confirm that the badge reads as collector identification at thumbnail size, its text is legible at the intended size, and it feels part of the title group while the subject and title remain dominant. Check clearance from the subject, typography and safe border, and verify both original layers. If placement fails, adjust scale, position or nearby spacing within scope. Record unresolved placement or legibility as needs_attention even if the PSD saves and its layers pass verification.
+
+
 
 **COLOUR, AUTHENTIC SETTINGS AND ARTISTIC INTEGRATION**
 
-Use black, charcoal, warm white and restrained gold with truthful sporting colours. Composite the selected real-location source where supported and retain its defining architecture and proportions. Keep the hero’s original setting when it works better. Darken selectively so its roofline, court, track or other features remain identifiable without dominating at thumbnail size. Use atmosphere and selective charcoal textures or colour accents to create depth. Avoid a plain backdrop, featureless black, luminous outlines, excessive sparks, smoke and heavy ribbons.
-
-Match subject and setting perspective, light and shadows. Connect the gesture, environment, title and plaque through alignment, tonal transitions or restrained accents. Blend non-essential cropped edges only where it suits the pose and setting. Never fade or obscure the face, hands, defining gesture, kit number or equipment. Keep full-body action, interactions and vehicles physically grounded. Do not repeat the same sweep, stadium placement or fade across designs.
-
-Keep type readable over quiet space. Honour edit scope. Do not source or replace a background when the background is locked. A signature-only edit permits nearby spacing, type and plaque adjustments within the existing composition.
+Use black, charcoal, warm white and restrained gold with truthful sporting colours. Where a verified venue view is available, composite its feature at subdued contrast, preserving architecture and proportions. Match perspective, lighting and shadows to the hero. Never fade or obscure the face, hands, defining gesture, kit number or equipment. Keep action and vehicles physically grounded. Avoid featureless black, luminous outlines, excessive sparks, smoke and heavy ribbons. Do not repeat the same sweep, stadium placement or fade across designs.
 
 VISIBLE COLLECTOR TRANSFORMATION
 
-Always include a distinct abstract art layer in every new design, visible at thumbnail size. Grain, darkening or a colour wash alone is insufficient. Use story-specific charcoal shapes, fractured geometry, material marks or restrained directional accents.
+Create an abstract collector background in every design. Grain, darkening, a colour wash or isolated scratches alone are insufficient. Follow the hero's movement or a real venue feature toward the title and plaque using story-specific charcoal shapes, fractured geometry or material marks. Where a verified supporting moment adds a distinct memory, weave its expression or gesture subtly into that route. Test it within the venue and abstract treatment before deciding to omit it. Preserve the hero as the first read at 250 px.
 
-Use the hero's real movement or a verified venue feature to guide one visible route through the supporting image toward the headline and edition badge. Choose a specific material treatment that follows that route; disconnected scratches and thin accents alone are insufficient. Connect them through overlapping tones and edge transitions, keeping quiet text areas, hero dominance and a distinct supporting moment. Integrate the layer into the full generation, rather than isolating effects behind the player.
+Keep the collector treatment adjustable on a separate layer or with a mask. Judge its strength after the original photographs, title and official plaque are visible together. At 250 px, one material shape or tonal transition must visibly connect action, setting and title area, continuing toward the badge and through the border to the canvas edge. Keep text areas quiet and the badge legible. Protect faces, hands, kit, equipment and vehicle details; preserve truthful sporting colours.
 
-Protect faces, hands, gestures, kit numbers, equipment, vehicle details and the official badge. Preserve truthful sporting colours; vary the treatment by story.
+Where a verified venue view is available, retain its identifying feature subtly within the abstract environment. Otherwise verify that the abstract fallback makes no claim to depict the actual venue. Distinguish photographic moments tonally. Vary treatment by story; keep the hero dominant.
 
-Keep a verified venue recognisable through defining features. Blend it into the composition instead of isolating it in a blurred strip or inset. Use tonal transitions to distinguish separate photographic moments. Connect the premium title to the planned plaque position through alignment, scale, spacing and surrounding tones. Add the official plaque during assembly.
+**Creative review before generation.** Use the original photos as the authority for every face, pose, uniform and object. Inspect the scaled layout at 250 px wide and compare facial sizes at intended print size. Check the first read, supporting image's purpose and movement toward title and plaque. Where a verified venue view is available, check its visible feature; otherwise check that the fallback makes no actual-venue claim. Correct scale, crop, contrast, spacing or title here; honour explicit locks. Record the direction in REVIEW NOTES, lock it and proceed automatically. Without master access, review the reserved footprint provisionally; defer original-layer checks until access returns.
 
-Lock the verified subjects and exact title. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Plan how the hero, selected supporting photograph, authentic setting, styling, text, framing-safe border and plaque footprint work together at print and thumbnail sizes. Confirm the story is recognisable with the title hidden. Briefly state the chosen direction and record the layout and source decisions in REVIEW NOTES.
+**3. Generate the collector treatment once**
 
-**3. Generate the complete flat artwork once**
+Use the reviewed layout as the exact composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references. Generate the surrounding venue treatment, abstract artwork and lighting around the locked photographs. Exclude the official plaque and number from generation; show only their reserved footprint in the generation reference. Keep the output flat artwork without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
 
-Send one design-specific brief for the complete art direction around the planned photographic placements: venue treatment, abstract shapes, lighting, exact title, typography, collector border and reserved badge footprint. Include the hero and selected secondary source with its distinct story role, crop, position and background transition as composition references. Generate the surrounding artwork once. Any generated people or sporting objects are placement guides only: completely replace them with the verified source photographs during finishing and remove exposed generated silhouettes. Keep the output flat artwork without physical frame, room or wall. Display the generation in chat as the composition draft.
+Assemble with original masked photographs, reviewed typography, collector border and original plaque pair. Any generated people or sporting objects are placement guides only: cover them completely with verified sources and remove exposed generated silhouettes. Keep the abstract treatment adjustable. A visual criticism goes to PSD finishing and never triggers another generation.
 
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
-**4. Inspect and finish at 100% and thumbnail size**
+**4. Inspect and finish the assembled PSD**
 
 **MANDATORY PHOTOGRAPHIC AUTHENTICITY AND INTEGRATION CHECK**
 
@@ -138,12 +142,12 @@ Inspect the rendered PSD beside the sources at 100%, then at 250 px wide. Verify
 
 Record unresolved identity or integration in REVIEW NOTES and needs_attention metadata. Continue authorised review saves and delivery. Report the actual source comparison and any unverified checks. Reserve print approval for its separate process.
 
-Review can end with no creative changes. Preserve successful composition, typography and lighting. At 250 px wide, verify that the hero reads first, the supporting moment belongs subtly to the venue, the title and plaque read clearly, and visible abstract shapes connect the composition. Refine disconnected treatment during the existing PSD finishing pass while protecting photographic details and quiet text areas. At 100%, verify the supporting likeness, crop and transition into the venue. If competing or pasted-on, refine its mask, scale or contrast, or omit it.
+Inspect the assembled artwork beside its sources at 100% and 250 px wide. Confirm hero dominance, subtle supporting imagery where used, connected abstract treatment, readable title and plaque, and continuous border with edge-to-edge artwork. Where a verified venue view is available, verify its selected feature. Otherwise check that the fallback makes no actual-venue claim. At 100%, verify the supporting likeness, crop and transition into the environment.
 
-Inspect all four edges and corners for continuous collector detail, framing-safe clearance and artwork extending to the edge. Correct only the border if clearance fails; restore edge-to-edge venue tones and abstract marks where needed. Keep the strongest inspected artwork and mark unresolved quality or identity as needs_attention.
+If it passes, proceed directly to the final save. Correct only a visible defect in the affected mask, source placement, local tone, abstract layer, typography, border or plaque alignment. Compare with the pre-correction version and keep the correction only if it improves the result. Correct only the border if clearance fails. Preserve successful creative decisions; never generate again for visual criticism. Record unresolved quality or identity as needs_attention and continue the authorised Review handoff.
 
 
-**5. Assemble, save and verify one final Review PSD**
+**5. Save and verify one final Review PSD**
 
 On a master copy, place the inspected composite in **FINAL POLISHED ARTWORK**, retaining the hero and any supporting photograph on separate editable masked layers. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
 
@@ -155,17 +159,7 @@ Use that full title for the PSD stem and JSON design_title; match the JSON basen
 
 
 
-**COMPOSE THE BADGE INTO THE ARTWORK**
-
-Treat the title, subject identification and official badge as one collector composition. Reassess the planned footprint against the generated artwork. Use the master badge’s size and position as asset starting values and actively choose both for the composition. When placing the badge below the title, start by testing a width around 65–85% of the main title block’s width. Adjust for the badge shape, available space, title hierarchy and subject clearance.
-
-Use a shared centreline or edge alignment with the title group. The gap to the nearest related text should generally be smaller than the badge’s height. Avoid isolated corners or excessive empty space around the badge. Use restrained, editable tonal or colour adjustments to match the surrounding finish. Keep the badge legible and avoid blur, added glow and extra backing boxes.
-
-Use the original official asset and preserve its mark, lettering, geometry and edition information. Restrained, non-destructive tonal, colour and finish adjustments are permitted. Move or proportionally resize SC_EDITION_PLAQUE and SC_EDITION_NUMBER together on their original separate layers. Keep each visible once and the number aligned inside the plaque. Keep SC_EDITION_NUMBER as the original editable text layer with the same name and apply the matching live text transform. Use compatible editable styling for contrast, but never change its edition text, rasterise it or redraw the original assets.
-
-**Mandatory assembly check.** Compare at least two badge arrangements that test different sizes and positions using PSD transforms only. Inspect the complete artwork at full size and thumbnail size and retain the strongest arrangement. Honour explicit locks. Confirm that the badge reads as collector identification at thumbnail size, its text is legible at the intended size, and it feels part of the title group while the subject and title remain dominant. Check clearance from the subject, typography and safe border, and verify both original layers. If placement fails, adjust scale, position or nearby spacing within scope. Record unresolved placement or legibility as needs_attention even if the PSD saves and its layers pass verification.
-
-Save just the final **`[Product Title].psd`** directly in /Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
+If master access was deferred, first test both plaque placements as specified above. Verify the chosen position against the final composite: both original layers visible once, number editable and aligned inside the plaque, text legible, and safe clearance from hero, title and border. Adjust only a specific placement defect with matching transforms. Save just the final **`[Product Title].psd`** directly in /Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 
 **6. Write the Smart Upload JSON and deliver**
 
@@ -173,4 +167,4 @@ Motorsport JSON only: set sport to the verified specific discipline: Formula One
 
 After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in /Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/JSON/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.
 
-Display the inspected final artwork, or the best available provisional result if a required checkpoint is pending. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action.
+Display the reopened saved PSD render as **Final artwork · rendered from the saved PSD**. If saving or inspection remains pending, label the available result provisional instead. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action.

@@ -17,3 +17,15 @@ Match subject and setting perspective, light and shadows. Connect the gesture, e
 Keep type readable over quiet space. Honour edit scope. Do not source or replace a background when the background is locked. A signature-only edit permits nearby spacing, type and plaque adjustments within the existing composition.
 
 """
+
+NEW_BACKGROUND_RESEARCH = """**AUTHENTIC BACKGROUND RESEARCH**
+
+Choose a verified setting that supports the story: the actual venue and era for an event, or an associated ground or circuit for a tribute. Compare available views for perspective, lighting and source detail; record the source and verified location. Identify one real feature to retain, such as a court marking, stand profile, roof structure or track section. Use the hero's original background when it supplies that feature. If no suitable verified view is available, continue with an abstract fallback and record which venue detail could not be established, without introducing an extra approval stage. Never invent identifying architecture or imply an unverified event.
+
+"""
+
+NEW_COLLECTOR_BACKGROUND = """**COLOUR, AUTHENTIC SETTINGS AND ARTISTIC INTEGRATION**
+
+Use black, charcoal, warm white and restrained gold with truthful sporting colours. Where a verified venue view is available, composite its feature at subdued contrast, preserving architecture and proportions. Match perspective, lighting and shadows to the hero. Never fade or obscure the face, hands, defining gesture, kit number or equipment. Keep action and vehicles physically grounded. Avoid featureless black, luminous outlines, excessive sparks, smoke and heavy ribbons. Do not repeat the same sweep, stadium placement or fade across designs.
+
+"""

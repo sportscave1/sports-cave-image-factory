@@ -26,3 +26,13 @@ Preserve the existing badge position and size unless the user requests a change.
 Inspect the assembled placement at full size and thumbnail size. Verify legibility, layer identity, editability, alignment and the chosen transform. Honour explicit locks and apply changes only within the authorised edit scope.
 
 """
+
+NEW_BADGE_LAYOUT = BADGE_PLACEMENT_VERIFICATION.replace(
+    "Reassess the planned footprint against the generated artwork.",
+    "Choose the footprint on the scaled photographic layout before generation."
+).replace(
+    "**Mandatory assembly check.**",
+    "**Layout check.** With master access, run these original-layer checks before generation. "
+    "Otherwise review the reserved footprint provisionally and run them once the master "
+    "is available, before saving the final PSD."
+)
