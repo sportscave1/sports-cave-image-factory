@@ -235,7 +235,7 @@ def test_current_suggestion_can_be_queued_once_without_backfill(store):
         queue.enqueue_selected('not-current')
 
 
-def test_explicit_retry_only_for_failed_jobs_without_saved_artwork(store):
+def test_explicit_retry_for_all_finished_jobs(store):
     from home_sports_morning_brief import SETTING_KEY
     cur, token = store
     edition = publish(cur, count=1)
@@ -252,10 +252,10 @@ def test_explicit_retry_only_for_failed_jobs_without_saved_artwork(store):
                                  (3, '', ''), (4, '', ''), (2, '', ''), (0, '', '')):
         cur.execute('UPDATE morning_design_jobs SET stage=%s,file_id=%s,file_path=%s WHERE id=%s',
                     (stage, file_id, path, first['id']))
-        assert queue.enqueue_selected(first['id']) is False
+        assert queue.enqueue_selected(first['id']) is (stage in (3, 4, 5))
 
 
-def test_late_verified_artwork_blocks_explicit_retry(store, monkeypatch):
+def test_late_verified_artwork_does_not_block_explicit_retry(store, monkeypatch):
     from home_sports_morning_brief import SETTING_KEY
     cur, token = store
     edition = publish(cur, count=1)
@@ -263,18 +263,17 @@ def test_late_verified_artwork_blocks_explicit_retry(store, monkeypatch):
     first = queue.tick(token, [])['jobs'][0]
     queue.tick(token, [dict(id=first['id'], state='failed')])
     monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {first['id']: {'stage': 4}})
-    with pytest.raises(ValueError, match='already been uploaded'):
-        queue.enqueue_selected(first['id'])
-    assert queue.list_jobs()[0]['stage'] == 5
+    assert queue.enqueue_selected(first['id']) is True
+    assert queue.list_jobs()[0]['stage'] == 0
 
 
 @pytest.mark.parametrize('status', [None, 'Pending', 'Generating', 'Opening ChatGPT',
     'Ready for review', 'Completed · uploaded', 'Uploaded · needs review', 'Uploaded · checking review metadata'])
-def test_home_queue_button_disabled_unless_attention(status):
+def test_home_queue_button_enabled_regardless_of_status(status):
     from home_morning_brief_actions import article_html
     item = dict(title='Champion', recommendation='Brief', links=[])
     markup = article_html(item, design_key='fixture', design_status=status)
-    assert ' disabled>Add to Queue</button>' in markup
+    assert ' disabled>Add to Queue</button>' not in markup
     assert 'data-prompt=' not in markup
     enabled = article_html(item, design_key='fixture', design_status='Needs attention')
     assert ' disabled' not in enabled and 'Add to Queue</button>' in enabled
@@ -322,6 +321,13 @@ def test_real_file_verification_rejects_wrong_revision_and_missing_metadata(monk
     monkeypatch.setattr(design_review_page, 'final_psd', lambda source: True)
     monkeypatch.setattr(design_review_metadata, '_read_sidecar', lambda *args: (value, sidecar))
     assert queue.verify_outputs([{'id': key}])[key]['stage'] == 4
+    output = '00000000-0000-0000-0000-000000000099'
+    repeated = {'id': key, 'prompt': f'\nQueue output receipt: {output}\n'}
+    assert queue.verify_outputs([repeated]) == {}
+    value['morning_design_job_id'] = output
+    assert queue.verify_outputs([repeated])[key]['stage'] == 4
+    value['morning_design_job_id'] = key
+
     value['review_status'] = 'needs_attention'
     assert queue.verify_outputs([{'id': key}])[key]['stage'] == 5
     value['review_status'] = 'ready_for_review'
@@ -497,7 +503,7 @@ def test_deleted_design_redo_blocks_existing_unverified_or_posted_artwork(store,
     if signal == 'receipt':
         cur.execute("INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport,stage) VALUES ('00000000-0000-0000-0000-000000000001','id:saved','R1','Final','NBA',6)")
     assert queue.list_jobs()[0]['label'] != 'Deleted · ready to redo'
-    assert queue.enqueue_selected(first['id']) is False
+    assert queue.enqueue_selected(first['id']) is True
 
 
 def test_restored_design_is_rechecked_when_redo_is_clicked(store, monkeypatch):
@@ -513,7 +519,7 @@ def test_restored_design_is_rechecked_when_redo_is_clicked(store, monkeypatch):
         'metadata_if_present': lambda self, path: {'id': path} if present else None})())
     assert queue.list_jobs()[0]['label'] == 'Deleted · ready to redo'
     present.append(True)
-    assert queue.enqueue_selected(first['id']) is False
+    assert queue.enqueue_selected(first['id']) is True
 
 
 def test_display_only_uses_cached_deletions_without_provider_reads(store, monkeypatch):

@@ -150,10 +150,8 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
     elif not legend and markets:
         label += f' ({", ".join(markets)})'
-    enabled = bool(design_key) and design_status in ('Needs attention', 'Deleted · ready to redo')
+    enabled = bool(design_key)
     reason = ('Add this design to the Design Companion queue' if enabled else
-              'Already in the Design Companion queue' if design_status in ('Pending', 'Opening ChatGPT', 'Generating') else
-              'This design has already been made or uploaded' if design_status else
               'Queue status unavailable. Refresh Home.')
     actions = (
         f'<button type="button" data-design-key="{escape(design_key or "", quote=True)}" '

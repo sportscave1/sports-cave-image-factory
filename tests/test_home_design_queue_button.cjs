@@ -25,8 +25,13 @@ const { chromium } = require('playwright');
     assert.equal(requests, 1);
     release();
     await page.waitForFunction(() => document.querySelector('.sc-brief-status').textContent.includes('Pending'));
-    assert.equal(await button.isDisabled(), true);
+    assert.equal(await button.isDisabled(), false);
     assert.equal(await page.locator('.sc-brief-toast').textContent(), 'Added to the Design Companion queue.');
+    await button.click();
+    await page.waitForFunction(() => document.querySelector('[data-design-key]').disabled);
+    assert.equal(requests, 2);
+    release();
+    await page.waitForFunction(() => !document.querySelector('[data-design-key]').disabled);
     assert.equal(page.context().pages().length, 1);
     console.log('PASS: queue POST, immediate disabling, duplicate-click protection, pending status, no ChatGPT tab.');
   } finally { await browser.close(); }

@@ -144,8 +144,8 @@
           });
           const result = await response.json();
           if (!response.ok) throw Error(result.error || 'Could not add this design.');
-          enqueue.title = 'Already queued or made';
-          toast.textContent = result.added ? 'Added to the Design Companion queue.' : 'This design is already queued or made.';
+          enqueue.title = 'Add this design to the Design Companion queue';
+          toast.textContent = result.added ? 'Added to the Design Companion queue.' : 'This design is already queued or running.';
           if (result.added) {
             const label = enqueue.closest('.sc-brief-row').querySelector('.sc-brief-status');
             if (label) {
@@ -157,6 +157,7 @@
           // A lost response may follow a successful enqueue. Refresh before retrying.
           toast.textContent = (error.name === 'TimeoutError' ? 'Queue request timed out.' : error.message) + ' Refresh Home to check its status.';
         }
+        enqueue.disabled = false;
         toast.hidden = false;
         clearTimeout(hideToast);
         hideToast = setTimeout(() => { toast.hidden = true; }, 6000);
