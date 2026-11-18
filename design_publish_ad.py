@@ -106,13 +106,15 @@ def dashboard():
         cur.execute("""SELECT updated_at > now()-interval '95 seconds' AS online
                        FROM app_settings WHERE key=%s""", (HEARTBEAT_KEY,))
         status = cur.fetchone()
-        cur.execute("""SELECT a.value, j.title, j.stage AS upload_stage FROM app_settings a
-            JOIN product_upload_staff_jobs j ON a.key=%s || j.id::text
+        cur.execute("""SELECT a.value, COALESCE(j.title, a.value->'result'->>'product_name') AS title,
+            CASE WHEN a.value->>'source'='new_ads' THEN 6 ELSE j.stage END AS upload_stage
+            FROM app_settings a LEFT JOIN product_upload_staff_jobs j ON a.key=%s || j.id::text
+            WHERE j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads')
             ORDER BY CASE a.value->>'stage'
                 WHEN 'preparing' THEN 0 WHEN 'opening' THEN 0 WHEN 'generating' THEN 0 WHEN 'posting' THEN 0
                 WHEN 'waiting' THEN 1 ELSE 2 END,
                 CASE WHEN a.value->>'stage'='waiting' THEN a.updated_at END,
-                a.updated_at DESC, a.key LIMIT 100""", (PREFIX,))
+                a.updated_at DESC, a.key LIMIT 100""", (PREFIX, PREFIX + '%'))
         jobs = []
         for row in cur.fetchall():
             value = row['value']
@@ -145,16 +147,21 @@ def _prompt(result, saved, folder, job):
     black_path = saved['folder'] + '/' + black['filename']
     preview = ('https://www.dropbox.com/home' + quote(saved['folder'], safe='/')
                + '?' + urlencode({'preview': black['filename']}))
-    outputs = '\n'.join(f'- {idea["scene_name"]}: {folder}/{COVERS[idea["id"]]}'
-                        for idea in INSTANT_EXPERIENCE_CONCEPTS)
-    return f"""Sports Cave automatic ad job {job}
-
-First retrieve the original black-frame WebP through connected Dropbox, by file ID
+    reference = f"""First retrieve the original black-frame WebP through connected Dropbox, by file ID
 {black['file_id']}, revision {black['revision']}, and exact path {json.dumps(black_path, ensure_ascii=False)}.
 Expected size: {black['size_bytes']} bytes. Dropbox content hash: {black['content_hash']}.
 Dropbox preview for identification: {preview}
 Use that exact file as the image reference for all three covers, following the artwork
-preservation rules below. A storefront image, preview or other frame is not a substitute.
+preservation rules below. A storefront image, preview or other frame is not a substitute."""
+    return delivery_prompt(result, reference, folder, job)
+
+
+def delivery_prompt(result, reference, folder, job):
+    outputs = '\n'.join(f'- {idea["scene_name"]}: {folder}/{COVERS[idea["id"]]}'
+                        for idea in INSTANT_EXPERIENCE_CONCEPTS)
+    return f"""Sports Cave automatic ad job {job}
+
+{reference}
 
 Apply the New Ads Instant Experience brief below. Generate the three full-resolution covers
 and actual UTF-8 ad_copy.csv. In addition to showing the outputs in chat, save the actual
@@ -175,6 +182,9 @@ Before the final response, finish the Dropbox delivery instructions above.
 
 
 def _prepare(value, job):
+    if value.get('source') == 'new_ads':
+        from ads_companion_queue import prepare
+        return prepare(value)
     import ads_page
     from ads_auto_post import destination
     from product_upload_intake import Intakes
@@ -375,13 +385,17 @@ def tick(token, event):
         cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES (%s,'true',now())
             ON CONFLICT(key) DO UPDATE SET updated_at=now()""", (HEARTBEAT_KEY,))
         enabled = _enabled(cur)
-        cur.execute("""SELECT a.key, a.value, j.stage, j.intake_id, j.worker_actor, j.storefront,
+        cur.execute("""SELECT a.key, a.value,
+            CASE WHEN a.value->>'source'='new_ads' THEN 6 ELSE j.stage END AS stage,
+            j.intake_id, j.worker_actor, j.storefront,
             EXTRACT(EPOCH FROM now()-a.updated_at) AS age
-            FROM app_settings a JOIN product_upload_staff_jobs j
+            FROM app_settings a LEFT JOIN product_upload_staff_jobs j
                 ON a.key=%s || j.id::text
-            WHERE a.value->>'stage' IN ('preparing','opening','generating','posting')
-               OR (a.value->>'stage'='waiting' AND (j.stage=7 OR (j.stage=6 AND %s)))
-            ORDER BY (a.value->>'stage'='waiting') ASC, a.updated_at, a.key LIMIT 1""", (PREFIX, enabled))
+            WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
+              AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
+               OR (a.value->>'stage'='waiting' AND
+                   (j.stage=7 OR ((j.stage=6 OR a.value->>'source'='new_ads') AND %s))))
+            ORDER BY (a.value->>'stage'='waiting') ASC, a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled))
         job = cur.fetchone()
         if not job:
             return {}
