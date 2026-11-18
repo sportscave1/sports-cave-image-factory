@@ -14,7 +14,7 @@ function fixture(records=new Map()) {
     tabs:{get:async()=>({id:1,url:chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:1,...options};},
       update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return {clicked:true,response:'response-1',chat};}},
     downloads:{search:async()=>downloads}};
-  const context=vm.createContext({chrome,URL,URLSearchParams,AbortSignal,Uint8Array,Date,
+  const context=vm.createContext({chrome,setTimeout,clearTimeout,URL,URLSearchParams,AbortSignal,Uint8Array,Date,
     queueId:/^[a-f0-9-]{36}$/,suppliedReceipt:/^[a-f0-9]{64}$/,staffAlarm:'alarm',osOrigin:'https://os.test',
     staffRead:async key=>records.get(key),staffWrite:async(key,value)=>records.set(key,value),
     fetch:async(url,options)=>{
@@ -22,6 +22,7 @@ function fixture(records=new Map()) {
       if(url.startsWith('https://os.test'))return {ok:true,json:async()=>({received:'ad_copy.csv'})};
       return {ok:valid,url,body:new ReadableStream({start(c){c.enqueue(new Uint8Array([1,2,3]));c.close();}})};
     }});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/message-deadline.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/ad-queue.js'),'utf8'),context);
   context.job=job;
   return {records,calls,opens,messages,reloads,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),

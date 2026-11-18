@@ -101,7 +101,8 @@ def settings(enabled=None):
 
 
 def dashboard():
-    with connect() as conn, conn.cursor() as cur:
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
         enabled = _enabled(cur)
         cur.execute("""SELECT updated_at > now()-interval '95 seconds' AS online
                        FROM app_settings WHERE key=%s""", (HEARTBEAT_KEY,))
@@ -431,7 +432,7 @@ def tick(token, event):
                               AND c.value->>'action' IN ('cancel','delete'))
               AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
                OR (a.value->>'stage'='waiting' AND
-                   (j.stage=7 OR ((j.stage=6 OR a.value->>'source'='new_ads') AND %s))))
+                   ((j.stage=6 OR a.value->>'source'='new_ads') AND %s)))
             ORDER BY (a.value->>'stage'='waiting') ASC, a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled))
         job = cur.fetchone()
         if not job:

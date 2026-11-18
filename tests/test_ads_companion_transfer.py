@@ -98,3 +98,44 @@ def test_submitted_job_cannot_receive_or_restart(batch):
     with pytest.raises(ValueError,match='Posting receipt'):transfer.resume(batch.job,{'id':'admin'})
     with pytest.raises(PermissionError):transfer.resume(batch.job,{'id':'other'})
     assert not batch.calls
+
+
+def test_acknowledged_image_retry_skips_image_processing_and_provider_io(batch, monkeypatch):
+    import ads_image_workflow, product_upload_services
+    name=next(iter(ads.COVERS.values()))
+    send(batch,name)
+    def forbidden(*args,**kwargs):raise AssertionError('Verified retry must reuse its durable receipt')
+    monkeypatch.setattr(ads_image_workflow,'inspect_instant_experience_original',forbidden)
+    monkeypatch.setattr(product_upload_services,'Dropbox',forbidden)
+    assert send(batch,name)['reused'] is True
+    with pytest.raises(ValueError,match='preserved'):send(batch,name,data=batch.files[name]+b'changed')
+
+
+def test_transfer_rejects_invalid_or_oversize_body_before_reading():
+    import asyncio
+    from starlette.requests import Request
+    async def forbidden():raise AssertionError('Do not consume an invalid body')
+    for query,length in [('name=wrong.exe','1'),('name=ad_copy.csv',str(2*1024**2+1))]:
+        request=Request(dict(type='http',method='POST',path='/',query_string=query.encode(),
+            headers=[(b'authorization',b'Bearer '+b'a'*43),(b'content-length',length.encode())]),forbidden)
+        response=asyncio.run(transfer.file_route(request))
+        assert response.status_code>=400
+
+
+def test_stalled_transfer_body_times_out_and_releases_capacity(monkeypatch):
+    import asyncio
+    from starlette.requests import Request
+    wait=asyncio.wait_for
+    async def bounded(awaitable, timeout):return await wait(awaitable,.01)
+    monkeypatch.setattr(transfer.asyncio,'wait_for',bounded)
+    async def stalled():
+        await asyncio.sleep(1)
+        return {'type':'http.request','body':b'x','more_body':False}
+    request=Request(dict(type='http',method='POST',path='/',query_string=b'name=ad_copy.csv',
+        headers=[(b'authorization',b'Bearer '+b'a'*43)]),stalled)
+    response=asyncio.run(transfer.file_route(request))
+    assert response.status_code>=400
+    assert transfer._BODY_SLOTS.acquire(False)
+    assert transfer._BODY_SLOTS.acquire(False)
+    assert not transfer._BODY_SLOTS.acquire(False)
+    transfer._BODY_SLOTS.release();transfer._BODY_SLOTS.release()

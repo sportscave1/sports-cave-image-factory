@@ -1,0 +1,249 @@
+COMPANION REVIEW - 18 November 2026
+Task: 20261118-2979308d | Owner: codex-companion-review-20261118-01a1ecc0
+Base: a4d96d3d2ca776525938df2a2d2a499be44d3fa1
+Scope: initial review, focused local fixes, phased recommendations. No release.
+
+INITIAL ASSESSMENT
+These are qualitative engineering ratings, not measured production benchmarks.
+5 = usable with material bottlenecks; 8 = bounded and recovery-tested; 10 would
+require sustained real-world performance and fault evidence, which is absent.
+Queue display: 4/10 before, 6/10 after this pass.
+Upload execution: 6/10. Durable claims and restart guards; browser/provider waits.
+Design execution: 6/10. Durable submission journal; shared paste/send mutex.
+Ads execution: 6/10. Receipt checks and download recovery; serial artifact import.
+Editions display: 5/10. Adaptive client polling; unbounded backend refresh wait.
+Editions transfer foundation: 7/10 by inspection; bounded streaming, shared upload
+slot and bandwidth policy already exist. No throughput rating is claimed.
+
+IMPLEMENTED LOCALLY
+- Companion menu contains Companion Queues (default) and Editions Companion.
+  Existing routes, administrator permissions and deep links remain unchanged.
+  Developer retains its own tools and separate Dev Mode link.
+- Only the selected design/upload/ads tab runs. Registered queue polling paths
+  reduce from three to one per page session; this is a structural count, not a
+  claimed 67% reduction in total load or measured latency.
+- Design and upload page reads request display_only=True. Design viewing avoids
+  the claim lock, delivery reconciliation and Dropbox deletion checks. Upload
+  viewing no longer marks stale jobs failed. Worker paths retain those duties.
+- Design connection uses one heartbeat lookup rather than loading upload jobs
+  and attached ad metadata. Heartbeat semantics remain 95 seconds.
+- Closed Ads composer performs zero catalogue loads. Opening it loads products;
+  enqueue still validates current product and permissions independently.
+
+REMAINING FINDINGS / EVIDENCE
+upload_companion_page.py: selected queue reads still synchronously await DB;
+errors replace content with a warning. History/card rendering is bounded by
+20 upload / 100 design / 100 ad rows, but not paged in the UI. Status totals
+reflect the loaded window, not necessarily the entire backlog.
+worker_health_cache.py Snapshot.read: concurrent callers condition.wait without
+a deadline; first refresh blocks on loader; failures lack a last-good fallback.
+worker_health.py snapshot + worker_health_api.py snapshot: reads backlog in
+500-row chunks, projects all state, then slices 25 rows in API. Growth increases
+snapshot cost despite small response pages. Client already has 12s request
+abort, visibility-aware 5s/20s refresh, so backend work is the priority.
+windows-upload-companion/{worker,staff-queue,design-queue,ad-queue}.js: persistent
+journals/receipts protect uncertain sends; design and upload paste/send share a
+mutex, while generation can overlap. Queue alarms are 30s. Browser messages can
+await an unresponsive content script without an explicit per-call deadline.
+Do not blindly retry uncertain ChatGPT sends or reduce alarm periods as a fix.
+ads_companion_transfer.py: validates sizes, response identity, cancellation and
+lease before import. File bodies are buffered (up to 20 MiB per image), and a
+shared import lease serializes work. Preserve deduplication and publication
+checkpoints when redesigning transfers.
+companion_transfer.py + companion_bandwidth.py: existing process-wide upload
+slot, small token bucket, calibration/headroom and streaming are useful safety
+foundations. Increasing concurrency alone could harm UI responsiveness.
+
+PHASED WORK (RECOMMENDED ORDER)
+1. Display resilience and measurement
+   Add user-scoped, bounded last-good snapshots, explicit freshness timestamps,
+   backoff, read deadlines and pause/resume of hidden polling. Separate display
+   reads from authoritative action validation. Instrument p50/p95 latency, query
+   count, payload bytes and refresh concurrency. Test cold/warm/errors and 20
+   concurrent viewers. Target warm shell <300ms, cached status <500ms, no blank
+   panels on refresh errors; these are acceptance targets, not current claims.
+2. Editions scalability
+   Split aggregate health from paged jobs. Move filtering/pagination into SQL;
+   bound snapshot construction, refresh workers and DB statement timeouts.
+   Preserve full-backlog health/count correctness. Test 100/1,000/10,000 jobs,
+   concurrent invalidation, DB outage and recovery. Target p95 status <500ms
+   on agreed test hardware and bounded query/memory cost per visible page.
+3. Companion orchestration reliability
+   Bound content-script requests, retain uncertain-send state, add durable event
+   acknowledgements and observable retry/backoff reasons. Consider immediate
+   next-job wakeups after verified completion while keeping alarm recovery.
+   Inject browser shutdown, content-script hang, network loss and duplicate
+   callbacks. Require no duplicate sends/publications and eventual recovery.
+4. Upload/design/ads transfer efficiency
+   Profile PSD preparation, mockups, downloads, image conversion and cloud
+   writes separately. Reuse verified artifacts by source revision/hash; stream
+   bounded file bodies and tune concurrency within measured memory/bandwidth
+   limits. Test interrupted transfers, expired links, cancellation during import,
+   retry after receipt and shared-connection responsiveness before increasing
+   concurrency. AI/provider generation time remains outside UI control.
+5. Product polish and acceptance
+   Unified timestamps, verified stage progress, actionable error explanations,
+   job timeline and paged history. Never imply AI completion from elapsed time.
+   Run synthetic end-to-end jobs and a long fault/soak run, then a separately
+   authorized real-environment acceptance and release. No real ads, Shopify
+   writes, customer files or production credentials in local preview tests.
+
+VALIDATION
+- 14 focused Python tests: selected-tab isolation, lazy composer, play/pause,
+  restart click-only behaviour, authorization/origin and sidebar source checks.
+- Broad disposable-PGlite Python run: 118 passed, 1 obsolete hidden-tab test
+  failed. Updated that test to select Ads and verified it passes individually.
+- Added heartbeat absent/unseen/live/expired regression: passed separately.
+- 13 Node protocol checks passed: durable download recovery, duplicate sends,
+  restart uncertainty, correlation/origin checks, MV3 lifetime and polling.
+- Real extracted sidebar fixture checked in headless Edge at 1280 and 390px:
+  default route, Editions navigation, collapse/reopen and Developer separation.
+- git diff --check passed. No full application startup or external workflow run.
+
+FRAMEWORK REFERENCES
+Lazy tabs and expanders are supported by the minimum configured Streamlit 1.58:
+https://docs.streamlit.io/1.58.0/develop/api-reference/layout/st.tabs
+https://docs.streamlit.io/1.58.0/develop/api-reference/layout/st.expander
+
+LIMITS
+This is an initial code-path review and local regression pass, not a proof that
+all companions are error-free or a live performance benchmark. Execution and
+provider-facing changes in phases 2-5 remain proposed, not implemented.
+
+
+FOLLOW-UP IMPLEMENTATION - ALL FIVE LOCAL PHASES
+The earlier proposed-work section records the initial review. The following
+supersedes its implementation status. No commit, push, deployment or live
+customer/provider workflow was performed.
+
+1. Resilient queue display
+   companion_display.py uses account/revision/permission-scoped snapshots,
+   bounded worker and memory budgets, last-good data (maximum 120s), retry delay,
+   explicit last-verified timestamps and invalidation after controls. Only the
+   visible tab runs. A small visibility component stops refresh timers when the
+   browser is hidden and resumes on return. Cached status never authorises an
+   action. Read-only queue queries use dedicated connections with local query/
+   lock timeouts plus a client cancellation watchdog; the connection factory
+   retains its existing 8s connection timeout.
+2. Editions scaling
+   Background projection preserves the existing authoritative status rules.
+   An in-memory SQLite display index serves SQL-filtered 50-row cursor pages,
+   bounded deltas, and the legacy 25-row API. Summary counts cover the whole
+   projected backlog. Two global refresh slots, single-flight per database,
+   exponential retry delay, max-age, 10000-row/16MB per-index limits and a 20s
+   projection budget prevent unbounded refresh work. Capacity limits report
+   unavailable/stale status rather than silently truncating counts.
+   Source SQL also removes a per-product count scan and replaces an OR identity
+   join with an equivalent canonical-identity equality join. Duplicate identity,
+   approval, source-revision and lease safeguards remain tested.
+   Architectural choice: filtering/paging run against the disposable display
+   index rather than duplicating complex Python verification rules in production
+   SQL. Full authoritative projection still occurs on background refresh; it is
+   not constant-cost in backlog size and the index is rebuilt after restart.
+3. Browser orchestration
+   Companion 1.5.5 bounds content-script requests (readiness 1.5s, status 8s,
+   artifact bytes 25s, send 120s). Deadlines free the serial handoff queue but
+   retain the durable uncertain-send boundary. Late permits are refused after
+   removal. Existing receipt journals, event reconciliation and alarm recovery
+   remain in place. Ad collection has one bounded prompt-free fast follow-up
+   after a download starts or a verified receipt arrives, instead of always
+   waiting for the next 30s alarm. There is no tight idle polling loop.
+4. Transfers
+   An exact previously recorded ad-file receipt avoids repeat conversion and
+   provider upload after a lost acknowledgement. Identity, response ID, content
+   hash, size and permissions must match. Conflicting content remains refused.
+   CSV/image size gates run before buffering; body consumption has a deadline
+   and a two-request bound. Browser blob and streamed downloads enforce matching
+   limits. Existing revision-bound PSD reuse, bounded streaming, bandwidth
+   headroom, interrupted-transfer recovery and publication gates were retained
+   and exercised by their local regression/receiver suites. No speculative
+   Photoshop concurrency or quality reduction was introduced.
+5. UX and acceptance
+   Freshness and stale-state notices, last checkpoint timestamps, bounded
+   history/Ads waiting pages, and loaded-window count labels make status honest.
+   Design generation no longer advances a percentage merely because time passes.
+   Cold Editions reads return a retryable, redacted response. Local browser
+   tests cover lazy tabs/composer, outage retention, visibility and mobile width.
+
+MEASURED LOCAL RESULTS
+- Disposable PostgreSQL projection (full existing status rules):
+  100 jobs: 40.56ms / 2 logical data queries.
+  1000 jobs: 162.71ms / 5 logical data queries.
+  10000 jobs: 1860.12ms / 41 logical data queries.
+  The 10000-job pre-query-optimisation sample was 20369.58ms.
+  These counts exclude transaction timeout setup commands.
+- Synthetic indexed-page benchmark, 20 viewers, 1000 requests per size:
+  p95 5.03ms (100), 7.50ms (1000), 6.31ms (10000); responses approximately 8KB
+  for the small synthetic job fixture. Real 10000-job index used 10.67MB.
+- 60-second fault soak: 22693 reads, 20 viewers, 10000 jobs, 82 refreshes,
+  peak concurrent refreshes 1, p95 9.58ms. 11662 stale reads retained data during
+  refresh/injected failures. 20 initial reads correctly reported cold loading.
+- Existing 4MiB loopback transfer fixture: loaded control requests had median
+  1.88ms and maximum 2.10ms while the bounded transfer progressed. This is not a
+  measurement of WAN capacity, household browsing, Photoshop or live providers.
+
+ARTIFACTS
+output/companion-phases/display-benchmark.json
+output/companion-phases/database-{100,1000,10000}.json
+output/companion-phases/display-soak.json
+output/companion-phases/transfer-responsiveness.json
+output/companion-phases/queues-{1280,390}.png
+output/companion-phases/sports-cave-companion-1.5.5.zip
+Reproduce with scripts/benchmark_companion_display.py,
+scripts/soak_companion_display.py and the focused tests added in this task.
+
+RELEASE / VALIDATION LIMITS
+Local implementation only. The separately authorised real-environment release
+and acceptance remain outside this task. Extension changes require installing/
+reloading the packaged version at that time; this task did not change the user's
+running extension. Cold reads can show Loading while a verified snapshot builds;
+providers and Photoshop are not made instantaneous. The 60-second soak is a
+bounded regression exercise, not an overnight production endurance claim.
+The optional native-PostgreSQL benchmark needs AUTO_EDITIONS_NATIVE_TEST_PORT;
+its coverage is supplemented here by actual disposable PGlite SQL at three
+backlog sizes. No migrations or new Render services are needed.
+Database timeout reference: https://supabase.com/docs/guides/database/postgres/timeouts
+
+
+FINAL REGRESSION RECORD
+- Editions status/backlog/controls suite: 82 passed, 1 skipped (optional native
+  PostgreSQL performance port not configured). Actual PGlite SQL benchmarks ran
+  at 100/1000/10000 jobs, including complete cursor traversal with no duplicates.
+- Combined transfer/mockup/job suites: 155 backend checks passed; the single
+  AppTest failure was traced to an old fixture importing app.py and leaving its
+  login form attached. The fixture now builds synthetic assets directly. The
+  affected mockup suite plus Ads AppTest then passed together (20 tests).
+- Latest ad transfer suite: 6 passed, including stalled-body timeout/capacity
+  recovery and zero provider/conversion work on acknowledged-file retry.
+- Focused display/control/navigation suite: 20 passed.
+- Node browser-companion protocol suite: 19 passed.
+- Actual synthetic queue page in Edge: desktop/mobile, stale-content retention,
+  hidden-tab polling stop/resume, selected queues and deferred catalogue passed.
+- Existing Editions HTTP/disposable-SQL browser recovery flow passed as part of
+  its suite; no live Photoshop, Shopify, Dropbox or Meta writes were exercised.
+- Studio static verification passed. A Starlette/httpx deprecation warning
+  remains in test infrastructure; it is not a failing check.
+
+The current code has been verified in the focused suites above. The combined
+large suite is not described as an untouched all-green run: its fixture defect
+and the focused rerun after fixing it are recorded explicitly.
+
+Local runtime note: the synthetic Streamlit/Uvicorn server also logged ASGI
+response-order exceptions (http.response.body before http.response.start), as
+seen in the earlier sidebar fixture. Browser interaction and layout assertions
+passed. This pre-existing local fixture/runtime issue is not counted as a clean
+server-log check and should be revisited in the release environment validation.
+
+Release follow-up: false status and collection publication
+- Submitted or uncertain ChatGPT handoffs no longer expire solely because no
+  verified progress was observed. Explicit provider failures remain failures.
+- Older companion observation-only timeout messages do not cancel responses.
+- Waiting ads remain waiting when their upload dependency needs attention.
+- Active generation takes precedence over transient ChatGPT error alerts.
+- Collection publication targets AppCatalog channels only; product Market
+  availability remains required. Confirmed against Shopify schema description
+  of Product.resourcePublicationsV2 (Collection supports APP only).
+- Release checks: 57 display/SQL/transfer/queue tests, 22 prompt tests, 20 Node
+  protocol/progress tests passed; updated upload/ad regression reruns recorded.
+- Legacy prompt tests import app.py and must run separately from AppTest tests
+  to avoid leaking their login form into isolated UI fixtures.

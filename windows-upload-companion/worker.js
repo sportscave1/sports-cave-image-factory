@@ -7,6 +7,7 @@ const suppliedReceipt = /^[a-f0-9]{64}$/;
 const pending = new Map();
 const latest = 'uploadCompanionLast';
 let queue = Promise.resolve();
+importScripts('message-deadline.js');
 importScripts('staff-queue.js');
 importScripts('design-queue.js');
 importScripts('ad-queue.js');
@@ -40,7 +41,7 @@ async function run(id, prompt, job) {
     const deadline = Date.now() + 18000;
     let ready;
     do {
-      try { ready = await chrome.tabs.sendMessage(job.tab, {type:'project:ready'}, {frameId:0}); }
+      try { ready = await companionMessage(job.tab, {type:'project:ready'}, {frameId:0}); }
       catch { /* Edge has not loaded the project content script yet. */ }
       if (job.cancelled) return;
       if (ready?.ready) break;
@@ -51,7 +52,7 @@ async function run(id, prompt, job) {
       return;
     }
     if (job.cancelled) return;
-    const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
+    const result = await companionMessage(job.tab, {type:'project:send', id, prompt,
       freshUpload:!job.designJob && !job.adJob, reference:job.reference}, {frameId:0});
     if (job.cancelled) return;
     if (result?.sent && job.sending) {

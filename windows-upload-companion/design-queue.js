@@ -46,7 +46,7 @@ async function designQueueTick() {
     for (const job of Object.values(jobs).slice(0, 1)) {
       const report = await health(job.receipt);
       const tab = job.tab ? await chrome.tabs.get(job.tab).catch(() => null) : null;
-      const progress = tab && report.state === 'submitted' ? await chrome.tabs.sendMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
+      const progress = tab && report.state === 'submitted' ? await companionMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
       events.push({id:job.id, state:progress?.blocked ? 'blocked' : report.state, reason:progress?.reason || report.reason, chat_url:progress?.chat_url || tab?.url || ''});
     }
     const response = await fetch(osOrigin + '/api/morning-designs/tick', {

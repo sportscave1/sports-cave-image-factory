@@ -3,6 +3,12 @@
 const adProject = 'https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/project';
 const adStorage = 'publishAdJob';
 let adTickRunning = false;
+let adFollowupTimer = null;
+function followUpAdTransfer(outcome) {
+  // One prompt-free fast check after progress, with the durable alarm as fallback.
+  if (!['download-started','received'].includes(outcome) || adFollowupTimer !== null) return;
+  adFollowupTimer = setTimeout(() => {adFollowupTimer=null;void adQueueTick();}, outcome==='received'?250:1000);
+}
 const adChat = /^https:\/\/chatgpt\.com\/g\/g-p-6a6bd98cd6f081918788b544dcdecfc2(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/;
 
 async function collectAd(job, token) {
@@ -23,16 +29,17 @@ async function collectAd(job, token) {
   const names=['ad_copy.csv','collector-hallway.jpg','architectural-wall.jpg','man-cave.jpg'];
   const name=names.find(file=>job.missing?.includes(file));
   if(!name)return;
+  const maxBytes=(name.endsWith('.csv')?2:20)*1024*1024;
   let transfer=local.transfer;
   if(transfer?.name!==name)transfer=null;
   if(!transfer) {
     const started=new Date().toISOString();
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-artifact',job:job.id,name,response:job.response_ids?.[name],recover:job.recover,chat:job.chat_url},{frameId:0});
+    const result=await companionMessage(tab.id,{type:'project:ad-artifact',job:job.id,name,response:job.response_ids?.[name],recover:job.recover,chat:job.chat_url},{frameId:0});
     if(!result?.clicked) {
       await staffWrite(adStorage,{...local,transfer:null,transferError:result?.reason||'Waiting for downloadable attachments'});return;
     }
     transfer={name,started,response:result.response};
-    await staffWrite(adStorage,{...local,transfer,transferError:''});return;
+    await staffWrite(adStorage,{...local,transfer,transferError:''});return 'download-started';
   }
   const downloads=await chrome.downloads.search({startedAfter:transfer.started,limit:30});
   // Cross-origin downloads may reduce the native referrer to the ChatGPT origin.
@@ -49,11 +56,13 @@ async function collectAd(job, token) {
   const url=new URL(item.finalUrl||item.url);
   let data;
   if(url.protocol==='blob:' && url.origin==='https://chatgpt.com') {
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,chat:job.chat_url,url:url.href},{frameId:0});
+    const result=await companionMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,chat:job.chat_url,url:url.href},{frameId:0});
     if(!result?.data) {
       await staffWrite(adStorage,{...local,transfer:null,transferError:result?.error||'Original download expired; retrying the same attachment'});return;
     }
+    if(result.data.length>Math.ceil(maxBytes/3)*4)throw Error('Ad file exceeds transfer limit');
     data=Uint8Array.from(atob(result.data),char=>char.charCodeAt(0));
+    if(data.length>maxBytes)throw Error('Ad file exceeds transfer limit');
   } else {
     if(url.protocol!=='https:' || url.username || url.password ||
       !(url.hostname==='chatgpt.com'||url.hostname.endsWith('.oaiusercontent.com')))throw Error('Unapproved artifact download host');
@@ -66,7 +75,7 @@ async function collectAd(job, token) {
     if(finalURL.protocol!=='https:' || !(finalURL.hostname==='chatgpt.com'||finalURL.hostname.endsWith('.oaiusercontent.com')))throw Error('Unapproved artifact redirect');
     const reader=response.body.getReader(),chunks=[];let size=0;
     while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;
-      if(size>20*1024*1024){await reader.cancel();throw Error('Ad file exceeds transfer limit');}chunks.push(value);}
+      if(size>maxBytes){await reader.cancel();throw Error('Ad file exceeds transfer limit');}chunks.push(value);}
     data=new Uint8Array(size);let offset=0;for(const chunk of chunks){data.set(chunk,offset);offset+=chunk.length;}
   }
   const query=new URLSearchParams({job:job.id,name,chat:job.chat_url,response:transfer.response});
@@ -77,6 +86,7 @@ async function collectAd(job, token) {
   if(!response.ok)throw Error(receipt.error||'Ad file receipt was not confirmed');
   if(receipt.received!==name)throw Error('Ad file receipt mismatch');
   await staffWrite(adStorage,{...local,transfer:null,transferError:''});
+  return 'received';
 }
 
 async function rememberAdTab(id, tab) {
@@ -109,7 +119,7 @@ async function adQueueTick() {
     const local = await staffRead(adStorage);
     const report = local?.receipt ? await health(local.receipt) : {};
     const progress = local?.tab && report.state === 'submitted'
-      ? await chrome.tabs.sendMessage(local.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
+      ? await companionMessage(local.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
     const response = await fetch(osOrigin + '/api/staff-product-uploads/ad-tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
       body:JSON.stringify({id:local?.id, state:progress?.blocked ? 'blocked' : report.state,
@@ -121,13 +131,13 @@ async function adQueueTick() {
     const {job, busy, stop} = await response.json();
     if(stop?.id===local?.id && local) {
       const operation=pending.get(local.receipt);if(operation)operation.cancelled=true;
-      if(local.tab)await chrome.tabs.sendMessage(local.tab,{type:'project:cancel'},{frameId:0}).catch(()=>null);
+      if(local.tab)await companionMessage(local.tab,{type:'project:cancel'},{frameId:0}).catch(()=>null);
       await chrome.storage.local.remove(adStorage);return;
     }
     if (busy) return;
     if (!job) await chrome.storage.local.remove(adStorage);
     else if (job.stage === 'opening') await startAd(job);
-    else if (job.stage === 'generating') await collectAd(job,token);
+    else if (job.stage === 'generating') followUpAdTransfer(await collectAd(job,token));
   } catch(error) {
     const local=await staffRead(adStorage);
     if(local)await staffWrite(adStorage,{...local,transferError:String(error.message||'Ad transfer interrupted').slice(0,300)});

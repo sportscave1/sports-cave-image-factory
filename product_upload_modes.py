@@ -78,6 +78,10 @@ Ensure this product's availability in each discovered applicable active Market.
 Publish this PRODUCT to every discovered enabled required channel publication.
 Separately verify/publish EACH selected collection to every enabled required channel,
 including SPORT COLLECTION and COLLECTOR SERIES; never stop at the first two.
+Collection targets are sales-channel publications (AppCatalog) only, not
+MarketCatalog or CompanyLocationCatalog publications. Record collection market/B2B
+publication as not applicable, never as a blocker. Product Market availability
+remains required. Verified collection channel publication satisfies this gate.
 Reuse existing memberships/publications and repair only missing ones. Never remove
 legitimate shared collection publications or change unrelated collection contents.
 Use supported publishable operations for each resource, inspect every userError,

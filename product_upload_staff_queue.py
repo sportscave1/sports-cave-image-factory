@@ -45,7 +45,8 @@ def enqueue(user, source, title, sport, *, ad_country=None):
 
 def list_jobs(actor=None, *, display_only=False):
     from design_publish_ad import PREFIX, public as ad_public
-    with connect() as conn, conn.cursor() as cur:
+    from companion_read_connection import read_connection
+    with (read_connection(connect) if display_only else connect()) as conn, conn.cursor() as cur:
         if actor is None:
             cur.execute('''SELECT * FROM product_upload_staff_jobs
                 ORDER BY (stage < 6) DESC, updated_at DESC LIMIT 20''')
@@ -57,7 +58,7 @@ def list_jobs(actor=None, *, display_only=False):
         rows = cur.fetchall()
         # Status remains truthful even when the desktop is disconnected.
         for row in rows:
-            if not display_only and 1 <= row['stage'] <= 5 and row['updated_at'] < datetime.now(timezone.utc) - timedelta(minutes=STALL_MINUTES):
+            if not display_only and 1 <= row['stage'] <= 3 and row['updated_at'] < datetime.now(timezone.utc) - timedelta(minutes=STALL_MINUTES):
                 cur.execute('''UPDATE product_upload_staff_jobs SET stage=7,
                     message=%s,updated_at=now() WHERE id=%s AND stage BETWEEN 1 AND 5
                     AND updated_at=%s RETURNING *''',
@@ -91,7 +92,7 @@ def public(row):
     if cancelled:
         label = 'Cancelled'
     elif stalled:
-        label = 'Needs attention · no verified progress for 10 minutes'
+        label = 'Waiting for verified progress · check conversation' if stage == 5 else 'Taking longer · check companion'
     return dict(id=str(row['id']), title=row['title'], stage=stage, label=label,
                 percent=percent, detail=row['message'], storefront=row['storefront'],
                 updated_at=row['updated_at'].isoformat(), restartable=stage == 7,
@@ -237,6 +238,15 @@ def settings(enabled=None):
         return dict(enabled=_enabled(cur))
 
 
+def desktop_online():
+    """Read only the heartbeat; displaying designs must not load/reconcile uploads."""
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
+        cur.execute("SELECT seen_at > now()-interval '95 seconds' AS online FROM product_upload_desktop WHERE singleton")
+        row = cur.fetchone()
+    return bool(row and row['online'])
+
+
 def header_queue_status():
     from companion_header import enrich_queues
     with connect() as conn, conn.cursor() as cur:
@@ -264,7 +274,7 @@ def desktop_tick(token):
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
         device = cur.fetchone()
         if not device:
-            raise PermissionError('Pair this Edge profile in Developer → Upload Companion.')
+            raise PermissionError('Pair this Edge profile in Companion → Companion Queues.')
         cur.execute('SELECT * FROM product_upload_staff_jobs WHERE stage BETWEEN 1 AND 5')
         job = cur.fetchone()
         if not job and _enabled(cur):
@@ -479,11 +489,20 @@ def tick(token, event):
     current = worker_job(str(key), actor)
     if not current:
         return stop
-    if str(key) == event.get('id') and current['stage'] >= 4 and event.get('state') in ('failed', 'uncertain', 'blocked', 'stalled'):
+    # Older installed companions report observation timeouts as blockers. Those
+    # are not failed provider operations and must not cancel a running response.
+    observation_only = str(event.get('reason') or '').startswith((
+        'ChatGPT finished responding, but publication and PSD mapping remain unverified.',
+        'The companion cannot read the upload conversation.',
+        'The upload conversation tab was closed before publication and PSD mapping were verified.',
+    ))
+    if str(key) == event.get('id') and current['stage'] == 4 and event.get('state') == 'uncertain':
+        advance(key, actor, 4, 'ChatGPT handoff unconfirmed · check the existing conversation; no duplicate prompt will be sent.', allowed=[4])
+    if str(key) == event.get('id') and current['stage'] >= 4 and not observation_only and event.get('state') in ('failed', 'blocked'):
         advance(key, actor, 7, str(event.get('reason') or 'ChatGPT stopped without a verified upload result.'), allowed=[4, 5])
         return {'stop': {'id': str(key)}}
     timeout = timedelta(minutes=STALL_MINUTES)
-    if current['updated_at'] < datetime.now(timezone.utc) - timeout:
+    if current['stage'] < 4 and current['updated_at'] < datetime.now(timezone.utc) - timeout:
         detail = f"{current['message'] or LABELS[stage]} · timed out. Review Product Uploads and the ChatGPT conversation."
         advance(key, actor, 7, detail, storefront=current['storefront'],
                 allowed=[stage])

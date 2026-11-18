@@ -35,6 +35,13 @@ def test_combined_job_preserves_upload_and_posts_once_after_four_files(store, mo
         ads.tick('x' * 43, {})
     assert ads.tick(token, {}) == {}
     assert uploads.list_jobs('staff')['jobs'][0]['ad']['active']
+    # An upload dependency failure must not fail or consume the waiting ad.
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=7 WHERE id=%s', (upload,))
+    assert ads.tick(token, {}) == {}
+    assert uploads.list_jobs('staff')['jobs'][0]['ad']['active']
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=0 WHERE id=%s', (upload,))
     assert not uploads.list_jobs('stranger')['jobs']
 
     uploads.desktop_tick(token)
@@ -203,7 +210,10 @@ def test_ads_companion_heartbeat_pause_and_blocked_job_history(store, monkeypatc
     assert ads.tick(token, {})['job']['id'] == str(second)
 
 
-def test_developer_companion_shows_ads_queue(monkeypatch):
+def test_companion_shows_selected_ads_queue(monkeypatch):
+    # AppTest has no browser visibility; the real component is covered in Edge.
+    monkeypatch.setattr('upload_companion_page.visible', lambda: True)
+    monkeypatch.setattr('upload_companion_page.read_display', lambda name, loader: loader())
     import ads_companion_quick_add
     monkeypatch.setattr(ads_companion_quick_add,'catalog',lambda:dict(products=[]))
     from streamlit.testing.v1 import AppTest
@@ -222,5 +232,9 @@ def test_developer_companion_shows_ads_queue(monkeypatch):
     ).run()
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ['Design queue', 'Upload queue', 'Ads queue']
+    assert not app.button  # Hidden queues no longer execute.
+    app.session_state['companion-queue-tabs'] = 'Ads queue'
+    app.run()
+    assert not app.exception
     assert [(button.label, button.disabled) for button in app.button] == [('Play', False), ('Pause', True)]
     assert any('Fixture' in text.value for text in app.markdown)

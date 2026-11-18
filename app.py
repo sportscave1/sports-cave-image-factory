@@ -7267,7 +7267,9 @@ def _active_sidebar_group(route):
     import crm_navigation
     if route in (*analytics_nav.WEBSITE_ROUTES, *analytics_nav.ANALYTICS_ROUTES):
         return "website"
-    if route in {"Developer", "Worker Health", "Upload Companion", "Task Recorder", "Image Protection"}:
+    if route in {"Worker Health", "Upload Companion"}:
+        return "companion"
+    if route in {"Developer", "Developer Studio", "Task Recorder", "Image Protection"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
@@ -7449,16 +7451,21 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if ({'Worker Health', 'Upload Companion', 'Task Recorder', 'Developer'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
-        'developer','Developer',':material/developer_mode:','Worker Health',
-        can_open_overview='Worker Health' in allowed_routes,
+    if {'Worker Health', 'Upload Companion'}.intersection(allowed_routes) and disclosure(
+        'companion', 'Companion', ':material/smart_toy:', 'Upload Companion',
+        can_open_overview='Upload Companion' in allowed_routes,
+    ):
+        children = st.container(key="sidebar-companion-children")
+        if 'Upload Companion' in allowed_routes:
+            child_button(children, 'Upload Companion', 'Companion Queues', icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
+        if 'Worker Health' in allowed_routes:
+            child_button(children, 'Worker Health', 'Editions Companion', icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+    if ({'Task Recorder', 'Developer', 'Developer Studio'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
+        'developer','Developer',':material/developer_mode:','Developer',
+        can_open_overview='Developer' in allowed_routes,
     ):
         children=st.container(key="sidebar-developer-children")
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
-        if 'Worker Health' in allowed_routes:
-            child_button(children,'Worker Health','Editions Companion',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
-        if 'Upload Companion' in allowed_routes:
-            child_button(children,'Upload Companion','Companion Queues',icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
         if 'Task Recorder' in allowed_routes:
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Image Protection' in history_routes:

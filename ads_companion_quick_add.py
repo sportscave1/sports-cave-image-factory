@@ -41,8 +41,11 @@ def enqueue(user, body):
 
 def render():
     import streamlit as st
+    composer = st.expander('Add to queue', expanded=False, key='cq-ad-composer', on_change='rerun')
+    if not composer.open:
+        return
     from ads_page import current_ads_user
-    with st.expander('Add to queue',expanded=False):
+    with composer:
         try: data=catalog()
         except Exception:
             st.warning('Could not load products. Try again shortly.');return
@@ -66,6 +69,8 @@ def render():
                         st.session_state['cq-ad-request']=str(uuid4())
                         st.session_state['cq-ad-last-input']=selection
                     enqueue(current_ads_user(),dict(product=product,sport=sport,country=country,type=kind,request_id=st.session_state['cq-ad-request']))
+                    from companion_display import invalidate
+                    invalidate()
                     st.success('Added to Ads queue.')
                 except (ValueError,PermissionError) as error:st.error(str(error))
 

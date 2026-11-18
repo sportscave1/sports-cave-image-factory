@@ -208,7 +208,8 @@ def _posted_designs(cur, jobs, published):
 
 
 def list_jobs(day=None, *, display_only=False):
-    with connect() as conn, conn.cursor() as cur:
+    from companion_read_connection import read_connection
+    with (read_connection(connect) if display_only else connect()) as conn, conn.cursor() as cur:
         if not display_only:
             cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
             _release_delivered(cur)

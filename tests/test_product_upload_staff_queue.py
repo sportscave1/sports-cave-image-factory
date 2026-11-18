@@ -317,9 +317,11 @@ def test_cancel_blocks_persisted_intake_writes_and_explicit_restart_clears_it(st
         assert not row['data'].get('staff_upload_cancelled')
 
 
-def test_stall_visible_without_desktop_and_expires_without_false_success(store):
+def test_slow_submitted_upload_remains_pending_without_false_failure(store, monkeypatch):
     key = submit('staff')
-    queue.pair({'id':'desktop'})
+    token = queue.pair({'id':'desktop'})
+    queue.tick(token, {})
+    monkeypatch.setattr(queue, 'verify', lambda job: None)
     with store() as conn, conn.cursor() as cur:
         cur.execute("UPDATE product_upload_staff_jobs SET stage=5,updated_at=now()-interval '11 minutes' WHERE id=%s", (key,))
     warning = queue.list_jobs('staff')['jobs'][0]
@@ -327,7 +329,11 @@ def test_stall_visible_without_desktop_and_expires_without_false_success(store):
     with store() as conn, conn.cursor() as cur:
         cur.execute("UPDATE product_upload_staff_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (key,))
     expired = queue.list_jobs('staff')['jobs'][0]
-    assert expired['stage'] == 7 and 'No verified progress' in expired['detail']
+    assert expired['stage'] == 5 and expired['stalled']
+    assert 'Waiting for verified progress' in expired['label']
+    assert not expired['restartable']
+    result = queue.tick(token, {'id': str(key), 'state': 'submitted'})
+    assert result['job']['stage'] == 5
 
 
 def test_verification_failure_is_visible_and_does_not_extend_timeout(store, monkeypatch):
@@ -360,3 +366,14 @@ def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
         assert ready in jobs.jobs
     finally:
         jobs.pool.shutdown(wait=False)
+
+
+def test_lightweight_desktop_heartbeat(store):
+    assert queue.desktop_online() is False
+    token = queue.pair({'id': 'desktop'})
+    assert queue.desktop_online() is False
+    queue.desktop_tick(token)
+    assert queue.desktop_online() is True
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_desktop SET seen_at=now()-interval '96 seconds'")
+    assert queue.desktop_online() is False

@@ -28,7 +28,7 @@ function fixture(records = new Map()) {
       },
     },
   };
-  const context=vm.createContext({chrome,URL,AbortSignal,setTimeout,setInterval,clearInterval,
+  const context=vm.createContext({chrome,URL,AbortSignal,setTimeout,clearTimeout,setInterval,clearInterval,
     fetch:async (_url,options)=>{events=JSON.parse(options.body);return {ok:true,json:async()=>result};}});
   context.importScripts=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
