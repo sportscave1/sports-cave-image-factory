@@ -2,6 +2,17 @@
 (() => {
   'use strict';
   const names=['ad_copy.csv','collector-hallway.jpg','architectural-wall.jpg','man-cave.jpg'];
+  let downloadAttempt=null;
+  // A click is not a receipt: Work can reject an expired attachment with a
+  // toast without ever creating a browser download. Observe only new errors.
+  new MutationObserver(records=>{
+    if(!downloadAttempt)return;
+    for(const record of records)for(const node of record.addedNodes) {
+      const text=(node.textContent||'').trim();
+      if(text.length<300 && text.includes('Failed to download file'))
+        downloadAttempt.error='ChatGPT could not download '+downloadAttempt.name;
+    }
+  }).observe(document.documentElement,{childList:true,subtree:true});
   function downloadBridge(action,job,name,url) {
     return new Promise((resolve,reject)=>{
       const nonce=crypto.randomUUID();
@@ -24,6 +35,11 @@
       .map(node=>({node,role:node.dataset.messageAuthorRole||node.dataset.conversationRole,
         body:node.matches('h4') ? node.nextElementSibling : node}));
     let start=messages.findIndex(turn=>turn.role==='user' && turn.body?.textContent.includes('Sports Cave automatic ad job '+job));
+    // Resume may follow an explicit repair in this same job's saved chat.
+    // Already received files remain pinned to their original response IDs.
+    if(recover && !response)messages.forEach((turn,index)=>{
+      if(turn.role==='user' && turn.body?.textContent.includes('Sports Cave automatic ad job '+job))start=index;
+    });
     // The server records this exact chat only after the send journal confirms
     // submission. Long briefs appear as Pasted text, hiding their job marker.
     const users=messages.filter(turn=>turn.role==='user');
@@ -72,6 +88,11 @@
     return matches[0];
   }
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{
+    if(sender.id===chrome.runtime.id && message?.type==='project:ad-download-status') {
+      const same=downloadAttempt && downloadAttempt.job===message.job &&
+        downloadAttempt.name===message.name && downloadAttempt.response===message.response && message.chat===location.href;
+      reply({error:same ? downloadAttempt.error||'' : ''});return;
+    }
     if(sender.id===chrome.runtime.id && message?.type==='project:ad-blob') {
       if(!String(message.url).startsWith('blob:https://chatgpt.com/'))return;
       (async()=>{
@@ -92,6 +113,7 @@
     (async()=>{
       const found=await locate(message.job,message.name,message.response,message.recover,message.chat);
       await downloadBridge('arm',message.job,message.name);
+      downloadAttempt={job:message.job,name:message.name,response:found.response};
       // Use the site's existing authenticated download action, including sandbox links.
       found.link.click();
       reply({clicked:true,response:found.response,chat:location.href});

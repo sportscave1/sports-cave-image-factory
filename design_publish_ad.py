@@ -378,6 +378,8 @@ def _step(key, value, job, event, age):
         if float((value.get('catalog_retry') or {}).get('next_at', 0)) > time.time():
             return {}
         transfer_detail = str(event.get('transfer_detail') or '')[:600]
+        if event.get('transfer_failed') is True:
+            raise ValueError(transfer_detail or 'ChatGPT attachment download failed. Restore the files in the saved chat, then Resume import.')
         if transfer_detail and transfer_detail != value.get('detail'):
             value['detail'] = transfer_detail
             write(key, value)

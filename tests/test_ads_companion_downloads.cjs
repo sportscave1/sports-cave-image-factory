@@ -8,11 +8,11 @@ const chat='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+id;
 function fixture(records=new Map()) {
   const calls=[],opens=[],messages=[],reloads=[];
   const job={id,receipt:'a'.repeat(64),chat_url:chat,missing:['ad_copy.csv']};
-  let downloads=[],valid=true;
+  let downloads=[],valid=true,downloadError='';
   const chrome={runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{onAlarm:{addListener(){}}},
     tabs:{get:async()=>({id:1,url:chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:1,...options};},
-      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return {clicked:true,response:'response-1',chat};}},
+      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return message.type==='project:ad-download-status'?{error:downloadError}:{clicked:true,response:'response-1',chat};}},
     downloads:{search:async()=>downloads}};
   const context=vm.createContext({chrome,setTimeout,clearTimeout,URL,URLSearchParams,AbortSignal,Uint8Array,Date,
     queueId:/^[a-f0-9-]{36}$/,suppliedReceipt:/^[a-f0-9]{64}$/,staffAlarm:'alarm',osOrigin:'https://os.test',
@@ -26,7 +26,7 @@ function fixture(records=new Map()) {
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/ad-queue.js'),'utf8'),context);
   context.job=job;
   return {records,calls,opens,messages,reloads,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),
-    downloads:value=>downloads=value,valid:value=>valid=value};
+    downloads:value=>downloads=value,valid:value=>valid=value,downloadError:value=>downloadError=value};
 }
 test('background tab, durable native download journal, verified receipt and no prompt resend',async()=>{
   const f=fixture();await f.run();assert.equal(f.opens[0].active,false);
@@ -54,7 +54,36 @@ test('unrelated and ambiguous downloads never upload; expired links re-request o
   f.downloads([{...item,referrer:'https://unrelated.test'}]);await f.run();assert.equal(f.calls.length,0);
   f.downloads([item,item]);await f.run();assert.equal(f.calls.length,0);
   f.downloads([item]);f.valid(false);await f.run();assert.equal(f.records.get('publishAdJob').transfer,null);
-  await f.run();assert.equal(f.messages.length,2);
+  await f.run();assert.equal(f.messages.filter(m=>m.type==='project:ad-artifact').length,2);
+});
+
+test('provider download failures refresh twice then stop across worker restarts; Resume resets budget',async()=>{
+  let f=fixture();await f.run();
+  const records=f.records;
+  for(let attempt=1;attempt<=3;attempt++) {
+    f=fixture(records);f.downloadError('ChatGPT could not download ad_copy.csv');
+    await f.run();await f.run();
+    assert.equal(records.get('publishAdJob').downloadFailures,attempt);
+    assert.equal(f.reloads.length,attempt<3?1:0);
+    assert.equal(f.calls.length,0);
+  }
+  assert.equal(records.get('publishAdJob').transferFailed,true);
+  const count=f.messages.length;await f.run();assert.equal(f.messages.length,count);
+  f.job.resume_token='restored-files';await f.run();
+  assert.equal(records.get('publishAdJob').transferFailed,false);
+  assert.equal(records.get('publishAdJob').downloadFailures,0);
+  await f.run();assert.equal(f.messages.at(-1).type,'project:ad-artifact');
+});
+
+test('silent missing receipts have the same bounded retry budget',async()=>{
+  const f=fixture();await f.run();await f.run();
+  for(let attempt=1;attempt<=3;attempt++) {
+    f.records.get('publishAdJob').transfer.started='2000-01-01T00:00:00Z';
+    await f.run();
+    if(attempt<3)await f.run();
+  }
+  assert.equal(f.records.get('publishAdJob').transferFailed,true);
+  assert.equal(f.calls.length,0);
 });
 
 test('expired blob after a restart retries the original attachment instead of remaining stuck',async()=>{

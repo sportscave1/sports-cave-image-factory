@@ -65,6 +65,15 @@ def test_pagination_exhaustion_is_not_missing_membership(monkeypatch):
         client.product_set_members('set', product={'product_id':'123'})
 
 
+def test_download_failure_stops_before_meta_and_retains_saved_chat(monkeypatch):
+    _, _, value, calls = setup(monkeypatch)
+    with pytest.raises(ValueError, match='Restore the files'):
+        ads._step('key', value, {}, {'transfer_failed': True}, 0)
+    assert calls == []
+    assert value['chat_url'] == 'saved-chat'
+    assert 'posting_id' not in value
+
+
 def test_paged_get_reports_truncation(monkeypatch):
     import meta_ads_client as meta
     monkeypatch.setattr(meta, '_request', lambda *a, **kw: {'data':[{'id':'one'}], 'paging':{'next':'next'}})

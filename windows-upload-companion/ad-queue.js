@@ -24,11 +24,12 @@ async function collectAd(job, token) {
   await chrome.tabs.update(tab.id,{autoDiscardable:false});
   if(job.resume_token && local.resume_token!==job.resume_token) {
     await chrome.tabs.reload(tab.id);
-    await staffWrite(adStorage,{...local,resume_token:job.resume_token,transfer:null,transferError:''});return;
+    await staffWrite(adStorage,{...local,resume_token:job.resume_token,transfer:null,transferError:'',downloadFailures:0,transferFailed:false});return;
   }
   const names=['ad_copy.csv','collector-hallway.jpg','architectural-wall.jpg','man-cave.jpg'];
   const name=names.find(file=>job.missing?.includes(file));
   if(!name)return;
+  if(local.transferFailed)return;
   const maxBytes=(name.endsWith('.csv')?2:20)*1024*1024;
   let transfer=local.transfer;
   if(transfer?.name!==name)transfer=null;
@@ -47,7 +48,16 @@ async function collectAd(job, token) {
   const candidates=downloads.filter(item=>[job.chat_url,'https://chatgpt.com/'].includes(item.referrer) &&
     item.filename.replaceAll('\\','/').split('/').pop().replace(/ \(\d+\)(?=\.[^.]+$)/,'')===name);
   if(candidates.length!==1) {
-    if(Date.now()-Date.parse(transfer.started)>120000)await staffWrite(adStorage,{...local,transfer:null,transferError:'Download was not confirmed. Retrying the same original attachment.'});
+    const status=await companionMessage(tab.id,{type:'project:ad-download-status',job:job.id,name,
+      response:transfer.response,chat:job.chat_url},{frameId:0}).catch(()=>null);
+    if(status?.error || Date.now()-Date.parse(transfer.started)>120000) {
+      const failures=(local.downloadFailures||0)+1;
+      const failed=failures>=3;
+      await staffWrite(adStorage,{...local,transfer:null,downloadFailures:failures,transferFailed:failed,
+        transferError:failed ? 'ChatGPT attachment download failed after three attempts. Restore the files in the saved chat, then Resume import. No ads have been submitted.' :
+          (status?.error||'No browser download receipt')+'. Refreshing the saved chat and retrying the same attachment.'});
+      if(!failed)await chrome.tabs.reload(tab.id);
+    }
     return;
   }
   const item=candidates[0];
@@ -85,7 +95,7 @@ async function collectAd(job, token) {
   const receipt=await response.json();
   if(!response.ok)throw Error(receipt.error||'Ad file receipt was not confirmed');
   if(receipt.received!==name)throw Error('Ad file receipt mismatch');
-  await staffWrite(adStorage,{...local,transfer:null,transferError:''});
+  await staffWrite(adStorage,{...local,transfer:null,transferError:'',downloadFailures:0,transferFailed:false});
   return 'received';
 }
 
@@ -124,7 +134,7 @@ async function adQueueTick() {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
       body:JSON.stringify({id:local?.id, state:progress?.blocked ? 'blocked' : report.state,
                           reason:progress?.reason || report.reason, chat_url:progress?.chat_url,
-                          transfer_detail:local?.transferError}),
+                          transfer_detail:local?.transferError,transfer_failed:local?.transferFailed===true}),
       credentials:'omit', signal:AbortSignal.timeout(25000),
     });
     if (!response.ok) return;
