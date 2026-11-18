@@ -102,6 +102,7 @@ def test_exact_primary_market_comes_from_matching_brief(store, monkeypatch):
 def test_post_request_imports_originals_in_route_order(country, code, monkeypatch):
     import ads_direct_post
     import product_upload_services
+    import ads_posting_page
 
     folder = '/fixture'
     upload = str(uuid4())
@@ -131,6 +132,9 @@ def test_post_request_imports_originals_in_route_order(country, code, monkeypatc
                 catalog_resolution={'id': '25'}, dataset_resolution={'id': '26'}, page=True, instagram=True)
     monkeypatch.setattr(ads_direct_post, 'references', lambda *_args, **kwargs: refs)
     value = dict(result=result, folder=folder, handle='fixture-product', upload=upload)
+    monkeypatch.setattr(ads, 'write', lambda *_: None)
+    monkeypatch.setattr(ads_posting_page, 'MetaPostingClient', lambda: SimpleNamespace(
+        product_set_health=lambda key: {'products':[{'url':result['product_url']}] if key=='21' else []}))
     request = ads._post_request(value)
     assert request.country == code
     assert request.product_set_id == '21'

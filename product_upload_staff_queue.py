@@ -490,7 +490,13 @@ async def ad_tick_route(request):
     return await tick_route(request)
 
 
+async def ad_file_route(request):
+    from ads_companion_transfer import file_route
+    return await file_route(request)
+
+
 ROUTES = (
+    ('/api/staff-product-uploads/ad-file', ad_file_route, ('POST',)),
     ('/api/staff-product-uploads/cancel', restart_route, ('POST',)),
     ('/api/staff-product-uploads/ad-tick', ad_tick_route, ('POST',)),
     ('/api/staff-product-uploads/restart', restart_route, ('POST',)),

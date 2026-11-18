@@ -14499,6 +14499,10 @@ def render_supported_result(result, *, source_matches=True):
 
 
 def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
+    if st.query_params.get('ads_queue_job'):
+        from ads_companion_draft import render
+        render(str(st.query_params['ads_queue_job']), current_ads_user())
+        return
     import ads_google_ui
     workflow_mode = normalize_ads_workflow_mode(workflow_mode)
     st.session_state[ADS_ACTIVE_WORKFLOW_MODE_KEY] = workflow_mode
@@ -15001,6 +15005,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                 try:
                     from ads_companion_queue import enqueue
                     receipt = enqueue(current_ads_user(), result, product_selection)
+                    st.link_button('View queued ad draft', '/?page='+os_accounts.page_key_for_route('Ads')+'&ads_queue_job='+receipt['id'])
                     if receipt['active']:
                         st.success("Added to the companion Ads queue. It will run when the companion is online and the queue is playing.")
                     elif receipt['posting_id'] and not receipt['detail']:

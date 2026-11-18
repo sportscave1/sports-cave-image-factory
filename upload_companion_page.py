@@ -8,7 +8,7 @@ def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'os-bridge.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js'):
+        for filename in ('manifest.json', 'os-bridge.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 
@@ -221,11 +221,25 @@ def render_ad_queue():
     from design_publish_ad import dashboard, settings
 
     def links(job):
+        if job.get('id'):
+            import os_accounts
+            st.link_button('View imported ad draft', '/?'+urlencode(dict(page=os_accounts.page_key_for_route('Ads'),ads_queue_job=job['id'])))
         if job.get('chat_url'):
             st.link_button('Open ad chat', job['chat_url'])
         if job.get('posting_id'):
             st.link_button('See in Posting', '/?' + urlencode(
                 dict(page='ads_posting', meta_posting_job=job['posting_id'])))
+        if job.get('targeting'):
+            st.caption('Product set: ' + job['targeting']['product_set_name'] + ' · Audience: ' + job['targeting']['audience_name'])
+        if job.get('resumable') and st.button('Resume import', key='cq-ad-resume-'+job['id'],
+                help='Collect the missing files from the original conversation without generating again.'):
+            from ads_companion_transfer import resume
+            from ads_page import current_ads_user
+            try:
+                resume(job['id'], current_ads_user())
+                st.rerun()
+            except ValueError as error:
+                st.error(str(error))
 
     @st.fragment(run_every=10)
     def history():
@@ -265,6 +279,8 @@ def render_ad_queue():
             with st.container(border=True):
                 st.write(job['title'])
                 st.caption(f"{job['country']} | {job['sport']} | {job['label']}")
+                if job.get('detail'):
+                    st.caption(job['detail'])
                 links(job)
 
         st.subheader('Waiting queue')
@@ -284,5 +300,5 @@ def render_ad_queue():
                 if job['detail']:
                     st.caption(job['detail'])
                 links(job)
-        st.caption('Latest 100 ads. Keep Edge open, signed in and running Companion 1.4 or later.')
+        st.caption('Latest 100 ads. Keep Edge open and signed in with Companion 1.5 or later. Ad tabs work in the background; the computer must remain awake.')
     history()

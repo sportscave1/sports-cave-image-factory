@@ -118,8 +118,9 @@ def dashboard():
         jobs = []
         for row in cur.fetchall():
             value = row['value']
-            entry = dict(public(value), title=row['title'], country=value['country'], sport=value['sport'],
-                         stage=value['stage'], chat_url=value.get('chat_url'))
+            entry = dict(public(value), id=value['upload'], title=row['title'], country=value['country'], sport=value['sport'],
+                         stage=value['stage'], chat_url=value.get('chat_url'), targeting=value.get('targeting'),
+                         resumable=value['stage'] in ('failed','generating') and bool(value.get('chat_url') and value.get('folder')) and not value.get('posting_id'))
             if value['stage'] == 'waiting' and row['upload_stage'] == 6:
                 entry['label'] = 'Ready for the ad queue' if enabled else 'Ready · queue paused'
             elif value['stage'] == 'waiting' and row['upload_stage'] == 7:
@@ -164,20 +165,22 @@ def delivery_prompt(result, reference, folder, job):
 {reference}
 
 Apply the New Ads Instant Experience brief below. Generate the three full-resolution covers
-and actual UTF-8 ad_copy.csv. In addition to showing the outputs in chat, save the actual
-files to the supplied Dropbox folder using these names:
+and actual UTF-8 ad_copy.csv. Return all FOUR original downloadable files together in your
+final response, with exactly these filenames (the companion will save them to these paths):
 {outputs}
 - CSV: {folder}/ad_copy.csv
 
-Save actual JPEGs under the given .jpg filenames. Verify all four files in Dropbox.
-The companion imports the files, selects targeting and submits to Meta. Use Dropbox
-for the file handoff and leave all app form and Meta actions to the companion.
+Return actual JPEGs under the given .jpg filenames, not preview thumbnails or contact sheets.
+Keep the current CSV format. Do not add image URLs to the CSV. Do not publish Meta ads or
+operate the Ads app. The companion downloads these four attachments, saves and verifies them
+in the job's Dropbox folder, selects verified targeting, and submits the existing posting job.
+Once all four downloadable files are present, emit SC_AD_READY: {job}.
 If a required step is blocked, finish independent work and end with SC_AD_BLOCKED:
 followed by the exact incomplete checkpoint. Once delivery is verified, report completion.
 
 {result['master_prompt']}
 
-Before the final response, finish the Dropbox delivery instructions above.
+Before the final response, verify all four downloadable attachments are present above.
 """
 
 
@@ -287,10 +290,17 @@ def _post_request(value):
     result = value['result']
     dbx = Dropbox()
     filenames = ['ad_copy.csv', *COVERS.values()]
+    receipts = value.get('artifacts') or {}
+    if receipts and any(name not in receipts for name in filenames):
+        return None
     files = [dbx.metadata_if_present(value['folder'] + '/' + name) for name in filenames]
     if not all(files):
         return None
     for name, meta in zip(filenames, files):
+        receipt = receipts.get(name)
+        if receipt and any(meta.get(field) != receipt[saved] for field, saved in
+                           (('id','id'),('rev','rev'),('content_hash','hash'),('size','size'))):
+            raise ValueError('A collected ad file changed after its receipt. Review the imported draft before posting.')
         if not (meta.get('id') and meta.get('rev') and meta.get('content_hash') and
                 meta.get('path_display') == value['folder'] + '/' + name):
             raise ValueError('Dropbox returned an ad file outside this job’s exact delivery folder.')
@@ -306,8 +316,12 @@ def _post_request(value):
             raise ValueError(f'{name} must be a valid full-resolution JPEG.')
         creatives.append(dict(copy[route][0], image=record))
     refs = ads_direct_post.references(posting.AD_TYPE, state={})
-    set_id = _selected_product_set(refs.get('product_sets') or [], result['category'])
-    audience = _selected_audience(posting, refs, result)
+    from ads_companion_targeting import select
+    targeting = select(refs, result, client=posting.MetaPostingClient(), saved=value.get('targeting'))
+    set_id, audience = targeting['product_set_id'], targeting['audience']
+    if value.get('targeting') != targeting:
+        value['targeting'] = targeting
+        write(PREFIX+value['upload'], value)
     catalog_id = str(refs['catalog_resolution']['id'])
     if not posting._posting_form_ready(product_title=result['product_name'], product_url=result['product_url'],
             country=result['country'], sport=result['category'], creatives=creatives, catalog_id=catalog_id,
@@ -342,7 +356,7 @@ def _step(key, value, job, event, age):
         stage, age = 'generating', 0
         value['stage'] = stage
         write(key, value)
-    if stage in ('opening', 'generating') and event.get('state') in ('failed', 'uncertain', 'blocked'):
+    if stage in ('opening', 'generating') and not value.get('collect_only') and event.get('state') in ('failed', 'uncertain', 'blocked'):
         raise ValueError(str(event.get('reason') or 'Check the Meta Ads conversation for the blocked step.')[:600])
     if stage == 'opening':
         if age > 3600:
@@ -350,6 +364,10 @@ def _step(key, value, job, event, age):
         return dict(id=value['upload'], project=PROJECT, receipt=_source_token(value['upload']),
                     prompt=value['prompt'], stage=stage)
     if stage == 'generating':
+        transfer_detail = str(event.get('transfer_detail') or '')[:600]
+        if transfer_detail and transfer_detail != value.get('detail'):
+            value['detail'] = transfer_detail
+            write(key, value)
         request = _post_request(value)
         if request:
             try:
@@ -369,6 +387,9 @@ def _step(key, value, job, event, age):
         elif row.get('status') in TERMINAL or (age > 1800 and not row.get('running_here') and not row.get('lease_active')):
             raise ValueError('Meta Posting needs review. Open the saved posting job to check its receipts.')
         return {}
+    if stage == 'generating':
+        from ads_companion_transfer import delivery
+        return delivery(value)
     return dict(id=value['upload'], stage=stage)
 
 

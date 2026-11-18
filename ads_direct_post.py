@@ -87,11 +87,14 @@ def render_settings(result, workflow):
                     st.session_state[key] = 'broad'
                 options = posting._relevant_target_options(audiences, product_title=result.get('product_name'),
                     sport=result.get('category'), key=key, id_key='key', default_selection='broad')
-                selected = st.selectbox('Audience', options, key=key,
+                def mark_audience():
+                    workflow['audience_explicit'] = True
+                selected = st.selectbox('Audience', options, key=key, on_change=mark_audience,
                     format_func=lambda value: 'Broad — Sports Cave Default' if value == 'broad'
                     else f"{by_key[value]['label_type']} — {by_key[value]['name']}")
                 audience = by_key[selected]
-            settings = {'posting_mode': posting.POSTING_MODE_NEW, 'product_set_id': product_set, 'audience': audience}
+            settings = {'posting_mode': posting.POSTING_MODE_NEW, 'product_set_id': product_set, 'audience': audience,
+                        'audience_explicit': bool(workflow.get('audience_explicit', saved.get('audience_explicit', False)))}
         settings['submission_id'] = workflow.setdefault('direct_post_id', str(uuid4()))
         settings['catalog_id'] = catalog
         settings['customer_lifecycle_strategy'] = posting.CUSTOMER_LIFECYCLE_ALL_AUDIENCES
