@@ -35,23 +35,13 @@ TEMPLATE = Path(__file__).parent / "components" / "morning_brief_actions.html"
 META_AD_HEADING = re.compile(r"^(?:recommended|suggested)\b.*\bmeta\b.*\bad\b", re.I)
 META_AD_COPY = re.compile(r"^(?:headline|primary text|description|cta|call to action)\s*:", re.I)
 
-_BORDER_STYLE_GUIDANCE = (
-    "Choose a border that suits the artwork. Restrained antique gold, fine double lines or "
-    "subtle heritage corners can work where they add to the design. A simple, elegant border "
-    "is equally suitable. Avoid heavy ornament and vary the treatment across designs."
-)
+_CREATE_DESIGN_BORDER_RULES = """**Border and print safety for generation and the final layout**
 
-_CREATE_DESIGN_BORDER_RULES = (
-    "**Border and print safety for generation and the final layout**\n\n"
-    "Leave an even framing-safe margin equal to 3% of the canvas’s shorter dimension on all "
-    "four sides. Measure from the canvas edge to the outermost decorative border detail, "
-    "including corner ornaments. On the 2835 × 2004 master, use 60 px.\n\n"
-    f"{_BORDER_STYLE_GUIDANCE}\n\n"
-    "Extend the background to every canvas edge. Adjust only the border and its corner details "
-    "to achieve the margin. Preserve the existing artwork scale and layout. Verify the margin "
-    "after generation and correct it during final assembly.\n\n"
-    "This is a framing-safe margin. Apply any printer-required bleed separately.\n\n"
-)
+Keep the decorative collector border continuous on all four sides, with its outermost detail 3% of the shorter canvas dimension inside every edge: 60 px on the 2835 × 2004 master. Use a restrained, story-specific collector detail such as a fine antique-gold rule with shorter inner returns echoing court or venue geometry. A plain rectangle alone is insufficient; avoid heavy ornament.
+
+Extend venue tones, textures and selected abstract marks through the border into the outer framing margin, all the way to every canvas edge. Keep the border legible above these layers and faces, lettering and the plaque comfortably inside it. This framing-safe margin is separate from any printer-required bleed. Verify all four edges and corners on the rendered final PSD; correct border clearance without shrinking the artwork.
+
+"""
 
 _CREATE_DESIGN_COLLECTOR_BACKGROUND = COLLECTOR_BACKGROUND + PURPOSEFUL_ABSTRACT + "\n\n"
 
@@ -116,7 +106,7 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 **3. Generate the complete flat artwork once**
 
-Send one design-specific brief with the selected original photographs, accurate scene and movement, exact emotional title, typography, contrast, safe margins, the reserved badge footprint and the distinct abstract art layer. Describe how its shapes, colour and directional flow connect the main image, secondary image, title and edition badge position. Include the hero and selected secondary source with its distinct story role, crop, position and background transition alongside the venue references. Generate the full artwork with subject, supporting moment where sourced, venue, the integrated abstract layer, typography and border. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
+Send one design-specific brief for the complete art direction around the planned photographic placements: venue treatment, abstract shapes, lighting, exact title, typography, collector border and reserved badge footprint. Include the hero and selected secondary source with its distinct story role, crop, position and background transition as composition references. Generate the surrounding artwork once. Any generated people or sporting objects are placement guides only: completely replace them with the verified source photographs during finishing and remove exposed generated silhouettes. Keep the output flat artwork without physical frame, room or wall. Display the generation in chat as the composition draft.
 
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
@@ -125,7 +115,7 @@ Retry a transient tool failure once per authorised method. Retry image generatio
 {CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
 **5. Assemble, save and verify one final Review PSD**
 
-On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
+On a master copy, place the inspected composite in **FINAL POLISHED ARTWORK**, retaining the hero and any supporting photograph on separate editable masked layers. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
 
 {REVIEW_SAVE_NAMING}
 
@@ -137,7 +127,7 @@ On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Pre
 
 After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.{market_note}
 
-Display the inspected final artwork, or the best available provisional result if a required checkpoint is pending. Report verified PSD and JSON paths, any pending checkpoint and quality concerns separately. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
+Display the inspected final artwork, or the best available provisional result if a required checkpoint is pending. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
 
 
 @lru_cache(maxsize=1)

@@ -24,10 +24,10 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert 'For an event-specific design, supporting photographs must belong to that verified event.' in prompt
     assert 'select the strongest hero using the existing best-image rules' in prompt
     assert 'Run a focused search for that complementary photograph' in prompt
-    assert 'Use the strongest verified pairing by default' in prompt
+    assert 'Use a supporting photograph only when it adds meaning and remains subordinate to the hero.' in prompt
     assert 'continue with the hero and verified setting' in prompt
     assert 'Include the hero and selected secondary source with its distinct story role' in prompt
-    assert 'partial portrait, shoulders and expression, cropped gesture or source-derived action silhouette' in prompt
+    assert "start with the supporting face smaller than the hero's face" in prompt
     assert 'selective softness only on non-essential transitions' in prompt
     assert 'At 100%, verify the supporting likeness, crop and transition into the venue' in prompt
     assert 'not additional image-generation calls' in prompt
@@ -51,3 +51,20 @@ def test_new_creative_rules_do_not_leak_into_edits():
                      MOTORSPORT_ARTWORK):
         assert guidance not in prompt
     assert 'Preserve the existing badge position and size unless the user requests a change' in prompt
+
+
+def test_new_design_replaces_generation_conflicts_without_blocking_review():
+    prompt = _prompt('Collector', 'Verified story')
+    for obsolete in ('Keep the generation as the visual baseline',
+                     'Generate the full artwork with subject',
+                     'Use the strongest verified pairing by default',
+                     'Test the selected supporting photograph in disconnected areas',
+                     'A simple, elegant border is equally suitable'):
+        assert obsolete not in prompt
+    for requirement in ('separate editable masked layers',
+                        'Any generated people or sporting objects are placement guides only',
+                        'Reject assumed feelings, invented relationships with a city',
+                        'A plain rectangle alone is insufficient',
+                        'Continue authorised review saves and delivery',
+                        'continue without pausing for approval'):
+        assert requirement in prompt

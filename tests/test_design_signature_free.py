@@ -31,7 +31,7 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert prompt.count(BACKGROUND_RESEARCH) == 1
         assert prompt.count(_CREATE_DESIGN_COLLECTOR_BACKGROUND if prompt is new else COLLECTOR_BACKGROUND) == 1
         assert prompt.count(NEW_DESIGN_TITLE_GUIDANCE if prompt is new else COLLECTOR_TITLE_GUIDANCE) == 1
-        assert ('four to six concise titles' if prompt is new else 'four to six short candidates') in prompt
+        assert ('a few concise candidates' if prompt is new else 'four to six short candidates') in prompt
         assert 'one sentence explaining its connection' in prompt
         assert 'Never invent a commentary line, fan chant or nickname.' in prompt
         assert 'Honour explicit user locks on approved titles and artwork' in prompt

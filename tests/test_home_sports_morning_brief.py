@@ -509,7 +509,7 @@ def test_create_design_uses_recent_performance_as_context_for_a_timeless_title()
     assert research < title < result.index('Use web image search')
     assert 'closest comparable sport or collector collection' in result
     assert 'Treat unranked products as style references only' in result
-    assert 'Choose emotional meaning the photograph and name cannot already convey' in result
+    assert 'For each, identify the visible photographic detail or verified story that earns its wording.' in result
     assert 'Keep numbers out of headlines' in result
     assert 'choose a story supporters would still want to display in five years' in result.lower()
     assert 'Include an accolade, statistic or year only when essential and verified' in result
@@ -545,10 +545,10 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Keep a photo-only fallback clearly provisional",
         "Do not search for, source, generate, trace, reproduce or include athlete signatures",
         "VISIBLE COLLECTOR TRANSFORMATION",
-        "Keep the generation as the visual baseline",
-        "Keep the repair only if it improves authenticity",
+        "Build every visible athlete and sporting object from the verified original photographs",
+        "Completely cover generated renditions",
         "Review can end with no creative changes",
-        "correct only the border if clearance fails",
+        "Correct only the border if clearance fails",
         "contact shadows only at actual points of contact",
         "mark unresolved quality or identity as needs_attention",
         "ORIGINAL EDITABLE ARTWORK", "FINAL POLISHED ARTWORK", "REVIEW NOTES",
