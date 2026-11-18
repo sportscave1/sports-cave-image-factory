@@ -530,8 +530,8 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     assert "Hide this" not in result and "Recommended Meta ad" not in result
     sections = (
         "Research the story, sources and master", "Prepare the complete composition before generation",
-        "Generate the complete flat artwork once", "Inspect and finish at 100% and thumbnail size",
-        "Assemble, save and verify one final Review PSD", "Write the Smart Upload JSON and deliver",
+        "Generate the collector treatment once", "Inspect and finish the assembled PSD",
+        "Save and verify one final Review PSD", "Write the Smart Upload JSON and deliver",
     )
     positions = [result.index(heading) for heading in sections]
     assert positions == sorted(positions)
@@ -547,10 +547,10 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "VISIBLE COLLECTOR TRANSFORMATION",
         "Build every visible athlete and sporting object from the verified original photographs",
         "Completely cover generated renditions",
-        "Review can end with no creative changes",
+        "If it passes, proceed directly to the final save",
         "Correct only the border if clearance fails",
         "contact shadows only at actual points of contact",
-        "mark unresolved quality or identity as needs_attention",
+        "Record unresolved quality or identity as needs_attention",
         "ORIGINAL EDITABLE ARTWORK", "FINAL POLISHED ARTWORK", "REVIEW NOTES",
         "create-only mode", "Reopen that saved revision", "parser plus a rendered preview",
         "99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/JSON/", "intended_collections", "dropbox_revision",

@@ -12,13 +12,13 @@ Complete the focused search within the existing research allowance. If no suitab
 
 """
 
-COMPLETE_COMPOSITION = """**Compose the complete collector artwork.** Before generation, compare two brief internal layout approaches using the selected sources, not additional image-generation calls. Choose the approach that best connects the hero, any supporting imagery, environment, collector title, subject name and official plaque across the actual master canvas.
+COMPLETE_COMPOSITION = """**Compose the complete collector artwork.** Before generation, build a scaled layout using actual photographs and exact title. Use a master copy and original plaque pair when accessible; otherwise use verified dimensions and a reserved plaque footprint. Test abstract treatment and border with simple shapes, not additional image-generation calls.
 
 Make the hero the first thing seen at 250 px wide. When both faces are visible, start with the supporting face smaller than the hero's face; judge facial scale and contrast, not figure area alone. Crop the supporting image to the expression or gesture that adds meaning. Integrate it as a subtle part of the stadium, crowd or track and abstract artwork, rather than a second feature above the title.
 
-Bring supporting highlights toward the surrounding venue tones and blend non-essential outer edges into architecture and abstract marks. Keep its authentic expression readable, with selective softness only on non-essential transitions. Give the hero the strongest contrast and sharpest detail. If the supporting image attracts attention first, reduce its scale or contrast, reposition it or omit it. Preserve useful breathing room around the title and plaque instead of filling every gap.
+Bring supporting highlights toward the surrounding venue tones and blend non-essential outer edges into architecture and abstract marks. Keep its authentic expression readable, with selective softness only on non-essential transitions. Give the hero the strongest contrast and sharpest detail. If the supporting image attracts attention first, test a smaller crop, lower contrast and a blend within the venue before omitting it if it still competes. Preserve useful breathing room around the title and plaque instead of filling every gap.
 
-Arrange the title, name and plaque as a coordinated group where appropriate, or connect them through a clear shared alignment elsewhere. Choose the arrangement for the photograph and story rather than repeating a fixed left-title/right-player layout. Record the chosen composition and any supporting image's role briefly in the existing REVIEW NOTES, then proceed through the existing workflow.
+Coordinate title, name and plaque through grouping or shared alignment suited to the photograph and story. Avoid a fixed left-title/right-player layout. Record the composition and supporting image's role in REVIEW NOTES, then proceed.
 
 """
 
@@ -34,16 +34,14 @@ Assess the title, subject name and plaque together at full size and thumbnail si
 
 PURPOSEFUL_ABSTRACT = """VISIBLE COLLECTOR TRANSFORMATION
 
-Always include a distinct abstract art layer in every new design, visible at thumbnail size. Grain, darkening or a colour wash alone is insufficient. Use story-specific charcoal shapes, fractured geometry, material marks or restrained directional accents.
+Create an abstract collector background in every design. Grain, darkening, a colour wash or isolated scratches alone are insufficient. Follow the hero's movement or a real venue feature toward the title and plaque using story-specific charcoal shapes, fractured geometry or material marks. Where a verified supporting moment adds a distinct memory, weave its expression or gesture subtly into that route. Test it within the venue and abstract treatment before deciding to omit it. Preserve the hero as the first read at 250 px.
 
-Use the hero's real movement or a verified venue feature to guide one visible route through the supporting image toward the headline and edition badge. Choose a specific material treatment that follows that route; disconnected scratches and thin accents alone are insufficient. Connect them through overlapping tones and edge transitions, keeping quiet text areas, hero dominance and a distinct supporting moment. Integrate the layer into the full generation, rather than isolating effects behind the player.
+Keep the collector treatment adjustable on a separate layer or with a mask. Judge its strength after the original photographs, title and official plaque are visible together. At 250 px, one material shape or tonal transition must visibly connect action, setting and title area, continuing toward the badge and through the border to the canvas edge. Keep text areas quiet and the badge legible. Protect faces, hands, kit, equipment and vehicle details; preserve truthful sporting colours.
 
-Protect faces, hands, gestures, kit numbers, equipment, vehicle details and the official badge. Preserve truthful sporting colours; vary the treatment by story.
+Where a verified venue view is available, retain its identifying feature subtly within the abstract environment. Otherwise verify that the abstract fallback makes no claim to depict the actual venue. Distinguish photographic moments tonally. Vary treatment by story; keep the hero dominant."""
 
-Keep a verified venue recognisable through defining features. Blend it into the composition instead of isolating it in a blurred strip or inset. Use tonal transitions to distinguish separate photographic moments. Connect the premium title to the planned plaque position through alignment, scale, spacing and surrounding tones. Add the official plaque during assembly."""
+REVIEW_RELATIONSHIPS = """Inspect the assembled artwork beside its sources at 100% and 250 px wide. Confirm hero dominance, subtle supporting imagery where used, connected abstract treatment, readable title and plaque, and continuous border with edge-to-edge artwork. Where a verified venue view is available, verify its selected feature. Otherwise check that the fallback makes no actual-venue claim. At 100%, verify the supporting likeness, crop and transition into the environment.
 
-REVIEW_RELATIONSHIPS = """Review can end with no creative changes. Preserve successful composition, typography and lighting. At 250 px wide, verify that the hero reads first, the supporting moment belongs subtly to the venue, the title and plaque read clearly, and visible abstract shapes connect the composition. Refine disconnected treatment during the existing PSD finishing pass while protecting photographic details and quiet text areas. At 100%, verify the supporting likeness, crop and transition into the venue. If competing or pasted-on, refine its mask, scale or contrast, or omit it.
-
-Inspect all four edges and corners for continuous collector detail, framing-safe clearance and artwork extending to the edge. Correct only the border if clearance fails; restore edge-to-edge venue tones and abstract marks where needed. Keep the strongest inspected artwork and mark unresolved quality or identity as needs_attention.
+If it passes, proceed directly to the final save. Correct only a visible defect in the affected mask, source placement, local tone, abstract layer, typography, border or plaque alignment. Compare with the pre-correction version and keep the correction only if it improves the result. Correct only the border if clearance fails. Preserve successful creative decisions; never generate again for visual criticism. Record unresolved quality or identity as needs_attention and continue the authorised Review handoff.
 
 """

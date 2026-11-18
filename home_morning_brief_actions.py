@@ -10,10 +10,10 @@ from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS,
 )
-from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
+from design_collector_assets import NEW_BADGE_LAYOUT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
 from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
-from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
+from design_collector_background import NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND
 from design_motorsport import MOTORSPORT_ARTWORK, MOTORSPORT_JSON
 from design_subject_authenticity import (
     CREATE_DESIGN_AUTHENTICITY_CHECK,
@@ -43,7 +43,7 @@ Extend venue tones, textures and selected abstract marks through the border into
 
 """
 
-_CREATE_DESIGN_COLLECTOR_BACKGROUND = COLLECTOR_BACKGROUND + PURPOSEFUL_ABSTRACT + "\n\n"
+_CREATE_DESIGN_COLLECTOR_BACKGROUND = NEW_COLLECTOR_BACKGROUND + PURPOSEFUL_ABSTRACT + "\n\n"
 
 _CREATE_DESIGN_TYPOGRAPHY = SIGNATURE_FREE_COMPOSITION.replace(
     "Treat the subject, title, name, supporting context and edition badge as one coordinated composition. "
@@ -80,7 +80,7 @@ def _prompt(title, story, *, edit=None, primary_market=""):
 
 **Start the authorised new-design job**
 
-Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Use the current brief, the matching job instructions and the guide's shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, one full artwork generation, inspection and finishing, then one verified final PSD and matching JSON in Design Studio Review. Display references and the artwork in chat and continue without pausing for approval.
+Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Use the current brief, the matching job instructions and the guide's shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references and the artwork in chat and continue without pausing for approval.
 
 {context}
 
@@ -94,32 +94,34 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 {MOTORSPORT_ARTWORK}
 
-{COMPLEMENTARY_IMAGES}{BACKGROUND_RESEARCH}Inspect the actual designs-canvas.psd for dimensions, orientation, resolution, colour profile, framing clearance, guides and collector layers. Work from a copy. If access remains unavailable, use verified dimensions where available, reserve the plaque footprint and continue independently. Keep master-dependent assembly, saves and verification pending.
+{COMPLEMENTARY_IMAGES}{NEW_BACKGROUND_RESEARCH}Inspect the actual designs-canvas.psd for dimensions, orientation, resolution, colour profile, framing clearance, guides and collector layers. Work from a copy. If access remains unavailable, use verified dimensions where available, reserve the plaque footprint and continue independently. Keep master-dependent assembly, saves and verification pending.
 
 **2. Prepare the complete composition before generation**
 
 {COMPLETE_COMPOSITION}{_CREATE_DESIGN_BORDER_RULES}{_CREATE_DESIGN_TYPOGRAPHY}
 
-{BADGE_FOOTPRINT}
+{NEW_BADGE_LAYOUT}
 
-{_CREATE_DESIGN_COLLECTOR_BACKGROUND}Lock the verified subjects and exact title. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Plan how the hero, selected supporting photograph, authentic setting, styling, text, framing-safe border and plaque footprint work together at print and thumbnail sizes. Confirm the story is recognisable with the title hidden. Briefly state the chosen direction and record the layout and source decisions in REVIEW NOTES.
+{_CREATE_DESIGN_COLLECTOR_BACKGROUND}**Creative review before generation.** Use the original photos as the authority for every face, pose, uniform and object. Inspect the scaled layout at 250 px wide and compare facial sizes at intended print size. Check the first read, supporting image's purpose and movement toward title and plaque. Where a verified venue view is available, check its visible feature; otherwise check that the fallback makes no actual-venue claim. Correct scale, crop, contrast, spacing or title here; honour explicit locks. Record the direction in REVIEW NOTES, lock it and proceed automatically. Without master access, review the reserved footprint provisionally; defer original-layer checks until access returns.
 
-**3. Generate the complete flat artwork once**
+**3. Generate the collector treatment once**
 
-Send one design-specific brief for the complete art direction around the planned photographic placements: venue treatment, abstract shapes, lighting, exact title, typography, collector border and reserved badge footprint. Include the hero and selected secondary source with its distinct story role, crop, position and background transition as composition references. Generate the surrounding artwork once. Any generated people or sporting objects are placement guides only: completely replace them with the verified source photographs during finishing and remove exposed generated silhouettes. Keep the output flat artwork without physical frame, room or wall. Display the generation in chat as the composition draft.
+Use the reviewed layout as the exact composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references. Generate the surrounding venue treatment, abstract artwork and lighting around the locked photographs. Exclude the official plaque and number from generation; show only their reserved footprint in the generation reference. Keep the output flat artwork without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
+
+Assemble with original masked photographs, reviewed typography, collector border and original plaque pair. Any generated people or sporting objects are placement guides only: cover them completely with verified sources and remove exposed generated silhouettes. Keep the abstract treatment adjustable. A visual criticism goes to PSD finishing and never triggers another generation.
 
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
-**4. Inspect and finish at 100% and thumbnail size**
+**4. Inspect and finish the assembled PSD**
 
 {CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
-**5. Assemble, save and verify one final Review PSD**
+**5. Save and verify one final Review PSD**
 
 On a master copy, place the inspected composite in **FINAL POLISHED ARTWORK**, retaining the hero and any supporting photograph on separate editable masked layers. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
 
 {REVIEW_SAVE_NAMING}
 
-{BADGE_PLACEMENT_VERIFICATION}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
+If master access was deferred, first test both plaque placements as specified above. Verify the chosen position against the final composite: both original layers visible once, number editable and aligned inside the plaque, text legible, and safe clearance from hero, title and border. Adjust only a specific placement defect with matching transforms. Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 
 **6. Write the Smart Upload JSON and deliver**
 
@@ -127,7 +129,7 @@ On a master copy, place the inspected composite in **FINAL POLISHED ARTWORK**, r
 
 After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.{market_note}
 
-Display the inspected final artwork, or the best available provisional result if a required checkpoint is pending. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
+Display the reopened saved PSD render as **Final artwork · rendered from the saved PSD**. If saving or inspection remains pending, label the available result provisional instead. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
 
 
 @lru_cache(maxsize=1)
@@ -144,7 +146,7 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
     elif not legend and markets:
         label += f' ({", ".join(markets)})'
-    enabled = bool(design_key) and design_status == 'Needs attention'
+    enabled = bool(design_key) and design_status in ('Needs attention', 'Deleted · ready to redo')
     reason = ('Add this design to the Design Companion queue' if enabled else
               'Already in the Design Companion queue' if design_status in ('Pending', 'Opening ChatGPT', 'Generating') else
               'This design has already been made or uploaded' if design_status else
@@ -160,6 +162,7 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
             'Ready for review': ('✓', 'complete'),
             'Uploaded · needs review': ('!', 'attention'),
             'Needs attention': ('!', 'attention'),
+            'Deleted · ready to redo': ('!', 'attention'),
             'Generating': ('◌', 'running'),
             'Opening ChatGPT': ('◌', 'running'),
             'Uploaded · checking review metadata': ('◌', 'running'),
