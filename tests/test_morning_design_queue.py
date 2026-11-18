@@ -514,3 +514,14 @@ def test_restored_design_is_rechecked_when_redo_is_clicked(store, monkeypatch):
     assert queue.list_jobs()[0]['label'] == 'Deleted · ready to redo'
     present.append(True)
     assert queue.enqueue_selected(first['id']) is False
+
+
+def test_display_only_uses_cached_deletions_without_provider_reads(store, monkeypatch):
+    import design_deletion_status
+    cur, token = store
+    publish(cur, count=1)
+    job=queue.tick(token, [])['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=5,file_id='id:deleted',file_rev='R1',file_path='/Review/Final.psd' WHERE id=%s", (job['id'],))
+    monkeypatch.setattr(design_deletion_status,'deleted',lambda jobs,posted:{r['id'] for r in jobs})
+    monkeypatch.setattr(queue,'_deleted_designs',lambda *args: (_ for _ in ()).throw(AssertionError('foreground Dropbox call')))
+    assert queue.list_jobs(display_only=True)[0]['label']=='Deleted · ready to redo'

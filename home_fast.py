@@ -47,21 +47,26 @@ def panel(st, user, today, name, loader, renderer):
     initial = SNAPSHOTS.read(key, loader)
     waiting = initial['value'] is None
 
+    # Replace one owned slot on every refresh, including loading/stale transitions.
+    # Never append refreshed HTML into the previous panel's container.
+    target = st.empty()
+
     @st.fragment(run_every=1 if waiting else 30)
     def content():
-        result = SNAPSHOTS.read(key, loader)
-        value = result['value']
-        if value is None:
-            st.caption(name + (' · temporarily unavailable; retrying' if result['state'] == 'unavailable'
-                               else ' · loading saved information…'))
-            return
-        if waiting:
-            # One rerun switches the initial short refresh to the idle cadence.
-            st.rerun()
-        if result['state'] == 'stale':
-            stamp = datetime.fromtimestamp(result['checked_at'], ZoneInfo('Australia/Sydney')).strftime('%H:%M')
-            st.caption(f'Showing saved information checked at {stamp} Sydney · refreshing')
-        renderer(value)
+        with target.container():
+            result = SNAPSHOTS.read(key, loader)
+            value = result['value']
+            if value is None:
+                st.caption(name + (' · temporarily unavailable; retrying' if result['state'] == 'unavailable'
+                                   else ' · loading saved information…'))
+                return
+            if waiting:
+                # One rerun switches the initial short refresh to the idle cadence.
+                st.rerun()
+            if result['state'] == 'stale':
+                stamp = datetime.fromtimestamp(result['checked_at'], ZoneInfo('Australia/Sydney')).strftime('%H:%M')
+                st.caption(f'Showing saved information checked at {stamp} Sydney · refreshing')
+            renderer(value)
     content()
 
 

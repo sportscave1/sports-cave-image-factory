@@ -219,7 +219,11 @@ def list_jobs(day=None, *, display_only=False):
         published = _published_designs(cur, jobs)
         posted = _posted_designs(cur, jobs, published)
     # Network checks must not hold the desktop claim lock.
-    deleted = set() if display_only else _deleted_designs(jobs, posted)
+    if display_only:
+        from design_deletion_status import deleted as cached_deleted
+        deleted = cached_deleted(jobs, posted)
+    else:
+        deleted = _deleted_designs(jobs, posted)
     return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
                             else 'Deleted · ready to redo' if r['id'] in deleted
