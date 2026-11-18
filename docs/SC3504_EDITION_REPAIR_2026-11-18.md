@@ -66,3 +66,26 @@ Prevention code remains uncommitted and undeployed under local-only rules.
 This fixes the identified recalculation defect; it cannot promise that all
 future allocation failures are impossible. Production UI was not visually
 inspected; its authoritative allocation and line status records were verified.
+
+## Authorized prevention release
+
+The user subsequently explicitly authorized deployment and required the missing
+FastAPI dependency and tests to be fixed first. Installed the already-declared
+FastAPI and PostgreSQL driver dependencies locally, and aligned Streamlit with
+the existing 1.58 test environment. No production dependency changes are needed.
+Corrected the table test's fake backend to supply its settings-reader interface.
+The combined UI suite exposed shared Streamlit form/fragment context; the release
+runner now runs each module in a fresh process rather than excluding UI tests.
+
+Rebased the focused commit onto verified live main
+`a4d96d3d2ca776525938df2a2d2a499be44d3fa1`, preserving the newer Home and product
+onboarding changes. Release checks: 204 active Python tests passed across six
+complete modules (238 discovered, 34 existing retired-allocator skips), plus 18
+isolated PostgreSQL/PGlite allocation scenarios. No FastAPI test is excluded.
+Render topology validation passed. These are the relevant release suites, not
+a claim that every unrelated repository test was executed.
+
+Reproduce with `scripts/run_edition_recalculation_checks.ps1 -PGLiteModule
+<absolute-path-to-pglite/dist/index.js>`. The PGlite scenarios are in-memory and
+have no production connection. Preserve exactly one existing primary service;
+no Blueprint or migration changes are part of this release.
