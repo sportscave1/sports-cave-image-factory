@@ -69,7 +69,7 @@ if(!dialog){
  states.forEach((state,i)=>{let timer;state.search.addEventListener('input',()=>{state.version=(state.version||0)+1;clearTimeout(timer);timer=setTimeout(()=>load(i),250);});state.more.addEventListener('click',()=>load(i,true));});
  dialog.querySelector('details').addEventListener('toggle',event=>{if(event.target.open)load(1);});
  dialog.querySelector('[data-close]').onclick=()=>dialog.close();
- dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}});
+ dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX < r.left||event.clientX>r.right||event.clientY < r.top||event.clientY>r.bottom)dialog.close();}});
  dialog.refresh=()=>load(0);
 }
 if(open&&!open.dataset.ready){open.dataset.ready='1';open.onclick=()=>{dialog.showModal();dialog.refresh();};}

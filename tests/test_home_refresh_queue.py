@@ -100,3 +100,11 @@ def test_popup_lazy_bounded_search_and_queue(tmp_path):
         page.keyboard.press('Escape')
         expect(page.get_by_role('dialog')).not_to_be_visible()
         browser.close()
+
+
+def test_inline_script_does_not_resemble_html_tags():
+    # DOMPurify strips an entire script containing HTML-like comparison tokens.
+    import re
+    from home_design_refresh import render_html
+    script = render_html(None).split('<script>', 1)[1].split('</script>', 1)[0]
+    assert not re.search(r'<[A-Za-z]', script)
