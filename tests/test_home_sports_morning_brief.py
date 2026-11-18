@@ -510,7 +510,8 @@ def test_create_design_uses_recent_performance_as_context_for_a_timeless_title()
     assert 'closest comparable sport or collector collection' in result
     assert 'Treat unranked products as style references only' in result
     assert 'For each, identify the visible photographic detail or verified story that earns its wording.' in result
-    assert 'Keep numbers out of headlines' in result
+    assert 'Keep incidental jersey/car numbers, scores, statistics and dates in supporting context' in result
+    assert 'A number integral to verified fan language or a meaningful sporting phrase may remain' in result
     assert 'choose a story supporters would still want to display in five years' in result.lower()
     assert 'Include an accolade, statistic or year only when essential and verified' in result
 
