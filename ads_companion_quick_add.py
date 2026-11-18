@@ -13,8 +13,7 @@ def catalog():
         country=queue.country_name(row['row'].get('primary_market')) or {
             'NFL':'USA','Baseball':'USA','Basketball':'USA','NASCAR':'USA','AFL':'Australia','NRL':'Australia',
         }.get(sport,'Australia')
-        if row.get('product_url'):
-            products.append(dict(id=row['identity'],name=row['label'],sport=sport,country=country))
+        products.append(dict(id=row['identity'],name=row['label'],sport=sport,country=country))
     return dict(products=products,countries=list(queue.COUNTRIES),
                 sports=[s for s in ads.CATEGORY_OPTIONS if s!='Select category'],types=['Instant Experience'])
 

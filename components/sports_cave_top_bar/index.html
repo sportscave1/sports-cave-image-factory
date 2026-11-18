@@ -988,6 +988,9 @@
     .sc-ad-quick label {font:11px Arial!important;color:#e7ddc7!important;display:grid;gap:3px;min-width:0;}
     .sc-ad-quick label:first-child {grid-column:1/-1;}
     .sc-ad-quick select,.sc-ad-quick input,.sc-ad-quick button {width:100%;box-sizing:border-box;min-width:0;background:#252017;color:#f8edcf;border:1px solid #6f5a2e;border-radius:4px;padding:6px;font:12px Arial;}
+    #sc-ad-products {max-height:220px;overflow-y:auto;background:#fff;color:#272727;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px #0003;}
+    #sc-ad-products [role="option"] {padding:9px 8px;cursor:pointer;font:12px/1.4 Arial;overflow-wrap:anywhere;}
+    #sc-ad-products [aria-selected="true"] {background:#f0eee7;}
     .sc-ad-quick button {grid-column:1/-1;cursor:pointer;color:#17140e;background:#d1a444;}
     #sc-ad-message {font:11px/1.3 Arial!important;color:#f3ce7e!important;white-space:normal;}
     .sc-companion-popup a {color:#f3ce7e;display:inline-block;margin:4px 12px 4px 0;}
@@ -1080,7 +1083,7 @@
       <div id="sc-os-ads-card" class="sc-companion-card" hidden>
         <details id="sc-os-ads-status" class="sc-companion-details">
           <summary><span class="sc-companion-name">Ads</span><span id="sc-os-ads-title" class="sc-companion-title"></span><span id="sc-os-ads-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-ads-meter" max="100" aria-label="Ads stage progress"></progress></summary>
-          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" list="sc-ad-products" placeholder="Search products" required autocomplete="off"><datalist id="sc-ad-products"></datalist></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" role="combobox" aria-autocomplete="list" aria-controls="sc-ad-products" aria-expanded="false" placeholder="Search products" required autocomplete="off"><div id="sc-ad-products" role="listbox" aria-label="Edition Ops products" hidden></div></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
         </details>
       </div>
     </div>
@@ -1258,34 +1261,70 @@
         const queueLink=doc.createElement('a');queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';elements.list.append(queueLink);
       }
     };
-    let adProducts=[],adQuickScope='',adRequest='';
+    let adProducts=[],adQuickScope='',adRequest='',adSelected='',adOptions=[],adActive=-1;
     const adMessage=root.querySelector('#sc-ad-message'),adProduct=root.querySelector('#sc-ad-product');
     const quick=root.querySelector('#sc-ad-quick');
+    const adList=root.querySelector('#sc-ad-products');
+    const closeProducts=()=>{adList.hidden=true;adProduct.setAttribute('aria-expanded','false');adProduct.removeAttribute('aria-activedescendant');};
+    const activateProduct=index=>{
+      adActive=index;
+      [...adList.children].forEach((node,i)=>node.setAttribute('aria-selected',String(i===index)));
+      if(adList.children[index]){adProduct.setAttribute('aria-activedescendant',adList.children[index].id);adList.children[index].scrollIntoView({block:'nearest'});}
+    };
+    const chooseProduct=product=>{
+      adSelected=product.id;adProduct.value=product.name;adRequest='';closeProducts();
+      root.querySelector('#sc-ad-sport').value=product.sport;
+      root.querySelector('#sc-ad-country').value=product.country;
+    };
+    const showProducts=()=>{
+      const query=adSelected?'':adProduct.value.trim().toLocaleLowerCase();
+      adOptions=adProducts.filter(p=>p.name.toLocaleLowerCase().includes(query));
+      adList.replaceChildren();adActive=-1;
+      adProduct.removeAttribute('aria-activedescendant');
+      for(const [index,product] of adOptions.entries()){
+        const option=doc.createElement('div');option.id='sc-ad-option-'+index;option.setAttribute('role','option');
+        option.setAttribute('aria-selected','false');option.textContent=product.name;
+        option.addEventListener('mousedown',event=>event.preventDefault());
+        option.addEventListener('click',()=>{chooseProduct(product);adProduct.focus();closeProducts();});
+        adList.append(option);
+      }
+      if(!adOptions.length){const empty=doc.createElement('div');empty.textContent='No matching products';empty.setAttribute('role','status');adList.append(empty);}
+      adList.hidden=false;adList.scrollTop=0;adProduct.setAttribute('aria-expanded','true');
+    };
+    adProduct.addEventListener('focus',showProducts,listenerOptions);
+    adProduct.addEventListener('click',showProducts,listenerOptions);
+    adProduct.addEventListener('blur',closeProducts,listenerOptions);
+    adProduct.addEventListener('keydown',event=>{
+      if(event.key==='Escape'&&!adList.hidden){event.preventDefault();event.stopPropagation();closeProducts();return;}
+      if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();if(adList.hidden)showProducts();
+        if(adOptions.length)activateProduct(Math.max(0,Math.min(adOptions.length-1,adActive+(event.key==='ArrowDown'?1:-1))));
+      }else if(event.key==='Enter'&&!adList.hidden){
+        event.preventDefault();if(adOptions.length)chooseProduct(adOptions[Math.max(0,adActive)]);
+      }
+    },listenerOptions);
+
     quick.addEventListener('toggle',async()=>{
       if(!quick.open || adQuickScope===state.config.uploadScope)return;
-      const scope=state.config.uploadScope;adProducts=[];adProduct.value='';
+      const scope=state.config.uploadScope;adProducts=[];adSelected='';adProduct.value='';closeProducts();
       try {
         const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{credentials:'same-origin',signal:listenerController.signal});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load products');
         if(scope!==state.config.uploadScope)return;
-        adProducts=data.products;adQuickScope=scope;
-        const list=root.querySelector('#sc-ad-products');list.replaceChildren();
-        for(const product of adProducts){const option=doc.createElement('option');option.value=product.name;list.append(option);}
+        adProducts=data.products.slice().sort((a,b)=>a.name.localeCompare(b.name));adQuickScope=scope;
         for(const [name,values] of [['sport',data.sports],['country',data.countries]]) {
           const select=root.querySelector('#sc-ad-'+name);select.replaceChildren();
           for(const value of values){const option=doc.createElement('option');option.value=value;option.textContent=value;select.append(option);}
         }
         adMessage.textContent='Choose a product and check its market.';
+        if(doc.activeElement===adProduct)showProducts();
       }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
     },listenerOptions);
-    adProduct.addEventListener('input',()=>{
-      const product=adProducts.find(p=>p.name===adProduct.value);adRequest='';
-      if(product){root.querySelector('#sc-ad-sport').value=product.sport;root.querySelector('#sc-ad-country').value=product.country;}
-    },listenerOptions);
+    adProduct.addEventListener('input',()=>{adSelected='';adRequest='';showProducts();},listenerOptions);
     for(const name of ['sport','country','type'])root.querySelector('#sc-ad-'+name).addEventListener('change',()=>{adRequest='';},listenerOptions);
     root.querySelector('#sc-ad-form').addEventListener('submit',async event=>{
       event.preventDefault();const scope=state.config.uploadScope;
-      const matches=adProducts.filter(p=>p.name===adProduct.value);
+      const matches=adProducts.filter(p=>p.id===adSelected&&p.name===adProduct.value);
       if(matches.length!==1){adMessage.textContent='Select one product from the list.';return;}
       const button=root.querySelector('#sc-ad-submit');if(button.disabled)return;button.disabled=true;
       adRequest=adRequest||parentWindow.crypto.randomUUID();
