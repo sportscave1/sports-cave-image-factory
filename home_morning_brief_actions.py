@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
-    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS,
+    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, CREATIVE_REVIEW,
 )
 from design_collector_assets import NEW_BADGE_LAYOUT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
@@ -102,7 +102,7 @@ Choose a story supporters would still want to display in five years. Use timeles
 
 {NEW_BADGE_LAYOUT}
 
-{_CREATE_DESIGN_COLLECTOR_BACKGROUND}**Creative review before generation.** Use the original photos as the authority. Inspect actual title lettering, visible abstraction, hero integration and the secondary-image test together at 250 px; compare facial sizes at print size. Where a verified venue view is available, check its identifying feature; otherwise avoid actual-venue claims. Honour explicit locks. Resolve weak choices within this review, record and lock the layout, then proceed automatically to the single generation. Without master access, review the reserved footprint provisionally; defer original-layer checks until access returns.
+{_CREATE_DESIGN_COLLECTOR_BACKGROUND}{CREATIVE_REVIEW}
 
 **3. Generate the collector treatment once**
 
