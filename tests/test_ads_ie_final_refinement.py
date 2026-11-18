@@ -59,10 +59,10 @@ class FinalRefinementTests(unittest.TestCase):
                     product_name=result["product_name"], category="MMA", country="Australia")
                 self.assertEqual(standalone.count(phrase), 1)
 
-    def test_visual_review_without_replacement_and_reference_contract(self):
+    def test_visual_review_with_improvement_and_reference_contract(self):
         prompt = self.record()["master_prompt"]
         for phrase in ("Do these look like three different properties, or the same wall-and-opening composition restyled?",
-                       "Inspection must not trigger another image generation", "exactly three final covers",
+                       "regenerate images needing improvement during the final creative review before export", "exactly three final covers",
                        "never reduce a previous generation again", "Do not compound percentage reductions"):
             self.assertIn(phrase, prompt)
         self.assertIn("no deterministic Ads footer renderer", prompt)
