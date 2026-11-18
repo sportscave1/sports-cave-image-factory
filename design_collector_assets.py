@@ -33,6 +33,8 @@ With master access, compare at least two badge arrangements that test different 
 
 {COLLECTOR_LAYER_RULES}
 
+Review the live edition number (001 / 100) with the badge before generation and again on the final assembled artwork. Make it clear, readable and visually part of the badge and overall design at thumbnail and intended print size. Adjust its colour and editable layer effects as needed, including removing shadows that reduce clarity or clash with the finish. Preserve the existing badge blending and sizing guidance, the exact edition text and the original editable SC_EDITION_NUMBER layer; never flatten, rasterise or replace the numbering.
+
 Make two views of the same locked layout: review with the real plaque and live number visible, then hide both for the generation reference, leaving the underlying artwork visible. Record their paired position and proportional scale relative to the master canvas in REVIEW NOTES. Keep that area continuous, without a generated badge or placeholder. Restore the recorded transform during final assembly and adjust only a named placement defect.
 
 Without master access, review the reserved footprint provisionally and run them once the master is available, before saving the final PSD. Record unresolved placement or legibility as needs_attention. Continue independent work without an approval pause.
