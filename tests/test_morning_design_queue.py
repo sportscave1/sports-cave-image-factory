@@ -13,6 +13,9 @@ VERIFY_OUTPUTS = queue.verify_outputs
 
 @pytest.fixture
 def store(database, monkeypatch):
+    import product_upload_services
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Provider', (), {
+        'metadata_if_present': lambda self, path: {'id': path}})())
     db, cur = database
     for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql', '20261118070000_product_upload_manual_restart.sql'):
         cur.execute((ROOT / 'migrations' / name).read_text(encoding='utf8'))
@@ -116,7 +119,7 @@ def test_claim_upgrades_waiting_legacy_prompt_without_replacing_active_prompt(st
     assert claim['id'] == waiting
     assert 'Use the original selected story.' in claim['prompt']
     assert f'morning_design_job_id = "{waiting}"' in claim['prompt']
-    assert 'Generate the complete flat artwork once' in claim['prompt']
+    assert 'Generate the collector treatment once' in claim['prompt']
     assert 'Old rules' not in claim['prompt']
 
 
@@ -160,7 +163,7 @@ def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
     for job in first:
         assert f'morning_design_job_id = "{job["id"]}"' in job['prompt']
         assert 'Use the original photos as the authority' in job['prompt']
-        assert 'Generate the complete flat artwork once' in job['prompt']
+        assert 'Generate the collector treatment once' in job['prompt']
         assert 'Omit the marker for visual concerns alone.' in job['prompt']
     queue.tick(token, [dict(id=job['id'], state='submitted') for job in first])
     assert {j['stage'] for j in queue.list_jobs() if j['id'] in {r['id'] for r in first}} == {2}
@@ -438,3 +441,70 @@ def test_home_status_icons_preserve_honest_labels(status, icon, tone):
     assert f'sc-brief-status {tone}' in html
     assert f'aria-hidden="true">{icon}</i>' in html
     assert status in html
+
+@pytest.mark.parametrize('stage', [4, 5])
+def test_deleted_unposted_design_can_be_explicitly_requeued(store, monkeypatch, stage):
+    import product_upload_services
+    from home_sports_morning_brief import SETTING_KEY
+    from home_morning_brief_actions import article_html
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=%s,file_id='id:deleted',file_rev='R1',file_path='/Review/Final.psd' WHERE id=%s", (stage, first['id']))
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Provider', (), {
+        'metadata_if_present': lambda self, path: None})())
+    record = queue.list_jobs()[0]
+    assert record['label'] == 'Deleted · ready to redo'
+    markup = article_html(dict(title='A', recommendation='Brief', links=[]), design_key=first['id'], design_status=record['label'])
+    assert ' disabled' not in markup
+    assert queue.enqueue_selected(first['id']) is True
+    assert queue.enqueue_selected(first['id']) is False
+    record = queue.list_jobs()[0]
+    assert record['stage'] == 0 and record['file_path'] == ''
+    retry = queue.tick(token, [])['jobs'][0]
+    assert retry['receipt'] != first['receipt']
+
+
+@pytest.mark.parametrize('signal', ['moved', 'replacement', 'offline', 'published', 'receipt'])
+def test_deleted_design_redo_blocks_existing_unverified_or_posted_artwork(store, monkeypatch, signal):
+    import product_upload_services
+    from home_sports_morning_brief import SETTING_KEY
+    from psd_directory import ROOT
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=5,file_id='id:saved',file_rev='R1',file_path='/Review/Final.psd' WHERE id=%s", (first['id'],))
+    def metadata(self, path):
+        if signal == 'offline':
+            raise OSError('Synthetic outage')
+        if signal == 'moved' and path == 'id:saved':
+            return {'id': 'id:saved', 'path_display': '/Elsewhere/Renamed.psd'}
+        if signal == 'replacement' and path == ROOT + '/Final.psd':
+            return {'id': 'id:replacement'}
+        return None
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Provider', (), {'metadata_if_present': metadata})())
+    if signal == 'published':
+        cur.execute("INSERT INTO shopify_products VALUES ('product','ACTIVE','https://example.test/product')")
+        cur.execute('INSERT INTO product_psd_mappings VALUES (%s,%s,%s)', ('product', 'id:saved', ROOT + '/Final.psd'))
+    if signal == 'receipt':
+        cur.execute("INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport,stage) VALUES ('00000000-0000-0000-0000-000000000001','id:saved','R1','Final','NBA',6)")
+    assert queue.list_jobs()[0]['label'] != 'Deleted · ready to redo'
+    assert queue.enqueue_selected(first['id']) is False
+
+
+def test_restored_design_is_rechecked_when_redo_is_clicked(store, monkeypatch):
+    import product_upload_services
+    from home_sports_morning_brief import SETTING_KEY
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=5,file_id='id:saved',file_path='/Review/Final.psd' WHERE id=%s", (first['id'],))
+    present = []
+    monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Provider', (), {
+        'metadata_if_present': lambda self, path: {'id': path} if present else None})())
+    assert queue.list_jobs()[0]['label'] == 'Deleted · ready to redo'
+    present.append(True)
+    assert queue.enqueue_selected(first['id']) is False

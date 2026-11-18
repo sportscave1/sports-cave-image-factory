@@ -146,7 +146,7 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
     elif not legend and markets:
         label += f' ({", ".join(markets)})'
-    enabled = bool(design_key) and design_status == 'Needs attention'
+    enabled = bool(design_key) and design_status in ('Needs attention', 'Deleted · ready to redo')
     reason = ('Add this design to the Design Companion queue' if enabled else
               'Already in the Design Companion queue' if design_status in ('Pending', 'Opening ChatGPT', 'Generating') else
               'This design has already been made or uploaded' if design_status else
@@ -162,6 +162,7 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
             'Ready for review': ('✓', 'complete'),
             'Uploaded · needs review': ('!', 'attention'),
             'Needs attention': ('!', 'attention'),
+            'Deleted · ready to redo': ('!', 'attention'),
             'Generating': ('◌', 'running'),
             'Opening ChatGPT': ('◌', 'running'),
             'Uploaded · checking review metadata': ('◌', 'running'),

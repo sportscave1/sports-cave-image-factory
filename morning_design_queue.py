@@ -173,6 +173,40 @@ def _release_delivered(cur):
         WHERE stage=3 AND file_id<>'' AND file_rev<>'' AND file_path<>'' """)
 
 
+def _deleted_designs(jobs, published):
+    """Only confirmed absence permits redo; IDs survive Dropbox moves/renames."""
+    from product_upload_services import Dropbox
+    from psd_directory import ROOT
+    candidates = [job for job in jobs if job['id'] not in published
+                  and job['stage'] in (4, 5) and (job['file_id'] or job['file_path'])]
+    if not candidates:
+        return set()
+    missing = set()
+    try:
+        provider = Dropbox()
+        for job in candidates:
+            paths = [job['file_id'], job['file_path']]
+            if job['file_path']:
+                paths.append(ROOT + '/' + PurePosixPath(job['file_path']).name)
+            if all(provider.metadata_if_present(path) is None for path in dict.fromkeys(paths) if path):
+                missing.add(job['id'])
+    except Exception as error:
+        LOG.warning('design_deletion_check_unavailable type=%s', type(error).__name__)
+        return set()
+    return missing
+
+
+def _posted_designs(cur, jobs, published):
+    """Retain successful publication receipts even if a product is later archived."""
+    saved = [job for job in jobs if job['file_id']]
+    if not saved:
+        return published
+    cur.execute('''SELECT source_id FROM product_upload_staff_jobs
+        WHERE stage=6 AND source_id=ANY(%s)''', ([job['file_id'] for job in saved],))
+    posted = {row['source_id'] for row in cur.fetchall()}
+    return published | {job['id'] for job in saved if job['file_id'] in posted}
+
+
 def list_jobs(day=None):
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
@@ -181,8 +215,12 @@ def list_jobs(day=None):
             ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
         jobs = cur.fetchall()
         published = _published_designs(cur, jobs)
-        return [dict(id=str(r['id']), title=r['title'],
+        posted = _posted_designs(cur, jobs, published)
+    # Network checks must not hold the desktop claim lock.
+    deleted = _deleted_designs(jobs, posted)
+    return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
+                            else 'Deleted · ready to redo' if r['id'] in deleted
                             else 'Uploaded · needs review' if r['stage'] == 5 and (r['file_id'] or r['file_path']) else LABELS[r['stage']]), stage=r['stage'],
                      chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path'],
                      updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in jobs]
@@ -373,7 +411,9 @@ def enqueue_selected(key):
         cur.execute('SELECT * FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
         job = cur.fetchone()
         if job:
-            if job['stage'] != 5 or job['file_id'] or job['file_path']:
+            posted = _posted_designs(cur, [job], _published_designs(cur, [job]))
+            deleted = job['id'] in _deleted_designs([job], posted)
+            if job['id'] in posted or (not deleted and (job['stage'] != 5 or job['file_id'] or job['file_path'])):
                 return False
             # Catch a late delivery before explicitly restarting failed work.
             if verify_outputs([job]):
@@ -381,7 +421,7 @@ def enqueue_selected(key):
             prompt = _job_prompt(key, suggestion['item']['title'], suggestion['item']['recommendation'])
             prompt += f'\nQueue retry receipt: {uuid4()}\n'
             cur.execute('''UPDATE morning_design_jobs SET stage=0,prompt=%s,message='',
-                chat_url='',updated_at=now() WHERE id=%s''', (prompt, key))
+                chat_url='',file_id='',file_rev='',file_path='',updated_at=now() WHERE id=%s''', (prompt, key))
             return True
         insert_suggestion(cur, suggestion['date'], suggestion['section'], suggestion['item'])
         return True
