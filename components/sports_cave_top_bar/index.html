@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "navigation-controls-v4";
+  const CONTROLLER_VERSION = "companion-header-v1";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -945,6 +945,66 @@
       .sc-os-topbar-name { display: none; }
       .sc-os-topbar-logo { height: 26px; width: 26px; }
     }
+    /* Search only occupies space while explicitly opened. */
+    #${ROOT_ID} .sc-os-mobile-search {display:inline-flex;}
+    #${ROOT_ID} .sc-os-topbar-search-wrap {
+      display:none;position:fixed;top:calc(var(--sc-topbar-height) + 8px);
+      left:50%;right:auto;transform:translateX(-50%);width:min(680px,calc(100vw - 24px));
+      max-width:680px;padding:8px;background:#171717;border:1px solid #494238;
+      border-radius:12px;box-shadow:0 12px 40px #0005;z-index:1000001;
+    }
+    body.sc-mobile-search-open #${ROOT_ID} .sc-os-topbar-search-wrap {display:block;}
+    #${ROOT_ID} #sc-os-search-results {position:absolute;top:calc(100% + 5px);left:0;right:0;max-height:calc(100dvh - var(--sc-topbar-height) - 100px);}
+    #sc-os-companion-status {gap:8px;width:100%;margin:0;}
+    .sc-companion-card {display:flex;align-items:center;gap:4px;flex:1;min-width:0;}
+    .sc-companion-card[hidden] {display:none;}
+    .sc-companion-details {position:relative;flex:1;min-width:0;}
+    .sc-companion-details summary, #sc-os-staff-upload-summary {
+      box-sizing:border-box;width:100%;min-width:0;padding:4px 8px;list-style:none;
+      cursor:pointer;background:#211c15;border:1px solid #63512d;border-radius:8px;
+    }
+    .sc-companion-details summary::-webkit-details-marker {display:none;}
+    .sc-companion-name {display:block;font-size:10px;line-height:12px;letter-spacing:.06em;text-transform:uppercase;color:#d3ae61;font-weight:700;}
+    .sc-companion-title,.sc-companion-stage {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .sc-companion-title {font-size:12px;line-height:14px;font-weight:700;}
+    .sc-companion-stage {font-size:11px;line-height:12px;}
+    .sc-companion-details progress {display:block;width:100%;height:3px;margin-top:2px;accent-color:#d3a94e;}
+    .sc-companion-details[data-state="failed"] summary {border-color:#c87872;color:#ffd3cb;}
+    .sc-companion-details[data-state="complete"] summary {border-color:#71936d;color:#cef1c9;}
+    .sc-companion-details[data-stale="true"] summary,#sc-os-staff-uploads[data-stale="true"] summary {border-style:dashed;}
+    .sc-companion-popup {position:absolute;top:calc(100% + 6px);right:0;width:min(340px,calc(100vw - 20px));box-sizing:border-box;padding:12px;background:#191612;border:1px solid #63512d;border-radius:8px;color:#f8edcf;box-shadow:0 8px 24px #0004;max-height:55vh;overflow:auto;z-index:2;font-size:12px;}
+    .sc-companion-popup article {padding:4px 20px 8px 0;overflow-wrap:anywhere;}
+    .sc-companion-popup article+article {border-top:1px solid #63512d;padding-top:8px;}
+    .sc-companion-popup p {margin:3px 0;}
+    .sc-companion-popup a {color:#f3ce7e;display:inline-block;margin:4px 12px 4px 0;}
+    .sc-companion-close {position:absolute;right:4px;top:4px;color:inherit;background:transparent;border:0;font:20px Arial;cursor:pointer;}
+    .sc-companion-popup .sc-os-queue-control,#sc-os-staff-upload-popup .sc-os-queue-control {margin:6px 8px;}
+    @media(min-width:1101px) {
+      #${ROOT_ID},#${ROOT_ID}.sc-has-staff-upload {grid-template-columns:var(--sc-sidebar-width) auto auto minmax(0,1fr) auto;}
+      #${ROOT_ID}.sc-has-posting,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:var(--sc-sidebar-width) auto auto auto minmax(0,1fr) auto;}
+      #sc-os-companion-status {padding-inline:12px;box-sizing:border-box;}
+      #sc-os-posting-slot {width:180px;}
+    }
+    @media(max-width:1100px) {
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:124px;}
+      #${ROOT_ID}.sc-has-staff-upload,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:minmax(100px,1fr) auto auto auto;grid-template-rows:60px 64px;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-brand {grid-column:1;grid-row:1;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-navigation {grid-column:2;grid-row:1;}
+      #${ROOT_ID}.sc-has-staff-upload #sc-os-files {grid-column:3;grid-row:1;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-actions {grid-column:4;grid-row:1;}
+      #sc-os-companion-status {grid-column:1/-1;grid-row:2;padding:4px 8px;box-sizing:border-box;}
+      #sc-os-posting-slot {position:fixed;right:8px;top:calc(var(--sc-topbar-height) + 8px);}
+      .sc-companion-popup,#sc-os-staff-upload-popup {position:fixed;top:calc(var(--sc-topbar-height) + 8px);right:8px;left:auto;}
+    }
+    @media(max-width:600px) {
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:168px!important;}
+      #${ROOT_ID}.sc-has-staff-upload,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:minmax(76px,1fr) auto;grid-template-rows:56px 48px 64px;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-actions {grid-column:2;grid-row:1;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-navigation {grid-column:1;grid-row:2;}
+      #${ROOT_ID}.sc-has-staff-upload #sc-os-files {grid-column:2;grid-row:2;}
+      #sc-os-companion-status {grid-row:3;gap:5px;}
+      .sc-companion-details summary,#sc-os-staff-upload-summary {padding-inline:5px;}
+    }
   `;
 
   let style = doc.getElementById(STYLE_ID);
@@ -970,7 +1030,7 @@
       <button id="sc-os-refresh" class="sc-os-topbar-icon-button" type="button" aria-label="Refresh" title="Refresh">${icon("refresh")}</button>
     </div>
     <button id="sc-os-files" class="sc-os-topbar-icon-button" type="button" aria-label="Open Files" ${config.filesEnabled ? "" : "hidden"}>${icon("folder")}<span>Files</span></button>
-    <div class="sc-os-topbar-search-wrap">
+    <div class="sc-os-topbar-search-wrap" role="dialog" aria-label="Search Sports Cave OS">
       <div class="sc-os-topbar-search-shell">
         ${icon("search")}
         <label for="sc-os-global-search" hidden>Search Sports Cave OS</label>
@@ -982,20 +1042,33 @@
     <div id="sc-os-posting-slot" aria-hidden="true" hidden></div>
     <div id="sc-upload-notices" aria-label="Upload notifications"></div>
     <div id="sc-os-companion-status" hidden>
+      <div id="sc-os-design-card" class="sc-companion-card" hidden>
+        <details id="sc-os-design-status" class="sc-companion-details">
+          <summary><span class="sc-companion-name">Design</span><span id="sc-os-design-title" class="sc-companion-title"></span><span id="sc-os-design-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-design-meter" max="100" aria-label="Design progress"></progress></summary>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-design-close" type="button" aria-label="Close design status">×</button><div id="sc-os-design-list"></div><button id="sc-os-queue-design" class="sc-os-queue-control" type="button" hidden></button></div>
+        </details>
+      </div>
+      <div id="sc-os-upload-card" class="sc-companion-card">
       <details id="sc-os-staff-uploads" hidden>
         <summary id="sc-os-staff-upload-summary">
+          <span class="sc-companion-name">Uploads</span>
           <span id="sc-os-staff-upload-title"></span><span id="sc-os-staff-upload-stage" role="status"></span>
           <progress id="sc-os-staff-upload-meter" max="100" aria-label="Product upload progress"></progress>
         </summary>
         <div id="sc-os-staff-upload-popup">
           <button id="sc-os-staff-upload-close" type="button" aria-label="Close upload status" title="Close upload status">×</button>
           <div id="sc-os-staff-upload-list" aria-label="Your product uploads"></div>
+          <button id="sc-os-queue-upload" class="sc-os-queue-control" type="button" hidden></button>
         </div>
       </details>
       <button id="sc-os-staff-upload-reset" class="sc-os-upload-reset" type="button" hidden aria-label="Restart failed upload" title="Restart from the original PSD and regenerate mockups">↻</button>
-      ${["design", "upload"].map(queue =>
-        `<button id="sc-os-queue-${queue}" class="sc-os-queue-control" type="button" hidden></button>`
-      ).join("")}
+      </div>
+      <div id="sc-os-ads-card" class="sc-companion-card" hidden>
+        <details id="sc-os-ads-status" class="sc-companion-details">
+          <summary><span class="sc-companion-name">Ads</span><span id="sc-os-ads-title" class="sc-companion-title"></span><span id="sc-os-ads-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-ads-meter" max="100" aria-label="Ads stage progress"></progress></summary>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button></div>
+        </details>
+      </div>
     </div>
     <div class="sc-os-topbar-actions">
       <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}</button>
@@ -1098,10 +1171,58 @@
     const companionStatus = root.querySelector("#sc-os-companion-status");
     const staffProgress = root.querySelector("#sc-os-staff-uploads");
     const uploadSummary = root.querySelector("#sc-os-staff-upload-summary");
-    const queueButtons = Object.fromEntries(["design", "upload"].map(queue => [
+    staffProgress.addEventListener('toggle', () => {
+      if (staffProgress.open) uploadNotices.replaceChildren();
+    }, listenerOptions);
+    const queueButtons = Object.fromEntries(["design", "upload", "ads"].map(queue => [
       queue, root.querySelector("#sc-os-queue-" + queue),
     ]));
     let queues = {};
+    const companionPanels = Object.fromEntries(["design", "ads"].map(name => [name, {
+      card:root.querySelector(`#sc-os-${name}-card`),
+      panel:root.querySelector(`#sc-os-${name}-status`),
+      title:root.querySelector(`#sc-os-${name}-title`),
+      stage:root.querySelector(`#sc-os-${name}-stage`),
+      meter:root.querySelector(`#sc-os-${name}-meter`),
+      list:root.querySelector(`#sc-os-${name}-list`),
+    }]));
+    const renderCompanions = status => {
+      for (const [name, elements] of Object.entries(companionPanels)) {
+        const control = queues[name];
+        elements.card.hidden = !Array.isArray(control?.jobs);
+        if (elements.card.hidden) {elements.panel.open=false;continue;}
+        const jobs = control.jobs;
+        const job = jobs.find(item => item.state === 'running') || jobs.find(item => item.state === 'waiting') || jobs[0];
+        const online = name === 'ads' ? control.online : status.online;
+        const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
+        let label = job ? job.label : idle;
+        if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
+        if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
+        if (control.waiting) label += ` · ${control.waiting} waiting`;
+        elements.title.textContent = job?.title || 'No current job';
+        elements.stage.textContent = label;
+        elements.panel.title = [name,job?.title,label,job?.detail].filter(Boolean).join(' · ');
+        elements.panel.dataset.state = job?.state || 'idle';
+        elements.panel.dataset.stale = 'false';
+        elements.meter.value = job?.percent || 0;
+        elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
+        elements.list.replaceChildren(...jobs.slice(0,10).map(item => {
+          const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
+          title.textContent=item.title;
+          detail.textContent=item.label + (item.detail ? ' · '+item.detail : '');
+          article.append(title,detail);
+          if (/^https:\/\/chatgpt\.com\//.test(item.chat_url || '')) {
+            const chat=doc.createElement('a');chat.href=item.chat_url;chat.target='_blank';chat.rel='noopener';chat.textContent='Open chat';article.append(chat);
+          }
+          if (/^[a-f0-9-]{36}$/.test(item.posting_id || '')) {
+            const link=doc.createElement('a');link.href='/?'+new URLSearchParams({page:'ads_posting',meta_posting_job:item.posting_id});link.textContent='See in Posting';article.append(link);
+          }
+          if (item.state === 'failed') showUploadNotice({id:`${name}-${item.id}-${item.updated_at}`,kind:'error',text:`${name === 'ads' ? 'Ads' : 'Design'} · ${item.title}: ${item.detail || item.label}`});
+          return article;
+        }));
+        const queueLink=doc.createElement('a');queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';elements.list.append(queueLink);
+      }
+    };
     let queueRevision = 0;
     const pendingQueues = new Set();
     let lastStaffStatus = "";
@@ -1172,6 +1293,7 @@
     const dismissUploadOverlays = () => {
       uploadOverlayRevision++;
       staffProgress.open = false;
+      for (const {panel} of Object.values(companionPanels)) panel.open=false;
       uploadNotices.replaceChildren();
     };
     // The shell can outlive its controller during Streamlit reruns.
@@ -1182,8 +1304,16 @@
     }, listenerOptions);
     parentWindow.addEventListener("popstate", dismissUploadOverlays, listenerOptions);
     doc.addEventListener("click", event => {
-      if (staffProgress.open && !staffProgress.contains(event.target)) staffProgress.open = false;
+      const path=event.composedPath?.() || [];
+      if (staffProgress.open && !path.includes(staffProgress) && !staffProgress.contains(event.target)) staffProgress.open = false;
+      for (const {panel} of Object.values(companionPanels)) if (panel.open && !path.includes(panel) && !panel.contains(event.target)) panel.open=false;
     }, listenerOptions);
+    for (const [name, {panel}] of Object.entries(companionPanels)) {
+      panel.addEventListener('toggle',()=>{if(panel.open)uploadNotices.replaceChildren();},listenerOptions);
+      const close=()=>{panel.open=false;root.querySelector(`#sc-os-${name}-status > summary`)?.focus();};
+      root.querySelector(`#sc-os-${name}-close`).addEventListener('click',close,listenerOptions);
+      panel.addEventListener('keydown',event=>{if(event.key==='Escape'){event.stopPropagation();close();}},listenerOptions);
+    }
     const closeUploadStatus = () => {
       staffProgress.open = false;
       uploadSummary.focus();
@@ -1198,9 +1328,9 @@
     const renderQueueButtons = () => {
       for (const [queue, button] of Object.entries(queueButtons)) {
         const control = queues[queue];
-        button.hidden = !control?.waiting;
+        button.hidden = !control || (!control.waiting && !Array.isArray(control.jobs) && !control.display);
         if (button.hidden) continue;
-        const name = queue === "design" ? "Design" : "Upload";
+        const name = queue === "design" ? "Design" : queue === "ads" ? "Ads" : "Upload";
         const action = control.enabled ? "Pause" : "Play";
         const label = `${action} ${queue} queue (${control.waiting} waiting)`;
         button.innerHTML = icon(action.toLowerCase()) + `<span>${name} (${Number(control.waiting)})</span>`;
@@ -1208,12 +1338,12 @@
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-busy", String(pendingQueues.has(queue)));
       }
-      companionStatus.hidden = staffProgress.hidden && Object.values(queueButtons).every(button => button.hidden);
+      companionStatus.hidden = staffProgress.hidden && Object.values(queueButtons).every(button => button.hidden) && Object.values(companionPanels).every(item=>item.card.hidden);
       root.classList.toggle("sc-has-staff-upload", !companionStatus.hidden);
     };
     for (const [queue, button] of Object.entries(queueButtons)) {
       button.addEventListener("click", async () => {
-        if (!queues[queue]?.waiting || pendingQueues.has(queue)) return;
+        if (!queues[queue] || pendingQueues.has(queue)) return;
         const scope = state.config.uploadScope;
         const overlayRevision = uploadOverlayRevision;
         pendingQueues.add(queue);
@@ -1251,12 +1381,16 @@
         const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
           credentials:"same-origin", cache:"no-store", signal:listenerController.signal,
         });
-        if (!response.ok || listenerController.signal.aborted) return;
+        if (listenerController.signal.aborted) return;
+        if (!response.ok) throw new Error('Companion status unavailable');
         const status = await response.json();
         if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
         const jobs = status.jobs || [];
-        staffProgress.hidden = !jobs.length;
         if (revision === queueRevision && !pendingQueues.size) queues = status.queues || {};
+        renderCompanions(status);
+        staffProgress.hidden = !jobs.length && !queues.upload?.display;
+        root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
+        staffProgress.dataset.stale='false';
         renderQueueButtons();
         const serialized = JSON.stringify(status);
         if (serialized === lastStaffStatus) return;
@@ -1264,15 +1398,21 @@
         if (!jobs.length) {
           staffProgress.open = false;
           summaryReset.hidden = true;
+          staffProgress.dataset.stage='0';
+          root.querySelector('#sc-os-staff-upload-title').textContent='No current job';
+          root.querySelector('#sc-os-staff-upload-stage').textContent=queues.upload?.enabled === false ? 'Queue paused' : status.online ? 'Ready' : 'Companion offline';
+          root.querySelector('#sc-os-staff-upload-meter').value=0;
+          root.querySelector('#sc-os-staff-upload-list').replaceChildren();
           return;
         }
         const label = job => job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
         const adLabel = job => "Ad · " + job.ad.label;
-        const job = jobs[0];
+        const job = jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || jobs[0];
         bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
-        const currentLabel = job.ad ? label(job) + " · " + adLabel(job) : label(job);
+        const currentLabel = (job.ad && !Array.isArray(queues.ads?.jobs) ? label(job) + " · " + adLabel(job) : label(job))
+          + (queues.upload?.waiting ? ` · ${queues.upload.waiting} waiting` : '');
         uploadSummary.title = job.title + " · " + currentLabel;
         root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
         root.querySelector("#sc-os-staff-upload-stage").textContent = currentLabel;
@@ -1348,7 +1488,13 @@
           return entry;
         }));
       } catch (_error) {
-        // The next refresh keeps the latest confirmed state visible during connection loss.
+        if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
+        lastStaffStatus='';
+        for (const {panel,stage} of Object.values(companionPanels)) {
+          panel.dataset.stale='true';stage.textContent='Status unavailable · retrying';
+        }
+        staffProgress.dataset.stale='true';
+        root.querySelector('#sc-os-staff-upload-stage').textContent='Status unavailable · retrying';
       } finally {
         if (!listenerController.signal.aborted) later(refreshStaffProgress, 6000);
       }
@@ -1951,9 +2097,7 @@
           ? repairsButton
         : state.activePanel === "settings"
             ? settingsButton
-            : mobileViewport()
-              ? mobileSearchButton
-              : searchInput;
+            : mobileSearchButton;
       state.activePanel = "";
       if (returnFocus && trigger) trigger.focus({preventScroll: true});
     };
@@ -1966,7 +2110,7 @@
         searchPanel.hidden = true;
         setExpanded(searchInput, false);
         setExpanded(mobileSearchButton, true);
-        if (mobileViewport()) doc.body.classList.add("sc-mobile-search-open");
+        doc.body.classList.add("sc-mobile-search-open");
       } else if (name === "notifications") {
         notificationsPanel.hidden = false;
         setExpanded(notificationsButton, true);
@@ -3184,7 +3328,7 @@
       updateSidebarWidth();
       if (!mobileViewport()) {
         closeMobileNavigation();
-        doc.body.classList.remove("sc-mobile-search-open");
+        if (state.activePanel !== "search") doc.body.classList.remove("sc-mobile-search-open");
       }
     };
     // Focus can be restored by the browser/Streamlit or keyboard traversal.
@@ -3284,7 +3428,7 @@
         navigationButton.click();
         return;
       }
-      if (target !== searchInput && isEditableSearchEvent(event)
+      if (target !== searchInput && target !== mobileSearchButton && isEditableSearchEvent(event)
           && !(event.key === "Escape" && root.contains(target))) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.repeat && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -3395,6 +3539,7 @@
     // The shell DOM survives Streamlit reruns; the controller's open state does
     // not. Never retain a visible search panel with no live dismissal state.
     searchPanel.hidden = true;
+    doc.body.classList.remove("sc-mobile-search-open");
     setExpanded(searchInput, false);
     updateSidebarWidth();
     if (!parentWindow.ResizeObserver) {
@@ -3408,6 +3553,11 @@
         root.dataset.installStage = "config";
         const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
+        if (state.config.uploadScope !== nextConfig.uploadScope) {
+          dismissUploadOverlays();queues={};lastStaffStatus='';
+          staffProgress.hidden=true;summaryReset.hidden=true;
+          renderCompanions({});renderQueueButtons();
+        }
         if (state.config.currentRouteKey !== nextConfig.currentRouteKey) dismissUploadOverlays();
         state.config = {...nextConfig};
         state.searchIndex = prepareSearchIndex(state.config.searchIndex);
@@ -3438,6 +3588,7 @@
           staffProgress.open = false;
           staffProgress.hidden = true;
           queues = {};
+          renderCompanions({});
           renderQueueButtons();
         }
         if (revisionChanged) {

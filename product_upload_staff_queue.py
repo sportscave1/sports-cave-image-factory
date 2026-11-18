@@ -238,6 +238,7 @@ def settings(enabled=None):
 
 
 def header_queue_status():
+    from companion_header import enrich_queues
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT
             (SELECT count(*) FROM morning_design_jobs WHERE stage=0) AS design_waiting,
@@ -245,10 +246,10 @@ def header_queue_status():
             (SELECT count(*) FROM product_upload_staff_jobs WHERE stage=0) AS upload_waiting,
             (SELECT value FROM app_settings WHERE key=%s) AS upload_enabled''', (CONTROL_KEY,))
         row = cur.fetchone()
-    return {
+    return enrich_queues({
         'design': dict(waiting=row['design_waiting'], enabled=bool(row['design_enabled'])),
         'upload': dict(waiting=row['upload_waiting'], enabled=row['upload_enabled'] is not False),
-    }
+    })
 
 
 def can_control_queues(user):
@@ -358,7 +359,7 @@ async def status_route(request):
     from starlette.responses import JSONResponse
     try:
         user = await run_in_threadpool(_request_user, request, required_page='Design Studio')
-        result = await run_in_threadpool(list_jobs, user['id'])
+        result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
             result['queues'] = await run_in_threadpool(header_queue_status)
         return JSONResponse(result, headers=HEADERS)
@@ -379,10 +380,11 @@ async def queue_control_route(request):
         if not can_control_queues(user):
             raise PermissionError('An administrator must control the companion queues.')
         body = await request.json()
-        if (not isinstance(body, dict) or body.get('queue') not in ('design', 'upload')
+        if (not isinstance(body, dict) or body.get('queue') not in ('design', 'upload', 'ads')
                 or not isinstance(body.get('enabled'), bool)):
             raise ValueError('Choose a companion queue and Play or Pause.')
-        update = design_settings if body['queue'] == 'design' else settings
+        from design_publish_ad import settings as ad_settings
+        update = {'design': design_settings, 'upload': settings, 'ads': ad_settings}[body['queue']]
         control = await run_in_threadpool(update, body['enabled'])
         return JSONResponse({'enabled': control['enabled']}, headers=HEADERS)
     except Exception as error:

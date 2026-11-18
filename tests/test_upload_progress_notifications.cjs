@@ -16,6 +16,7 @@ const documentEvents = {}, windowEvents = {};
 const state={config:{uploadScope:'admin',staffUploadProgress:true,navigationRouteLabels:{edition_ops:'Edition Ops'}}};
 let payload={online:true,jobs:[]};
 let queueResponse;
+let disconnected=false;
 const writes=[];
 const context={state, URLSearchParams, icon:name=>name,
  doc:{createElement:()=>new Element(),addEventListener:(event,callback)=>documentEvents[event]=callback},
@@ -24,6 +25,7 @@ const context={state, URLSearchParams, icon:name=>name,
  parentWindow:{addEventListener:(event,callback)=>windowEvents[event]=callback,
  sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},
  fetch:async(url,options)=>{
+   if(disconnected)throw Error('offline');
    if (options?.method === 'POST') {
      const body=JSON.parse(options.body);
      writes.push({url,body});
@@ -145,6 +147,36 @@ install();
  assert.equal(nodes.get('#sc-os-companion-status').hidden,false);
  assert.equal(nodes.get('#sc-os-staff-uploads').hidden,true);
  assert.equal(upload.hidden,true);
+ payload={online:true,jobs:[],queues:{upload:{waiting:0,enabled:true,display:true},
+   design:{waiting:1,enabled:true,jobs:[{id:'design-fixture',title:'Design in progress',state:'running',label:'Generating',percent:45,estimated:true}]},
+   ads:{waiting:0,enabled:true,online:true,jobs:[{id:'ad-fixture',title:'Ad in progress',state:'running',label:'Waiting for covers',percent:40}]}}};
+ await context.refresh();
+ assert.equal(nodes.get('#sc-os-staff-uploads').hidden,false,'idle upload companion remains visible');
+ assert.equal(nodes.get('#sc-os-staff-upload-stage').textContent,'Ready');
+ assert.equal(nodes.get('#sc-os-design-title').textContent,'Design in progress');
+ assert.equal(nodes.get('#sc-os-design-meter')['aria-valuetext'],'Estimated 45% · Generating · 1 waiting');
+ assert.equal(nodes.get('#sc-os-ads-meter').value,40);
+ const adControl=nodes.get('#sc-os-queue-ads');
+ assert.equal(adControl.hidden,false,'active queue can be paused without waiting jobs');
+ const beforeWrites=writes.length;
+ await adControl.events.click();
+ assert.deepEqual(writes[beforeWrites].body,{queue:'ads',enabled:false});
+ payload.queues.ads.jobs[0]={...payload.queues.ads.jobs[0],state:'failed',label:'Ad needs attention',detail:'Missing cover',updated_at:'failed-at'};
+ await context.refresh();
+ assert.equal(nodes.get('#sc-os-ads-status').dataset.state,'failed');
+ assert.equal(nodes.get('#sc-os-ads-status').open,false,'polling cannot force open the popup');
+ const notices=region.children.length;
+ await context.refresh();assert.equal(region.children.length,notices,'failure notice is not repeated');
+ assert.equal(nodes.get('#sc-os-ads-list').children[0].children[1].textContent,'Ad needs attention · Missing cover');
+ disconnected=true;await context.refresh();
+ assert.equal(nodes.get('#sc-os-design-status').dataset.stale,'true');
+ assert.equal(nodes.get('#sc-os-design-stage').textContent,'Status unavailable · retrying');
+ disconnected=false;await context.refresh();
+ assert.equal(nodes.get('#sc-os-design-status').dataset.stale,'false');
+ assert.equal(nodes.get('#sc-os-design-title').textContent,'Design in progress');
+ payload.queues={};await context.refresh();
+ assert.equal(nodes.get('#sc-os-design-card').hidden,true);
+ assert.equal(nodes.get('#sc-os-ads-card').hidden,true);
  state.config.staffUploadProgress=false;const prior=timers.length;await context.refresh();assert.equal(timers.length,prior);
  console.log('Upload overlays: one-shot notices, click-only status, dismissal on navigation and remount, progress and queue controls passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
