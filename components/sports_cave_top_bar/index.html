@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v2";
+  const CONTROLLER_VERSION = "companion-header-v3";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1253,7 +1253,6 @@
           if (/^[a-f0-9-]{36}$/.test(item.posting_id || '')) {
             const link=doc.createElement('a');link.href='/?'+new URLSearchParams({page:'ads_posting',meta_posting_job:item.posting_id});link.textContent='See in Posting';article.append(link);
           }
-          if (item.state === 'failed') showUploadNotice({id:`${name}-${item.id}-${item.updated_at}`,kind:'error',text:`${name === 'ads' ? 'Ads' : 'Design'} · ${item.title}: ${item.detail || item.label}`});
           return article;
         }));
         const queueLink=doc.createElement('a');queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';elements.list.append(queueLink);
@@ -1444,32 +1443,83 @@
         } finally {
           queueRevision++;
           pendingQueues.delete(queue);
-          if (!listenerController.signal.aborted) renderQueueButtons();
+          if (!listenerController.signal.aborted) {
+            lastStaffStatus = '';
+            renderQueueButtons();
+            void refreshStaffProgress(false);
+          }
         }
       }, listenerOptions);
     }
+    let staffRead = null, staffTimer = null, staffDelay = 15000, staffFailures = 0;
+    const clearStaffTimer = () => {
+      if (staffTimer !== null) {
+        parentWindow.clearTimeout(staffTimer);
+        timers.delete(staffTimer);
+        staffTimer = null;
+      }
+    };
+    // Actions need a fresh snapshot after any older read. Routine refreshes share it.
     const refreshStaffProgress = async (schedule = true) => {
+      if (staffRead) {
+        if (schedule) return staffRead;
+        await staffRead;
+        return refreshStaffProgress(false);
+      }
+      clearStaffTimer();
+      if (!state.config.staffUploadProgress || listenerController.signal.aborted) {
+        staffProgressStarted = false;
+        return;
+      }
+      if (doc.hidden) {
+        staffTimer = later(refreshStaffProgress, 30000);
+        return;
+      }
+      staffRead = readStaffProgress();
+      try { await staffRead; }
+      finally {
+        staffRead = null;
+        if (!listenerController.signal.aborted && state.config.staffUploadProgress) {
+          staffTimer = later(refreshStaffProgress, staffDelay);
+        }
+      }
+    };
+    doc.addEventListener('visibilitychange', () => {
+      if (!doc.hidden && state.config.staffUploadProgress) void refreshStaffProgress();
+    }, listenerOptions);
+    const readStaffProgress = async () => {
       const scope = state.config.uploadScope;
       const revision = queueRevision;
       if (!state.config.staffUploadProgress) {staffProgressStarted = false; return;}
+      const controller = new parentWindow.AbortController();
+      const abort = () => controller.abort();
+      listenerController.signal.addEventListener('abort', abort, {once:true});
+      const timeout = parentWindow.setTimeout(abort, 8000);
       try {
         const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
-          credentials:"same-origin", cache:"no-store", signal:listenerController.signal,
+          credentials:"same-origin", cache:"no-store", signal:controller.signal,
         });
         if (listenerController.signal.aborted) return;
         if (!response.ok) throw new Error('Companion status unavailable');
         const status = await response.json();
         if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
         const jobs = status.jobs || [];
+        staffFailures = 0;
+        const active = jobs.some(item => item.stage > 0 && item.stage < 6
+            || item.stage === 0 && status.queues?.upload?.enabled !== false)
+          || Object.values(status.queues || {}).some(queue => queue.jobs?.some(item => item.state === 'running')
+            || queue.enabled && (queue.waiting > 0 || queue.jobs?.some(item => item.state === 'waiting')));
+        staffDelay = active ? 2000 : 15000;
+        // Polling historical failures must not create popups or rebuild unchanged DOM.
+        const serialized = JSON.stringify(status);
+        if (serialized === lastStaffStatus) return;
         if (revision === queueRevision && !pendingQueues.size) queues = status.queues || {};
         renderCompanions(status);
         staffProgress.hidden = !jobs.length && !queues.upload?.display;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
         staffProgress.dataset.stale='false';
         renderQueueButtons();
-        const serialized = JSON.stringify(status);
-        if (serialized === lastStaffStatus) return;
-        lastStaffStatus = serialized;
+        lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
         if (!jobs.length) {
           staffProgress.open = false;
           summaryReset.hidden = true;
@@ -1520,10 +1570,6 @@
             bindCancel(cancel, item);
             entry.append(cancel);
           }
-          if (item.stalled || (item.stage === 7 && !item.cancelled)) {
-            showUploadNotice({id:`stalled-${item.id}-${item.updated_at}`,kind:'error',
-              text:item.title + ' · ' + (item.detail || item.label)});
-          }
           if (item.detail) {
             const detail = doc.createElement("p");
             detail.textContent = item.detail;
@@ -1565,13 +1611,15 @@
       } catch (_error) {
         if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
         lastStaffStatus='';
+        staffDelay = Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
         for (const {panel,stage} of Object.values(companionPanels)) {
           panel.dataset.stale='true';stage.textContent='Status unavailable · retrying';
         }
         staffProgress.dataset.stale='true';
         root.querySelector('#sc-os-staff-upload-stage').textContent='Status unavailable · retrying';
       } finally {
-        if (schedule && !listenerController.signal.aborted) later(refreshStaffProgress, 6000);
+        parentWindow.clearTimeout(timeout);
+        listenerController.signal.removeEventListener('abort', abort);
       }
     };
     const state = {
@@ -3660,6 +3708,9 @@
           staffProgressStarted = true;
           void refreshStaffProgress();
         } else if (!state.config.staffUploadProgress) {
+          clearStaffTimer();
+          staffProgressStarted = false;
+          lastStaffStatus = '';
           staffProgress.open = false;
           staffProgress.hidden = true;
           queues = {};
