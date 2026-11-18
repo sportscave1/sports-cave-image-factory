@@ -125,6 +125,7 @@ def resume(job_id, user, settings=None):
         if not row:
             raise ValueError('Ad job not found.')
         value = row['value']
+        value.pop('catalog_retry', None)
         if settings is not None:
             if value['stage'] != 'failed':
                 raise ValueError('Targeting can be corrected after the job stops for review.')

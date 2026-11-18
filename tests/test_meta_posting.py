@@ -532,7 +532,7 @@ class PostingNavigationTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn('importlib.import_module("ads_posting_page")', source)
         self.assertIn('importlib.import_module("ads_meta_review_page")', source)
-        self.assertIn("get_ads_meta_review_page().render_page()", source)
+        self.assertIn("get_ads_meta_review_page().render_page(", source)
 
     def test_posting_v3_ui_keeps_shared_setup_and_three_compact_creatives(self):
         source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")

@@ -22,7 +22,7 @@ def test_combined_job_preserves_upload_and_posts_once_after_four_files(store, mo
 
     monkeypatch.setattr(ads, 'connect', store)
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda user, page: True)
-    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: {'id': key})
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key, **kwargs: {'id': key})
     actor = {'id': 'staff'}
     source = {'id': 'id:fixture-psd', 'rev': 'original'}
     upload = uploads.enqueue(actor, source, 'A Collector Design', 'Baseball', ad_country='USA')
@@ -141,7 +141,7 @@ def test_post_request_imports_originals_in_route_order(country, code, monkeypatc
     value = dict(result=result, folder=folder, handle='fixture-product', upload=upload)
     monkeypatch.setattr(ads, 'write', lambda *_: None)
     monkeypatch.setattr(ads_posting_page, 'MetaPostingClient', lambda: SimpleNamespace(
-        product_set_members=lambda key: [{'url':result['product_url']}] if key=='21' else []))
+        product_set_members=lambda key, **kwargs: [{'url':result['product_url']}] if key=='21' else []))
     request = ads._post_request(value)
     assert request.country == code
     assert request.product_set_id == '21'
@@ -173,7 +173,7 @@ def test_ads_companion_heartbeat_pause_and_blocked_job_history(store, monkeypatc
 
     monkeypatch.setattr(ads, 'connect', store)
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda user, page: True)
-    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: {'id': key})
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key, **kwargs: {'id': key})
     token = uploads.pair({'id': 'desktop'})
     actor = {'id': 'staff'}
     first, second = [
@@ -238,3 +238,20 @@ def test_companion_shows_selected_ads_queue(monkeypatch):
     assert not app.exception
     assert [(button.label, button.disabled) for button in app.button] == [('Play', False), ('Pause', True)]
     assert any('Fixture' in text.value for text in app.markdown)
+
+
+def test_catalog_backoff_does_not_block_other_ads(store, monkeypatch):
+    import os_accounts
+    monkeypatch.setattr(ads, 'connect', store)
+    monkeypatch.setattr(os_accounts, 'can_access_page', lambda *args: True)
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: {'id': key})
+    token = uploads.pair({'id':'desktop'})
+    waiting, ready = str(uuid4()), str(uuid4())
+    with store() as conn, conn.cursor() as cur:
+        for key, retry in ((waiting, {'next_at':ads.time.time()+900}), (ready, {})):
+            value=dict(upload=key,source='new_ads',stage='generating',requester='staff',catalog_retry=retry)
+            cur.execute('INSERT INTO app_settings(key,value) VALUES (%s,%s::jsonb)', (ads.PREFIX+key,json.dumps(value)))
+    processed=[]
+    monkeypatch.setattr(ads,'_step',lambda key,value,*args: processed.append(value['upload']) or {})
+    ads.tick(token,{})
+    assert processed==[ready]

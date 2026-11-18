@@ -29,6 +29,7 @@ def action(user, job, operation):
         if operation=='play':
             cur.execute("SELECT 1 FROM app_settings WHERE key=%s AND updated_at > now()-interval '10 minutes'", (ads.PREFIX+'lease',))
             if cur.fetchone(): raise ValueError('The companion is finishing a step. Press Play again shortly.')
+            value.pop('catalog_retry', None)
             if value['stage']=='complete': raise ValueError('This job already completed. Open its Posting receipt.')
             if value.get('posting_id'):
                 value['stage']='posting' # Observe the same durable posting job, never submit another.
