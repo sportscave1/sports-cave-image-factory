@@ -72,12 +72,29 @@ def _story_without_meta_ad(text):
     return "\n".join(lines).strip()
 
 
-def _prompt(title, story, *, edit=None, primary_market=""):
+def _prompt(title, story, *, edit=None, primary_market="", refresh_product_id=None):
     context = _story_without_meta_ad(story)
     if edit is not None:
         from design_review_prompt import build_edit_prompt
         return build_edit_prompt(title, context, edit["source"], edit["metadata"])
 
+    handoff_fields = 'upload_intent (new_product), existing_shopify_product_id (null)'
+    handoff_identity = 'A shared athlete or similar title alone does not make this a refresh.'
+    if refresh_product_id is not None:
+        target = str(refresh_product_id).removeprefix('gid://shopify/Product/')
+        if not re.fullmatch(r'[1-9][0-9]*', target):
+            raise ValueError('A refresh needs an exact existing Shopify product ID.')
+        target = 'gid://shopify/Product/' + target
+        handoff_fields = ('upload_intent (existing_product_refresh), '
+                          f'existing_shopify_product_id ("{target}"), design_origin (designs_to_refresh)')
+        handoff_identity = (
+            f'This is new artwork for the existing product {target}. Keep that exact target even when '
+            'the title, photographs or collector concept change. Never label this handoff new_product '
+            'or substitute another target. Read back the intent, origin and exact product ID with the '
+            'PSD binding. Publishing from Review must update only this existing product, preserving its '
+            'ID, handle/URL, variants, sales and edition history, counters and inventory. If the target '
+            'cannot be verified, retain the Review artwork as needs_attention; never create another product.'
+        )
     market_note = (f' Include primary_market = "{primary_market}" in the design JSON for downstream ad targeting.'
                    if primary_market in {'AUS', 'USA', 'UK', 'CA', 'CAN', 'NZ'} else '')
     return f"""Sports Cave event: {title}
@@ -135,7 +152,7 @@ In that inspection, compare sources at 100% for authenticity and generation 1 be
 
 {MOTORSPORT_JSON}
 
-After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.{market_note}
+After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), {handoff_fields}, dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. {handoff_identity} Follow any automatic queue receipt instructions.{market_note}
 
 Display the reopened saved PSD render as **Final artwork · rendered from the saved PSD**. If saving or inspection remains pending, label the available result provisional instead. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
 

@@ -60,6 +60,9 @@ def _handoff_details(value, source):
         raise ValueError(mismatch)
     intent = value.get('upload_intent')
     target = _text(value.get('existing_shopify_product_id'))
+    refresh_origin = value.get('design_origin') == 'designs_to_refresh'
+    if refresh_origin and intent != 'existing_product_refresh':
+        raise ValueError('Designs to Refresh artwork must update its exact existing Shopify product, never create a new one.')
     if intent == 'existing_product_refresh':
         if re.fullmatch(r'[1-9][0-9]*', target):
             target = 'gid://shopify/Product/' + target
@@ -87,6 +90,8 @@ def _handoff_details(value, source):
                              ' '.join(_strings(value.get('review_notes')))[:1000],
                 source_photographs=_strings(value.get('source_photographs')),
                 signature_assets=_strings(value.get('signature_assets')),
+                **({'design_origin': 'designs_to_refresh', 'customer_facing_title': title}
+                   if refresh_origin else {}),
                 **({'sport_selection_pending': True} if checks_passed and not sport else {}))
 
 
@@ -129,7 +134,8 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
                 if first_error is None:
                     first_error = error
                 if allow_stale_sport and isinstance(error, _StaleRevision):
-                    stale_refresh |= value.get('upload_intent') == 'existing_product_refresh'
+                    stale_refresh |= (value.get('upload_intent') == 'existing_product_refresh'
+                                      or value.get('design_origin') == 'designs_to_refresh')
                     if not stale_sport:
                         label = _text(value.get('sport'), 100)
                         # Match Product Uploads' separate Soccer destination.

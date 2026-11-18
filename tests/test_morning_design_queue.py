@@ -552,3 +552,25 @@ def test_requeue_during_output_lookup_ignores_previous_attempt(store, monkeypatc
     assert restarted['receipt'] != first['receipt']
     record = queue.list_jobs()[0]
     assert record['stage'] == 1 and record['file_path'] == ''
+
+
+def test_waiting_refresh_upgrades_old_two_pass_snapshot_and_keeps_receipts():
+    job_id = '00000000-0000-0000-0000-000000000123'
+    old = ('SPORTS CAVE EXISTING DESIGN REFRESH\nOld two-pass refresh workflow.\n'
+           'Product: Collector\nShopify product ID: 123\n'
+           'Product page: https://example.test/products/collector\n'
+           'Research hypothesis from the Home recommendation: Improve the title.\n'
+           'Decision context: Selected by owner.\n1. Old workflow rules.\n'
+           f'Include morning_design_job_id = "{job_id}" in the final .upload.json handoff. '
+           'Save to Design Studio Review only; do not publish or alter the live product.\n'
+           'Queue retry receipt: 00000000-0000-0000-0000-000000000001\n')
+    job = dict(id=job_id, title='Collector', prompt=old)
+    upgraded = queue._waiting_prompt(job)
+    assert 'one creative image-generation call' in upgraded
+    assert 'Old two-pass' not in upgraded and 'Old workflow rules' not in upgraded
+    assert 'Improve the title.' in upgraded and 'Selected by owner.' in upgraded
+    assert f'morning_design_job_id = "{job_id}"' in upgraded
+    assert 'gid://shopify/Product/123' in upgraded
+    assert 'design_origin (designs_to_refresh)' in upgraded
+    assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded

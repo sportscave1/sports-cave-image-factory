@@ -63,11 +63,45 @@ def _job_prompt(key, title, recommendation, *, primary_market=""):
         'required workflow checkpoint, if one remains. Omit the marker for visual concerns alone.\n')
 
 
+def _waiting_refresh_prompt(job):
+    """Refresh unclaimed jobs from the shared renderer without changing queue receipts."""
+    from home_design_refresh import _refresh_prompt
+    from home_morning_brief_actions import _prompt
+
+    prompt = job['prompt']
+    target = re.search(r'^Shopify product ID: (.+)$', prompt, re.M)
+    if not target:
+        raise ValueError('The queued refresh is missing its exact Shopify product ID.')
+    _, found, tail = prompt.rpartition('\nInclude morning_design_job_id = "')
+    if not found:
+        raise ValueError('The queued refresh is missing its Review receipt.')
+    tail = '\nInclude morning_design_job_id = "' + tail
+    if '\n\n**Start the authorised new-design job**\n\n' in prompt:
+        _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
+        _, _, body = body.partition('\n\n')
+        brief, found, _ = body.partition('\n\n**1. Research the story, sources and master**')
+        if not found:
+            raise ValueError('The original refresh brief could not be recovered.')
+        rendered = _prompt(job['title'], brief, refresh_product_id=target[1].strip())
+    else:
+        page = re.search(r'^Product page: (.+)$', prompt, re.M)
+        suggestion = re.search(r'^Research hypothesis from the Home recommendation: (.*?)\nDecision context:', prompt, re.M | re.S)
+        evidence = re.search(r'^Decision context: (.+)$', prompt, re.M)
+        if not page:
+            raise ValueError('The queued refresh is missing its existing product reference.')
+        rendered = _refresh_prompt(dict(
+            title=job['title'], product_id=target[1].strip(),
+            suggestion=suggestion[1].strip() if suggestion else 'Research a complete new collector design.',
+            evidence=evidence[1].strip() if evidence else 'Selected from Designs to Refresh.',
+        ), page[1].strip())
+    return 'SPORTS CAVE EXISTING DESIGN REFRESH\n' + rendered + tail
+
+
 def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
     if prompt.startswith('SPORTS CAVE EXISTING DESIGN REFRESH\n'):
-        return prompt
+        return _waiting_refresh_prompt(job)
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
         from design_new_composition import PURPOSEFUL_ABSTRACT

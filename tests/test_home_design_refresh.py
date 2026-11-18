@@ -6,38 +6,43 @@ import re
 from unittest.mock import Mock
 
 import crm_growth_reporting
-from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
-from design_motorsport import MOTORSPORT_ARTWORK
-from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
-from home_design_refresh import RECOMMENDATION_GUIDANCE, _render_candidate
+from home_design_refresh import RECOMMENDATION_GUIDANCE, _render_candidate, _refresh_prompt
+from home_morning_brief_actions import _prompt
 
 
-def test_home_handoff_commissions_two_new_artwork_passes():
+def test_refresh_handoff_uses_shared_single_generation_and_exact_existing_target():
     row = dict(product_id='123', handle='collector', title='Collector', sessions=40,
                suggestion='A crowded title may weaken thumbnail recognition.')
     markup = _render_candidate(row)
     prompt = unescape(re.search(r'data-refresh-prompt="([^"]+)"', markup)[1])
     assert row['suggestion'] in prompt and 'Research hypothesis' in prompt
     assert 'Redesign research lead' in markup
-    copy = ' '.join(prompt.split())
-    checkpoints = (
-        'Run a fresh web image search', 'state the strongest hero',
-        'Pass 1 must be a complete new flat design', 'make Pass 2 a refinement',
-        'Compare and score the original, Pass 1 and Pass 2', 'unique staging path',
-        'SMART UPLOAD HANDOFF METADATA', '**REVIEW REPLACEMENT RULE**',
-    )
-    offsets = [copy.index(checkpoint) for checkpoint in checkpoints]
-    assert offsets == sorted(offsets)
-    assert prompt.count(MOTORSPORT_ARTWORK) == 1
-    assert prompt.index(MOTORSPORT_ARTWORK) < prompt.index('Run a fresh web image search')
-    assert 'Reuse a photo from the existing PSD only when' in prompt
-    assert 'Do not revert to the old layout' in prompt
-    assert prompt.index(BADGE_FOOTPRINT) < prompt.index('3. Generate and inspect')
-    assert prompt.index('5. Use a separate working copy') < prompt.index(BADGE_PLACEMENT_VERIFICATION) < prompt.index('unique staging path')
-    assert REVIEW_REPLACEMENT_RULE in prompt
-    assert 'Missing or stale JSON alone must not block replacement.' in prompt
-    assert 'Pending cleanup alone does not change an otherwise verified artwork' in prompt
-    assert 'update the exact JSON\n   revision to ready_for_review before resuming' in prompt
+    assert 'Current title (suggestion, not an approved title lock): Collector' in prompt
+    assert 'upload_intent (existing_product_refresh)' in prompt
+    assert 'existing_shopify_product_id ("gid://shopify/Product/123")' in prompt
+    assert 'design_origin (designs_to_refresh)' in prompt
+    assert 'one creative image-generation call' in prompt
+    assert 'Pass 2' not in prompt and 'STAGING' not in prompt
+    assert 'upload_intent (new_product)' not in prompt
+    assert '**REVIEW REPLACEMENT RULE**' not in prompt
+    assert 'Leave the existing live PSD and Shopify listing untouched' in prompt
+    assert 'Publish Now and Publish + ads' in prompt
+    # All creative, generation and assembly stages are the same renderer, not copied text.
+    new = _prompt('Collector', 'Any suggested story')
+    assert prompt.split('**1.', 1)[1].split('**6.', 1)[0] == new.split('**1.', 1)[1].split('**6.', 1)[0]
+
+
+def test_refresh_inherits_later_changes_from_the_shared_new_design_renderer(monkeypatch):
+    import home_morning_brief_actions as actions
+    monkeypatch.setattr(actions, 'CREATIVE_REVIEW', 'FUTURE SHARED CREATIVE RULE')
+    prompt = _refresh_prompt(dict(title='Collector', product_id='123'), 'https://example.test/product')
+    assert prompt.count('FUTURE SHARED CREATIVE RULE') == 1
+
+
+def test_refresh_rejects_an_ambiguous_product_target():
+    import pytest
+    with pytest.raises(ValueError, match='exact existing Shopify product ID'):
+        _refresh_prompt(dict(title='Collector', product_id='not-an-id'), 'https://example.test/product')
 
 
 def test_recommendation_source_supplies_editorial_guidance_with_or_without_traffic(monkeypatch):
