@@ -24,10 +24,10 @@ def enrich_queues(queues):
     jobs = []
     for job in ads['jobs']:
         stage = job['stage']
-        state = stage if stage in ('waiting', 'complete', 'failed') else 'running'
+        state = stage if stage in ('waiting', 'complete', 'failed','cancelled') else 'running'
         # These are stage checkpoints, not a claim about image generation percentage.
         percent = {'waiting': 0, 'preparing': 10, 'opening': 20, 'generating': 40,
-                   'posting': 80, 'complete': 100, 'failed': 0}[stage]
+                   'posting': 80, 'complete': 100, 'failed': 0,'cancelled':0}[stage]
         jobs.append({**job, 'state': state, 'percent': percent, 'estimated': False})
     queues['ads'] = dict(enabled=ads['enabled'], online=ads['online'], jobs=jobs,
                          waiting=sum(job['state'] == 'waiting' for job in jobs))

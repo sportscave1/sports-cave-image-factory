@@ -39,4 +39,12 @@ def test_edge_attachment_matching_waits_and_isolates_the_original_turn():
         page.evaluate("""() => document.querySelector('article').insertAdjacentHTML('beforeend','<a href="/file">ad_copy.csv</a>')""")
         assert 'Ambiguous' in request('ad_copy.csv')['reason']
         assert len(page.evaluate('clicked'))==2
+        # A saved-chat recovery does not depend on the original prompt still
+        # being rendered by ChatGPT's history virtualization.
+        page.evaluate("""() => document.body.innerHTML='<article><div data-message-author-role="assistant" data-message-id="existing-files"><a href="/file">ad_copy.csv Spreadsheet</a></div></article>'""")
+        assert not request('ad_copy.csv')['clicked']
+        assert request('ad_copy.csv',recover=True)['response']=='existing-files'
+        assert not request('ad_copy.csv',recover=True,response='wrong')['clicked']
+        page.evaluate("""() => document.body.insertAdjacentHTML('afterbegin','<div data-message-author-role="user">Sports Cave automatic ad job 00000000-0000-0000-0000-000000000099</div>')""")
+        assert 'different queued job' in request('ad_copy.csv',recover=True)['reason']
         browser.close()

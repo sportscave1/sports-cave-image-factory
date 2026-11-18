@@ -26,6 +26,13 @@ def render(job_id, user):
 
     try:
         value = read(job_id,user)
+        from ads_companion_controls import stopped, action
+        if stopped(job_id):
+            st.info('This job is stopped. Its imported files and posting receipts are retained.')
+            if st.button('Play / resume saved job'):
+                action(user,job_id,'play')
+                st.rerun()
+            return
         if not value.get('result') or not value.get('folder'):
             st.info('The queued ad is waiting to be prepared.')
             if st.button('Refresh import status'):

@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v1";
+  const CONTROLLER_VERSION = "companion-header-v2";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -973,9 +973,23 @@
     .sc-companion-details[data-state="complete"] summary {border-color:#71936d;color:#cef1c9;}
     .sc-companion-details[data-stale="true"] summary,#sc-os-staff-uploads[data-stale="true"] summary {border-style:dashed;}
     .sc-companion-popup {position:absolute;top:calc(100% + 6px);right:0;width:min(340px,calc(100vw - 20px));box-sizing:border-box;padding:12px;background:#191612;border:1px solid #63512d;border-radius:8px;color:#f8edcf;box-shadow:0 8px 24px #0004;max-height:55vh;overflow:auto;z-index:2;font-size:12px;}
-    .sc-companion-popup article {padding:4px 20px 8px 0;overflow-wrap:anywhere;}
+    .sc-companion-popup article {padding:6px 0;overflow-wrap:anywhere;}
     .sc-companion-popup article+article {border-top:1px solid #63512d;padding-top:8px;}
-    .sc-companion-popup p {margin:3px 0;}
+    .sc-companion-popup p {margin:2px 0!important;font:11px/1.35 Arial,sans-serif!important;color:#d9cfb8!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .sc-companion-popup strong {font:600 12px/1.3 Arial,sans-serif!important;color:#f8edcf!important;}
+    .sc-companion-popup {padding:8px!important;width:min(380px,calc(100vw - 20px));}
+    .sc-companion-popup article:first-child {padding-right:18px;}
+    .sc-ad-actions {display:inline-flex;gap:4px;float:right;margin-left:5px;}
+    .sc-ad-actions button {width:26px;height:26px;padding:2px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
+    .sc-ad-actions button:disabled {opacity:.4;cursor:default;}
+    .sc-ad-quick {border-top:1px solid #63512d;margin-top:6px;padding-top:6px;}
+    .sc-ad-quick summary {border:0!important;padding:4px!important;font:600 12px Arial!important;color:#f3ce7e!important;cursor:pointer;}
+    .sc-ad-quick form {display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:5px;margin-top:6px;}
+    .sc-ad-quick label {font:11px Arial!important;color:#e7ddc7!important;display:grid;gap:3px;min-width:0;}
+    .sc-ad-quick label:first-child {grid-column:1/-1;}
+    .sc-ad-quick select,.sc-ad-quick input,.sc-ad-quick button {width:100%;box-sizing:border-box;min-width:0;background:#252017;color:#f8edcf;border:1px solid #6f5a2e;border-radius:4px;padding:6px;font:12px Arial;}
+    .sc-ad-quick button {grid-column:1/-1;cursor:pointer;color:#17140e;background:#d1a444;}
+    #sc-ad-message {font:11px/1.3 Arial!important;color:#f3ce7e!important;white-space:normal;}
     .sc-companion-popup a {color:#f3ce7e;display:inline-block;margin:4px 12px 4px 0;}
     .sc-companion-close {position:absolute;right:4px;top:4px;color:inherit;background:transparent;border:0;font:20px Arial;cursor:pointer;}
     .sc-companion-popup .sc-os-queue-control,#sc-os-staff-upload-popup .sc-os-queue-control {margin:6px 8px;}
@@ -1066,7 +1080,7 @@
       <div id="sc-os-ads-card" class="sc-companion-card" hidden>
         <details id="sc-os-ads-status" class="sc-companion-details">
           <summary><span class="sc-companion-name">Ads</span><span id="sc-os-ads-title" class="sc-companion-title"></span><span id="sc-os-ads-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-ads-meter" max="100" aria-label="Ads stage progress"></progress></summary>
-          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button></div>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" list="sc-ad-products" placeholder="Search products" required autocomplete="off"><datalist id="sc-ad-products"></datalist></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
         </details>
       </div>
     </div>
@@ -1187,6 +1201,10 @@
       list:root.querySelector(`#sc-os-${name}-list`),
     }]));
     const renderCompanions = status => {
+      if(adQuickScope && (adQuickScope!==state.config.uploadScope || !queues.ads?.jobs)) {
+        adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
+        root.querySelector('#sc-ad-products').replaceChildren();
+      }
       for (const [name, elements] of Object.entries(companionPanels)) {
         const control = queues[name];
         elements.card.hidden = !Array.isArray(control?.jobs);
@@ -1201,7 +1219,7 @@
         if (control.waiting) label += ` · ${control.waiting} waiting`;
         elements.title.textContent = job?.title || 'No current job';
         elements.stage.textContent = label;
-        elements.panel.title = [name,job?.title,label,job?.detail].filter(Boolean).join(' · ');
+        elements.panel.title = '';
         elements.panel.dataset.state = job?.state || 'idle';
         elements.panel.dataset.stale = 'false';
         elements.meter.value = job?.percent || 0;
@@ -1210,6 +1228,24 @@
           const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
           title.textContent=item.title;
           detail.textContent=item.label + (item.detail ? ' · '+item.detail : '');
+          detail.title=detail.textContent;
+          if(name==='ads') {
+            const actions=doc.createElement('span');actions.className='sc-ad-actions';
+            for(const [action,glyph,label,allowed] of [['play','▶','Play / resume job',item.can_play],['cancel','■','Cancel job',item.can_cancel],['delete','🗑','Delete from queue',true]]) {
+              const button=doc.createElement('button');button.type='button';button.textContent=glyph;button.title=label;button.setAttribute('aria-label',label+' · '+item.title);
+              button.disabled=!allowed;button.onclick=async()=>{
+                button.disabled=true;const scope=state.config.uploadScope;
+                try {
+                  const response=await parentWindow.fetch('/api/staff-product-uploads/ad-control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,action})});
+                  const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update job');
+                  if(scope!==state.config.uploadScope)return;
+                  root.querySelector('#sc-ad-message').textContent=action==='play'?'Resuming saved job':action==='cancel'?'Job cancelled':'Removed from queue';
+                  await refreshStaffProgress();
+                }catch(error){if(scope===state.config.uploadScope)root.querySelector('#sc-ad-message').textContent=error.message;}
+                finally{button.disabled=!allowed;}
+              };actions.append(button);
+            }article.append(actions);
+          }
           article.append(title,detail);
           if (/^https:\/\/chatgpt\.com\//.test(item.chat_url || '')) {
             const chat=doc.createElement('a');chat.href=item.chat_url;chat.target='_blank';chat.rel='noopener';chat.textContent='Open chat';article.append(chat);
@@ -1223,6 +1259,45 @@
         const queueLink=doc.createElement('a');queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';elements.list.append(queueLink);
       }
     };
+    let adProducts=[],adQuickScope='',adRequest='';
+    const adMessage=root.querySelector('#sc-ad-message'),adProduct=root.querySelector('#sc-ad-product');
+    const quick=root.querySelector('#sc-ad-quick');
+    quick.addEventListener('toggle',async()=>{
+      if(!quick.open || adQuickScope===state.config.uploadScope)return;
+      const scope=state.config.uploadScope;adProducts=[];adProduct.value='';
+      try {
+        const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{credentials:'same-origin',signal:listenerController.signal});
+        const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load products');
+        if(scope!==state.config.uploadScope)return;
+        adProducts=data.products;adQuickScope=scope;
+        const list=root.querySelector('#sc-ad-products');list.replaceChildren();
+        for(const product of adProducts){const option=doc.createElement('option');option.value=product.name;list.append(option);}
+        for(const [name,values] of [['sport',data.sports],['country',data.countries]]) {
+          const select=root.querySelector('#sc-ad-'+name);select.replaceChildren();
+          for(const value of values){const option=doc.createElement('option');option.value=value;option.textContent=value;select.append(option);}
+        }
+        adMessage.textContent='Choose a product and check its market.';
+      }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
+    },listenerOptions);
+    adProduct.addEventListener('input',()=>{
+      const product=adProducts.find(p=>p.name===adProduct.value);adRequest='';
+      if(product){root.querySelector('#sc-ad-sport').value=product.sport;root.querySelector('#sc-ad-country').value=product.country;}
+    },listenerOptions);
+    for(const name of ['sport','country','type'])root.querySelector('#sc-ad-'+name).addEventListener('change',()=>{adRequest='';},listenerOptions);
+    root.querySelector('#sc-ad-form').addEventListener('submit',async event=>{
+      event.preventDefault();const scope=state.config.uploadScope;
+      const matches=adProducts.filter(p=>p.name===adProduct.value);
+      if(matches.length!==1){adMessage.textContent='Select one product from the list.';return;}
+      const button=root.querySelector('#sc-ad-submit');if(button.disabled)return;button.disabled=true;
+      adRequest=adRequest||parentWindow.crypto.randomUUID();
+      try {
+        const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({product:matches[0].id,country:root.querySelector('#sc-ad-country').value,sport:root.querySelector('#sc-ad-sport').value,type:root.querySelector('#sc-ad-type').value,request_id:adRequest})});
+        const data=await response.json();if(!response.ok)throw Error(data.error||'Could not add ad');
+        if(scope!==state.config.uploadScope)return;
+        adMessage.textContent='Added to Ads queue';await refreshStaffProgress();
+      }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
+      finally{button.disabled=false;}
+    },listenerOptions);
     let queueRevision = 0;
     const pendingQueues = new Set();
     let lastStaffStatus = "";

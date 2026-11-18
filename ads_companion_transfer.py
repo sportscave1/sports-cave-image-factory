@@ -50,6 +50,8 @@ def receive(token, job_id, name, chat_url, response_id, data):
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (key,))
         value = cur.fetchone()['value']
     try:
+        from ads_companion_controls import stopped
+        if stopped(job_id): raise ValueError('This ad job has been cancelled or deleted.')
         if value['stage'] != 'generating' or value.get('posting_id') or value.get('chat_url') != chat_url:
             raise ValueError('The ad checkpoint changed; refresh its import status.')
         if (value.get('response_ids') or {}).get(name, response_id) != response_id:
@@ -89,6 +91,7 @@ def progress(value):
 
 def delivery(value):
     return dict(id=value['upload'], stage=value['stage'], receipt=ads._source_token(value['upload']),
+                recover=bool(value.get('collect_only')),resume_token=value.get('resume_token'),response_ids=value.get('response_ids') or {},
                 chat_url=value.get('chat_url'),
                 missing=[name for name in FILES if name not in (value.get('artifacts') or {})])
 
@@ -119,7 +122,8 @@ def resume(job_id, user, settings=None):
             raise ValueError('Use the existing Posting receipt to recover a submitted ad.')
         if not value.get('folder') or not ads.CHAT.fullmatch(value.get('chat_url', '')):
             raise ValueError('The original ad conversation and prepared folder are required.')
-        value.update(stage='generating', detail=progress(value), collect_only=True)
+        value.update(stage='generating', detail=progress(value), collect_only=True,resume_token=str(uuid4()))
+        cur.execute('DELETE FROM app_settings WHERE key=%s',('ads_job_control:'+str(UUID(job_id)),))
         cur.execute('UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s',
                     (json.dumps(value), ads.PREFIX+str(UUID(job_id))))
 

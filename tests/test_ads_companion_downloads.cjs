@@ -6,13 +6,13 @@ const path=require('node:path');
 const id='00000000-0000-0000-0000-000000000001';
 const chat='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+id;
 function fixture(records=new Map()) {
-  const calls=[],opens=[],messages=[];
+  const calls=[],opens=[],messages=[],reloads=[];
   const job={id,receipt:'a'.repeat(64),chat_url:chat,missing:['ad_copy.csv']};
   let downloads=[],valid=true;
   const chrome={runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{onAlarm:{addListener(){}}},
     tabs:{get:async()=>({id:1,url:chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:1,...options};},
-      update:async()=>{},sendMessage:async(tab,message)=>{messages.push(message);return {clicked:true,response:'response-1',chat};}},
+      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return {clicked:true,response:'response-1',chat};}},
     downloads:{search:async()=>downloads}};
   const context=vm.createContext({chrome,URL,URLSearchParams,AbortSignal,Uint8Array,Date,
     queueId:/^[a-f0-9-]{36}$/,suppliedReceipt:/^[a-f0-9]{64}$/,staffAlarm:'alarm',osOrigin:'https://os.test',
@@ -24,7 +24,7 @@ function fixture(records=new Map()) {
     }});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/ad-queue.js'),'utf8'),context);
   context.job=job;
-  return {records,calls,opens,messages,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),
+  return {records,calls,opens,messages,reloads,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),
     downloads:value=>downloads=value,valid:value=>valid=value};
 }
 test('background tab, durable native download journal, verified receipt and no prompt resend',async()=>{
@@ -39,6 +39,12 @@ test('background tab, durable native download journal, verified receipt and no p
   assert.equal(restart.calls[0].options.headers,undefined);
   assert.equal(restart.records.get('publishAdJob').transfer,null);
   restart.job.missing=[];await restart.run();assert.equal(restart.calls.length,2);
+});
+test('Play reloads the saved background chat once and pins recovered response IDs',async()=>{
+  const f=fixture();f.job.resume_token='new-resume';f.job.recover=true;f.job.response_ids={'ad_copy.csv':'original-response'};
+  await f.run();await f.run();assert.deepEqual(f.reloads,[1]);
+  await f.run();assert.equal(f.messages[0].recover,true);assert.equal(f.messages[0].response,'original-response');
+  await f.run();assert.equal(f.reloads.length,1);
 });
 test('unrelated and ambiguous downloads never upload; expired links re-request original',async()=>{
   const f=fixture();await f.run();await f.run();

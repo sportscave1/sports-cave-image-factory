@@ -65,7 +65,7 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
             expect(page.locator('#sc-os-global-search')).to_be_focused()
             page.locator('#fixture-content').click()
             expect(page.locator('#sc-os-global-search')).to_be_hidden()
-            page.locator('#sc-os-ads-status summary').click()
+            page.locator('#sc-os-ads-status > summary').click()
             expect(page.get_by_role('button',name='Pause ads queue (0 waiting)',exact=True)).to_be_visible()
             page.get_by_role('button',name='Pause ads queue (0 waiting)',exact=True).click()
             expect(page.get_by_role('button',name='Play ads queue (0 waiting)',exact=True)).to_be_visible()

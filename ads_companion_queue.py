@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 import design_publish_ad as companion
 
 
-def enqueue(user, result, selection):
+def enqueue(user, result, selection, *, request_key=None):
     """Freeze the submitted brief; retries of this draft return the same job."""
     import ads_page
 
@@ -33,13 +33,16 @@ def enqueue(user, result, selection):
         country=result['country'], stage='waiting', result=result,
         product_gid='gid://shopify/Product/' + pid.rsplit('/', 1)[-1], handle=handle)
     fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-    key = str(uuid5(NAMESPACE_URL, 'sports-cave-new-ads:' + fingerprint))
+    key = str(uuid5(NAMESPACE_URL, 'sports-cave-new-ads:' + (
+        str(user['id'])+':request:'+request_key if request_key else fingerprint)))
     payload['upload'] = key  # Existing companion protocol uses this as the ad job ID.
     with companion.connect() as conn, conn.cursor() as cur:
         cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES (%s,%s::jsonb,now())
             ON CONFLICT DO NOTHING''', (companion.PREFIX + key, json.dumps(payload)))
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (companion.PREFIX + key,))
         saved = cur.fetchone()['value']
+        if request_key and any(saved.get(field)!=payload.get(field) for field in ('product_gid','country','sport')):
+            raise ValueError('This request already queued different selections. Choose the product again for a new request.')
     return dict(id=key, **companion.public(saved))
 
 

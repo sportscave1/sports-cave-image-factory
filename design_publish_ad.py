@@ -23,7 +23,7 @@ COVERS = {idea['id']: idea['scene_name'].lower().replace(' ', '-') + '.jpg'
 LABELS = {'waiting': 'Waiting for the published product', 'preparing': 'Preparing the verified mockup',
           'opening': 'Opening Meta Ads in ChatGPT',
           'generating': 'Waiting for ad copy and three covers', 'posting': 'Creating the Meta campaign',
-          'complete': 'Ads created · paused for review', 'failed': 'Ad needs attention'}
+          'complete': 'Ads created · paused for review', 'failed': 'Ad needs attention', 'cancelled': 'Cancelled'}
 LOG = logging.getLogger(__name__)
 
 
@@ -80,8 +80,8 @@ def public(value):
     if not value:
         return None
     return dict(label=LABELS[value['stage']], detail=value.get('detail', ''),
-                active=value['stage'] not in ('complete', 'failed'),
-                posting_id=value.get('posting_id') if value['stage'] in ('posting', 'complete', 'failed') else None)
+                active=value['stage'] not in ('complete', 'failed', 'cancelled'),
+                posting_id=value.get('posting_id'))
 
 
 def _enabled(cur):
@@ -107,10 +107,12 @@ def dashboard():
                        FROM app_settings WHERE key=%s""", (HEARTBEAT_KEY,))
         status = cur.fetchone()
         cur.execute("""SELECT a.value - 'prompt' - 'result' AS value, a.updated_at,
+            (SELECT value->>'action' FROM app_settings WHERE key='ads_job_control:' || (a.value->>'upload')) AS control,
             COALESCE(j.title, a.value->'result'->>'product_name') AS title,
             CASE WHEN a.value->>'source'='new_ads' THEN 6 ELSE j.stage END AS upload_stage
             FROM app_settings a LEFT JOIN product_upload_staff_jobs j ON a.key=%s || j.id::text
-            WHERE j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads')
+            WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
+              AND NOT EXISTS (SELECT 1 FROM app_settings c WHERE c.key='ads_job_control:' || (a.value->>'upload') AND c.value->>'action'='delete')
             ORDER BY CASE a.value->>'stage'
                 WHEN 'preparing' THEN 0 WHEN 'opening' THEN 0 WHEN 'generating' THEN 0 WHEN 'posting' THEN 0
                 WHEN 'waiting' THEN 1 ELSE 2 END,
@@ -119,9 +121,13 @@ def dashboard():
         jobs = []
         for row in cur.fetchall():
             value = row['value']
+            if row['control']=='delete': continue
+            if row['control']=='cancel':
+                value.update(stage='cancelled',detail='Automation stopped. Already-started Meta operations must be reviewed in Posting.')
             entry = dict(public(value), id=value['upload'], updated_at=row['updated_at'].isoformat(),
                          title=row['title'], country=value['country'], sport=value['sport'],
                          stage=value['stage'], chat_url=value.get('chat_url'), targeting=value.get('targeting'),
+                         can_play=value['stage']!='complete', can_cancel=value['stage'] not in ('complete','cancelled'),
                          resumable=value['stage'] in ('failed','generating') and bool(value.get('chat_url') and value.get('folder')) and not value.get('posting_id'))
             if value['stage'] == 'waiting' and row['upload_stage'] == 6:
                 entry['label'] = 'Ready for the ad queue' if enabled else 'Ready · queue paused'
@@ -338,6 +344,7 @@ def _post_request(value):
 
 
 def _step(key, value, job, event, age):
+    from ads_companion_controls import stopped
     from meta_posting_jobs import JOBS, TERMINAL, confirmed_ads
     from meta_posting_service import PostingBusyError
 
@@ -372,6 +379,7 @@ def _step(key, value, job, event, age):
             write(key, value)
         request = _post_request(value)
         if request:
+            if stopped(value['upload']): return {}
             try:
                 value['posting_id'] = JOBS.submit(request)
             except PostingBusyError:
@@ -408,6 +416,10 @@ def tick(token, event):
         cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES (%s,'true',now())
             ON CONFLICT(key) DO UPDATE SET updated_at=now()""", (HEARTBEAT_KEY,))
         enabled = _enabled(cur)
+        reported = str(event.get('id') or '')
+        if re.fullmatch(r'[a-f0-9-]{36}',reported):
+            cur.execute("SELECT 1 FROM app_settings WHERE key=%s AND value->>'action' IN ('cancel','delete')",('ads_job_control:'+reported,))
+            if cur.fetchone(): return {'stop': {'id':reported}}
         cur.execute("""SELECT a.key, a.value,
             CASE WHEN a.value->>'source'='new_ads' THEN 6 ELSE j.stage END AS stage,
             j.intake_id, j.worker_actor, j.storefront,
@@ -415,6 +427,8 @@ def tick(token, event):
             FROM app_settings a LEFT JOIN product_upload_staff_jobs j
                 ON a.key=%s || j.id::text
             WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
+              AND NOT EXISTS (SELECT 1 FROM app_settings c WHERE c.key='ads_job_control:' || (a.value->>'upload')
+                              AND c.value->>'action' IN ('cancel','delete'))
               AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
                OR (a.value->>'stage'='waiting' AND
                    (j.stage=7 OR ((j.stage=6 OR a.value->>'source'='new_ads') AND %s))))
@@ -441,6 +455,8 @@ def tick(token, event):
             cur.execute('UPDATE app_settings SET value=%s::jsonb, updated_at=now() WHERE key=%s',
                         (json.dumps(value), key))
     try:
+        from ads_companion_controls import stopped
+        if stopped(value['upload']): return {}
         if value['stage'] in ('complete', 'failed'):
             return {}
         requester = DEFAULT_STORE.get_user(value['requester'])

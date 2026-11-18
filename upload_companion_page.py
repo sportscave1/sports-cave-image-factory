@@ -219,6 +219,8 @@ def render_ad_queue():
     import streamlit as st
     from urllib.parse import urlencode
     from design_publish_ad import dashboard, settings
+    from ads_companion_quick_add import render as quick_add
+    quick_add()
 
     def links(job):
         if job.get('id'):
@@ -231,15 +233,16 @@ def render_ad_queue():
                 dict(page='ads_posting', meta_posting_job=job['posting_id'])))
         if job.get('targeting'):
             st.caption('Product set: ' + job['targeting']['product_set_name'] + ' · Audience: ' + job['targeting']['audience_name'])
-        if job.get('resumable') and st.button('Resume import', key='cq-ad-resume-'+job['id'],
-                help='Collect the missing files from the original conversation without generating again.'):
-            from ads_companion_transfer import resume
-            from ads_page import current_ads_user
-            try:
-                resume(job['id'], current_ads_user())
-                st.rerun()
-            except ValueError as error:
-                st.error(str(error))
+        if not job.get('id'): return
+        from ads_companion_controls import action
+        from ads_page import current_ads_user
+        for column,operation,label,allowed in zip(st.columns(3),('play','cancel','delete'),
+                ('▶ Play / resume','■ Cancel','🗑 Delete'),(job.get('can_play'),job.get('can_cancel'),True)):
+            if column.button(label,key='cq-ad-'+operation+'-'+job['id'],disabled=not allowed):
+                try:
+                    action(current_ads_user(),job['id'],operation)
+                    st.rerun()
+                except (ValueError,PermissionError) as error:st.error(str(error))
 
     @st.fragment(run_every=10)
     def history():
@@ -271,7 +274,7 @@ def render_ad_queue():
                 settings(False)
                 st.rerun()
 
-        st.caption('Use Publish + ad in Design Studio to add work to this queue.')
+        st.caption('Add products above or use Publish + ad in Design Studio. Cancel stops future automation; Delete hides the job without removing files or Meta receipts.')
         st.subheader('Running now')
         if not running:
             st.caption('No ad running.')
@@ -285,9 +288,11 @@ def render_ad_queue():
 
         st.subheader('Waiting queue')
         if waiting:
-            st.dataframe([{'Position': position, 'Artwork': job['title'], 'Country': job['country'],
-                           'Sport': job['sport'], 'Status': job['label']}
-                          for position, job in enumerate(waiting, 1)], hide_index=True, width='stretch')
+            for position,job in enumerate(waiting,1):
+                with st.container(border=True):
+                    st.write(f"{position}. {job['title']}")
+                    st.caption(f"{job['country']} · {job['sport']}")
+                    links(job)
         else:
             st.caption('Nothing waiting.')
 
@@ -300,5 +305,5 @@ def render_ad_queue():
                 if job['detail']:
                     st.caption(job['detail'])
                 links(job)
-        st.caption('Latest 100 ads. Keep Edge open and signed in with Companion 1.5 or later. Ad tabs work in the background; the computer must remain awake.')
+        st.caption('Latest 100 ads. Keep Edge open and signed in with Companion 1.5.1 or later. Ad tabs work in the background; the computer must remain awake.')
     history()

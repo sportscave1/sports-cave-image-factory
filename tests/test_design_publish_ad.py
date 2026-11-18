@@ -204,6 +204,8 @@ def test_ads_companion_heartbeat_pause_and_blocked_job_history(store, monkeypatc
 
 
 def test_developer_companion_shows_ads_queue(monkeypatch):
+    import ads_companion_quick_add
+    monkeypatch.setattr(ads_companion_quick_add,'catalog',lambda:dict(products=[]))
     from streamlit.testing.v1 import AppTest
     import os_accounts
     import upload_companion_page as page
@@ -221,4 +223,4 @@ def test_developer_companion_shows_ads_queue(monkeypatch):
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ['Design queue', 'Upload queue', 'Ads queue']
     assert [(button.label, button.disabled) for button in app.button] == [('Play', False), ('Pause', True)]
-    assert app.dataframe[0].value.iloc[0]['Artwork'] == 'Fixture'
+    assert any('Fixture' in text.value for text in app.markdown)

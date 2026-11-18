@@ -16,6 +16,10 @@ async function collectAd(job, token) {
     local={...local,tab:tab.id};await staffWrite(adStorage,local);return;
   }
   await chrome.tabs.update(tab.id,{autoDiscardable:false});
+  if(job.resume_token && local.resume_token!==job.resume_token) {
+    await chrome.tabs.reload(tab.id);
+    await staffWrite(adStorage,{...local,resume_token:job.resume_token,transfer:null,transferError:''});return;
+  }
   const names=['ad_copy.csv','collector-hallway.jpg','architectural-wall.jpg','man-cave.jpg'];
   const name=names.find(file=>job.missing?.includes(file));
   if(!name)return;
@@ -23,7 +27,7 @@ async function collectAd(job, token) {
   if(transfer?.name!==name)transfer=null;
   if(!transfer) {
     const started=new Date().toISOString();
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-artifact',job:job.id,name,response:job.response_id},{frameId:0});
+    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-artifact',job:job.id,name,response:job.response_ids?.[name],recover:job.recover},{frameId:0});
     if(!result?.clicked) {
       await staffWrite(adStorage,{...local,transfer:null,transferError:result?.reason||'Waiting for downloadable attachments'});return;
     }
@@ -45,7 +49,7 @@ async function collectAd(job, token) {
   const url=new URL(item.finalUrl||item.url);
   let data;
   if(url.protocol==='blob:' && url.origin==='https://chatgpt.com') {
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,url:url.href},{frameId:0});
+    const result=await chrome.tabs.sendMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,url:url.href},{frameId:0});
     if(!result?.data)throw Error(result?.error||'Original blob unavailable');
     data=Uint8Array.from(atob(result.data),char=>char.charCodeAt(0));
   } else {
@@ -112,7 +116,12 @@ async function adQueueTick() {
       credentials:'omit', signal:AbortSignal.timeout(25000),
     });
     if (!response.ok) return;
-    const {job, busy} = await response.json();
+    const {job, busy, stop} = await response.json();
+    if(stop?.id===local?.id && local) {
+      const operation=pending.get(local.receipt);if(operation)operation.cancelled=true;
+      if(local.tab)await chrome.tabs.sendMessage(local.tab,{type:'project:cancel'},{frameId:0}).catch(()=>null);
+      await chrome.storage.local.remove(adStorage);return;
+    }
     if (busy) return;
     if (!job) await chrome.storage.local.remove(adStorage);
     else if (job.stage === 'opening') await startAd(job);

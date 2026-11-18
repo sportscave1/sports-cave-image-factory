@@ -497,7 +497,19 @@ async def ad_file_route(request):
     return await file_route(request)
 
 
+async def ad_control_route(request):
+    from ads_companion_controls import route
+    return await route(request)
+
+
+async def ad_quick_add_route(request):
+    from ads_companion_quick_add import route
+    return await route(request)
+
+
 ROUTES = (
+    ('/api/staff-product-uploads/ad-control', ad_control_route, ('POST',)),
+    ('/api/staff-product-uploads/ad-quick-add', ad_quick_add_route, ('GET','POST')),
     ('/api/staff-product-uploads/ad-file', ad_file_route, ('POST',)),
     ('/api/staff-product-uploads/cancel', restart_route, ('POST',)),
     ('/api/staff-product-uploads/ad-tick', ad_tick_route, ('POST',)),

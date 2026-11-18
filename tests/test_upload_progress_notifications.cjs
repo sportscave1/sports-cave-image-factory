@@ -167,7 +167,7 @@ install();
  assert.equal(nodes.get('#sc-os-ads-status').open,false,'polling cannot force open the popup');
  const notices=region.children.length;
  await context.refresh();assert.equal(region.children.length,notices,'failure notice is not repeated');
- assert.equal(nodes.get('#sc-os-ads-list').children[0].children[1].textContent,'Ad needs attention · Missing cover');
+ assert.ok(nodes.get('#sc-os-ads-list').children[0].children.some(child=>child.textContent==='Ad needs attention · Missing cover'));
  disconnected=true;await context.refresh();
  assert.equal(nodes.get('#sc-os-design-status').dataset.stale,'true');
  assert.equal(nodes.get('#sc-os-design-stage').textContent,'Status unavailable · retrying');
