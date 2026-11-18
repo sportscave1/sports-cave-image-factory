@@ -33,6 +33,7 @@ from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 from ads_footer import COMPACT_FOOTER_RULES, FOOTER_VERSION, apply_footer_contract
 from ads_final_delivery import VERSION as FINAL_DELIVERY_VERSION, apply_final_delivery
+from ads_generation_review import VERSION as GENERATION_REVIEW_VERSION, apply_generation_review
 import ads_carousel_winner as carousel_winner
 import ads_google_demand_gen as google_ads
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
@@ -9079,8 +9080,8 @@ def build_ads_prompt(
             compose_final_ads_prompt(prompt, **prompt_kwargs),
             creative_refresh_context,
         )
-    return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(
-        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata)))
+    return apply_final_delivery(apply_generation_review(apply_footer_contract(physical_realism.apply_context(
+        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata))))
 
 
 def render_insufficient_winner_data():
@@ -9490,6 +9491,8 @@ def ads_prompt_contract_version_for_campaign(
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
     if campaign_type == "Instant Experience":
         version += '; ' + ie_visuals.VERSION + '; ' + SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        version += '; ' + GENERATION_REVIEW_VERSION
     return version + '; OWNER CONFIRMED PHYSICAL AND WORLDWIDE DEFAULTS V1; ' + FOOTER_VERSION + '; ' + FINAL_DELIVERY_VERSION
 
 
@@ -14423,8 +14426,6 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
                                  source_matches=source_matches, quality_issues=issues)
     else:
         import ads_auto_post
-        if _is_instant_experience_result(result):
-            _render_final_ad_review(result, workflow)
         ads_auto_post.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
 
 
@@ -14699,11 +14700,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             else:
                 st.markdown(
                     "1. Enter the product and select the sport, country and campaign type.\n"
-                    "2. Select Submit.\n"
-                    "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
-                    "4. Copy and paste the generated master prompt.\n"
-                    "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
-                    "6. Generate and upload the images in the displayed order."
+                    "2. Select Add to queue for Instant Experience.\n"
+                    "3. The companion runs generation automatically when online and the queue is playing.\n"
+                    "4. Images and copy receive a final creative review before the CSV and downloads are prepared.\n"
+                    "5. The companion completes the existing handoff and creates paused Meta ads for review."
                 )
             st.warning(
                 "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
@@ -14776,7 +14776,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             render_product_image_link(st)
     elif not is_google:
         render_product_artwork_reference(product_selection, product_url)
-    campaign_moment = render_campaign_moment_section()
+    campaign_moment = render_campaign_moment_section() if is_google or is_creative_refresh else None
     creative_refresh_context = None
     if is_creative_refresh:
         with st.container(border=True, key="ads-creative-refresh-winning-ad"):
@@ -14829,15 +14829,15 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         and isinstance(result, dict) and result.get("campaign_type") == "Instant Experience" and result.get("master_prompt")
         and st.button("Fresh pack", key="ads-ie-fresh-pack")
     )
-    submit_area, queue_area = st.columns(2) if not is_google and not is_creative_refresh else (st, None)
-    submitted = submit_area.button(
+    submitted = st.button(
         "Submit",
         type="primary",
         use_container_width=True,
-    ) or fresh_ie_pack or (bool(creative_refresh_context) and deliberate_new)
+    ) if is_google or is_creative_refresh else False
+    submitted = submitted or fresh_ie_pack or (bool(creative_refresh_context) and deliberate_new)
     queued = False
-    if queue_area is not None:
-        queued = queue_area.button(
+    if not is_google and not is_creative_refresh:
+        queued = st.button(
             "Add to queue", key="ads-add-to-queue", use_container_width=True,
             disabled=campaign_type != "Instant Experience",
             help="Automatically generate and save three covers and ad copy, then create paused Meta ads for review. Instant Experience only.",
