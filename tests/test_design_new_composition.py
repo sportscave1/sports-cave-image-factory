@@ -58,10 +58,12 @@ def test_new_design_replaces_generation_conflicts_without_blocking_review():
                      'Generate the full artwork with subject',
                      'Use the strongest verified pairing by default',
                      'Test the selected supporting photograph in disconnected areas',
-                     'A simple, elegant border is equally suitable'):
+                     'A simple, elegant border is equally suitable',
+                     'Any generated people or sporting objects are placement guides only',
+                     'Completely cover generated renditions'):
         assert obsolete not in prompt
     for requirement in ('separate editable masked layers',
-                        'Any generated people or sporting objects are placement guides only',
+                        'Do not automatically paste whole source cutouts over them.',
                         'Reject assumed feelings, invented relationships with a city',
                         'A plain rectangle alone is insufficient',
                         'Continue authorised review saves and delivery',

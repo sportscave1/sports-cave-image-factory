@@ -234,7 +234,7 @@ The border must feel custom-designed for an expensive limited-edition sports col
 
 Create a refined Sports Cave border using:
 
-* Deep black, charcoal or near-black foundations
+* Story-led natural or team-derived palettes with selective dark contrast; black foundations only when suited to the story
 * Fine warm-gold or muted-metallic pinlines
 * Clean layered keylines
 * Precise symmetrical spacing
@@ -410,7 +410,7 @@ Use:
 * Equal scale and visual importance
 * Authentic jersey names, numbers, colours and stitching
 * Natural spacing between the subjects
-* Strong silhouettes against a restrained dark background
+* Strong silhouettes against a restrained story-led background with selective shadow depth
 * Subtle light behind each subject to separate the real cutouts from the environment
 
 Never create a generated jersey-back replacement.
@@ -436,7 +436,7 @@ The background must support the rivalry without competing with it.
 Use only:
 
 * One restrained, era-appropriate stadium, arena, field, court, circuit, ring or environmental layer
-* Deep black or charcoal foundation
+* Story-led palette with selective shadow depth; a black foundation is optional
 * Subtle atmospheric smoke, haze, turf, court, asphalt or venue texture
 * Controlled central light or shadow divide
 * Restrained team-colour atmosphere on each subject’s side
@@ -1431,12 +1431,12 @@ Build the artwork around that answer.
 
 STEP 4 - SPORTS CAVE VISUAL STYLE
 
-Use a dark cinematic foundation:
+Choose a story-led cinematic palette; these are options, not a required dark foundation:
 
-Deep black
-Charcoal
-Smoke
-Stadium darkness
+Natural venue greens, blues, earth and stone
+Meaningful team hues and warm archival neutrals
+Selective black or charcoal
+Stadium shadow
 Arena shadows
 Garage shadows
 Track grit
@@ -1717,7 +1717,7 @@ Improve composition
 Improve plaque integration
 Improve border elegance
 Make the border longer horizontally and slightly shorter vertically so it feels more rectangular and premium
-Improve premium black-and-gold collector feeling
+Improve premium collector feeling through story-led colour, refined type and tonal depth
 Remove clutter
 Remove cheap poster-shop elements
 Remove social-media-style layout
@@ -1734,7 +1734,7 @@ Does it celebrate a legend, rivalry, team, championship, or iconic moment?
 Does it feel emotional?
 Does it feel premium?
 Does it feel collectible?
-Does it work in black and gold?
+Does the palette express this story with a premium collector finish?
 Is the title powerful and upgraded where needed?
 Is the Sports Cave limited-edition plaque properly used?
 Is the border elegant, longer horizontally, and slightly less tall vertically?
@@ -1797,7 +1797,7 @@ Return this concise handoff:
 9. Three focused image-search phrases per principal
 10. One fallback moment if preferred photography is unavailable
 
-For rivalry or group designs, choose photographs that can coexist naturally in one restrained Sports Cave composition. The direction must feel premium, realistic, minimal, dark, framed-first and collector-driven.
+For rivalry or group designs, choose photographs that can coexist naturally in one restrained Sports Cave composition. The direction must feel premium, realistic, minimal, tonally rich, framed-first and collector-driven.
 """
 
 
@@ -1843,7 +1843,7 @@ The final reaction should be:
 "I need that on my wall."
 
 Core emotional hook:
-Build the design around legend + moment + nostalgia + darkness + subtle gold + framed collector energy.
+Build the design around legend + moment + nostalgia + story-led colour + selective gold + framed collector energy.
 The design must instantly answer:
 Why does this moment matter?
 What memory does it unlock?
@@ -1860,8 +1860,8 @@ Do not mix different eras, teams, cars, trophies, uniforms, liveries, or venues.
 Subjects must feel physically present with correct shadows, contact, perspective, texture, and depth.
 
 Sports Cave collector style:
-Use a dark cinematic foundation:
-deep black, charcoal, smoke, stadium shadows, arena darkness, garage shadows, vintage grit, track dust, or warm spotlight atmosphere.
+Choose a story-led cinematic palette; these are options, not a required dark foundation:
+natural venue colours, team-derived hues, archival neutrals, selective stadium or garage shadows, track texture, or warm spotlight atmosphere. Use black or charcoal when the story calls for it, without suppressing meaningful background colour.
 
 Use gold sparingly only for premium emphasis:
 title accents, thin dividers, plaque detail, edition number, small collector details, subtle highlights.
@@ -1930,7 +1930,7 @@ Use each verified authentic signature asset exactly as provided and place it sub
 
 Use the exact Sports Cave limited-edition plaque asset from the mapping below whenever available. Never invent, redraw, retype or approximate the plaque, seal, wording or edition number.
 
-Build around one clear hero or a controlled rivalry/group composition. Use a minimal deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, subtle relevant venue or era texture, strong negative space and a thin border fully inside the 4:3 landscape canvas.
+Build around one clear hero or a controlled rivalry/group composition. Use a minimal story-led foundation with natural or team-derived colour, selective shadows, small warm-gold details where appropriate, premium typography, subtle relevant venue or era texture, strong negative space and a thin border fully inside the 4:3 landscape canvas.
 
 Do not add generated players, recognisable crowd figures, random logos, oversized text, excessive smoke or generic clutter. Keep every subject, name, signature, plaque, title, effect and border detail fully inside the safe area.
 
@@ -1945,7 +1945,7 @@ They are your most emotionally loaded designs.
 
 The common thread is not "perfect graphic design." It is:
 
-legend + moment + nostalgia + darkness + gold + framed collector energy.
+legend + moment + nostalgia + story-led colour + selective gold + framed collector energy.
 
 That is what works.
 
@@ -1970,9 +1970,9 @@ The best sellers trigger one of these emotions:
 
 That is the Sports Cave money zone.
 
-2. Dark cinematic background
+2. Story-led cinematic background
 
-Most winners use:
+Choose natural venue colours, team-derived hues or archival neutrals. Dark treatments are optional:
 
 black
 charcoal
@@ -1982,7 +1982,7 @@ stadium lighting
 garage lighting
 vintage grit
 
-This makes them feel more like collectibles and less like posters.
+Collector quality comes from authentic imagery, deliberate hierarchy, refined typography and print finish, not a compulsory black background.
 
 3. Gold typography and gold detail
 
@@ -2037,7 +2037,7 @@ legendary moments
 rivalries
 career-defining quotes
 stadium nostalgia
-black-and-gold collector styling
+story-led collector styling
 numbered limited runs
 man cave identity
 
@@ -2093,11 +2093,11 @@ Why would someone want this on their wall?
 
 Visual Style Rules
 
-Use a dark, premium foundation:
+Choose a premium palette from the subject, setting and era; use these shadow treatments only where appropriate:
 
-deep black
-charcoal
-smoke
+natural venue and team colours
+warm archival neutrals
+selective black or charcoal
 stadium shadows
 garage shadows
 vintage sports atmosphere
@@ -2221,7 +2221,7 @@ The authentic signature asset should feel like memorabilia, not decoration.
 Place it in a natural empty area:
 
 sky
-dark background
+story-led background with selective shadow depth
 near the subject
 near the title
 
@@ -2285,7 +2285,7 @@ Before finalising any design, check:
 
 Does it trigger nostalgia?
 Does it celebrate a legend, rivalry, or moment?
-Does it look premium in black and gold?
+Does the story-led palette look premium without unnecessary dark overlays?
 Does it feel like a limited edition collector piece?
 Is the title strong enough to sell the story?
 Is the plaque subtle but visible?
@@ -2355,7 +2355,7 @@ Not:
 Default Style Summary
 
 Dark cinematic sports tribute artwork.
-Premium black and gold collector style.
+Premium story-led collector colour; use black and gold where they suit the subject.
 Strong title.
 Subtle limited edition plaque.
 Realistic subject.
@@ -2452,7 +2452,7 @@ Give me 5 short title options that feel emotional, cinematic, collector-worthy, 
 10. A final creative brief I can use to create the artwork.
 
 Important:
-The design must feel premium, dark, cinematic, nostalgic, collector-focused, realistic, limited-edition, and framed-first.
+The design must feel premium, tonally rich, cinematic, nostalgic, collector-focused, realistic, limited-edition, and framed-first.
 
 Golden rule:
 Do not design first and think later.
@@ -2511,8 +2511,8 @@ Emotional hook:
 
 Design the piece in true Sports Cave collector style:
 
-Dark cinematic foundation
-Deep black and charcoal atmosphere
+Story-led palette with a slightly darker cinematic finish
+Visible natural setting colours and selective deep shadows; all-black only when appropriate
 Premium warm lighting
 Subtle gold accents only
 Realistic hero subject
