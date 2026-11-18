@@ -7,6 +7,7 @@ from uuid import uuid5, NAMESPACE_URL
 from supabase_backend import connect
 
 KEY = 'home_refresh_manual_products'
+SEED_KEY = 'home_refresh_initial_products'
 PAGE_SIZE = 40
 
 
@@ -39,16 +40,29 @@ def companion():
 
 
 def listing(query='', offset=0, all_designs=False):
-    verified, freshness = (set(), None) if all_designs else companion()
+    freshness = None
     with connect() as conn, conn.cursor() as cur:
         rows = catalog(cur)
+        cur.execute('SELECT value FROM app_settings WHERE key=%s', (SEED_KEY,))
+        initial = cur.fetchone()
+    if not all_designs and initial is None:
+        # Populate once from verified evidence; never seed from an unavailable snapshot.
+        verified, freshness = companion()
+        seed = [r['product_id'] for r in rows if r['product_id'] not in verified]
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now()) ON CONFLICT DO NOTHING",
+                        (SEED_KEY, json.dumps(seed)))
+            cur.execute('SELECT value FROM app_settings WHERE key=%s', (SEED_KEY,))
+            initial = cur.fetchone()
+    selected = set(initial['value'] if initial else [])
+    with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (KEY,))
         saved = cur.fetchone()
         manual = set(saved['value'] if saved else [])
         cur.execute("SELECT id,stage FROM morning_design_jobs WHERE section='refresh'")
         jobs = {str(r['id']): r['stage'] for r in cur.fetchall()}
     rows = [dict(r, stage=jobs.get(job_id(r['product_id']))) for r in rows
-            if (all_designs or r['product_id'] not in verified or r['product_id'] in manual)
+            if (all_designs or r['product_id'] in selected or r['product_id'] in manual)
             and query.casefold() in (r['title'] + ' ' + r['product_id']).casefold()]
     return dict(rows=rows[offset:offset+PAGE_SIZE], total=len(rows),
                 next_offset=offset+PAGE_SIZE if offset+PAGE_SIZE < len(rows) else None,
@@ -118,7 +132,7 @@ async def api(request):
     except TimeoutError:
         if request.method == 'GET':
             return JSONResponse({'state': 'loading', 'retry_after_ms': 1000,
-                                 'message': 'Checking companion verification…'},
+                                 'message': 'Checking companion verificationâ€¦'},
                                 status_code=202, headers={**headers, 'Retry-After': '1'})
         return JSONResponse({'error': 'Queue request timed out. Please retry.'}, status_code=503, headers=headers)
     except ValueError as error:

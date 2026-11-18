@@ -163,3 +163,23 @@ def test_popup_recovers_cold_cache_and_retains_rows_on_failure():
         expect(page.get_by_role('button',name='Retry refresh list')).not_to_be_visible()
         expect(page.locator('.sc-refresh-list .sc-refresh-row')).to_have_count(1)
         browser.close()
+
+
+def test_saved_list_survives_companion_outage_and_status_changes(store,monkeypatch):
+    assert refresh.listing()['total'] == 111
+    def offline():
+        raise AssertionError('Saved refresh list must not call companion status')
+    monkeypatch.setattr(refresh,'companion',offline)
+    assert refresh.listing()['total'] == 111
+    assert refresh.listing('Design 212')['rows'][0]['product_id'] == '212'
+    refresh.change('1','add')
+    assert refresh.listing()['total'] == 112
+
+
+def test_failed_first_snapshot_does_not_seed_empty_list(store,monkeypatch):
+    def cold(): raise TimeoutError('warming')
+    monkeypatch.setattr(refresh,'companion',cold)
+    with pytest.raises(TimeoutError): refresh.listing()
+    store.execute('SELECT value FROM app_settings WHERE key=%s',(refresh.SEED_KEY,))
+    assert store.fetchone() is None
+    assert refresh.listing(all_designs=True)['total'] == 322
