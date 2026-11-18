@@ -106,7 +106,8 @@ def dashboard():
         cur.execute("""SELECT updated_at > now()-interval '95 seconds' AS online
                        FROM app_settings WHERE key=%s""", (HEARTBEAT_KEY,))
         status = cur.fetchone()
-        cur.execute("""SELECT a.value, COALESCE(j.title, a.value->'result'->>'product_name') AS title,
+        cur.execute("""SELECT a.value - 'prompt' - 'result' AS value, a.updated_at,
+            COALESCE(j.title, a.value->'result'->>'product_name') AS title,
             CASE WHEN a.value->>'source'='new_ads' THEN 6 ELSE j.stage END AS upload_stage
             FROM app_settings a LEFT JOIN product_upload_staff_jobs j ON a.key=%s || j.id::text
             WHERE j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads')
@@ -118,7 +119,8 @@ def dashboard():
         jobs = []
         for row in cur.fetchall():
             value = row['value']
-            entry = dict(public(value), title=row['title'], country=value['country'], sport=value['sport'],
+            entry = dict(public(value), id=value['upload'], updated_at=row['updated_at'].isoformat(),
+                         title=row['title'], country=value['country'], sport=value['sport'],
                          stage=value['stage'], chat_url=value.get('chat_url'))
             if value['stage'] == 'waiting' and row['upload_stage'] == 6:
                 entry['label'] = 'Ready for the ad queue' if enabled else 'Ready · queue paused'
