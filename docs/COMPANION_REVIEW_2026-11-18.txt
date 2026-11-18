@@ -247,3 +247,14 @@ Release follow-up: false status and collection publication
   protocol/progress tests passed; updated upload/ad regression reruns recorded.
 - Legacy prompt tests import app.py and must run separately from AppTest tests
   to avoid leaking their login form into isolated UI fixtures.
+
+Production recovery follow-up
+- The requested upload had an uncertain-delivery failure even though Shopify
+  creation succeeded. Exact product/operation and six channel/five Market
+  publications were read back; the saved ready tag was added and verified.
+- The saved job and its dependency-only failed ad were restored with exact-ID,
+  checkpoint and message guards, without resending or regenerating artwork.
+- Live verification exposed a PSD already moved manually to the exact live
+  destination and linked to the same product. Mapping now reconciles that move
+  only for a verified Companion package with identical file ID, hash and size.
+  Captured metadata stays intact; existing mapping revision checks still apply.

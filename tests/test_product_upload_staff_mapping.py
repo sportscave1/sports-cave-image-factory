@@ -36,7 +36,7 @@ def test_reset_rearms_mapping_version_without_losing_moved_psd(monkeypatch):
     assert task['state'] == 'Mapped' and task['moved'] == source
 
 
-@pytest.mark.parametrize('lost_move_response', [False, True])
+@pytest.mark.parametrize('lost_move_response', [False, True, 'already_moved'])
 def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response):
     service, intake_id, original, listing = setup(env, arrived=False)
     store, sql, provider = env
@@ -112,7 +112,11 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         path = f'{folder}/WEBP/{name}'
         provider.files.setdefault(path, dict(id='id:' + name, rev='new', content_hash='a' * 64,
                                              size=90, path_display=path, name=name))
-    if lost_move_response:
+    if lost_move_response == 'already_moved':
+        from product_upload_dropbox import ROOTS
+        provider.api.move_path(provider.token, original['id'], ROOTS['live'] + '/' + original['name'],
+                               root_path=provider.context['root_path'])
+    if lost_move_response is True:
         original_move = provider.api.move_path.side_effect
 
         def lose_response(*args, **kwargs):
