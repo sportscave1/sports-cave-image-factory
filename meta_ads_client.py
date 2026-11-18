@@ -1842,10 +1842,12 @@ class MetaPostingClient:
             handle = urlsplit(product.get('product_url') or '').path.rstrip('/').rsplit('/', 1)[-1]
             filters = []
             if pid.isdigit():
-                filters.append({'retailer_id': {'i_contains': pid}})
+                # Shopify's current Meta feed uses variant IDs as retailer_id.
+                # The product ID belongs to retailer_product_group_id instead.
+                params['filter'] = json.dumps({'retailer_product_group_id': {'eq': pid}})
             if handle:
                 filters.append({'url': {'i_contains': '/products/' + handle}})
-            if filters:
+            if filters and 'filter' not in params:
                 params['filter'] = json.dumps({'or': filters})
         result = _paged_get(f"{str(product_set_id or '').strip()}/products",
                             params=params, config=self.config)

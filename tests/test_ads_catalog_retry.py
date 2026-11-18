@@ -72,3 +72,26 @@ def test_paged_get_reports_truncation(monkeypatch):
     assert meta._paged_get('set', max_pages=1)['has_more'] is True
     result=meta._paged_get('set', max_pages=2)
     assert result['has_more'] is False and len(result['rows'])==2
+
+
+def test_shopify_variant_feed_uses_exact_product_group(monkeypatch):
+    import json
+    import meta_ads_client as meta
+    from ads_companion_targeting import contains_product
+    product = dict(product_id='gid://shopify/Product/15492780228915',
+        product_url='https://www.sportscaveshop.com/products/the-unseen-lane-nikita-kucherov-wall-art')
+    variant = dict(retailer_id='68014763770163',
+        url=product['product_url'] + '?variant=68014763770163&utm_source=facebook')
+    calls = []
+    def read(path, **kwargs):
+        calls.append(path)
+        # Current Shopify feed retailer IDs identify variants, not products.
+        assert json.loads(kwargs['params']['filter']) == {
+            'retailer_product_group_id': {'eq': '15492780228915'}}
+        return {'rows': [variant], 'has_more': False}
+    monkeypatch.setattr(meta, '_paged_get', read)
+    client = object.__new__(meta.MetaPostingClient)
+    client.config = {}
+    assert contains_product(client.product_set_members('set', product=product), product)
+    assert calls == ['set/products']
+    assert not contains_product([dict(variant, url=product['product_url']+'-other')], product)
