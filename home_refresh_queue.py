@@ -1,5 +1,6 @@
 """Lazy refresh shortlist and explicit handoff to the existing design queue."""
 import json
+import logging
 import re
 from uuid import uuid5, NAMESPACE_URL
 
@@ -114,7 +115,14 @@ async def api(request):
         return JSONResponse(result, headers=headers)
     except (PermissionError, FilesUploadError):
         return JSONResponse({'error': 'Owner access required.'}, status_code=403, headers=headers)
+    except TimeoutError:
+        if request.method == 'GET':
+            return JSONResponse({'state': 'loading', 'retry_after_ms': 1000,
+                                 'message': 'Checking companion verification…'},
+                                status_code=202, headers={**headers, 'Retry-After': '1'})
+        return JSONResponse({'error': 'Queue request timed out. Please retry.'}, status_code=503, headers=headers)
     except ValueError as error:
         return JSONResponse({'error': str(error)}, status_code=400, headers=headers)
-    except Exception:
+    except Exception as error:
+        logging.getLogger(__name__).warning('home_refresh_queue_failed type=%s', type(error).__name__)
         return JSONResponse({'error': 'Designs are temporarily unavailable. Please retry.'}, status_code=503, headers=headers)

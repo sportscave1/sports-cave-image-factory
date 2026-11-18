@@ -108,3 +108,58 @@ def test_inline_script_does_not_resemble_html_tags():
     from home_design_refresh import render_html
     script = render_html(None).split('<script>', 1)[1].split('</script>', 1)[0]
     assert not re.search(r'<[A-Za-z]', script)
+
+
+def test_cold_companion_status_is_loading_not_unavailable(monkeypatch):
+    import files_upload_api, os_accounts
+    monkeypatch.setattr(files_upload_api, '_request_user', lambda *a,**k: {'id':'test'})
+    monkeypatch.setattr(os_accounts, 'is_reporting_owner', lambda _: True)
+    def warming(*args):
+        raise TimeoutError('Snapshot is warming')
+    monkeypatch.setattr(refresh, 'listing', warming)
+    client = TestClient(Starlette(routes=[Route('/queue',refresh.api,methods=['GET','POST'])]))
+    response = client.get('/queue')
+    assert response.status_code == 202
+    assert response.json()['state'] == 'loading'
+    assert response.headers['Retry-After'] == '1'
+
+
+def test_popup_recovers_cold_cache_and_retains_rows_on_failure():
+    from home_design_refresh import render_html
+    html = '<!doctype html><meta charset="utf-8">'+render_html(None)
+    state = {'calls':0,'fail':False}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge', headless=True)
+        page = browser.new_page()
+        def route(r):
+            if r.request.url == 'http://fixture.test/':
+                return r.fulfill(body=html,content_type='text/html')
+            picker = parse_qs(urlparse(r.request.url).query).get('all') == ['1']
+            if not picker:
+                state['calls'] += 1
+                if state['calls'] == 1:
+                    return r.fulfill(status=202,json={'state':'loading'})
+                if state['fail']:
+                    return r.fulfill(status=503,json={'error':'Temporary refresh failure.'})
+            return r.fulfill(json={'rows':[{'product_id':'1','title':'Saved design','stage':None}],
+                                  'total':1,'next_offset':None})
+        page.route('**/*',route)
+        page.goto('http://fixture.test/')
+        page.get_by_role('button',name='Designs to Refresh').click()
+        expect(page.locator('.sc-refresh-list')).to_contain_text('Saved design')
+        assert state['calls'] == 2
+        page.get_by_role('button',name='Close designs to refresh').click()
+        state['fail'] = True
+        page.get_by_role('button',name='Designs to Refresh').click()
+        expect(page.locator('[data-list-status]')).to_contain_text('Previous results are still shown')
+        expect(page.locator('.sc-refresh-list')).to_contain_text('Saved design')
+        page.get_by_text('Add a design',exact=True).click()
+        expect(page.locator('.sc-refresh-picker-list')).to_contain_text('Saved design')
+        # A successful catalogue request must not mask the refresh-list error.
+        expect(page.locator('[data-list-status]')).to_contain_text('Temporary refresh failure')
+        expect(page.get_by_role('button',name='Retry refresh list')).to_be_visible()
+        state['fail'] = False
+        page.get_by_role('button',name='Retry refresh list').click()
+        expect(page.get_by_role('button',name='Retry refresh list')).not_to_be_visible()
+        expect(page.locator('.sc-refresh-list .sc-refresh-row')).to_have_count(1)
+        browser.close()

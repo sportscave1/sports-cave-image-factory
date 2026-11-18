@@ -18,10 +18,10 @@
 <div class="sc-design-refresh"><button type="button" class="sc-refresh-open" aria-haspopup="dialog">▸ Designs to Refresh</button></div>
 <template id="sc-refresh-template"><dialog id="sc-refresh-dialog" aria-label="Designs to Refresh">
 <header><h3>Designs to Refresh</h3><button type="button" data-close aria-label="Close designs to refresh">Close</button></header>
-<details><summary>Add a design</summary><input data-picker-search type="search" placeholder="Search all designs" aria-label="Search all designs" maxlength="160"><div class="sc-refresh-picker-list"></div><button type="button" data-picker-more hidden>More designs</button></details>
+<details><summary>Add a design</summary><input data-picker-search type="search" placeholder="Search all designs" aria-label="Search all designs" maxlength="160"><div class="sc-refresh-picker-list"></div><button type="button" data-picker-more hidden>More designs</button><p data-picker-status role="status"></p><button type="button" data-picker-retry hidden>Retry catalogue</button></details>
 <input data-search type="search" placeholder="Search refresh list" aria-label="Search refresh list" maxlength="160">
 <p data-count></p><div class="sc-refresh-list"></div><button type="button" data-more hidden>More designs</button>
-<p data-status role="status"></p><button type="button" data-retry hidden>Retry</button>
+<p data-list-status role="status"></p><button type="button" data-retry hidden>Retry refresh list</button><p data-status role="status"></p>
 </dialog></template>
 <script>{
 const open=[...document.querySelectorAll('.sc-refresh-open')].at(-1);
@@ -29,9 +29,9 @@ const template=document.getElementById('sc-refresh-template');
 let dialog=document.getElementById('sc-refresh-dialog');
 if(!dialog){
  document.body.append(template.content.cloneNode(true));dialog=document.getElementById('sc-refresh-dialog');
- const status=dialog.querySelector('[data-status]'), retry=dialog.querySelector('[data-retry]');
- const states=[{list:dialog.querySelector('.sc-refresh-list'),search:dialog.querySelector('[data-search]'),more:dialog.querySelector('[data-more]')},
- {list:dialog.querySelector('.sc-refresh-picker-list'),search:dialog.querySelector('[data-picker-search]'),more:dialog.querySelector('[data-picker-more]')}];
+ const status=dialog.querySelector('[data-status]');
+ const states=[{list:dialog.querySelector('.sc-refresh-list'),search:dialog.querySelector('[data-search]'),more:dialog.querySelector('[data-more]'),status:dialog.querySelector('[data-list-status]'),retry:dialog.querySelector('[data-retry]')},
+ {list:dialog.querySelector('.sc-refresh-picker-list'),search:dialog.querySelector('[data-picker-search]'),more:dialog.querySelector('[data-picker-more]'),status:dialog.querySelector('[data-picker-status]'),retry:dialog.querySelector('[data-picker-retry]')}];
  const labels=['Queued','Opening ChatGPT','Generating','Checking delivery','Ready for review','Needs attention'];
  async function api(params,method='GET'){
    const response=await fetch('/ops/design-refresh/queue?'+new URLSearchParams(params),{method,credentials:'same-origin',signal:AbortSignal.timeout(15000)});
@@ -39,11 +39,22 @@ if(!dialog){
  }
  async function load(which,more=false){
   const state=states[which],version=state.version=(state.version||0)+1;
+  const note=state.status,retry=state.retry;
   state.more.disabled=true;retry.hidden=true;
-  if(!more){state.list.replaceChildren();state.more.hidden=true;status.textContent='Loading designs…';}
+  note.textContent=state.list.children.length?'Updating designs; showing previous results…':'Loading designs…';
   try{
-   const data=await api({all:which,q:state.search.value,offset:more?state.next:0});
-   if(version!==state.version)return;
+   const params={all:which,q:state.search.value,offset:more?state.next:0};
+   let data;
+   for(let attempt=0;attempt < 6;attempt++){
+    data=await api(params);
+    if(version!==state.version||!dialog.open)return;
+    if(data.state!=='loading')break;
+    note.textContent=state.list.children.length?'Checking verification; showing previous results…':'Checking companion verification…';
+    if(attempt===5)throw Error('Companion verification is still loading. Retry shortly.');
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    if(version!==state.version||!dialog.open)return;
+   }
+   if(!more){state.list.replaceChildren();state.list.scrollTop=0;}
    for(const row of data.rows){
     const line=document.createElement('div');line.className='sc-refresh-row';
     const title=document.createElement('span');title.textContent=row.title;
@@ -62,8 +73,8 @@ if(!dialog){
    }
    state.next=data.next_offset;state.more.hidden=state.next==null;
    if(!which){dialog.querySelector('[data-count]').textContent=data.total+' designs · unverified designs and your selections';}
-   status.textContent=data.freshness?.state==='stale'?'Showing last checked companion status. Reopen to refresh.':data.total?'':'No matching designs.';
-  }catch(error){if(version===state.version){status.textContent=error.message;retry.hidden=false;retry.onclick=()=>load(which);}}
+   note.textContent=data.freshness?.state==='stale'?'Showing last checked companion status. Reopen to refresh.':data.total?'':'No matching designs.';
+  }catch(error){if(version===state.version){note.textContent=error.message+(state.list.children.length?' Previous results are still shown.':'');retry.hidden=false;retry.onclick=()=>load(which,more);}}
   finally{if(version===state.version)state.more.disabled=false;}
  }
  states.forEach((state,i)=>{let timer;state.search.addEventListener('input',()=>{state.version=(state.version||0)+1;clearTimeout(timer);timer=setTimeout(()=>load(i),250);});state.more.addEventListener('click',()=>load(i,true));});
