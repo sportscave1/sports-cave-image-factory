@@ -157,7 +157,7 @@ def parse_edition(raw, today):
         edition["rivalries"] = _recommendations(data["rivalries"])
         if any(not item["links"] or not item["sport"] or not item["markets"] for item in edition["rivalries"]):
             raise ValueError("Each rivalry needs sources, sport and markets.")
-    if "legends" in data:
+    if "legends" in data and "design_recommendations" not in data:
         try:
             edition["legends"] = _legends(data["legends"])
             if len(_edition_json(edition)) > MAX_PAYLOAD:
@@ -207,6 +207,7 @@ def publish(raw, user):
                 ON CONFLICT (key) DO UPDATE SET
                     value=CASE WHEN app_settings.value->>'date'=EXCLUDED.value->>'date'
                         AND app_settings.value ? 'legends'
+                        AND NOT (EXCLUDED.value ? 'design_recommendations')
                         AND COALESCE(jsonb_array_length(EXCLUDED.value->'legends'), 0)=0
                         THEN EXCLUDED.value || jsonb_build_object('legends', app_settings.value->'legends')
                         ELSE EXCLUDED.value END,

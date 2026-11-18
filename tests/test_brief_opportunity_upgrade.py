@@ -129,7 +129,8 @@ def test_hosted_same_day_contract_upgrade_is_once_only(database, monkeypatch):
             monkeypatch.setattr(module,'sydney_date',lambda:TODAY)
     monkeypatch.setattr(os_accounts.DEFAULT_STORE,'get_user',lambda _:owner)
     monkeypatch.setattr(os_accounts,'can_access_page',lambda *_:True)
-    old = dict(date=str(TODAY),full_brief='Legacy edition.',recommendations=[article('Earlier story')])
+    old = dict(date=str(TODAY),full_brief='Legacy edition.',recommendations=[article('Earlier story')],
+               legends=[article('Earlier legend')])
     claims = dict(sub='owner',version='1')
     worker.enqueue('sports',old,claims)
     assert worker.process_one() and worker.status('sports')['format_version'] == 1
@@ -137,6 +138,7 @@ def test_hosted_same_day_contract_upgrade_is_once_only(database, monkeypatch):
     assert worker.process_one()
     state = worker.status('sports')
     assert state['verified'] and state['format_version'] == 2 and state['matches_submission']
+    assert 'legends' not in db.get_app_setting(sports.SETTING_KEY, ensure_schema_first=False)
     assert worker.enqueue('sports',edition(),claims)['status'] == 'completed'
     changed = edition()
     changed['summary'] = 'Another conflicting correction.'
