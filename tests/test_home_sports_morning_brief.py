@@ -558,7 +558,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Completion requires one full generation", "Shopify publication is a separate action",
     ):
         assert guard in result
-    assert len(result.split()) < 4050  # Allow the requested supporting-photo colour guidance.
+    assert len(result.split()) < 4100  # Includes focused hero-selection and background hierarchy refinements.
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)

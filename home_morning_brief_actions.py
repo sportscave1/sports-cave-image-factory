@@ -90,7 +90,7 @@ Use authorised read-only Shopify reports for comparable bestsellers and a lower-
 
 Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
 
-{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, the named subject must dominate at thumbnail size; reject obstructed or competing subjects. Search original galleries once if needed. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
+{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, compare the available candidates for clear facial likeness, expressive pose, clean silhouette and print detail; choose the strongest collector hero, not merely a relevant photo. Prefer a readable face over one hidden by limbs, equipment or an upward angle unless that pose defines the verified story. Test its crop at 250 px: the named subject must dominate without a tiny face; reject obstructed or competing subjects. Search original galleries once if needed. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
 
 {MOTORSPORT_ARTWORK}
 
