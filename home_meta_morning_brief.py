@@ -244,12 +244,12 @@ def publish(raw, user):
     return edition
 
 
-def render(st, user, today):
+def render(st, user, today, *, snapshot=None):
     if not can_view(user):
         return
     st.subheader("Meta CRM — Morning Brief")
     try:
-        saved = get_app_setting(SETTING_KEY, ensure_schema_first=False)
+        saved = snapshot['saved'] if snapshot is not None else get_app_setting(SETTING_KEY, ensure_schema_first=False)
         if not saved:
             st.caption("No Meta brief has been published yet.")
             return
@@ -305,7 +305,7 @@ def render(st, user, today):
         for section, label in INSIGHT_LABELS.items() if section in insights
     )
     try:
-        refresh = home_design_refresh.render_html(today)
+        refresh = snapshot['refresh'] if snapshot is not None else home_design_refresh.render_html(today)
     except Exception as error:
         LOG.warning("home_design_refresh_unavailable type=%s", type(error).__name__)
         refresh = ""
@@ -377,6 +377,7 @@ def render(st, user, today):
               }
               const controller = new AbortController();
               request = controller;
+              const deadline = setTimeout(() => controller.abort(), 8000);
               render(["…", "…", "…"], "Loading results");
               try {
                 const response = await fetch("/ops/meta-morning-brief/results?period=" + encodeURIComponent(period),
@@ -386,11 +387,11 @@ def render(st, user, today):
                 if (!controller.signal.aborted) render([data.roas, data.desktop, data.mobile],
                   period === "today" ? "Today is partial. Reporting may lag." : "");
               } catch {
-                if (!controller.signal.aborted) render([], "Results temporarily unavailable");
-              }
+                if (request === controller) render([], "Results temporarily unavailable · retry by selecting a period");
+              } finally { clearTimeout(deadline); }
             }
             select.addEventListener("change", load);
-            if (panel.dataset.saved !== "1") load();
+            // Saved Home data paints first. Provider reads are requested only on selection.
           }
         }</script>""",
         unsafe_allow_javascript=True,

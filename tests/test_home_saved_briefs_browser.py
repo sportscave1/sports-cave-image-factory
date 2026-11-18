@@ -1,0 +1,51 @@
+"""Published Home markup in a browser; all network traffic is intercepted."""
+from datetime import date
+from pathlib import Path
+from unittest.mock import Mock
+from playwright.sync_api import sync_playwright, expect
+import home_meta_morning_brief as meta
+import home_sports_morning_brief as sports
+import os_accounts
+
+
+def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_path):
+    today = date(2026, 11, 18)
+    monkeypatch.setattr(meta, 'can_view', lambda user: True)
+    monkeypatch.setattr(os_accounts, 'is_reporting_owner', lambda user: True)
+    monkeypatch.setattr(os_accounts, 'can_access_page', lambda *a: True)
+    for module in (sports, meta):
+        monkeypatch.setattr(module, 'get_app_setting', Mock(side_effect=AssertionError('render attempted storage')))
+    st = Mock()
+    sports.render(st, {}, today, snapshot=dict(saved={
+        'date':str(today), 'recommendations':[dict(title='Synthetic sports story',
+        recommendation='Review this saved opportunity.', links=[])]}, editions=[], statuses={}))
+    # Old reporting data previously triggered provider reads automatically on Home.
+    meta.render(st, {}, today, snapshot=dict(saved=dict(date='2026-11-16',report_date='2026-11-15',
+        roas=None,orders=None,actions=[],summary='Review the saved recommendations.',
+        recommendations=['Review delivery.', 'Check the creative.']),refresh=''))
+    fragments = ''.join(call.args[0] for call in st.html.call_args_list)
+    html = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:12px;font:14px Arial}*{box-sizing:border-box}</style>'+fragments
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge', headless=True)
+        try:
+            page=browser.new_page()
+            requests=[]
+            def route(request):
+                if request.request.url=='http://fixture.test/':
+                    request.fulfill(body=html,content_type='text/html')
+                else:
+                    requests.append(request.request.url)
+                    request.fulfill(json=dict(roas='2.00×',desktop=3,mobile=4))
+            page.route('**/*',route)
+            page.goto('http://fixture.test/')
+            expect(page.locator('.sc-meta-review')).to_contain_text('Review the saved recommendations.')
+            for width in (1600, 820, 390, 320):
+                page.set_viewport_size(dict(width=width,height=900))
+                assert page.evaluate('document.documentElement.scrollWidth') <= width
+            assert not requests, 'Home must not trigger live reporting automatically'
+            page.get_by_label('Reporting period').select_option('week')
+            expect(page.locator('.sc-meta-brief dl')).to_contain_text('2.00×')
+            assert len(requests)==1
+            page.screenshot(path=str(tmp_path/'home-saved-briefs-mobile.png'))
+        finally:
+            browser.close()

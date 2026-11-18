@@ -207,17 +207,18 @@ def _posted_designs(cur, jobs, published):
     return published | {job['id'] for job in saved if job['file_id'] in posted}
 
 
-def list_jobs(day=None):
+def list_jobs(day=None, *, display_only=False):
     with connect() as conn, conn.cursor() as cur:
-        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
-        _release_delivered(cur)
+        if not display_only:
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+            _release_delivered(cur)
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
             ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
         jobs = cur.fetchall()
         published = _published_designs(cur, jobs)
         posted = _posted_designs(cur, jobs, published)
     # Network checks must not hold the desktop claim lock.
-    deleted = _deleted_designs(jobs, posted)
+    deleted = set() if display_only else _deleted_designs(jobs, posted)
     return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
                             else 'Deleted · ready to redo' if r['id'] in deleted

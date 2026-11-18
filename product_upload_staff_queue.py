@@ -43,7 +43,7 @@ def enqueue(user, source, title, sport, *, ad_country=None):
     return key
 
 
-def list_jobs(actor=None):
+def list_jobs(actor=None, *, display_only=False):
     from design_publish_ad import PREFIX, public as ad_public
     with connect() as conn, conn.cursor() as cur:
         if actor is None:
@@ -57,7 +57,7 @@ def list_jobs(actor=None):
         rows = cur.fetchall()
         # Status remains truthful even when the desktop is disconnected.
         for row in rows:
-            if 1 <= row['stage'] <= 5 and row['updated_at'] < datetime.now(timezone.utc) - timedelta(minutes=STALL_MINUTES):
+            if not display_only and 1 <= row['stage'] <= 5 and row['updated_at'] < datetime.now(timezone.utc) - timedelta(minutes=STALL_MINUTES):
                 cur.execute('''UPDATE product_upload_staff_jobs SET stage=7,
                     message=%s,updated_at=now() WHERE id=%s AND stage BETWEEN 1 AND 5
                     AND updated_at=%s RETURNING *''',
@@ -352,6 +352,23 @@ def verify(job):
         advance(job['id'], job['worker_actor'], 6, storefront=product['online_store_url'], allowed=[5])
 
 
+from display_snapshot import Snapshots
+_HEADER_DISPLAYS = Snapshots(workers=2, ttl=2, retry=3, max_age=120, limit=32, byte_limit=8_000_000)
+
+
+def _header_display(user):
+    from workspace_display_cache import user_scope
+    admin = can_control_queues(user)
+    def load():
+        result = list_jobs(None if admin else user['id'], display_only=True)
+        if admin:
+            result['queues'] = header_queue_status()
+        return result
+    snapshot = _HEADER_DISPLAYS.read((user_scope(user), admin), load)
+    return {**(snapshot['value'] or {}), 'display_state': snapshot['state'],
+            'checked_at': snapshot['checked_at']}
+
+
 async def status_route(request):
     from files_upload_api import _request_user
     from product_upload_api import HEADERS, failure
@@ -359,6 +376,8 @@ async def status_route(request):
     from starlette.responses import JSONResponse
     try:
         user = await run_in_threadpool(_request_user, request, required_page='Design Studio')
+        if request.query_params.get('display') == '1':
+            return JSONResponse(_header_display(user), headers=HEADERS)
         result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
             result['queues'] = await run_in_threadpool(header_queue_status)
@@ -386,6 +405,8 @@ async def queue_control_route(request):
         from design_publish_ad import settings as ad_settings
         update = {'design': design_settings, 'upload': settings, 'ads': ad_settings}[body['queue']]
         control = await run_in_threadpool(update, body['enabled'])
+        from workspace_display_cache import user_scope
+        _HEADER_DISPLAYS.invalidate((user_scope(user), True))
         return JSONResponse({'enabled': control['enabled']}, headers=HEADERS)
     except Exception as error:
         return failure(error)

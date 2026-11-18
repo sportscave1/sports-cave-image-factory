@@ -216,13 +216,13 @@ def archive_page(today, *, before=None, size=20):
     return editions, editions[-1]["date"] if len(rows) > size else None
 
 
-def render(st, user, today):
+def render(st, user, today, *, snapshot=None):
     if not os_accounts.is_reporting_owner(user):
         return
     st.subheader("Sports Updates — Morning Brief")
     brief_unavailable = False
     try:
-        saved = get_app_setting(SETTING_KEY, ensure_schema_first=False)
+        saved = snapshot['saved'] if snapshot is not None else get_app_setting(SETTING_KEY, ensure_schema_first=False)
         edition = parse_edition(_edition_json(saved), today) if saved else None
     except Exception as error:
         LOG.warning("home_morning_brief_unavailable type=%s", type(error).__name__)
@@ -231,7 +231,7 @@ def render(st, user, today):
         edition = None
     editions = []
     try:
-        editions, _ = archive_page(today, size=20)
+        editions = snapshot['editions'] if snapshot is not None else archive_page(today, size=20)[0]
     except Exception as error:
         LOG.warning("home_brief_archive_unavailable type=%s", type(error).__name__)
     if edition:
@@ -243,14 +243,16 @@ def render(st, user, today):
         st.caption("No Morning Brief has been published yet.")
     from home_morning_brief_actions import brief_html
 
-    @st.fragment(run_every=15)
     def live_brief():
         from morning_design_queue import list_jobs
         statuses = None
         try:
-            statuses = {job['id']: job['label'] for job in list_jobs(edition['date'])} if edition else {}
+            statuses = snapshot['statuses'] if snapshot is not None else ({job['id']: job['label'] for job in list_jobs(edition['date'])} if edition else {})
         except Exception:
             pass
         st.html(brief_html(edition, editions=editions, today=today, design_statuses=statuses,
                           allow_ads=os_accounts.can_access_page(user, "ads")), unsafe_allow_javascript=True)
-    live_brief()
+    if snapshot is not None:
+        live_brief()
+    else:
+        st.fragment(run_every=15)(live_brief)()

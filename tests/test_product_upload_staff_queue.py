@@ -24,6 +24,16 @@ def submit(actor, revision='A'):
     return queue.enqueue({'id': actor}, {'id': 'id:original', 'rev': revision}, 'Design', 'NFL Wall Art')
 
 
+def test_header_display_does_not_reconcile_or_write_stalled_jobs(store):
+    key = submit('staff-one')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=4,updated_at=now()-interval '40 minutes' WHERE id=%s", (key,))
+    queue.list_jobs('staff-one', display_only=True)
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s', (key,))
+        assert cur.fetchone()['stage'] == 4
+
+
 def test_offline_requests_are_durable_private_and_claimed_once(store, monkeypatch):
     first = submit('staff-one')
     assert submit('staff-two') == first

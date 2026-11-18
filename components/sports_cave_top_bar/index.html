@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v3";
+  const CONTROLLER_VERSION = "companion-header-v4";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1411,6 +1411,7 @@
         button.title = label;
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-busy", String(pendingQueues.has(queue)));
+        button.disabled = pendingQueues.has(queue);
       }
       companionStatus.hidden = staffProgress.hidden && Object.values(queueButtons).every(button => button.hidden) && Object.values(companionPanels).every(item=>item.card.hidden);
       root.classList.toggle("sc-has-staff-upload", !companionStatus.hidden);
@@ -1496,13 +1497,14 @@
       listenerController.signal.addEventListener('abort', abort, {once:true});
       const timeout = parentWindow.setTimeout(abort, 8000);
       try {
-        const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
+        const response = await parentWindow.fetch("/api/staff-product-uploads/status?display=1", {
           credentials:"same-origin", cache:"no-store", signal:controller.signal,
         });
         if (listenerController.signal.aborted) return;
-        if (!response.ok) throw new Error('Companion status unavailable');
+        if (!response.ok) throw new Error([401,403].includes(response.status) ? 'Session needs refreshing' : 'Companion status unavailable');
         const status = await response.json();
         if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
+        if (status.display_state && !["ready", "stale"].includes(status.display_state)) throw new Error("Status refreshing");
         const jobs = status.jobs || [];
         staffFailures = 0;
         const active = jobs.some(item => item.stage > 0 && item.stage < 6
@@ -1517,7 +1519,8 @@
         renderCompanions(status);
         staffProgress.hidden = !jobs.length && !queues.upload?.display;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
-        staffProgress.dataset.stale='false';
+        staffProgress.dataset.stale=String(status.display_state === 'stale');
+        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale');
         renderQueueButtons();
         lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
         if (!jobs.length) {
@@ -1611,12 +1614,13 @@
       } catch (_error) {
         if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
         lastStaffStatus='';
-        staffDelay = Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
+        for (const button of Object.values(queueButtons)) button.disabled=true;
+        staffDelay = _error.message === 'Status refreshing' ? 1000 : Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
         for (const {panel,stage} of Object.values(companionPanels)) {
-          panel.dataset.stale='true';stage.textContent='Status unavailable · retrying';
+          panel.dataset.stale='true';stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
         }
         staffProgress.dataset.stale='true';
-        root.querySelector('#sc-os-staff-upload-stage').textContent='Status unavailable · retrying';
+        root.querySelector('#sc-os-staff-upload-stage').textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
       } finally {
         parentWindow.clearTimeout(timeout);
         listenerController.signal.removeEventListener('abort', abort);
@@ -2262,6 +2266,7 @@
       if (method === "GET" && pendingReads.has(key)) return pendingReads.get(key).promise;
       const controller = new AbortController();
       const entry = {controller};
+      const deadline = method === "GET" ? parentWindow.setTimeout(() => controller.abort(), 8000) : null;
       const headers = {Authorization: `Bearer ${state.config.authToken || ""}`};
       if (options.body !== undefined) headers["Content-Type"] = "application/json";
       entry.promise = (async () => {
@@ -2280,6 +2285,7 @@
       if (!response.ok) throw new Error(payload.error || "Request failed");
       return payload;
       })().finally(() => {
+        if (deadline !== null) parentWindow.clearTimeout(deadline);
         if (pendingReads.get(key) === entry) pendingReads.delete(key);
       });
       if (method === "GET") pendingReads.set(key, entry);
@@ -2601,6 +2607,8 @@
       }, {remember: true});
     };
     const refreshOrderStatus = async () => {
+      if (state.destroyed) return;
+      if (doc.hidden) { later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS); return; }
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
@@ -2617,7 +2625,10 @@
       const previousOrders = readStatusCache("orders");
       const confirmedAt = Number(previousOrders.payload?.confirmed_at || previousOrders.checked_at || 0);
       const expireOrdersBadge = () => {
-        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) updateOrdersBadge(0, "");
+        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) {
+          const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
+          if (badge) { badge.title = "Last known count · status delayed"; badge.dataset.stale = "true"; }
+        }
       };
       expireOrdersBadge();
       writeStatusCache("orders", {...(previousOrders.payload || {}), confirmed_at: confirmedAt});
@@ -2630,6 +2641,8 @@
             confirmed_at: Date.now(),
           });
           updateOrdersBadge(payload.action_required_count, payload.badge_label);
+          const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
+          if (badge) { badge.title = "Orders requiring action"; badge.dataset.stale = "false"; }
         }
         else expireOrdersBadge();
         showOrderToast(payload.notification);
@@ -2795,7 +2808,8 @@
     };
     const schedulePlannerStatus = (delay=PLANNER_STATUS_REFRESH_MS) => {
       if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
-      state.plannerStatusTimer = parentWindow.setTimeout(() => refreshPlannerStatus(), delay);
+      if (state.destroyed) return;
+      state.plannerStatusTimer = later(() => refreshPlannerStatus(), delay);
     };
     const refreshPlannerStatus = async ({immediate=false} = {}) => {
       if (!state.config.dailyPlannerEnabled || !state.config.dailyPlannerStatusUrl) {
@@ -2803,11 +2817,14 @@
         if (plannerTimerPill) plannerTimerPill.hidden = true;
         return;
       }
+      if (state.destroyed) return;
+      if (doc.hidden) { schedulePlannerStatus(); return; }
       if (state.plannerStatusPending) return;
       state.plannerStatusPending = true;
       writeStatusCache("planner");
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
+        if (payload.available === false) throw new Error("Planner status delayed");
         writeStatusCache("planner");
         const rolloverTimerIds = (payload.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean);
         rolloverTimerIds.forEach((timerId) => state.terminalPlannerTimerIds.add(timerId));
@@ -3676,13 +3693,23 @@
         root.dataset.installStage = "config";
         const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
-        if (state.config.uploadScope !== nextConfig.uploadScope) {
+        if (root.dataset.uploadScope !== nextConfig.uploadScope) {
+          clearStaffTimer();staffProgressStarted=false;
           dismissUploadOverlays();queues={};lastStaffStatus='';
           staffProgress.hidden=true;summaryReset.hidden=true;
+          uploadSummary.title='';
+          root.querySelector('#sc-os-staff-upload-meter').value=0;
+          root.querySelector('#sc-os-staff-upload-title').textContent='';
+          root.querySelector('#sc-os-staff-upload-stage').textContent='';
+          root.querySelector('#sc-os-staff-upload-list').replaceChildren();
+          for (const {title,stage,list,meter} of Object.values(companionPanels)) {
+            title.textContent='';stage.textContent='';list.replaceChildren();meter.value=0;
+          }
           renderCompanions({});renderQueueButtons();
         }
         if (state.config.currentRouteKey !== nextConfig.currentRouteKey) dismissUploadOverlays();
         state.config = {...nextConfig};
+        root.dataset.uploadScope = nextConfig.uploadScope || "";
         state.searchIndex = prepareSearchIndex(state.config.searchIndex);
         root.dataset.configRevision = state.config.revision || "none";
         root.dataset.currentRouteKey = state.config.currentRouteKey || "dashboard";
@@ -3706,6 +3733,21 @@
         showUploadNotice(state.config.uploadNotice);
         if (state.config.staffUploadProgress && !staffProgressStarted) {
           staffProgressStarted = true;
+          // Reserve visible cards before any network response. Unknown is not idle.
+          staffProgress.hidden = false;
+          root.querySelector('#sc-os-upload-card').hidden = false;
+          if (!root.querySelector('#sc-os-staff-upload-title').textContent) {
+            root.querySelector('#sc-os-staff-upload-title').textContent = 'Checking uploads';
+            root.querySelector('#sc-os-staff-upload-stage').textContent = 'Connecting…';
+          }
+          for (const {card,title,stage} of Object.values(companionPanels)) {
+            if (state.config.companionQueuesEnabled) {
+              card.hidden = false;
+              if (!title.textContent) { title.textContent = 'Checking queue'; stage.textContent = 'Connecting…'; }
+            }
+          }
+          companionStatus.hidden = false;
+          root.classList.add('sc-has-staff-upload');
           void refreshStaffProgress();
         } else if (!state.config.staffUploadProgress) {
           clearStaffTimer();

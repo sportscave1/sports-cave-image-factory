@@ -10660,15 +10660,15 @@ def _home_duration_label(seconds):
     return f"{minutes}m"
 
 
-@st.fragment(parallel=True)
-def render_home_weekly_work(user, local_now):
+def render_home_weekly_work(user, local_now, *, snapshot=None):
     render_html_section_title("This Week's Work")
     started = time.perf_counter()
     try:
         from workspace_display_cache import home_weekly_snapshot
-        snapshot = home_weekly_snapshot(
-            st.session_state, user, local_now, sports_cave_dashboard.build_home_weekly_work_snapshot
-        )
+        if snapshot is None:
+            snapshot = home_weekly_snapshot(
+                st.session_state, user, local_now, sports_cave_dashboard.build_home_weekly_work_snapshot
+            )
     except sports_cave_dashboard.DashboardStorageError:
         st.markdown(
             '<div class="sc-empty-note">Weekly work analytics are unavailable right now.</div>',
@@ -10724,6 +10724,8 @@ def render_home_weekly_work(user, local_now):
             )
 
     render_html_section_title("Completed Work This Week")
+    if snapshot.get("completed_work_total", 0) > 100:
+        st.caption("Showing the latest 100 entries. Open the full report for all work.")
     work_rows = [
         {
             "Date/time": format_dashboard_timestamp(row.get("timestamp")),
@@ -12524,20 +12526,12 @@ def render_lightweight_dashboard_page():
     local_now = account_local_now(user)
     today = sports_sales_calendar.sydney_date(local_now)
     with st.container(key="home-ops-dashboard"):
-        import home_meta_morning_brief
-        import home_sports_morning_brief
-
-        if home_meta_morning_brief.can_view(user):
-            sports_column, meta_column = st.columns([3, 2], gap="medium")
-            with sports_column:
-                home_sports_morning_brief.render(st, user, today)
-            with meta_column, st.container(key="home-meta-brief"):
-                home_meta_morning_brief.render(st, user, today)
-        else:
-            home_sports_morning_brief.render(st, user, today)
+        import home_fast
+        home_fast.render_briefs(st, user, today)
         home_daily_planner.render_status(st, user, local_now)
         with st.container(key="home-weekly-card"):
-            render_home_weekly_work(user, local_now)
+            home_fast.render_weekly(st, user, local_now,
+                sports_cave_dashboard.build_home_weekly_work_snapshot, render_home_weekly_work)
     # The weekly-work fragment completes independently of shell dispatch.
     safe_startup_print(f"PERF Dashboard shell_dispatch={(time.perf_counter() - started):.3f}s")
 
