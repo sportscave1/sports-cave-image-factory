@@ -41,12 +41,12 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'If in doubt, use the athlete' not in prompt
         assert 'Default to timeless player' not in prompt
         assert 'title first' not in prompt
-        assert 'COMPOSE THE BADGE INTO THE ARTWORK' in prompt
-        assert ('Choose the footprint on the scaled photographic layout before generation.' if prompt is new else 'Before generation, reserve a realistically sized footprint') in prompt
+        assert ('REVIEW THE REAL BADGE BEFORE GENERATION' if prompt is new else 'COMPOSE THE BADGE INTO THE ARTWORK') in prompt
+        assert ('on the photographic layout' if prompt is new else 'Before generation, reserve a realistically sized footprint') in prompt
         assert 'non-destructive tonal, colour and finish adjustments are permitted' in prompt
         assert 'never change its edition text, rasterise it' in prompt
         assert 'original editable text layer with the same name' in prompt
-        assert 'Use the master badge’s size and position as asset starting values' in prompt
+        assert ('Record their paired position and proportional scale relative to the master canvas' if prompt is new else 'Use the master badge’s size and position as asset starting values') in prompt
         assert 'Preserve the exact official badge asset' not in prompt
         assert ('continue with an abstract fallback' if prompt is new else 'continue with the original setting or a non-specific abstract environment') in prompt
         assert 'without introducing an extra approval stage' in prompt

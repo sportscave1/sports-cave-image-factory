@@ -37,9 +37,9 @@ META_AD_COPY = re.compile(r"^(?:headline|primary text|description|cta|call to ac
 
 _CREATE_DESIGN_BORDER_RULES = """**Border and print safety for generation and the final layout**
 
-Keep the decorative collector border continuous on all four sides, with its outermost detail 3% of the shorter canvas dimension inside every edge: 60 px on the 2835 × 2004 master. Use a restrained, story-specific collector detail such as a fine antique-gold rule with shorter inner returns echoing court or venue geometry. A plain rectangle alone is insufficient; avoid heavy ornament.
+Generation 1 includes the finished decorative border. Show it in the scaled layout and repeat its geometry in the generation request: one continuous fine antique-gold rule on all four sides, with short inner corner returns derived from the sporting story. The outermost detail sits 3% of the shorter canvas dimension inside every edge: 60 px on the 2835 × 2004 master. Scale that inset proportionally for the generation resolution. A plain rectangle alone is insufficient; avoid heavy ornament.
 
-Extend venue tones, textures and selected abstract marks through the border into the outer framing margin, all the way to every canvas edge. Keep the border legible above these layers and faces, lettering and the plaque comfortably inside it. This framing-safe margin is separate from any printer-required bleed. Verify all four edges and corners on the rendered final PSD; correct border clearance without shrinking the artwork.
+Carry venue tones, texture and selected abstract marks through the rule to every canvas edge; keep visible artwork in all four outer margins. Keep faces, lettering and plaque inside the border. Framing clearance is separate from printer-required bleed. Inspect every side and corner on generation 1; repair only broken or misplaced rules on a separate PSD layer, preserving the artwork beneath.
 
 """
 
@@ -80,21 +80,21 @@ def _prompt(title, story, *, edit=None, primary_market=""):
 
 **Start the authorised new-design job**
 
-Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Use the current brief, the matching job instructions and the guide's shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references and the artwork in chat and continue without pausing for approval.
+Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow the current brief, job instructions and shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references/artwork and continue without pausing for approval.
 
 {context}
 
 **1. Research the story, sources and master**
 
-Use authorised read-only Shopify reports to inspect artwork from comparable bestsellers and, where supported, a lower-selling print. Use the closest comparable sport or collector collection when evidence is sparse. Use verified storefront bestseller or approved project references if reports are unavailable. Treat unranked products as style references only. Record the evidence or gap in REVIEW NOTES. Draw original creative cues without claiming the design caused sales.
+Use authorised read-only Shopify reports for comparable bestsellers and a lower-selling print where supported. If unavailable, use verified storefront bestsellers or approved references in the closest comparable sport or collector collection. Treat unranked products as style references only. Record evidence or gaps in REVIEW NOTES; draw original cues without attributing sales to design.
 
-Choose a story supporters would still want to display in five years. Use a timeless player, team, rivalry or legacy angle for ordinary match results. Use an event angle for a verified landmark achievement, iconic moment or farewell. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
+Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
 
-{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 suitable candidates where available. Verify original source pages, story fit, identity, kit, pose, legibility and source detail at print scale. For an individual tribute, the named subject must dominate at thumbnail size. Reject obstructed crops or photos dominated by others. Make one focused search of original galleries if needed. Keep uncertain facts and unverified likenesses provisional. The user handles photo licensing separately.
+{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, the named subject must dominate at thumbnail size; reject obstructed or competing subjects. Search original galleries once if needed. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
 
 {MOTORSPORT_ARTWORK}
 
-{COMPLEMENTARY_IMAGES}{NEW_BACKGROUND_RESEARCH}Inspect the actual designs-canvas.psd for dimensions, orientation, resolution, colour profile, framing clearance, guides and collector layers. Work from a copy. If access remains unavailable, use verified dimensions where available, reserve the plaque footprint and continue independently. Keep master-dependent assembly, saves and verification pending.
+{COMPLEMENTARY_IMAGES}{NEW_BACKGROUND_RESEARCH}Inspect designs-canvas.psd dimensions, orientation, resolution, profile, clearance, guides and collector layers. Work from a copy. Without access, use verified dimensions, reserve the plaque footprint and continue independently. Keep master-dependent assembly, saves and verification pending.
 
 **2. Prepare the complete composition before generation**
 
@@ -106,22 +106,26 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 **3. Generate the collector treatment once**
 
-Use the reviewed layout as the exact composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references. Generate the surrounding venue treatment, abstract artwork and lighting around the locked photographs. Exclude the official plaque and number from generation; show only their reserved footprint in the generation reference. Keep the output flat artwork without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
+Use the badge-hidden reviewed layout as the composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references, original photographs and venue references. Carry the exact sources, final athlete depiction count, supporting role, photograph-derived abstract feature and dark tonal hierarchy into the request. Preserve source face, expression, natural skin texture, anatomy, hand-to-equipment relationships, uniform lettering and contact. No glossy skin smoothing or invented figures. Request complete flat artwork with finished title lettering, venue and collector treatment. Copy the locked title verbatim and repeat the border geometry above, including all four sides, corner returns and calculated inset. Exclude plaque, number, placeholder outlines and seals; generate a continuous natural surface in their reserved area. Keep the output without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
 
-Assemble with original masked photographs, reviewed typography, collector border and original plaque pair. Any generated people or sporting objects are placement guides only: cover them completely with verified sources and remove exposed generated silhouettes. Keep the abstract treatment adjustable. A visual criticism goes to PSD finishing and never triggers another generation.
+Inspect generation 1 beside the photographs for identity, natural texture and the selected depiction count before accepting its visual direction. Record discrepancies for local source restoration, without another generation or approval pause. Generation 1 becomes the visual master for finishing. On a master copy, keep its untouched original in hidden **ORIGINAL EDITABLE ARTWORK** and a visible working copy beneath **FINAL POLISHED ARTWORK** correction layers. Preserve successful lettering, abstraction, reflections, venue, lighting and border. Never reconstruct working surroundings from stretched samples, generic shapes or broad photographic strips.
 
-Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
+Place the original plaque pair at the recorded layout transform. Limit other PSD work to a named defect or required photographic source restoration. Any generated people or sporting objects are placement guides only: restore verified sources on separate editable masked layers, mask tightly and repair exposed outlines locally. Include surrounding photo pixels only for necessary genuine contact details, such as tyres meeting the track. Keep the abstract treatment adjustable through masks. A visual criticism never triggers another generation.
+
+Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependencies; finish independent work. Verify an uncertain write’s exact path, identity and contents before retrying.
 
 **4. Inspect and finish the assembled PSD**
 
 {CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
 **5. Save and verify one final Review PSD**
 
-On a master copy, place the inspected composite in **FINAL POLISHED ARTWORK**, retaining the hero and any supporting photograph on separate editable masked layers. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
+Retain the assembled layer structure, visible generation foundation, verified master settings and working layers. Document defects or limitations in hidden **REVIEW NOTES**.
 
 {REVIEW_SAVE_NAMING}
 
 If master access was deferred, first test both plaque placements as specified above. Verify the chosen position against the final composite: both original layers visible once, number editable and aligned inside the plaque, text legible, and safe clearance from hero, title and border. Adjust only a specific placement defect with matching transforms. Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
+
+In that inspection, compare sources at 100% for authenticity and generation 1 beside the final render at equal 250 px widths: hero, abstraction, venue, reflections, lettering, border and plaque. Restore surroundings from generation 1 where finishing flattened texture, introduced seams or weakened composition; retain source/text corrections. Record unresolved loss as needs_attention.
 
 **6. Write the Smart Upload JSON and deliver**
 

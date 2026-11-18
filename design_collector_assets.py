@@ -27,12 +27,14 @@ Inspect the assembled placement at full size and thumbnail size. Verify legibili
 
 """
 
-NEW_BADGE_LAYOUT = BADGE_PLACEMENT_VERIFICATION.replace(
-    "Reassess the planned footprint against the generated artwork.",
-    "Choose the footprint on the scaled photographic layout before generation."
-).replace(
-    "**Mandatory assembly check.**",
-    "**Layout check.** With master access, run these original-layer checks before generation. "
-    "Otherwise review the reserved footprint provisionally and run them once the master "
-    "is available, before saving the final PSD."
-)
+NEW_BADGE_LAYOUT = f"""**REVIEW THE REAL BADGE BEFORE GENERATION**
+
+With master access, compare at least two badge arrangements that test different sizes and positions using PSD transforms only on the photographic layout. When below the title, start around 65–85% of the main title block’s width. Choose for hierarchy, legibility, shared alignment and safe clearance; avoid isolated corners, excessive gaps or backing boxes.
+
+{COLLECTOR_LAYER_RULES}
+
+Make two views of the same locked layout: review with the real plaque and live number visible, then hide both for the generation reference, leaving the underlying artwork visible. Record their paired position and proportional scale relative to the master canvas in REVIEW NOTES. Keep that area continuous, without a generated badge or placeholder. Restore the recorded transform during final assembly and adjust only a named placement defect.
+
+Without master access, review the reserved footprint provisionally and run them once the master is available, before saving the final PSD. Record unresolved placement or legibility as needs_attention. Continue independent work without an approval pause.
+
+"""

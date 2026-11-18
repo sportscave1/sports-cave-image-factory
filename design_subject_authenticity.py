@@ -46,7 +46,7 @@ CREATE_DESIGN_AUTHENTICITY_CHECK = (
     "scaling, local colour matching and edge integration; never redraw missing detail. Choose a "
     "clearer source or reduce its placed size when source detail is insufficient. Completely "
     "cover generated renditions and remove their exposed outlines, limbs and objects. Clean "
-    "halos and source-background remnants without obscuring photographic details.\n\n"
+    "halos and source-background remnants without obscuring photographic details or covering successful surrounding artwork.\n\n"
     + _SOURCE_COMPARISON
     + "Inspect the rendered PSD beside the sources at 100%, then at 250 px wide. Verify original "
       "photographic detail throughout the visible subjects, not just facial resemblance. For "
