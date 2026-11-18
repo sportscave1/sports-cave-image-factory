@@ -87,11 +87,11 @@ Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Use th
 
 **1. Research the story, sources and master**
 
-Use authorised read-only Shopify reports to inspect artwork from comparable bestsellers and, where supported, a lower-selling print. Use the closest comparable sport or collector collection when evidence is sparse. Use verified storefront bestseller or approved project references if reports are unavailable. Treat unranked products as style references only. Record the evidence or gap in REVIEW NOTES. Draw original creative cues without claiming the design caused sales.
+Use authorised read-only Shopify reports for comparable bestsellers and a lower-selling print where supported. If unavailable, use verified storefront bestsellers or approved project references in the closest comparable sport or collector collection. Treat unranked products as style references only. Record evidence or gaps in REVIEW NOTES; draw original cues without attributing sales to design.
 
-Choose a story supporters would still want to display in five years. Use a timeless player, team, rivalry or legacy angle for ordinary match results. Use an event angle for a verified landmark achievement, iconic moment or farewell. Include an accolade, statistic or year only when essential and verified. Reserve a full date for a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
+Choose a story supporters would still want to display in five years: timeless player, team, rivalry or legacy for routine results; verified landmark, iconic moment or farewell for event tributes. Include an accolade, statistic or year only when essential and verified; full dates only for defining days. Omit dates, scores and changing rankings or statistics from routine tributes.
 
-{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 suitable candidates where available. Verify original source pages, story fit, identity, kit, pose, legibility and source detail at print scale. For an individual tribute, the named subject must dominate at thumbnail size. Reject obstructed crops or photos dominated by others. Make one focused search of original galleries if needed. Keep uncertain facts and unverified likenesses provisional. The user handles photo licensing separately.
+{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, the named subject must dominate at thumbnail size; reject obstructed or competing subjects. Search original galleries once if needed. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
 
 {MOTORSPORT_ARTWORK}
 
@@ -103,11 +103,11 @@ Choose a story supporters would still want to display in five years. Use a timel
 
 {BADGE_FOOTPRINT}
 
-{_CREATE_DESIGN_COLLECTOR_BACKGROUND}Lock the verified subjects and exact title. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Plan how the hero, selected supporting photograph, authentic setting, styling, text, framing-safe border and plaque footprint work together at print and thumbnail sizes. Confirm the story is recognisable with the title hidden. Briefly state the chosen direction and record the layout and source decisions in REVIEW NOTES.
+{_CREATE_DESIGN_COLLECTOR_BACKGROUND}Lock the verified subjects and exact title, including spelling and punctuation. Use the original photos as the authority for every face, expression, anatomy, pose, uniform, object and vehicle. Resolve hierarchy, photographic transitions and title legibility in the two internal layouts at print and thumbnail sizes. Choose the strongest complete composition before generation; assembly preserves its creative treatment. Confirm the story is recognisable with the title hidden. Record the chosen direction, layout and sources in REVIEW NOTES.
 
 **3. Generate the complete flat artwork once**
 
-Send one design-specific brief with the selected original photographs, accurate scene and movement, exact title, typography, contrast, safe margins, the reserved badge footprint and visible collector treatment. Include the hero and selected secondary source with its distinct story role, crop, position and background transition alongside the venue references. Generate the full artwork with subject, supporting moment where sourced, venue, abstract depth, typography and border. Keep the output flat artwork without physical frame, room or wall. Display the complete generation in chat.
+Send one complete design-specific brief with selected originals, verified venue references, accurate movement, exact title, typography, contrast, safe border, reserved badge footprint and visible collector treatment. Include the hero and selected secondary source with its distinct story role, crop, position and transition. Generate and display the complete flat artwork with abstract depth, without physical frame, room or wall.
 
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependent steps and finish independent work. Reconcile any uncertain write by verifying its exact path, identity and contents before retrying.
 
@@ -116,15 +116,17 @@ Retry a transient tool failure once per authorised method. Retry image generatio
 {CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
 **5. Assemble, save and verify one final Review PSD**
 
-On a master copy, place the inspected artwork in **FINAL POLISHED ARTWORK**. Preserve the unmodified generation in a hidden **ORIGINAL EDITABLE ARTWORK** group and document defects or limitations in hidden **REVIEW NOTES**. Retain the verified master canvas and working layers.
+On a master copy, use generation 1 as the visible foundation beneath editable corrections in **FINAL POLISHED ARTWORK**; retain an untouched copy in hidden **ORIGINAL EDITABLE ARTWORK**. Preserve successful abstract marks, venue, texture, lighting, reflections and typography. Never replace working surroundings with stretched samples, generic shapes or photographic strips. Repair outlines locally. Retain master settings/layers; log limitations in hidden **REVIEW NOTES**.
 
 {BADGE_PLACEMENT_VERIFICATION}Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
+
+In that inspection, compare sources at 100% for authenticity and generation 1 beside the final render at equal 250 px widths for composition: hero, abstract marks, venue, reflections, title and plaque. Restore surroundings where finishing flattened texture, introduced seams or weakened composition; retain authenticity/text corrections. Mark unresolved loss needs_attention. No additional generation or approval pause.
 
 **6. Write the Smart Upload JSON and deliver**
 
 After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.
 
-Display the inspected final artwork, or the best available provisional result if a required checkpoint is pending. Report verified PSD and JSON paths, any pending checkpoint and quality concerns separately. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
+Display the inspected artwork or best provisional result. Report verified PSD/JSON paths, pending checkpoints and quality concerns separately. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
 
 
 @lru_cache(maxsize=1)
