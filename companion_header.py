@@ -10,7 +10,8 @@ def enrich_queues(queues):
     designs = []
     for job in list_jobs():
         stage = job['stage']
-        state = 'waiting' if stage == 0 else 'running' if stage < 4 else 'complete' if stage == 4 else 'failed'
+        delivered = stage == 5 and bool(job.get('file_path'))
+        state = 'waiting' if stage == 0 else 'running' if stage < 4 else 'complete' if stage == 4 or delivered else 'failed'
         percent, label = estimated_progress(job) if state == 'running' else (100 if state == 'complete' else 0, job['label'])
         designs.append({**job, 'state': state, 'percent': percent,
                         'label': label, 'estimated': state == 'running'})

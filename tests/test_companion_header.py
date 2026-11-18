@@ -25,6 +25,20 @@ def test_header_preserves_real_states_and_marks_estimates(monkeypatch):
     assert not any(job['estimated'] for job in queues['ads']['jobs'])
 
 
+def test_delivered_design_review_notes_are_not_a_failed_generation(monkeypatch):
+    jobs = [dict(id='giannis', stage=5, file_path='/Review/Giannis.psd',
+                 label='Uploaded · needs review', detail='Check artwork and upload metadata.'),
+            dict(id='oscar', stage=5, file_path='', label='Needs attention',
+                 detail='Could not verify thinking level.')]
+    monkeypatch.setattr(morning_design_queue, 'list_jobs', lambda: jobs)
+    monkeypatch.setattr(design_publish_ad, 'dashboard', lambda: dict(enabled=True, online=True, jobs=[]))
+    result = companion_header.enrich_queues(dict(design={}, upload={}))['design']['jobs']
+    assert result[0]['state'] == 'complete' and result[0]['percent'] == 100
+    assert result[0]['label'] == 'Uploaded · needs review'
+    assert result[0]['detail'] == jobs[0]['detail']
+    assert result[1]['state'] == 'failed'
+
+
 def test_header_and_ads_controls_keep_admin_and_origin_guards(monkeypatch):
     import files_upload_api
     from starlette.applications import Starlette

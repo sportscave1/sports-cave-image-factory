@@ -44,13 +44,14 @@
   const keyDown = (element, key) => element.dispatchEvent(
     new KeyboardEvent('keydown', {key, code:key, bubbles:true, cancelable:true}));
   function powerControl(trigger) {
+    if (!trigger) return null;
     const controlled = trigger.getAttribute('aria-controls');
     if (trigger.getAttribute('aria-expanded') === 'false') return null;
     const menu = (controlled && document.getElementById(controlled)) ||
       document.querySelector('[role="menu"][aria-label="Select ChatGPT model"]');
     if (!menu?.matches('[role="menu"]')) return null;
     const power = Array.from(menu.querySelectorAll('[role="menuitem"]')).find(item =>
-      (item.getAttribute('aria-label') || item.textContent.trim()) === 'Power');
+      /^Power(?:\s|$)/i.test(item.getAttribute('aria-label') || item.textContent.trim()));
     const steps = Array.from(menu.querySelectorAll('[role="status"], [aria-live]'))
       .map(status => status.textContent.match(/(?:^|\D)(\d+)\s+of\s+(\d+)\.?\s*$/i))
       .find(Boolean);
@@ -60,51 +61,54 @@
     return {power, current, total};
   }
   async function setThinkingLevel() {
-    const trigger = await waitFor(() => {
-      if (!inProject() || existingTurn()) return null;
+    const currentTrigger = () => {
+      if (cancelled || !inProject() || existingTurn()) return null;
       const inside = formFor(input())?.querySelector(pickerSelector);
       const pickers = document.querySelectorAll(pickerSelector);
       return inside || (pickers.length === 1 ? pickers[0] : null);
-    }, 3500);
+    };
+    const trigger = await waitFor(currentTrigger, 10000);
     if (!trigger) return false;
-    // Work may replace the picker while updating the model or pasted files.
-    const currentTrigger = () => formFor(input())?.querySelector(pickerSelector) || trigger;
+    // Never retain the old trigger/menu across React updates.
     if (trigger.getAttribute('aria-expanded') !== 'true') {
       trigger.focus();
       keyDown(trigger, 'Enter');
+      if (!await waitFor(() => currentTrigger()?.getAttribute('aria-expanded') === 'true', 1800)) {
+        currentTrigger()?.click();
+      }
     }
     try {
-      let control = await waitFor(() => powerControl(trigger), 1800);
+      let control = await waitFor(() => powerControl(currentTrigger()), 10000);
       if (!control) return false;
       const target = control.total - stepsFromMaximum;
-      while (inProject() && control.current !== target) {
+      while (!cancelled && inProject() && control.current !== target) {
         const {power, current, total} = control;
         const direction = current < target ? 1 : -1;
         power.focus();
         keyDown(power, direction > 0 ? 'ArrowRight' : 'ArrowLeft');
         control = await waitFor(() => {
-          const next = powerControl(trigger);
+          const next = powerControl(currentTrigger());
           return next?.current === current + direction && next.total === total ? next : null;
-        }, 900);
+        }, 5000);
         if (!control) return false;
       }
-      if (!inProject() || control.current !== target) return false;
+      if (cancelled || !inProject() || control.current !== target) return false;
     } finally {
-      if (currentTrigger().getAttribute('aria-expanded') === 'true') {
+      if (currentTrigger()?.getAttribute('aria-expanded') === 'true') {
         keyDown(powerControl(currentTrigger())?.power || currentTrigger(), 'Escape');
-        if (!await waitFor(() => currentTrigger().getAttribute('aria-expanded') !== 'true', 800)) {
+        if (!await waitFor(() => currentTrigger()?.getAttribute('aria-expanded') !== 'true', 1800)) {
           // Some Work menus ignore synthetic Escape. Toggle the same picker
           // closed, then verify it actually closed before allowing Send.
           currentTrigger().focus();
           keyDown(currentTrigger(), 'Enter');
-          if (!await waitFor(() => currentTrigger().getAttribute('aria-expanded') !== 'true', 800)) {
+          if (!await waitFor(() => currentTrigger()?.getAttribute('aria-expanded') !== 'true', 1800)) {
             currentTrigger().click();
-            await waitFor(() => currentTrigger().getAttribute('aria-expanded') !== 'true', 800);
+            await waitFor(() => currentTrigger()?.getAttribute('aria-expanded') !== 'true', 1800);
           }
         }
       }
     }
-    const closed = currentTrigger().getAttribute('aria-expanded') !== 'true';
+    const closed = !cancelled && currentTrigger()?.getAttribute('aria-expanded') === 'false';
     return closed;
   }
   const thinkingUnavailable = () => ({

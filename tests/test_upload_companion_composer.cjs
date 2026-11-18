@@ -11,6 +11,7 @@ const conversation = 'https://chatgpt.com/g/g-p-6a387a17627081918e1700ec2783a12b
 function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, initialDraft = '',
   initialFiles = [], design = false, ad = false, start = 3, total = 6, canSet = true, powerAvailable = true,
   resetAfterPaste = false, draftBackupOK = true, ignoreEscape = false,
+  replacePicker = false, menuReadyAfter = 0, ignoreOpenKey = false, powerLabel = 'Power',
   splitPreview = false, mismatchedPreview = false, sendTypeButton = false,
   afterThinkingDelay = 0, afterPermitDelay = 0, acknowledge = true, attachmentPreview = false,
   invalidateAfterReopen = false, headerAvailable = true, duplicateSend = false,
@@ -28,15 +29,17 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
     get textContent() {return headerAvailable ? `GPT-6.2 Astra Power ${selected}` : '';},
     focus() {},
     click() {expanded = !expanded;},
-    getAttribute: name => name === 'aria-controls' ? 'picker' : String(expanded),
-    dispatchEvent(event) {if (event.key === 'Enter') {expanded = !expanded;if (expanded) {
+    getAttribute: name => name === 'aria-controls' ? 'picker' : String(replacePicker && opened ? false : expanded),
+    dispatchEvent(event) {if (event.key === 'Enter' && !(ignoreOpenKey && !expanded)) {expanded = !expanded;if (expanded) {
       opened++;
       if (opened >= 2 && invalidateAfterReopen) files.length = 0;
     }}},
   };
+  const liveTrigger = () => replacePicker && opened ? {...trigger,
+    getAttribute:name => name === 'aria-controls' ? 'picker' : String(expanded)} : trigger;
   const power = {
     focus() {},
-    getAttribute: () => 'Power',
+    getAttribute: () => powerLabel,
     dispatchEvent(event) {
       if (event.key === 'Escape' && !ignoreEscape) {
         expanded = false;
@@ -47,7 +50,7 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
     },
   };
   const menu = {matches: () => true, querySelectorAll: query => query === '[role="menuitem"]'
-    ? (powerAvailable ? [power] : []) : [{textContent:`Some setting, ${selected} of ${total}.`}]};
+    ? (powerAvailable && now >= menuReadyAfter ? [power] : []) : [{textContent:`Some setting, ${selected} of ${total}.`}]};
   const button = {isConnected:true, get disabled() {return now < Math.max(attachmentReadyAfter, disabledUntil);}, getAttribute:() => null, click() {
     assert.equal(this.disabled,false,'Never click a disabled Send');
     sent.push(inserted);
@@ -56,7 +59,7 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
     if (acknowledge) location.href = ad ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a6bd98cd6f081918788b544dcdecfc2-sports-cave-meta-ads') : design ? conversation.replace('6a387a17627081918e1700ec2783a12b-sc-mockups-uploads', '6a1e449948e881919c1e345006d63654-sports-cave-designs') : conversation;
   }};
   const staleSend = {...button,disabled:true,getClientRects:()=>[]};
-  const querySelector = query => query.includes('Select ChatGPT model') ? trigger :
+  const querySelector = query => query.includes('Select ChatGPT model') ? liveTrigger() :
     (sendTypeButton && !query.includes('button[aria-label="Send"]') ? null : duplicateSend ? staleSend : button);
   const previewButton = {getAttribute:()=>null, get textContent(){return mismatchedPreview ? 'An unrelated prompt that must never be sent instead' : inserted.replace(/\s+/g,' ').slice(0,78)+'…';}};
   const all = query => query.includes('send-button') ? (duplicateSend ? [staleSend,button] : [button]) :
@@ -100,7 +103,7 @@ function fixture({work = true, asAttachment = false, attachmentReadyAfter = 0, i
       return work ? null : node;
     },
     querySelectorAll(query) {
-      if (query.includes('Select ChatGPT model')) return [trigger];
+      if (query.includes('Select ChatGPT model')) return [liveTrigger()];
       if (!current)return [];
       if (query.startsWith('h4'))return work ? [{nextElementSibling:body}] : [];
       return work ? [] : [{querySelector:() => body}];
@@ -254,6 +257,20 @@ test('Designs uses the same second-from-top thinking level for inline and attach
     assert.deepEqual(app.sent, [prompt]);
     assert.deepEqual(app.thinking,[{selected:5, expanded:false}]);
     assert.equal(app.permitted(), 1);
+  }
+});
+
+test('Design queue tolerates replaced pickers, slow menus and click-only menu opening', async () => {
+  for (const config of [{replacePicker:true}, {menuReadyAfter:4000},
+    {ignoreOpenKey:true}, {powerLabel:'Power 6'},
+    {replacePicker:true, menuReadyAfter:4000, powerLabel:'Power 6'}]) {
+    const browser = fixture({design:true, start:6, ...config});
+    const prompt = 'Exact Oscar design prompt and receipt.';
+    const result = await browser.invoke({type:'project:send', id:'oscar', prompt});
+    assert.equal(result.sent,true,JSON.stringify(config));
+    assert.deepEqual(browser.sent,[prompt]);
+    assert.deepEqual(browser.thinking,[{selected:5,expanded:false}]);
+    assert.equal(browser.permitted(),1);
   }
 });
 
