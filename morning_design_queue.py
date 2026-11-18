@@ -106,8 +106,13 @@ def _waiting_prompt(job):
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
         from design_new_composition import PURPOSEFUL_ABSTRACT
         from home_morning_brief_actions import REVIEW_SAVE_NAMING
-        from design_motorsport import MOTORSPORT_JSON
-        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, REVIEW_SAVE_NAMING, MOTORSPORT_JSON)):
+        from design_motorsport import (
+            MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
+            MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK,
+        )
+        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, REVIEW_SAVE_NAMING,
+                                          MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
+                                          MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK)):
             return prompt
         _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
         _, _, body = body.partition('\n\n')  # Existing workflow introduction.

@@ -59,3 +59,30 @@ selector.render_selector(app,'fixture',{'id':'fixture'},suggested_sport=sport)
 """).run()
     assert not ui.exception and not ui.error
     assert ui.selectbox[0].value == 'id:'+str(names.index(sport))
+
+
+def test_motorsport_integration_reaches_shared_stages_and_waiting_jobs():
+    from design_motorsport import MOTORSPORT_PLACEMENT, MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK
+    from home_design_refresh import _refresh_prompt
+    new = _prompt('Boss in Red', 'Verified Allan Moffat period touring-car tribute.')
+    refresh = _refresh_prompt(dict(title='Current Moffat design', product_id='123'), 'https://example.test/product')
+    for prompt in (new, refresh):
+        for rule, start, end in ((MOTORSPORT_PLACEMENT, '**2.', '**3.'),
+                                 (MOTORSPORT_INTEGRATION, '**3.', '**4.'),
+                                 (MOTORSPORT_FINISH_CHECK, '**4.', '**5.')):
+            assert prompt.count(rule) == 1
+            assert prompt.index(start) < prompt.index(rule) < prompt.index(end)
+        assert 'one creative image-generation call' in prompt
+        assert 'never reinstate a corrected cutout seam' in prompt
+        assert 'never invent missing detail or accept a lookalike' in prompt
+    edited = _prompt('Moffat', 'A targeted edit', edit={
+        'source':dict(id='id:art',rev='R1',path_display='/Review/Art.psd'), 'metadata':{}})
+    assert all(rule not in edited for rule in (MOTORSPORT_PLACEMENT, MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK))
+    key = queue.identity('2026-11-19', 'legends', {'title':'Moffat'})
+    current = queue._job_prompt(key, 'Moffat', 'Keep the verified original sources.')
+    job = dict(id=key, title='Moffat', prompt=current.replace(MOTORSPORT_INTEGRATION, ''))
+    upgraded = queue._waiting_prompt(job)
+    assert MOTORSPORT_INTEGRATION in upgraded
+    assert 'Keep the verified original sources.' in upgraded
+    assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
