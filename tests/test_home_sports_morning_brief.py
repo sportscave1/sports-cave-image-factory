@@ -548,7 +548,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Build every visible athlete and sporting object from the verified original photographs",
         "Completely cover generated renditions",
         "If it passes, proceed directly to the final save",
-        "Correct only the border if clearance fails",
+        "Correct only the border for a rule defect",
         "contact shadows only at actual points of contact",
         "Record unresolved quality or identity as needs_attention",
         "ORIGINAL EDITABLE ARTWORK", "FINAL POLISHED ARTWORK", "REVIEW NOTES",
@@ -558,7 +558,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Completion requires one full generation", "Shopify publication is a separate action",
     ):
         assert guard in result
-    assert len(result.split()) < 3900
+    assert len(result.split()) < 4000
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)

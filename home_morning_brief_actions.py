@@ -39,7 +39,7 @@ _CREATE_DESIGN_BORDER_RULES = """**Border and print safety for generation and th
 
 Generation 1 includes the finished decorative border. Show it in the scaled layout and repeat its geometry in the generation request: one continuous fine antique-gold rule on all four sides, with short inner corner returns derived from the sporting story. The outermost detail sits 3% of the shorter canvas dimension inside every edge: 60 px on the 2835 × 2004 master. Scale that inset proportionally for the generation resolution. A plain rectangle alone is insufficient; avoid heavy ornament.
 
-Carry venue tones, texture and selected abstract marks through the rule to every canvas edge; keep visible artwork in all four outer margins. Keep faces, lettering and plaque inside the border. Framing clearance is separate from printer-required bleed. Inspect every side and corner on generation 1; repair only broken or misplaced rules on a separate PSD layer, preserving the artwork beneath.
+Carry venue tones, texture and selected abstract marks through the rule to every canvas edge; keep visible artwork in all four outer margins. Keep faces, hands, fingertips, defining equipment, lettering and plaque visibly clear inside the rule and corner returns. Check at 250 px before generation and after source restoration. For grazing or crossing, move or proportionally scale the whole source photograph minimally, preserving dominance, pose and hand-to-equipment contact; never crop, distort or fade defining details. Preserve successful title and abstraction. Framing clearance is separate from printer-required bleed. Inspect every side and corner on generation 1; repair only broken or misplaced rules on a separate PSD layer, preserving the artwork beneath.
 
 """
 
