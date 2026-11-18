@@ -531,3 +531,24 @@ def test_display_only_uses_cached_deletions_without_provider_reads(store, monkey
     monkeypatch.setattr(design_deletion_status,'deleted',lambda jobs,posted:{r['id'] for r in jobs})
     monkeypatch.setattr(queue,'_deleted_designs',lambda *args: (_ for _ in ()).throw(AssertionError('foreground Dropbox call')))
     assert queue.list_jobs(display_only=True)[0]['label']=='Deleted · ready to redo'
+
+
+def test_requeue_during_output_lookup_ignores_previous_attempt(store, monkeypatch):
+    from home_sports_morning_brief import SETTING_KEY
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    queue.tick(token, [dict(id=first['id'], state='failed')])
+
+    def late_output(jobs):
+        assert queue.enqueue_selected(first['id']) is True
+        return {first['id']: dict(stage=4, message='', source=dict(
+            id='id:old', rev='R1', path_display='/Review/Old.psd'))}
+
+    monkeypatch.setattr(queue, 'verify_outputs', late_output)
+    restarted = queue.tick(token, [])['jobs'][0]
+    assert restarted['id'] == first['id']
+    assert restarted['receipt'] != first['receipt']
+    record = queue.list_jobs()[0]
+    assert record['stage'] == 1 and record['file_path'] == ''
