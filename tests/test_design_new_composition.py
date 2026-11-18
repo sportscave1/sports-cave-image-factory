@@ -146,6 +146,10 @@ def test_dark_arena_direction_survives_prompt_assembly_and_finishing():
     assert 'predominantly dark abstract setting, sparse team-colour marks' in finishing
     assert 'retaining the reviewed dark abstract hierarchy and subdued venue' in saving
     assert 'For sports other than hockey and NBA' in layout
+    assert 'fine brushed antique-gold edges or inlays' in layout
+    assert 'fine brushed antique-gold contours or inlays' in generation
+    assert 'fine antique-gold detail defines the abstract forms' in finishing
+    assert 'integrated gold detail and restrained team-colour balance' in saving
     assert 'one creative image-generation call' in generation
     assert 'never generate again for visual criticism' in finishing
     assert 'Do not restore malformed generated corners over a corrected border' in saving
