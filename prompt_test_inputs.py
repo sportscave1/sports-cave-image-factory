@@ -65,5 +65,27 @@ def design_choices(provider=None):
     return sorted(rows, key=lambda r: r['title'].casefold())
 
 
+def edition_choices(connect=None):
+    """Edition Ops product names and URLs only; no sync or edition mutation."""
+    if connect is None:
+        from supabase_backend import read_connection
+        connect = read_connection
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT DISTINCT ON (btrim(shopify_handle))
+            btrim(shopify_handle) AS handle, product_title AS title
+            FROM edition_products
+            WHERE NULLIF(btrim(shopify_handle), '') IS NOT NULL
+              AND NULLIF(btrim(product_title), '') IS NOT NULL
+            ORDER BY btrim(shopify_handle), product_title LIMIT 10001""")
+        rows = cur.fetchall()
+    if len(rows) > 10000:
+        raise ValueError('Edition Ops catalogue is too large for this picker.')
+    return [dict(id=r['handle'], title=r['title'], source='Edition Ops',
+                 context={'product_url': 'https://www.sportscaveshop.com/products/' + r['handle']})
+            for r in sorted(rows, key=lambda row: (row['title'].casefold(), row['handle']))]
+
+
 def load_choices(workflow):
+    if workflow == 'Ads':
+        return edition_choices()
     return design_choices() if workflow in ('Edit design', 'Upload') else database_choices(workflow)

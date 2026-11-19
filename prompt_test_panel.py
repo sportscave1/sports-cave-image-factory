@@ -3,6 +3,7 @@ import logging
 import secrets
 from prompt_test_runner import WORKFLOWS, build_prompt
 from prompt_test_inputs import load_choices
+from prompt_clipboard import render_copy
 
 
 def render(st, prompt, text, user, valid=True):
@@ -13,42 +14,46 @@ def render(st, prompt, text, user, valid=True):
             return
         workflow = st.selectbox('Test workflow', WORKFLOWS[prompt.category], key=key + '-workflow')
         source_key = key + '-' + workflow
-        custom = st.checkbox('Enter a custom test product', key=source_key + '-custom')
+        custom = st.checkbox('Enter a product URL instead', key=source_key + '-url-mode')
         choice = None
         if custom:
-            title = st.text_input('Test product name or Sports Cave URL', key=source_key + '-title')
-            details = st.text_area('Test product details', key=source_key + '-details', height=120)
+            title = st.text_input('Product URL', key=source_key + '-url')
             if title.strip():
-                choice = dict(id='custom', title=title.strip(), context={'details': details}, source='Custom test product')
+                choice = dict(id='custom', title=title.strip(), context={'product_url': title.strip()}, source='Custom test product')
         else:
-            if st.button('Load / refresh test inputs', key=source_key + '-load'):
+            refresh = st.button('Refresh products' if workflow == 'Ads' else 'Load / refresh test inputs', key=source_key + '-load')
+            if refresh or (workflow == 'Ads' and source_key + '-rows' not in st.session_state):
                 try:
                     with st.spinner('Loading test inputs...'):
                         rows = load_choices(workflow)
                     st.session_state[source_key + '-rows'] = rows
                     st.session_state.pop(source_key + '-pick', None)
                 except Exception:
+                    st.session_state[source_key + '-rows'] = []
                     logging.getLogger(__name__).exception('Prompt test inputs unavailable')
-                    st.error('Test inputs could not be loaded. Retry, or enter a custom test product.')
+                    st.error('Test inputs could not be loaded. Refresh to retry, or enter a product URL.')
             rows = st.session_state.get(source_key + '-rows')
             if rows is not None:
                 if not rows:
-                    st.info('No matching test inputs are currently available. Refresh the relevant Home brief or Design Studio list, or enter a custom test product.')
+                    st.info('No matching products or suggestions are available. Refresh the list, or enter a product URL.')
                 else:
-                    options = [r['id'] for r in rows]
+                    by_id = {r['id']: r for r in rows}
+                    options = list(by_id)
                     if source_key + '-pick' not in st.session_state:
                         st.session_state[source_key + '-pick'] = secrets.choice(options)
                     if st.button('Choose another at random', key=source_key + '-random'):
                         st.session_state[source_key + '-pick'] = secrets.choice(options)
-                    label = 'Design Studio design' if workflow in ('Upload', 'Edit design') else 'Test product / suggestion'
-                    chosen = st.selectbox(label, options, format_func=lambda value: next(r['title'] for r in rows if r['id'] == value), key=source_key + '-pick')
-                    choice = next(r for r in rows if r['id'] == chosen)
+                    label = 'Design Studio design' if workflow in ('Upload', 'Edit design') else ('Edition Ops product' if workflow == 'Ads' else 'Test product / suggestion')
+                    chosen = st.selectbox(label, options, format_func=lambda value: by_id[value]['title'], key=source_key + '-pick')
+                    choice = by_id[chosen]
+        if choice and choice['source'] == 'Edition Ops':
+            st.text_input('Product URL', value=choice['context']['product_url'], disabled=True, key=source_key + '-selected-url-' + choice['id'])
         if choice:
             st.caption('Test input: ' + choice['title'] + ' - ' + choice['source'])
         if choice and valid:
             compiled = build_prompt(text, workflow, choice)
             st.subheader('Full prompt with product applied')
-            st.caption('Use the copy button at the top-right of the prompt below to copy everything. Changes to the draft or product update this prompt automatically.')
-            st.code(compiled, language=None, wrap_lines=True)
+            st.caption('Copies the complete current draft with your selected product applied.')
+            render_copy(st, compiled, preview_label='Show product-applied prompt')
         elif not valid:
             st.info('Fix the editor validation errors to prepare this prompt.')

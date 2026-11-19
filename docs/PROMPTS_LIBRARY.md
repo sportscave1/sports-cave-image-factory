@@ -31,9 +31,9 @@ Save draft stores one immutable category version containing the full text and th
 
 ## Copy a product-applied draft
 
-Open Prepare prompt to copy and enable Select a product. Choose a workflow and load its read-only input list, or enter a custom product name/URL and details. Upload and Edit design retain the Design Studio dropdown; other workflows retain Home/Refresh/catalogue suggestions.
+Open Prepare prompt to copy and enable Select a product. Choose a workflow and load its read-only input list, or enter a product URL. There is no product-details field. Ads automatically loads a searchable Edition Ops product dropdown (names and URLs only), cached for the session with a Refresh products button. Selecting an edition fills its URL. Upload and Edit design retain the Design Studio dropdown; Design workflows retain Home/Refresh suggestions.
 
-The full current editor draft is immediately assembled with the selected product context. Known product placeholders are substituted in a single pass; missing values and runtime slots remain intact. All sections are preserved. The code block's native copy button copies the complete text. Editing the product or draft automatically refreshes it; nothing is saved or activated by copying.
+The full current editor draft is immediately assembled with the selected product context. Known product placeholders are substituted in a single pass; missing values and runtime slots remain intact. All sections are preserved. A prominent Copy full prompt button copies the complete text, with a browser clipboard fallback. The long text is collapsed under an optional preview. The main library also opens on Copy full prompt, with editing in a separate tab. Editing the product or draft automatically refreshes it; nothing is saved or activated by copying.
 
 There is no OpenAI request, API key requirement, generated answer, image download or test job. Custom URLs are included as supplied without fetching them or requiring catalogue membership. Attach the source artwork yourself when manually testing image-based workflows.
 

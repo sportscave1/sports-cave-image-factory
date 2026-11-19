@@ -70,11 +70,11 @@ class PageTests(unittest.TestCase):
                 page = AppTest.from_string(source, default_timeout=30).run()
                 self.assertFalse(page.exception)
                 rows = [p for p in catalog() if p.category == category]
-                self.assertEqual([e.label for e in page.expander], ['Prepare prompt to copy'] + [p.title for p in rows] + ['Source & template details'])
+                self.assertEqual([e.label for e in page.expander], ['Prepare prompt to copy', 'Show full prompt'] + [p.title for p in rows] + ['Source & template details'])
                 self.assertEqual(len(page.text_area), 1)
                 self.assertTrue(next(b for b in page.button if b.label == 'Activate version').disabled)
                 page.text_input[0].set_value('no matches xyz').run()
-                self.assertEqual(len(page.expander), len(rows) + 2)
+                self.assertEqual(len(page.expander), len(rows) + 3)
 
     def test_entire_edits_sync_both_directions_and_reject_broken_boundaries(self):
         from prompt_bundle import combine, split

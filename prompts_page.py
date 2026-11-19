@@ -7,6 +7,7 @@ import os
 from prompt_library import ROOT, catalog
 from prompt_bundle import bundle_prompt, combine, is_bundle, split
 from prompt_releases import GitStore, ReleaseError
+from prompt_clipboard import render_copy
 
 
 def render_page(user):
@@ -90,7 +91,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             badge = (('Release v' if selected.get('commit') else 'Baseline v' if selected.get('baseline') else 'Draft v') + selected['version']) if selected else ('Deployed v' + deployed.get('version', '1.0'))
             status.html('<span class="prompt-badge">' + html.escape(badge) + '</span>')
             test_panel = st.container()
-            edit, preview = st.tabs(['Edit prompt', 'Full prompt preview'])
+            preview, edit = st.tabs(['Copy full prompt', 'Edit prompt'])
             with edit:
                 buffer_key = f'{key}-{choice}'
                 buffers = st.session_state.setdefault('prompt-editor-buffers', {})
@@ -127,7 +128,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                     valid = False
                     st.error(str(exc))
             with preview:
-                st.html('<div class="prompt-preview">' + html.escape(text) + '</div>')
+                render_copy(st, text)
                 st.download_button('Download prompt', text, file_name=prompt.title + '.txt', key='prompt-download-' + key)
             if st.session_state.get('prompt-show-compare-' + key, False):
                 compare_id = st.selectbox('Compare against', ['deployed'] + [v['id'] for v in versions],
