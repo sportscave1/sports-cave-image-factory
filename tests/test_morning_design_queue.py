@@ -575,3 +575,27 @@ def test_waiting_refresh_upgrades_old_two_pass_snapshot_and_keeps_receipts():
     assert 'design_origin (designs_to_refresh)' in upgraded
     assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
     assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+
+
+def test_waiting_refresh_rebuilds_old_shared_brief_with_edition_lock():
+    from home_design_refresh import _refresh_prompt
+    job_id = '00000000-0000-0000-0000-000000000123'
+    prompt = _refresh_prompt(dict(title='Collector', product_id='123', suggestion='Try a newer achievement.',
+                                 evidence='Selected by owner.'), 'https://example.test/products/collector')
+    prompt = prompt.replace('Existing edition/product title (preserve):',
+                            'Current title (suggestion, not an approved title lock):')
+    prompt = prompt.replace('Preserve the existing edition name, exact headline',
+                            'Reconsider the title, photographs, composition and treatment freely. Preserve exact headline')
+    tail = (f'\nInclude morning_design_job_id = "{job_id}" in the final .upload.json handoff.\n'
+            'Queue retry receipt: 00000000-0000-0000-0000-000000000001\n'
+            'Queue output receipt: 00000000-0000-0000-0000-000000000002\n')
+    job = dict(id=job_id, title='Collector', prompt='SPORTS CAVE EXISTING DESIGN REFRESH\n'+prompt+tail)
+    upgraded = queue._waiting_prompt(job)
+    assert 'Reconsider the title, photographs, composition and treatment freely' not in upgraded
+    assert 'Current title (suggestion' not in upgraded
+    assert 'Existing edition/product title (preserve): Collector' in upgraded
+    assert 'Try a newer achievement.' in upgraded and 'Selected by owner.' in upgraded
+    assert 'any older suggestion to rename the edition or change its story is superseded' in upgraded
+    assert upgraded.endswith(tail)
+    assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded

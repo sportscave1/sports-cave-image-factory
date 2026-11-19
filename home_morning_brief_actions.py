@@ -12,7 +12,7 @@ from design_new_composition import (
 )
 from design_collector_assets import NEW_BADGE_LAYOUT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
-from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE, REFRESH_TITLE_GUIDANCE
 from design_collector_background import NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND
 from design_motorsport import (
     MOTORSPORT_ARTWORK, MOTORSPORT_JSON, MOTORSPORT_PLACEMENT,
@@ -75,7 +75,8 @@ def _story_without_meta_ad(text):
     return "\n".join(lines).strip()
 
 
-def _prompt(title, story, *, edit=None, primary_market="", refresh_product_id=None):
+def _prompt(title, story, *, edit=None, primary_market="", refresh_product_id=None,
+            preserve_refresh_edition=False):
     context = _story_without_meta_ad(story)
     if edit is not None:
         from design_review_prompt import build_edit_prompt
@@ -98,6 +99,31 @@ def _prompt(title, story, *, edit=None, primary_market="", refresh_product_id=No
             'ID, handle/URL, variants, sales and edition history, counters and inventory. If the target '
             'cannot be verified, retain the Review artwork as needs_attention; never create another product.'
         )
+    story_guidance = 'Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.'
+    title_guidance = NEW_DESIGN_TITLE_GUIDANCE
+    typography = _CREATE_DESIGN_TYPOGRAPHY
+    save_naming = REVIEW_SAVE_NAMING
+    edition_check = ''
+    if preserve_refresh_edition:
+        story_guidance = 'Use the existing edition story as the research brief. Verify its subject, event or career angle, era and emotional meaning from the current artwork and listing. Find stronger authentic sources for that same story; do not replace it with a different moment or a new title concept. Preserve verified story-defining context, including an existing quotation, date, score or statistic where it identifies the original edition.'
+        title_guidance = REFRESH_TITLE_GUIDANCE
+        typography = typography.replace(
+            'Revise a conventional headline merely filling an empty corner within this layout review.',
+            'Refine a conventional headline placement within this layout review while preserving the exact existing wording.',
+        )
+        save_naming = """**Review filename and existing website product title**
+
+Keep the existing full website product title verbatim for JSON design_title and the PSD stem. Preserve the existing printed headline and any quotation exactly on the artwork; distinguish them from the full listing title. Use the normal safe filename handling and an unused collision suffix where required, with a matching JSON basename. A filename suffix does not rename the edition. Do not recompose, shorten or optimise the existing title to fit a new-product naming rule. Verify filename, JSON, Dropbox ID, revision and path together.
+
+"""
+        edition_check = 'Within this existing inspection, compare the headline and any quotation character by character with the original edition, and verify the same story, moment, era and emotional meaning in the new photographs and setting. Correct wording drift locally while preserving the upgraded treatment; record unresolved source or factual uncertainty under the existing needs_attention rules and continue Review delivery.\n\n'
+        handoff_identity = (
+            handoff_identity.replace('even when the title, photographs or collector concept change',
+                                     'while its photographs, composition and collector finish are upgraded')
+            + ' Keep design_title equal to the existing full product title and design_story faithful to the '
+            'same edition narrative, moment and quotation; describe the preserved story rather than inventing '
+            'a new concept from the new images. Verify these fields against the existing listing and artwork.'
+        )
     market_note = (f' Include primary_market = "{primary_market}" in the design JSON for downstream ad targeting.'
                    if primary_market in {'AUS', 'USA', 'UK', 'CA', 'CAN', 'NZ'} else '')
     return f"""Sports Cave event: {title}
@@ -112,9 +138,9 @@ Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow
 
 Use authorised read-only Shopify reports for comparable bestsellers and a lower-selling print where supported. If unavailable, use verified storefront bestsellers or approved references in the closest comparable sport or collector collection. Treat unranked products as style references only. Record evidence or gaps in REVIEW NOTES; draw original cues without attributing sales to design.
 
-Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
+{story_guidance}
 
-{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, compare the available candidates for clear facial likeness, expressive pose, clean silhouette and print detail; choose the strongest collector hero, not merely a relevant photo. Prefer a readable face over one hidden by limbs, equipment or an upward angle unless that pose defines the verified story. Test its crop at 250 px: the named subject and defining detail must dominate without a tiny face. Choose a cleaner verified source or crop when a phone, foreground head or unrelated player obscures the moment; retain raised hands and defining equipment inside the safe border. Open the full-resolution original, not a search thumbnail, screenshot, pre-cutout or compressed repost. Compare the best available originals at the intended placed size for facial detail, focus, motion blur, compression, exposure and usable crop. Reject pixelated, muddy, over-sharpened or blown-out faces and sources that require invented detail to look sharp. Prefer a stronger verified frame or a smaller placement over enlarging a weak image; upscaling does not establish detail or quality. Search original galleries once if needed. If no usable source is available within the existing allowance, record the quality limitation and keep the result provisional. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
+{title_guidance}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, compare the available candidates for clear facial likeness, expressive pose, clean silhouette and print detail; choose the strongest collector hero, not merely a relevant photo. Prefer a readable face over one hidden by limbs, equipment or an upward angle unless that pose defines the verified story. Test its crop at 250 px: the named subject and defining detail must dominate without a tiny face. Choose a cleaner verified source or crop when a phone, foreground head or unrelated player obscures the moment; retain raised hands and defining equipment inside the safe border. Open the full-resolution original, not a search thumbnail, screenshot, pre-cutout or compressed repost. Compare the best available originals at the intended placed size for facial detail, focus, motion blur, compression, exposure and usable crop. Reject pixelated, muddy, over-sharpened or blown-out faces and sources that require invented detail to look sharp. Prefer a stronger verified frame or a smaller placement over enlarging a weak image; upscaling does not establish detail or quality. Search original galleries once if needed. If no usable source is available within the existing allowance, record the quality limitation and keep the result provisional. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
 
 {MOTORSPORT_ARTWORK}
 
@@ -122,7 +148,7 @@ Choose a story supporters would still want to display in five years. Use timeles
 
 **2. Prepare the complete composition before generation**
 
-{COMPLETE_COMPOSITION}{MOTORSPORT_PLACEMENT}{_CREATE_DESIGN_BORDER_RULES}{_CREATE_DESIGN_TYPOGRAPHY}
+{COMPLETE_COMPOSITION}{MOTORSPORT_PLACEMENT}{_CREATE_DESIGN_BORDER_RULES}{typography}
 
 {NEW_BADGE_LAYOUT}
 
@@ -140,12 +166,12 @@ Retry a transient tool failure once per authorised method. Retry image generatio
 
 **4. Inspect and finish the assembled PSD**
 
-{CREATE_DESIGN_AUTHENTICITY_CHECK}{MOTORSPORT_FINISH_CHECK}{REVIEW_RELATIONSHIPS}
+{CREATE_DESIGN_AUTHENTICITY_CHECK}{MOTORSPORT_FINISH_CHECK}{edition_check}{REVIEW_RELATIONSHIPS}
 **5. Save and verify one final Review PSD**
 
 Retain the assembled layer structure, visible generation foundation, verified master settings and working layers. Document defects or limitations in hidden **REVIEW NOTES**.
 
-{REVIEW_SAVE_NAMING}
+{save_naming}
 
 If master access was deferred, first test both plaque placements as specified above. Verify the chosen position against the final composite: both original layers visible once, number editable and aligned inside the plaque, text legible, and safe clearance from hero, title and border. Adjust only a specific placement defect with matching transforms. Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 

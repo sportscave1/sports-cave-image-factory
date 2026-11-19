@@ -1,6 +1,6 @@
 """Signature policy is consistent across the three active design handoffs."""
 from design_collector_background import NEW_BACKGROUND_RESEARCH
-from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE, REFRESH_TITLE_GUIDANCE
 from home_design_refresh import _refresh_prompt
 from home_morning_brief_actions import _prompt, _CREATE_DESIGN_TYPOGRAPHY, _CREATE_DESIGN_COLLECTOR_BACKGROUND
 
@@ -15,7 +15,13 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
                                    suggestion='Improve hierarchy'), 'https://example.com/product')
     assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in edit
     for prompt in (new, refresh, edit):
-        assert prompt.count(_CREATE_DESIGN_TYPOGRAPHY) == 1
+        typography = _CREATE_DESIGN_TYPOGRAPHY
+        if prompt == refresh:
+            typography = typography.replace(
+                'Revise a conventional headline merely filling an empty corner within this layout review.',
+                'Refine a conventional headline placement within this layout review while preserving the exact existing wording.',
+            )
+        assert prompt.count(typography) == 1
         assert 'remove an existing signature only when requested' in prompt
         assert 'Preserve all other approved elements.' in prompt
         for obsolete in ('search both web and image results', 'verified signature assets',
@@ -27,13 +33,16 @@ def test_all_design_handoffs_use_the_same_signature_free_composition():
         assert 'SMART UPLOAD' in prompt or 'Smart Upload JSON' in prompt
         assert prompt.count(NEW_BACKGROUND_RESEARCH) == 1
         assert prompt.count(_CREATE_DESIGN_COLLECTOR_BACKGROUND) == 1
-        assert prompt.count(NEW_DESIGN_TITLE_GUIDANCE) == 1
-        assert 'Internally compare four distinct short candidates' in prompt
-        assert 'one sentence explaining its connection' in prompt
-        assert 'Never invent a commentary line, fan chant or nickname.' in prompt
-        assert 'Honour explicit user locks on approved titles and artwork' in prompt
-        recheck = 'Before generation and during final inspection'
-        assert recheck in prompt
+        if prompt == refresh:
+            assert prompt.count(REFRESH_TITLE_GUIDANCE) == 1
+            assert NEW_DESIGN_TITLE_GUIDANCE not in prompt
+        else:
+            assert prompt.count(NEW_DESIGN_TITLE_GUIDANCE) == 1
+            assert 'Internally compare four distinct short candidates' in prompt
+            assert 'one sentence explaining its connection' in prompt
+            assert 'Never invent a commentary line, fan chant or nickname.' in prompt
+            assert 'Honour explicit user locks on approved titles and artwork' in prompt
+            assert 'Before generation and during final inspection' in prompt
         assert 'Consider a few short, cinematic headline options' not in prompt
         assert 'If in doubt, use the athlete' not in prompt
         assert 'Default to timeless player' not in prompt

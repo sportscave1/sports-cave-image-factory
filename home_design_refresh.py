@@ -20,10 +20,11 @@ REVIEW_FIELDS = {"product_id", "handle", "title", "reason", "evidence",
                  "sessions", "orders", "suggestion"}
 REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
 RECOMMENDATION_GUIDANCE = (
-    "Write each suggestion as a testable creative problem and opportunity for a complete redesign. "
-    "Describe the collector appeal, story, subject hierarchy or thumbnail recognition worth "
-    "investigating. Commission fresh image research and reconsider the hero, scene, title and "
-    "composition. Treat existing artwork and the recommendation as research leads. Avoid "
+    "Write each suggestion as a testable creative problem and opportunity for an imagery and collector-finish upgrade. "
+    "Preserve the existing edition name, title wording, quotation and sporting story or moment. "
+    "Describe the subject hierarchy, image quality, background or thumbnail recognition worth "
+    "investigating. Commission fresh image research and reconsider the hero, scene and "
+    "composition within that same story. Treat existing artwork as the edition reference. Avoid "
     "prescribing only a crop, brightness or text-size change. Weak sales warrant investigation "
     "and a creative test. They do not establish that artwork caused the result."
 )
@@ -34,17 +35,17 @@ def _refresh_prompt(row, product_url):
     evidence = row.get('evidence') or f"{row.get('sessions', 0):,} GA4 landing sessions"
     context = f"""EXISTING PRODUCT REFRESH — NEW ARTWORK FOR THE SAME LISTING
 
-Current title (suggestion, not an approved title lock): {row['title']}
+Existing edition/product title (preserve): {row['title']}
 Shopify product ID: {row['product_id']}
 Product page and current artwork reference: {product_url}
-Research hypothesis from the Home recommendation: {row.get('suggestion') or 'Research a complete new collector design for this subject.'}
+Research hypothesis from the Home recommendation: {row.get('suggestion') or 'Upgrade the imagery and collector finish for this existing edition.'}
 Decision context: {evidence}
 
-Use the current title, artwork and recommendation as suggestions and research leads, just like a Morning Brief idea. Inspect the listing and its current artwork; where available, use its matching master in Dropbox Live ({LIVE_FOLDER}/) for read-only reference. Research and create a fresh design through the shared New Design workflow below. Reconsider the title, photographs, composition and treatment freely while preserving the verified subject and any defining event or rivalry promised by this product. Honour only explicit user locks, not the old layout. Weak sales warrant investigation, not an assumption that the artwork caused them.
+Inspect the listing and its current artwork; where available, use its matching master in Dropbox Live ({LIVE_FOLDER}/) for read-only reference. Preserve the existing edition name, exact headline and quotation wording, and the same subject, sporting story, event or career angle and emotional meaning. Use the artwork and listing together to distinguish the printed headline from the full product title and to establish the original story. The recommendation is an imagery and finish research lead only; any older suggestion to rename the edition or change its story is superseded by this preservation brief. Research fresh authentic photographs for that same story, and upgrade the composition, background, typography treatment and collector finish through the shared New Design workflow below. The old layout and photographs are not locked. Weak sales warrant investigation, not an assumption that the artwork caused them.
 
-Save the new PSD and matching JSON to Design Studio Review. Leave the existing live PSD and Shopify listing untouched during design creation. This is an existing-product refresh even if the new artwork or headline is entirely different; the exact product ID above remains the publication target. The JSON must retain that linkage for Publish Now and Publish + ads. Never create a new Shopify product for this request.
+Save the new PSD and matching JSON to Design Studio Review. Leave the existing live PSD and Shopify listing untouched during design creation. This is new imagery for the same named edition and story; the exact product ID above remains the publication target. The JSON must retain that linkage for Publish Now and Publish + ads. Never create a new Shopify product for this request.
 """
-    return _prompt(row['title'], context, refresh_product_id=row['product_id'])
+    return _prompt(row['title'], context, refresh_product_id=row['product_id'], preserve_refresh_edition=True)
 
 
 def _render_candidate(row):

@@ -96,7 +96,6 @@ def _job_prompt(key, title, recommendation, *, primary_market=""):
 def _waiting_refresh_prompt(job):
     """Refresh unclaimed jobs from the shared renderer without changing queue receipts."""
     from home_design_refresh import _refresh_prompt
-    from home_morning_brief_actions import _prompt
 
     prompt = job['prompt']
     target = re.search(r'^Shopify product ID: (.+)$', prompt, re.M)
@@ -106,24 +105,18 @@ def _waiting_refresh_prompt(job):
     if not found:
         raise ValueError('The queued refresh is missing its Review receipt.')
     tail = '\nInclude morning_design_job_id = "' + tail
-    if '\n\n**Start the authorised new-design job**\n\n' in prompt:
-        _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
-        _, _, body = body.partition('\n\n')
-        brief, found, _ = body.partition('\n\n**1. Research the story, sources and master**')
-        if not found:
-            raise ValueError('The original refresh brief could not be recovered.')
-        rendered = _prompt(job['title'], brief, refresh_product_id=target[1].strip())
-    else:
-        page = re.search(r'^Product page: (.+)$', prompt, re.M)
-        suggestion = re.search(r'^Research hypothesis from the Home recommendation: (.*?)\nDecision context:', prompt, re.M | re.S)
-        evidence = re.search(r'^Decision context: (.+)$', prompt, re.M)
-        if not page:
-            raise ValueError('The queued refresh is missing its existing product reference.')
-        rendered = _refresh_prompt(dict(
-            title=job['title'], product_id=target[1].strip(),
-            suggestion=suggestion[1].strip() if suggestion else 'Research a complete new collector design.',
-            evidence=evidence[1].strip() if evidence else 'Selected from Designs to Refresh.',
-        ), page[1].strip())
+    # Rebuild the brief as well as the stages: old snapshots explicitly allowed
+    # a replacement title/story, which would contradict today's edition lock.
+    page = re.search(r'^Product page(?: and current artwork reference)?: (.+)$', prompt, re.M)
+    suggestion = re.search(r'^Research hypothesis from the Home recommendation: (.*?)\nDecision context:', prompt, re.M | re.S)
+    evidence = re.search(r'^Decision context: (.+)$', prompt, re.M)
+    if not page:
+        raise ValueError('The queued refresh is missing its existing product reference.')
+    rendered = _refresh_prompt(dict(
+        title=job['title'], product_id=target[1].strip(),
+        suggestion=suggestion[1].strip() if suggestion else 'Upgrade the imagery and collector finish for this existing edition.',
+        evidence=evidence[1].strip() if evidence else 'Selected from Designs to Refresh.',
+    ), page[1].strip())
     return 'SPORTS CAVE EXISTING DESIGN REFRESH\n' + rendered + tail
 
 
