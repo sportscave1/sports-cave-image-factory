@@ -182,7 +182,7 @@
   }
   async function preserveRestoredDraft(id, node, form, freshUpload) {
     if (!node.innerText.trim()) return true;
-    if (design || !freshUpload || existingTurn() || attachments(form).length) return false;
+    if ((!design && !freshUpload) || existingTurn() || attachments(form).length) return false;
     const text=node.innerText;
     const saved=await chrome.runtime.sendMessage({type:'project:backup-draft',id,text});
     if (!saved?.ok || !inProject() || input()!==node || node.innerText!==text ||

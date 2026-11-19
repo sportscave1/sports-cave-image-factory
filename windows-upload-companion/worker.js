@@ -135,10 +135,10 @@ async function permit(message, sender) {
 }
 async function backupDraft(message, sender) {
   const job=pending.get(message.id);
-  if (!job || job.designJob || job.sending || sender.frameId!==0 || sender.tab?.id!==job.tab ||
-      sender.url!==project || typeof message.text!=='string' || !message.text.trim() ||
+  if (!job || job.sending || sender.frameId!==0 || sender.tab?.id!==job.tab ||
+      sender.url!==(job.project || project) || typeof message.text!=='string' || !message.text.trim() ||
       message.text.length>1048576) return {ok:false};
-  await chrome.storage.local.set({['draft:'+message.id]:{text:message.text, time:Date.now(), project}});
+  await chrome.storage.local.set({['draft:'+message.id]:{text:message.text, time:Date.now(), project:job.project || project}});
   return {ok:true};
 }
 function isOsComponent(address) {
