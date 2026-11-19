@@ -9,6 +9,21 @@ The cloud producers retain their existing Australia/Sydney schedules: Sports at
 and weekly priorities on Monday at 08:00. Desktop fallback automations stay paused.
 The existing worker reconciliation and retry timings are unchanged.
 
+The 19 November editorial update defaults the Sports Morning Brief to men's sport.
+Exclude routine women's leagues, including WBBL / Women's Big Bash, AFLW, NRLW
+and WNBA. Men's BBL, NRL and NBA stay eligible. Allow the Matildas, significant
+athletics / Olympic stories, and other world-famous women athletes only for major
+current achievements or events with credible evidence of broad mainstream interest
+and strong collector appeal. Explain each exception; routine league results and
+local stars do not qualify. A star exception must not restore excluded league
+coverage. Apply this before ranking across the summary, full brief, news, legends,
+rivalries, design picks and editorial calendar notes; fewer picks beat filler.
+The active 04:45 cloud Sports producer and 05:30/06:30 recovery instructions were
+updated and read back in their task editors. Times and active status are preserved.
+The connector's opportunity context and private publisher guidance expose the same
+policy. The separate live Home calendar and all-live-sports Meta ad workflow retain
+their existing scope. Previously published editions remain historical snapshots.
+
 Sports editions now accept `summary`, `rivalries` and `design_recommendations`.
 Home shows the summary paragraph and full-brief popup above Design recommendations,
 then the existing sports calendar. The complete brief contains sports news,

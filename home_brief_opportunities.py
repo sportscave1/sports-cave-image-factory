@@ -8,6 +8,22 @@ from sports_categories import normalize_sport_category
 from supabase_backend import connect
 
 
+SPORTS_EDITORIAL_POLICY = (
+    "Default to men's sport in the Sports Morning Brief summary, full brief, news, "
+    "legends, rivalries, design picks and editorial calendar notes. Exclude routine "
+    "women's leagues including WBBL / Women's Big Bash, AFLW, NRLW and WNBA. "
+    "Men's BBL, NRL and NBA remain eligible. Allow the Matildas (Australia women's "
+    "national football team). Allow significant athletics / Olympic stories and "
+    "other world-famous women athletes only for major current achievements or events "
+    "with source-backed broad mainstream interest and strong collector appeal; "
+    "explain why the exception qualifies. An ordinary league result or local star "
+    "is insufficient, and star exceptions must not reintroduce routine excluded leagues. "
+    "Filter before ranking and use fewer picks rather than excluded filler. "
+    "This editorial scope does not change the separate live Home calendar or "
+    "the all-live-sports Meta ad recommendation workflow."
+)
+
+
 def live_events(today):
     return [event for event in load_schedule() if event.status(today) == "Live"]
 
@@ -26,7 +42,8 @@ def opportunity_context(today):
         recent_designs=[dict(date=old['date'], subject=item.get('subject', ''), title=item['title'])
                         for old in history for section in design_sections(old)
                         for item in old.get(section, [])],
-        design_policy="Top four fresh designs overall; AUS and USA priority; exclude preceding seven days. No country quotas.")
+        sports_editorial_policy=SPORTS_EDITORIAL_POLICY,
+        design_policy="Top four fresh designs overall; AUS and USA priority; exclude preceding seven days. No country quotas. Apply sports_editorial_policy before ranking.")
 
 
 def validate_ad_products(items, today, *, require_all=False):

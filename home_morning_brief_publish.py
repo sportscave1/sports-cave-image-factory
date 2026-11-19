@@ -15,6 +15,7 @@ from home_morning_brief_actions import article_html
 from home_sports_morning_brief import LOG, MAX_PAYLOAD, SETTING_KEY, archive_page, get_app_setting, parse_edition, publish
 from sports_categories import CANONICAL_SPORT_CATEGORIES
 import os_accounts
+from home_brief_opportunities import SPORTS_EDITORIAL_POLICY
 from sports_sales_calendar import sydney_date
 
 PATH = "/ops/morning-brief/publish"
@@ -36,7 +37,8 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
         "markets, and confirmed start_date and end_date when available. Include the complete Sports Updates as full_brief. "
         "Include summary, up to three current rivalries and up to four design_recommendations ranked by sales potential, "
         "with subject, sales_rationale and opportunity_status. No market quotas; exclude the preceding seven days. Legacy submissions may use date and legends "
-        "to add the section to today's published edition without changing Sports Updates."
+        "to add the section to today's published edition without changing Sports Updates. "
+        + SPORTS_EDITORIAL_POLICY
     )
     if refresh_brief:
         instructions = ("Enter today's Sydney date and up to three verified candidates. "
