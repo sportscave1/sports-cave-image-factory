@@ -183,7 +183,7 @@ def render_queue(user=None):
                         invalidate_display()
                         st.rerun()
                 _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
-        _markup('<div class="cq-notice"><b>Add uploads from Design Studio</b><span>Press Publish now on each artwork. '
+        _markup('<div class="cq-notice"><b>Add uploads from Design Studio</b><span>Press Add to queue on each artwork. '
                 'They wait here and run one at a time while the queue is playing.</span></div>')
         _jobs(status['jobs'], designs=False, paused=not control['enabled'], user=user)
         st.caption('Showing the latest 20 upload jobs. Keep Edge open and the computer awake.')

@@ -355,13 +355,13 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         if published and row['data'].get('product_url'):
             publish.link_button('Open listing', row['data']['product_url'], key=key+'-shopify')
         else:
-            clicked = publish.button('Publish now', key=key+'-approved', type='primary',
-                                     disabled=published or editing or staged, help=f'Publish {title}')
+            clicked = publish.button('Add to queue', key=key+'-approved', type='primary',
+                                     disabled=published or editing or staged, help=f'Add {title} to the upload queue')
             from os_accounts import can_access_page
             if all(can_access_page(user, page) for page in ('Ads', 'Posting', 'Files')):
                 ad_clicked = publish_ad.button('Publish + ad', key=key+'-approved-ad',
                                              disabled=published or editing or staged,
-                                             help='Publish the design and create a paused Meta Instant Experience campaign.')
+                                             help='Add the design to the upload queue, then create a paused Meta Instant Experience campaign after publication.')
         if ad_clicked:
             st.session_state[ad_mode] = True
         if (clicked or ad_clicked) and needs_sport:
@@ -393,21 +393,21 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             from product_upload_staff_queue import enqueue
             try:
                 if clicked:
-                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), start=True)
+                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
                     text = f'Added to upload queue · {title}'
                 else:
-                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), ad_country=ad_country, start=True)
+                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), ad_country=ad_country)
                     text = f'Added to upload and ad queue · {title}'
                 st.session_state.pop(ad_mode, None)
                 notice = dict(id=str(job_id), job_id=str(job_id), interaction_id=uuid.uuid4().hex,
-                              kind='success', text=text, title=title, open_upload=True)
+                              kind='success', text=text, title=title, open_upload=False)
             except ValueError as exc:
                 notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:
-                logging.getLogger(__name__).exception('Smart Upload could not start')
-                action = 'Publish now' if clicked else 'Publish + ad'
+                logging.getLogger(__name__).exception('Smart Upload could not queue the design')
+                action = 'Add to queue' if clicked else 'Publish + ad'
                 notice = dict(id=uuid.uuid4().hex, kind='error',
-                              text=f'Upload could not start. Your PSD is retained. Try {action} again.')
+                              text=f'Upload could not be queued. Your PSD is retained. Try {action} again.')
             st.session_state['_product_upload_notice'] = notice
             st.session_state['_review_publish_notice'] = notice
             st.rerun()
@@ -566,7 +566,7 @@ def _gallery(app, user):
         if publish_notice['kind'] == 'error':
             st.error(publish_notice['text'])
         else:
-            st.success(publish_notice['text'] + ' · Track progress in Uploads above.')
+            st.success(publish_notice['text'] + ' · Keep adding designs here; view the queue in Uploads above.')
     removed = st.session_state.pop('_review_delete_result', None)
     if removed:
         count, warnings = removed

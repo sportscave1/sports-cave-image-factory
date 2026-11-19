@@ -40,7 +40,7 @@ def test_card_pencil_and_publish_buttons_share_one_row():
 <div data-testid="stColumn"><h3 class="sc-review-title" title="Forever Panda – Pablo Sandoval Wall Art">Forever Panda – Pablo Sandoval Wall Art</h3><div class="sc-review-status">Needs attention</div></div>
 <div data-testid="stColumn"><a class="sc-review-edit" href="#" aria-label="Edit design"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 20 20 4" stroke="currentColor"/></svg></a></div>
 <div data-testid="stColumn"><div class="st-key-design-review-delete-fixture"><button>Delete</button></div></div>
-<div data-testid="stColumn"><button>Publish now</button></div>
+<div data-testid="stColumn"><button>Add to queue</button></div>
 <div data-testid="stColumn"><button>Publish + ad</button></div>
 </div></div></div></div></div>"""
     with sync_playwright() as p:
@@ -49,7 +49,7 @@ def test_card_pencil_and_publish_buttons_share_one_row():
             for width in (950, 660, 390):
                 page = browser.new_page(viewport={'width':width, 'height':600})
                 page.set_content(css+'<style>body{margin:8px;font-family:Arial}*{box-sizing:border-box}button{font-size:14px;border:1px solid #ccc;border-radius:6px}</style>'+markup)
-                controls = [page.get_by_role('link',name='Edit design'), page.get_by_role('button',name='Delete'), page.get_by_role('button',name='Publish now'), page.get_by_role('button',name='Publish + ad')]
+                controls = [page.get_by_role('link',name='Edit design'), page.get_by_role('button',name='Delete'), page.get_by_role('button',name='Add to queue'), page.get_by_role('button',name='Publish + ad')]
                 boxes = [control.bounding_box() for control in controls]
                 centers = [box['y']+box['height']/2 for box in boxes]
                 assert max(centers)-min(centers) < 2
@@ -58,7 +58,7 @@ def test_card_pencil_and_publish_buttons_share_one_row():
                 page.get_by_role('checkbox').uncheck()
                 assert not page.get_by_role('button', name='Delete').is_visible()
                 assert page.locator('h3').is_visible()
-                assert page.get_by_role('button', name='Publish now').is_visible()
+                assert page.get_by_role('button', name='Add to queue').is_visible()
                 assert page.locator('h3').evaluate('(el)=>getComputedStyle(el).textOverflow') == 'ellipsis'
                 page.close()
         finally:

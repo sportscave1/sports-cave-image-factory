@@ -100,7 +100,7 @@ def test_bulk_queue_requires_upload_access(ui, monkeypatch):
 def test_publish_actions_are_in_separate_columns_on_the_same_card_row(ui):
     app, *_ = ui
     columns = app.get('column')
-    assert any([button.label for button in column.button] == ['Publish now'] for column in columns)
+    assert any([button.label for button in column.button] == ['Add to queue'] for column in columns)
     assert any([button.label for button in column.button] == ['Publish + ad'] for column in columns)
 
 
@@ -149,16 +149,16 @@ def test_toolbar_replaces_search_with_create_design(ui):
     assert 'data-design-create' in Path(gallery.__file__).read_text(encoding='utf-8')
 
 
-def test_publish_now_resumes_uploads_and_reveals_the_exact_receipt(ui):
+def test_add_to_queue_preserves_pause_and_keeps_gallery_open(ui):
     app, entries, _, enqueue, _, _ = ui
     key = gallery.review_key(entries[0])
     app.button(key=key+'-approved').click().run()
     assert not app.exception
     enqueue.assert_called_once()
-    assert enqueue.call_args.kwargs == {'start': True}
+    assert enqueue.call_args.kwargs == {}
     notice = app.session_state['_product_upload_notice']
-    assert notice['open_upload'] and notice['job_id'] == 'job-'+entries[0]['id']
-    assert any('Track progress in Uploads' in item.value for item in app.success)
+    assert not notice['open_upload'] and notice['job_id'] == 'job-'+entries[0]['id']
+    assert any('view the queue in Uploads' in item.value for item in app.success)
 
 
 def test_publish_now_continues_after_sport_choice_without_a_second_click(ui):
@@ -183,5 +183,31 @@ def test_publish_failure_is_visible_and_does_not_auto_retry(ui):
     assert not app.exception
     assert any('Upload could not be saved' in item.value for item in app.error)
     assert app.session_state['_product_upload_notice']['kind'] == 'error'
+    app.run()
+    enqueue.assert_called_once()
+
+
+def test_card_queue_actions_allow_multiple_designs_without_opening_status(ui):
+    app, entries, _, enqueue, _, _ = ui
+    for source in entries:
+        app.button(key=gallery.review_key(source)+'-approved').click().run()
+        assert not app.exception
+        assert not app.session_state['_product_upload_notice']['open_upload']
+        assert app.button(key=gallery.review_key(entries[1])+'-approved').label == 'Add to queue'
+    assert [call.args[1]['id'] for call in enqueue.call_args_list] == [s['id'] for s in entries]
+    assert all(call.kwargs == {} for call in enqueue.call_args_list)
+    app.run()
+    assert enqueue.call_count == 2
+
+
+def test_publish_ad_queues_targeting_without_resuming_or_opening_status(ui, monkeypatch):
+    app, entries, _, enqueue, _, _ = ui
+    monkeypatch.setattr('design_publish_ad.primary_country', lambda details: 'Australia')
+    app.button(key=gallery.review_key(entries[0])+'-approved-ad').click().run()
+    assert not app.exception
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs == {'ad_country': 'Australia'}
+    assert not app.session_state['_product_upload_notice']['open_upload']
+    assert any('Added to upload and ad queue' in item.value for item in app.success)
     app.run()
     enqueue.assert_called_once()
