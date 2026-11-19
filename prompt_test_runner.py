@@ -19,7 +19,7 @@ POLICY = """Run a TEXT-ONLY PROMPT TRIAL. Apply the supplied draft instructions 
 
 
 def configuration():
-    return (os.getenv('SPORTS_CAVE_OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY') or '',
+    return (os.getenv('OPENAI_API_KEY') or os.getenv('SPORTS_CAVE_OPENAI_API_KEY') or '',
             os.getenv('OPENAI_PROMPT_TEST_MODEL') or os.getenv('OPENAI_AD_REVIEW_MODEL') or 'gpt-5')
 
 
@@ -56,7 +56,29 @@ def run(text, workflow, item, image=None, *, post=None):
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
             json=payload, timeout=(10, 90))
         if not response.ok:
-            raise ValueError('The model service could not complete this test. Your draft is retained; retry explicitly.')
+            status = getattr(response, 'status_code', None)
+            try:
+                error = response.json().get('error', {})
+                code = error.get('code') if isinstance(error, dict) else None
+            except (ValueError, AttributeError, TypeError):
+                code = None
+            reasons = {
+                'insufficient_quota': 'The OpenAI account has no available API quota. Check API billing and project budget.',
+                'invalid_api_key': 'The server OpenAI API key is invalid. Update its configured connection.',
+                'model_not_found': 'The configured test model is unavailable to the server OpenAI project.',
+                'rate_limit_exceeded': 'The OpenAI rate limit was reached. Wait briefly before retrying.',
+                'invalid_image': 'The selected preview image was rejected. Try a custom text-only product.',
+                'context_length_exceeded': 'This prompt exceeds the model context limit. Test an individual section.',
+            }
+            reason = reasons.get(code) if isinstance(code, str) else None
+            reason = reason or {401: 'The server OpenAI connection was rejected.',
+                                403: 'The server OpenAI project does not have permission for this request.',
+                                429: 'The OpenAI quota or rate limit was reached.',
+                                400: 'The model rejected the test request format or input.',
+                                502: 'OpenAI is temporarily unavailable.',
+                                503: 'OpenAI is temporarily unavailable.'}.get(status, 'The model service could not complete this test.')
+            suffix = f' (HTTP {status})' if isinstance(status, int) else ''
+            raise ValueError(reason + suffix + ' Your draft is retained; no automatic retry was made.')
         data = response.json()
     except requests.RequestException:
         raise ValueError('The test connection timed out or was interrupted. No automatic retry was made; your draft is retained.') from None

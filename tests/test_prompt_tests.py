@@ -25,6 +25,13 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(result['incomplete'])
         self.assertEqual(post.call_count, 1)
 
+    def test_quota_error_is_actionable_without_leaking_provider_body(self):
+        response = Mock(ok=False, status_code=429)
+        response.json.return_value = {'error': {'code': 'insufficient_quota', 'message': 'private detail'}}
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'synthetic'}), self.assertRaisesRegex(ValueError, 'no available API quota') as raised:
+            run('draft', 'Ads', {'title': 'Product'}, post=Mock(return_value=response))
+        self.assertNotIn('private detail', str(raised.exception))
+
     def test_timeout_never_retries(self):
         import requests
         post = Mock(side_effect=requests.Timeout())
