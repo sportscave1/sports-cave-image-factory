@@ -1,0 +1,151 @@
+"""Durable prompt drafts in Git, narrow atomic publication, verified Render status.
+
+No application import, shell execution, service creation, or forced Git updates.
+"""
+import base64
+from datetime import datetime, timezone
+import json
+import os
+from urllib.parse import quote
+import uuid
+
+import requests
+
+from prompt_library import digest, replace_source, validate_text
+
+REPO = 'sportscave1/sports-cave-image-factory'
+SERVICE = 'srv-d8kl4on7f7vs73dvavv0'
+DRAFT_BRANCH = 'codex/prompt-library-drafts'
+MANIFEST = 'prompts/releases.json'
+
+
+class ReleaseError(RuntimeError):
+    pass
+
+
+class GitStore:
+    def __init__(self, token=None, render_token=None, session=None):
+        self.token = token if token is not None else os.getenv('PROMPTS_GITHUB_TOKEN', '')
+        self.render_token = render_token if render_token is not None else os.getenv('RENDER_API_KEY', '')
+        self.session = session or requests.Session()
+
+    def request(self, method, path, body=None, missing=False, render=False):
+        token = self.render_token if render else self.token
+        if not token:
+            raise ReleaseError('Release connection is not configured.' if render else 'Draft storage is not connected.')
+        base = 'https://api.render.com/v1/' if render else f'https://api.github.com/repos/{REPO}/'
+        headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'}
+        try:
+            response = self.session.request(method, base + path, headers=headers, json=body, timeout=25)
+        except requests.RequestException:
+            raise ReleaseError('Connection interrupted. Refresh status before retrying; the request may have completed.') from None
+        if missing and response.status_code == 404:
+            return None
+        if not response.ok:
+            # Never surface provider bodies, URLs with credentials, or request headers.
+            raise ReleaseError(f'Provider returned HTTP {response.status_code}. Refresh before retrying; concurrent edits are preserved.')
+        return response.json()
+
+    def head(self, branch='main', missing=False):
+        result = self.request('GET', 'git/ref/heads/' + branch, missing=missing)
+        return result['object']['sha'] if result else None
+
+    def read(self, path, ref, missing=False):
+        row = self.request('GET', 'contents/' + quote(path, safe='/') + '?ref=' + quote(ref, safe=''), missing=missing)
+        if row is None:
+            return None, None
+        return base64.b64decode(row['content']).decode('utf-8'), row['sha']
+
+    def history(self, prompt):
+        if not self.head(DRAFT_BRANCH, missing=True):
+            return {'versions': []}, None
+        text, sha = self.read(f'prompt-drafts/{prompt.key}.json', DRAFT_BRANCH, missing=True)
+        return (json.loads(text) if text else {'versions': []}), sha
+
+    def write_history(self, prompt, data, expected_sha):
+        if not self.head(DRAFT_BRANCH, missing=True):
+            self.request('POST', 'git/refs', {'ref': 'refs/heads/' + DRAFT_BRANCH, 'sha': self.head()})
+        body = {'message': f'Save prompt history: {prompt.title} [skip render]',
+                'branch': DRAFT_BRANCH,
+                'content': base64.b64encode(json.dumps(data, ensure_ascii=False, indent=2).encode()).decode()}
+        if expected_sha:
+            body['sha'] = expected_sha
+        result = self.request('PUT', f'contents/prompt-drafts/{prompt.key}.json', body)
+        return result['content']['sha']
+
+    def save(self, prompt, text, note, actor, history, expected_sha):
+        validate_text(prompt.text, text)
+        rows = history['versions']
+        if rows and rows[-1]['text'] == text:
+            raise ValueError('This text is already saved. Select its existing version.')
+        if not rows:
+            rows = [{'id': uuid.uuid4().hex, 'version': '1.0', 'text': prompt.text,
+                     'base_hash': digest(prompt.text), 'baseline': True, 'note': 'Original deployed source',
+                     'author': actor, 'created_at': datetime.now(timezone.utc).isoformat()}]
+        item = {'id': uuid.uuid4().hex, 'version': f'1.{len(rows)}', 'text': text,
+                'base_hash': digest(prompt.text), 'note': str(note)[:1000], 'author': actor,
+                'created_at': datetime.now(timezone.utc).isoformat()}
+        updated = {**history, 'path': prompt.path, 'symbol': prompt.symbol, 'versions': [*rows, item]}
+        self.write_history(prompt, updated, expected_sha)
+        return item
+
+    def activate(self, prompt, version_id, history, expected_sha):
+        item = next(v for v in history['versions'] if v['id'] == version_id)
+        if item.get('baseline'):
+            raise ReleaseError('Save the original as a new draft before publishing it.')
+        if item.get('commit'):
+            raise ReleaseError('This version already has a release attempt. Refresh its status before creating another draft.')
+        service = self.request('GET', 'services/' + SERVICE, render=True)
+        if (service.get('id') != SERVICE or service.get('name') != 'sports-cave-os'
+                or service.get('branch') != 'main' or service.get('autoDeploy') != 'yes'
+                or service.get('autoDeployTrigger') != 'commit'
+                or service.get('repo', '').removesuffix('.git') != 'https://github.com/' + REPO):
+            raise ReleaseError('The existing Render service does not match the approved release configuration.')
+        parent = self.head()
+        source, _ = self.read(prompt.path, parent)
+        changed = replace_source(prompt, source, item['base_hash'], item['text'])
+        manifest_text, _ = self.read(MANIFEST, parent, missing=True)
+        manifest = json.loads(manifest_text) if manifest_text else {}
+        manifest[prompt.key] = {'version': item['version'], 'id': item['id'], 'hash': digest(item['text']),
+                                'path': prompt.path, 'symbol': prompt.symbol}
+        parent_commit = self.request('GET', 'git/commits/' + parent)
+        tree = self.request('POST', 'git/trees', {'base_tree': parent_commit['tree']['sha'], 'tree': [
+            {'path': prompt.path, 'mode': '100644', 'type': 'blob', 'content': changed},
+            {'path': MANIFEST, 'mode': '100644', 'type': 'blob', 'content': json.dumps(manifest, indent=2)},
+        ]})
+        commit = self.request('POST', 'git/commits', {'message': f'Activate prompt {prompt.title} v{item["version"]}',
+                        'tree': tree['sha'], 'parents': [parent]})['sha']
+        # Persist the exact candidate BEFORE main can change. Lost responses are recoverable.
+        updated = {**history, 'versions': [{**v, 'commit': commit} if v['id'] == version_id else v
+                                           for v in history['versions']]}
+        self.write_history(prompt, updated, expected_sha)
+        self.request('PATCH', 'git/refs/heads/main', {'sha': commit, 'force': False})
+        return commit
+
+    def status(self, prompt, item):
+        commit = item.get('commit')
+        if not commit:
+            return 'Draft'
+        # A later deployment can include this prompt unchanged. Inspect its immutable manifest.
+        rows = self.request('GET', f'services/{SERVICE}/deploys?limit=20', render=True)
+        exact = None
+        for row in rows:
+            deploy = row.get('deploy', row)
+            sha = deploy.get('commit', {}).get('id')
+            if sha == commit:
+                exact = deploy.get('status')
+            if deploy.get('status') == 'live' and sha:
+                text, _ = self.read(MANIFEST, sha, missing=True)
+                active = (json.loads(text) if text else {}).get(prompt.key, {})
+                if active.get('id') == item['id'] and active.get('hash') == digest(item['text']):
+                    return 'Live'
+        if exact in {'build_failed', 'update_failed', 'pre_deploy_failed', 'canceled'}:
+            return 'Deployment failed'
+        if exact == 'deactivated':
+            return 'Previous release'
+        if exact in {'build_in_progress', 'pre_deploy_in_progress', 'update_in_progress', 'created'}:
+            return 'Deploying'
+        compare = self.request('GET', 'compare/' + commit + '...main')
+        if compare.get('status') in {'ahead', 'identical'}:
+            return 'Awaiting deployment' if exact != 'live' else 'Previous release'
+        return 'Not published — Git changed; save a new draft'

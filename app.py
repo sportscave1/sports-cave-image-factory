@@ -7205,6 +7205,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     social_media.WALL_PREVIEW_ROUTE: ":material/photo_library:",
     "Product Uploads": ":material/upload_file:",
     "Design Studio": ":material/palette:",
+    "Prompts": ":material/chat:",
     "Ads": ":material/ads_click:",
     ads_nav.CREATIVE_REFRESH_ROUTE: ":material/auto_awesome_motion:",
     ads_nav.POSTING_ROUTE: ":material/publish:",
@@ -7389,7 +7390,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                 social_media.AI_REELS_ROUTE,
                 icon=SIDEBAR_ICON_BY_ROUTE[social_media.AI_REELS_ROUTE],
             )
-    for route in ("Product Uploads", "Design Studio"):
+    for route in ("Product Uploads", "Design Studio", "Prompts"):
         _sidebar_route_button(route, current_page, allowed_routes, root=st)
 
     if ads_nav.ADS_CREATE_ROUTE in allowed_routes:
@@ -13859,6 +13860,9 @@ def render_selected_page(current_page):
         render_lightweight_dashboard_page()
     elif current_page == "Task Recorder":
         from task_recorder_page import render_page
+        render_page(current_os_user())
+    elif current_page == "Prompts":
+        from prompts_page import render_page
         render_page(current_os_user())
     elif current_page == "Developer Studio":
         from developer_studio_page import render_page
