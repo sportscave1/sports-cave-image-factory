@@ -9,7 +9,7 @@ def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js'):
+        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-repair.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 
@@ -99,6 +99,15 @@ def _jobs(jobs, *, designs, paused=False, user=None):
                 st.caption(job['detail'])
             if job.get('chat_url'):
                 st.link_button('Open design chat ↗', job['chat_url'])
+            if designs:
+                for action, label in (('defer', 'Move to pending'), ('cancel', 'Cancel design')):
+                    if job.get('can_'+action) and st.button(label, key='cq-design-'+action+'-'+job['id'], disabled=user is None):
+                        from morning_design_queue import control
+                        try:
+                            control(job['id'], user, job['updated_at'], action)
+                            invalidate_display();st.rerun()
+                        except (ValueError, PermissionError) as error:
+                            st.error(str(error))
     _markup(f'<div class="cq-section"><h3>Waiting queue</h3><span>{len(waiting)}</span></div>')
     if waiting:
         st.dataframe([{'Position': n, 'Design' if designs else 'Artwork': j['title'], 'Status': 'Waiting'}
@@ -134,7 +143,7 @@ def render_page(user):
                                         key='companion-queue-tabs', on_change='rerun')
         if designs.open:
             with designs:
-                render_design_queue()
+                render_design_queue(user)
         if uploads.open:
             with uploads:
                 render_queue(user)
@@ -190,7 +199,7 @@ def render_queue(user=None):
     history()
 
 
-def render_design_queue():
+def render_design_queue(user=None):
     import streamlit as st
     from morning_design_queue import settings, list_jobs
     from product_upload_staff_queue import desktop_online
@@ -225,7 +234,7 @@ def render_design_queue():
                         invalidate_display()
                         st.rerun()
                 _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
-        _jobs(jobs, designs=True, paused=not control['enabled'])
+        _jobs(jobs, designs=True, paused=not control['enabled'], user=user)
         st.caption('Up to 100 jobs · active jobs first · Edge must stay open and signed in; keep the computer awake.')
     history()
 

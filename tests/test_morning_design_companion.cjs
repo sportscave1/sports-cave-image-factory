@@ -6,7 +6,8 @@ const {test} = require('node:test');
 
 function fixture(records = new Map()) {
   const listeners = [], opened = [], sent = [], tabs = new Map();
-  let result = {jobs:[]}, events;
+  let result = {jobs:[]}, events, progress={blocked:false,generating:false,finished:true,chat_url:job(1).project.replace('/project','/c/00000000-0000-0000-0000-000000000099')}, allowStop=true;
+  const actions=[];
   const chrome = {
     runtime:{id:'companion',getManifest:()=>({version:'1.2.0'}),onMessage:{addListener:fn=>listeners.push(fn)},
       onStartup:{addListener(){}},onInstalled:{addListener(){}}},
@@ -17,9 +18,12 @@ function fixture(records = new Map()) {
     tabs:{
       create:async ({url,active})=>{const tab={id:opened.length+1,url,active};opened.push(tab);tabs.set(tab.id,tab);return tab;},
       get:async id=>tabs.get(id),
+      reload:async id=>actions.push('reload'),
       sendMessage:async (id,message)=>{
+        actions.push(message.type);
         if(message.type==='project:ready')return {ready:true};
-        if(message.type==='project:progress')return {blocked:false,chat_url:job(1).project.replace('/project','/c/00000000-0000-0000-0000-000000000099')};
+        if(message.type==='project:progress')return progress;
+        if(message.type==='project:cancel'){if(allowStop)progress={...progress,generating:false};return {stopped:true};}
         const sender={url:tabs.get(id).url,frameId:0,tab:{id}};
         const permission=await new Promise(resolve=>listeners[0]({type:'project:permit',id:message.id},sender,resolve));
         assert.equal(permission.ok,true);
@@ -33,7 +37,7 @@ function fixture(records = new Map()) {
   context.importScripts=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
   records.set('staffQueueCredential','x'.repeat(43));
-  return {records,opened,sent,events:()=>events,respond:value=>{result=value;},
+  return {records,opened,sent,tabs,actions,setProgress:value=>progress=value,allowStop:value=>allowStop=value,events:()=>events,respond:value=>{result=value;},
     run:code=>vm.runInContext(code,context)};
 }
 function job(n) {
@@ -165,4 +169,29 @@ test('an explicitly requeued design uses a fresh receipt and submits exactly onc
   assert.equal(f.sent.length,2);
   await f.run('designQueueTick()'); await f.run('queue');
   assert.equal(f.sent.length,2);
+});
+
+test('deferral stops the previous generation before opening the next design and retains its chat',async()=>{
+  const f=fixture(),first=job(1),second=job(2);
+  f.respond({jobs:[first]});await f.run('designQueueTick()');await f.run('queue');
+  const chat=first.project.replace('/project','/c/00000000-0000-0000-0000-000000000099');
+  f.tabs.get(1).url=chat;
+  f.setProgress({generating:true,finished:false,blocked:false,chat_url:chat,activity:'one'});
+  f.respond({jobs:[{...first,stage:2}]});await f.run('designQueueTick()');
+  f.respond({jobs:[second]});await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,2);
+  assert.ok(f.actions.indexOf('project:cancel')<f.actions.lastIndexOf('project:send'));
+  assert.equal(f.records.get('upload:'+first.receipt).state,'cancelled');
+  assert.ok(f.tabs.has(1),'saved chat remains available');
+});
+
+test('does not start another design until the previous owned response actually stops',async()=>{
+  const f=fixture(),first=job(1);
+  f.respond({jobs:[first]});await f.run('designQueueTick()');await f.run('queue');
+  f.setProgress({generating:true,finished:false,blocked:false});
+  f.tabs.get(1).url=first.project.replace('/project','/c/00000000-0000-0000-0000-000000000099');
+  f.allowStop(false);f.respond({jobs:[job(2)]});
+  await f.run('designQueueTick()');await f.run('queue');assert.equal(f.sent.length,1);
+  await f.run('designQueueTick()');assert.equal(f.actions.filter(a=>a==='reload').length,1);
+  f.allowStop(true);await f.run('designQueueTick()');await f.run('queue');assert.equal(f.sent.length,2);
 });

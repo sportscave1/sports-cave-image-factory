@@ -93,6 +93,9 @@ def test_stalled_design_releases_slot_without_resending_and_accepts_late_receipt
     queue.tick(token,[dict(id=first['id'],state='submitted')])
     cur.execute("UPDATE morning_design_jobs SET updated_at=now()-(%s * interval '1 minute') WHERE id=%s",(minutes,first['id']))
     event=dict(id=first['id'],state='submitted',activity='unchanged',finished=finished,generating=not finished)
+    if finished:
+        assert queue.tick(token,[event])['jobs'][0]['id']==first['id']
+        cur.execute("UPDATE app_settings SET value=jsonb_set(value,'{finished_at}',to_jsonb(extract(epoch from now())-360)) WHERE key=%s",('design_queue_progress:'+first['id'],))
     next_job=queue.tick(token,[event])['jobs'][0]
     assert next_job['id']!=first['id']
     cur.execute('SELECT stage,message FROM morning_design_jobs WHERE id=%s',(first['id'],))
@@ -114,6 +117,51 @@ def test_fresh_activity_keeps_slot_and_finished_response_has_grace(store):
     assert queue.tick(token,[dict(id=first['id'],state='submitted',activity='one',finished=False,generating=True)])['jobs'][0]['id']==first['id']
     cur.execute("UPDATE app_settings SET value=jsonb_set(value,'{changed_at}',to_jsonb(extract(epoch from now())-1900)) WHERE key=%s",('design_queue_progress:'+first['id'],))
     assert queue.tick(token,[dict(id=first['id'],state='submitted',activity='two',finished=True,generating=False)])['jobs'][0]['id']==first['id']
+
+
+def test_missing_browser_reports_cannot_bypass_stall_release(store):
+    cur,token=store;publish(cur,count=2)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    cur.execute("UPDATE morning_design_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s",(first['id'],))
+    next_job=queue.tick(token,[])['jobs'][0]
+    assert next_job['id']!=first['id']
+    old=next(j for j in queue.list_jobs(display_only=True) if j['id']==first['id'])
+    assert old['stage']==5 and old['can_cancel'] and not old['can_defer']
+    assert old['label']=='Pending · queue continues'
+    assert 'unavailable browser reports' in old['detail']
+
+
+@pytest.mark.parametrize('action',['cancel','defer'])
+def test_design_controls_release_slot_with_private_stale_safe_actions(store,monkeypatch,action):
+    cur,token=store;publish(cur,count=3)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    row=next(j for j in queue.list_jobs(display_only=True) if j['id']==first['id'])
+    monkeypatch.setattr(uploads,'can_control_queues',lambda user:user['id']=='admin')
+    with pytest.raises(PermissionError):
+        queue.control(first['id'],{'id':'other'},row['updated_at'],action)
+    with pytest.raises(ValueError):
+        queue.control(first['id'],{'id':'admin'},'2020-01-01T00:00:00+00:00',action)
+    queue.control(first['id'],{'id':'admin'},row['updated_at'],action)
+    with pytest.raises(ValueError):
+        queue.control(first['id'],{'id':'admin'},row['updated_at'],action)
+    next_job=queue.tick(token,[dict(id=first['id'],state='submitted')])['jobs']
+    assert len(next_job)==1 and next_job[0]['id']!=first['id']
+    old=next(j for j in queue.list_jobs(display_only=True) if j['id']==first['id'])
+    assert old['stage']==5 and 'Queue continues' in old['detail']
+    assert old['cancelled']==(action=='cancel')
+
+
+def test_cancel_waiting_design_preserves_pause_and_never_starts_it(store,monkeypatch):
+    cur,token=store;publish(cur,count=2)
+    queue.tick(token,[])
+    queue.settings(False)
+    waiting=next(j for j in queue.list_jobs(display_only=True) if j['stage']==0)
+    monkeypatch.setattr(uploads,'can_control_queues',lambda user:True)
+    queue.control(waiting['id'],{'id':'admin'},waiting['updated_at'],'cancel')
+    assert not queue.settings()['enabled']
+    assert all(j['id']!=waiting['id'] for j in queue.tick(token,[])['jobs'])
 
 
 def test_review_edit_apply_is_idempotent_and_keeps_prompt_unchanged(store,monkeypatch):

@@ -12,6 +12,7 @@ LABELS = ('Pending', 'Opening ChatGPT', 'Generating', 'Uploaded · checking revi
           'Ready for review', 'Needs attention')
 CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?/c/[a-f0-9-]{36}')
 LOG = logging.getLogger(__name__)
+CANCELLED = 'Cancelled by user.'
 
 # Dropbox scans can outlive the desktop's HTTP deadline. One bounded background
 # scan returns on a later poll; the existing prompt snapshot check rejects stale
@@ -312,7 +313,12 @@ def list_jobs(day=None, *, display_only=False):
     return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
                             else 'Deleted · ready to redo' if r['id'] in deleted
+                            else 'Cancelled' if r['message'].startswith(CANCELLED)
+                            else 'Pending · queue continues' if r['stage'] == 5 and not r['file_path']
                             else 'Uploaded · needs review' if r['stage'] == 5 and (r['file_id'] or r['file_path']) else LABELS[r['stage']]), stage=r['stage'],
+                     cancelled=r['message'].startswith(CANCELLED),
+                     can_cancel=(r['stage'] < 4 or r['stage'] == 5 and not r['file_path']) and not r['message'].startswith(CANCELLED),
+                     can_defer=1 <= r['stage'] <= 3,
                      chat_url=r['chat_url'], detail=r['message'], file_path=r['file_path'],
                      updated_at=r['updated_at'].isoformat(), created_at=r['created_at'].isoformat()) for r in jobs]
 
@@ -454,10 +460,11 @@ def tick(token, events, capacity=1):
                 chat_url=CASE WHEN %s<>'' THEN %s ELSE chat_url END,updated_at=now()
                 WHERE id=%s AND (stage=1 OR (stage BETWEEN 2 AND 3 AND %s=5))''',
                 (stage, str(event.get('reason') or '')[:1600], chat, chat, key, stage))
+        from design_queue_watchdog import release_stalled
+        release_stalled(cur)
         cur.execute('''UPDATE morning_design_jobs SET stage=5,
             message='Timed out. Inspect the saved ChatGPT conversation and Review folder; Queue continues; automatic resubmission is disabled.',
-            updated_at=now() WHERE (stage=1 AND updated_at < now()-interval '5 minutes')
-                OR (stage BETWEEN 2 AND 3 AND updated_at < now()-interval '90 minutes') ''')
+            updated_at=now() WHERE stage=1 AND updated_at < now()-interval '5 minutes' ''')
         discover(cur)
         cur.execute('SELECT enabled FROM morning_design_control WHERE singleton')
         enabled = cur.fetchone()['enabled']
@@ -505,7 +512,45 @@ async def tick_route(request):
         return failure(error)
 
 
-ROUTES = (('/api/morning-designs/tick', tick_route, ('POST',)),)
+def control(key, user, expected, action):
+    from product_upload_staff_queue import can_control_queues
+    if not can_control_queues(user):
+        raise PermissionError('An administrator must control design jobs.')
+    key = UUID(str(key))
+    if action not in ('cancel', 'defer') or not isinstance(expected, str) or not expected:
+        raise ValueError('Refresh the design status before changing this job.')
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        cur.execute('SELECT * FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
+        job = cur.fetchone()
+        allowed = job and (job['stage'] in (1, 2, 3) if action == 'defer' else
+                          (job['stage'] < 4 or job['stage'] == 5 and not job['file_path'])
+                          and not job['message'].startswith(CANCELLED))
+        if not allowed or job['updated_at'] != datetime.fromisoformat(expected):
+            raise ValueError('This design changed. Refresh its status and try again.')
+        message = (CANCELLED if action == 'cancel' else 'Moved to pending by user.') + (
+            ' Queue continues. Saved chat and files retained; no automatic resubmission. Late verified delivery will still be checked.')
+        cur.execute('UPDATE morning_design_jobs SET stage=5,message=%s,updated_at=now() WHERE id=%s', (message, key))
+    return dict(id=str(key), stage=5)
+
+
+async def control_route(request):
+    from product_upload_api import HEADERS, actor, failure
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import JSONResponse
+    try:
+        user = await actor(request, write=True)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError('Choose a design job.')
+        job = await run_in_threadpool(control, body.get('id'), user, body.get('updated_at'), body.get('action'))
+        return JSONResponse({'job': job}, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
+ROUTES = (('/api/morning-designs/tick', tick_route, ('POST',)),
+          ('/api/morning-designs/control', control_route, ('POST',)))
 
 
 def current_suggestions():

@@ -982,6 +982,9 @@
     .sc-ad-actions {display:inline-flex;gap:4px;float:right;margin-left:5px;}
     .sc-ad-actions button {width:26px;height:26px;padding:2px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
     .sc-ad-actions button:disabled {opacity:.4;cursor:default;}
+    .sc-design-actions {display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;}
+    .sc-design-actions button {min-height:30px;padding:4px 8px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
+    .sc-design-actions button:disabled {opacity:.4;cursor:default;}
     .sc-ad-quick {border-top:1px solid #63512d;margin-top:6px;padding-top:6px;}
     .sc-ad-quick summary {border:0!important;padding:4px!important;font:600 12px Arial!important;color:#f3ce7e!important;cursor:pointer;}
     .sc-ad-quick form {display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:5px;margin-top:6px;}
@@ -1240,6 +1243,7 @@
       designRotation++;
       renderCompanionSummary('design', elements, control, lastCompanionStatus);
     }, 5000));
+    const pendingDesignActions = new Set();
     const renderCompanions = status => {
       lastCompanionStatus = status;
       if(adQuickScope && (adQuickScope!==state.config.uploadScope || !queues.ads?.jobs)) {
@@ -1254,9 +1258,31 @@
         renderCompanionSummary(name, elements, control, status);
         elements.list.replaceChildren(...jobs.slice(0,10).map(item => {
           const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
+          let designActions;
           title.textContent=item.title;
           detail.textContent=item.label + (item.detail ? ' · '+item.detail : '');
           detail.title=detail.textContent;
+          if(name==='design') {
+            const actions=doc.createElement('span');actions.className='sc-design-actions';
+            for(const [action,label,allowed] of [['defer','Move to pending',item.can_defer],['cancel','Cancel design',item.can_cancel]]) {
+              if(!allowed)continue;
+              const button=doc.createElement('button');button.type='button';button.textContent=label;
+              button.setAttribute('aria-label',label+' · '+item.title);
+              button.disabled=pendingDesignActions.has(item.id);
+              button.onclick=async()=>{
+                if(pendingDesignActions.has(item.id))return;
+                pendingDesignActions.add(item.id);button.disabled=true;
+                try {
+                  const response=await parentWindow.fetch('/api/morning-designs/control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,updated_at:item.updated_at,action})});
+                  const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update design');
+                  pendingDesignActions.delete(item.id);
+                  doc.dispatchEvent(new parentWindow.CustomEvent('sc-design-edit-queued'));
+                  lastStaffStatus='';await refreshStaffProgress(false);
+                }catch(error){showUploadNotice({id:'design-'+item.id+'-'+Date.now(),kind:'error',text:error.message});}
+                finally{pendingDesignActions.delete(item.id);button.disabled=false;}
+              };actions.append(button);
+            }designActions=actions;
+          }
           if(name==='ads') {
             const actions=doc.createElement('span');actions.className='sc-ad-actions';
             for(const [action,glyph,label,allowed] of [['play','▶','Play / resume job',item.can_play],['cancel','■','Cancel job',item.can_cancel],['delete','🗑','Delete from queue',true]]) {
@@ -1275,6 +1301,7 @@
             }article.append(actions);
           }
           article.append(title,detail);
+          if(designActions)article.append(designActions);
           if (/^https:\/\/chatgpt\.com\//.test(item.chat_url || '')) {
             const chat=doc.createElement('a');chat.href=item.chat_url;chat.target='_blank';chat.rel='noopener';chat.textContent='Open chat';article.append(chat);
           }

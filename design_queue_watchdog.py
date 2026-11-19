@@ -25,7 +25,7 @@ def observe(cur, key, event):
         state.pop('finished_at',None)
     finished=event.get('finished') is True and event.get('generating') is False
     if finished:
-        state.setdefault('finished_at',state['changed_at'])
+        state.setdefault('finished_at',now)
     else:
         state.pop('finished_at',None)
     cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())
@@ -38,3 +38,24 @@ def observe(cur, key, event):
         return
     cur.execute('''UPDATE morning_design_jobs SET stage=5,message=%s,updated_at=now()
         WHERE id=%s AND stage=2''',(reason+' Queue continues. Saved chat and files retained; no automatic resubmission. Late verified delivery will still be checked.',key))
+
+
+def release_stalled(cur):
+    """Missing browser reports must not bypass the durable inactivity deadline."""
+    cur.execute('''SELECT j.id,j.stage,j.updated_at,p.value FROM morning_design_jobs j
+        LEFT JOIN app_settings p ON p.key='design_queue_progress:'||j.id::text
+        WHERE j.stage BETWEEN 2 AND 3''')
+    now = time.time()
+    for job in cur.fetchall():
+        baseline = job['updated_at'].timestamp()
+        state = job['value'] or {}
+        state = state if state.get('started_at') == baseline else {}
+        if state.get('finished_at') is not None and now-state['finished_at'] >= 300:
+            reason = 'ChatGPT finished, but a verified final Review delivery did not arrive within five minutes.'
+        elif now-state.get('changed_at', baseline) >= 1800:
+            reason = 'No verified ChatGPT progress for 30 minutes, including unavailable browser reports.'
+        else:
+            continue
+        cur.execute('''UPDATE morning_design_jobs SET stage=5,message=%s,updated_at=now()
+            WHERE id=%s AND stage BETWEEN 2 AND 3''',
+            (reason+' Queue continues. Saved chat and files retained; no automatic resubmission. Late verified delivery will still be checked.', job['id']))

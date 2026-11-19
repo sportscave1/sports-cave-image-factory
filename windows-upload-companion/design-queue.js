@@ -40,6 +40,30 @@ async function startDesign(job) {
   queue = queue.then(() => run(job.receipt, job.prompt, operation)).catch(() => {});
 }
 
+async function retireDesign(job) {
+  const operation=pending.get(job.receipt);
+  if(operation)operation.cancelled=true;
+  const id=job.tab || operation?.tab;
+  const tab=id ? await chrome.tabs.get(id).catch(()=>null) : null;
+  const owned=tab && (tab.url===designProject || /^https:\/\/chatgpt\.com\/g\/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/.test(tab.url||''));
+  if(owned && (!job.chatUrl || job.chatUrl===tab.url)) {
+    let progress=await companionMessage(id,{type:'project:progress'},{frameId:0}).catch(()=>null);
+    if(progress?.generating!==false) {
+      const stopped=await companionMessage(id,{type:'project:cancel'},{frameId:0}).catch(()=>null);
+      progress=await companionMessage(id,{type:'project:progress'},{frameId:0}).catch(()=>null);
+      if(progress?.generating!==false && !(tab.url===designProject && stopped?.stopped)) {
+        if(!job.stopReloaded) {
+          await chrome.tabs.reload(id).catch(()=>{});
+          await updateDesignJobs(jobs=>jobs[job.id] ? {...jobs,[job.id]:{...jobs[job.id],stopReloaded:true}} : jobs);
+        }
+        return false;
+      }
+    }
+  }
+  await save(job.receipt,'cancelled','Queue slot released; saved conversation and files retained. Restart only explicitly.');
+  return true;
+}
+
 async function designQueueTick() {
   if (designTickRunning) return;
   designTickRunning = true;
@@ -51,7 +75,11 @@ async function designQueueTick() {
     for (const job of Object.values(jobs).slice(0, 2)) {
       const report = await health(job.receipt);
       const tab = job.tab ? await chrome.tabs.get(job.tab).catch(() => null) : null;
-      const progress = tab && report.state === 'submitted' ? await companionMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
+      const progress = tab && ['submitted','uncertain'].includes(report.state) ? await companionMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
+      if(report.state==='uncertain' && (progress?.generating || progress?.finished) && !progress.blocked) {
+        await save(job.receipt,'submitted');report.state='submitted';
+      }
+      if(progress?.chat_url)await updateDesignJobs(current=>current[job.id] ? {...current,[job.id]:{...current[job.id],chatUrl:progress.chat_url}} : current);
       events.push({id:job.id, state:progress?.blocked ? 'blocked' : report.state, reason:progress?.reason || report.reason,
         activity:progress?.activity,finished:progress?.finished,generating:progress?.generating,
         chat_url:progress?.chat_url || tab?.url || ''});
@@ -63,9 +91,15 @@ async function designQueueTick() {
     if (!response.ok) return;
     const result = await response.json();
     if (!Array.isArray(result.jobs) || result.jobs.length > 2) return;
-    const activeIds = new Set(result.jobs.map(job => job.id));
-    // Reload after the network wait so a concurrent submission's tab is retained.
-    await updateDesignJobs(current => Object.fromEntries(Object.entries(current).filter(([id]) => activeIds.has(id))));
+    const activeReceipts = new Map(result.jobs.map(job => [job.id,job.receipt]));
+    // A deferred/cancelled job keeps its chat and can receive late delivery,
+    // but its generation must stop before the next design starts.
+    const current=await staffRead(designStorage)||{};
+    for(const job of Object.values(current)) {
+      if(activeReceipts.get(job.id)!==job.receipt && !await retireDesign(job))return;
+    }
+    // Reload after asynchronous stopping so concurrent tab references survive.
+    await updateDesignJobs(current => Object.fromEntries(Object.entries(current).filter(([id,job]) => activeReceipts.get(id)===job.receipt)));
     // Preserve reports for jobs admitted before the rollback, but never start
     // a second design while another is running or open two new chats at once.
     if (!result.jobs.some(job => job.stage === 2 || job.stage === 3)) {

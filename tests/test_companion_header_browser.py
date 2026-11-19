@@ -194,3 +194,36 @@ def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_re
             assert not writes and not errors
         finally:
             browser.close()
+
+
+def test_design_defer_and_cancel_controls_follow_the_next_job_without_enqueuing():
+    source=(Path(__file__).resolve().parents[1]/'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
+    config=dict(appName='Sports Cave OS',filesEnabled=True,uploadScope='design-controls',staffUploadProgress=True,
+                currentRouteKey='dashboard',revision='design-controls',searchIndex=[],navigationRouteLabels={},navigationRouteKeys={})
+    first=dict(id='first',title='Stalled design',state='running',label='Waiting for output',percent=10,updated_at='checkpoint',can_defer=True,can_cancel=True)
+    second=dict(id='second',title='Next design',state='waiting',label='Pending',percent=0,can_cancel=True)
+    payload=dict(online=True,jobs=[],queues=dict(upload=dict(enabled=True,waiting=0,display=True),design=dict(enabled=True,waiting=1,jobs=[first,second])))
+    writes=[]
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page(viewport={'width':1200,'height':750})
+            def respond(route):
+                if route.request.url=='http://fixture.test/':
+                    route.fulfill(body=source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config)),content_type='text/html')
+                elif route.request.url.endswith('/api/morning-designs/control'):
+                    body=route.request.post_data_json;writes.append(body)
+                    first.update(state='pending',label='Pending · queue continues',can_defer=False)
+                    second.update(state='running',label='Opening ChatGPT',can_defer=True,updated_at='next')
+                    payload['queues']['design']['waiting']=0
+                    route.fulfill(json=dict(job=dict(id=body['id'],stage=5)))
+                else:route.fulfill(json=payload)
+            page.route('**/*',respond);page.goto('http://fixture.test/')
+            page.locator('#sc-os-design-status > summary').click()
+            page.get_by_role('button',name='Move to pending · Stalled design',exact=True).click()
+            expect(page.locator('#sc-os-design-title')).to_have_text('Next design')
+            assert writes==[dict(id='first',updated_at='checkpoint',action='defer')]
+            expect(page.get_by_role('button',name='Cancel design · Stalled design',exact=True)).to_be_visible()
+            expect(page.get_by_role('button',name='Cancel design · Stalled design',exact=True)).to_be_enabled()
+            expect(page.get_by_role('button',name='Move to pending · Stalled design',exact=True)).to_have_count(0)
+        finally:browser.close()
