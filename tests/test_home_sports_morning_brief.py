@@ -423,7 +423,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "The Final Lap leads recent performance." in markup
     assert 'No verified product' in markup
     assert "Test &lt;creative&gt;" not in markup
-    assert '<dialog class="sc-meta-full"' not in markup
+    assert '<dialog class="sc-meta-full"' in markup
+    assert '>See more</button>' in markup
     assert "Shopify · catalogue and storefront" in markup
     assert "Search Console · SEO opportunities" in markup
 

@@ -213,7 +213,7 @@ def _ad_recommendations(items, *, all_live=False):
     return result
 
 
-def ad_rows_html(edition, today):
+def ad_rows_html(edition, today, *, compact=False):
     from home_brief_opportunities import live_events
     from home_brief_calendar import PRODUCT_QUERY, shop_product_handle
     from urllib.parse import urlencode
@@ -256,7 +256,24 @@ def ad_rows_html(edition, today):
                          '<details class="sc-ad-detail"><summary>Read more</summary>'
                          f'<p>{escape(item.get("secondary_reason", "The catalogue and existing ad coverage need review before selecting a secondary product."))}</p></details></div>')
         cards.append(f'<article class="sc-ad-sport">{body}</article>')
-    return ''.join(cards) or '<p>No sports are currently Live on the Home calendar.</p>'
+    full = ''.join(cards) or '<p>No sports are currently Live on the Home calendar.</p>'
+    if not compact:
+        return full
+    previews = []
+    for market, label in (('AUS', 'Australia'), ('USA', 'USA'), ('UK', 'UK')):
+        candidates = [item for item in rows if item['market'] == market]
+        item = next((item for item in candidates if item.get('product_url')), None)
+        if item:
+            content = (f'<strong>{label} · {escape(item["sport"])}</strong>'
+                       f'<a href="{escape(item["product_url"], quote=True)}">{escape(item["product_title"])}</a>')
+        else:
+            content = f'<strong>{label}</strong><span>No verified recommendation available.</span>'
+        previews.append(f'<div class="sc-ad-preview">{content}</div>')
+    return (''.join(previews)
+            + '<button type="button" class="sc-meta-more" aria-haspopup="dialog">See more</button>'
+            + '<dialog class="sc-meta-full" aria-label="All ad recommendations">'
+            + '<header><h4>All ad recommendations</h4><form method="dialog"><button>Close</button></form></header>'
+            + full + '</dialog>')
 
 
 def account_roas(day, end=None):
@@ -396,7 +413,7 @@ def render(st, user, today, *, snapshot=None):
         review = (
             '<section class="sc-meta-review" aria-label="Daily ad review">'
             f'<p>{escape(edition["summary"])}</p>'
-            f'<h4>Ad recommendations</h4>{ad_rows_html(edition, today)}</section>'
+            f'<h4>Ad recommendations</h4>{ad_rows_html(edition, today, compact=True)}</section>'
         )
     insights = (edition or {}).get("insights", {})
     insight_cards = "".join(
@@ -441,12 +458,14 @@ def render(st, user, today, *, snapshot=None):
         .sc-ad-detail summary {display:inline-block;color:#8c601a;text-decoration:underline;cursor:pointer;font-size:.76rem;margin:.15rem 0}
         .sc-ad-detail p {margin:.3rem 0}
         .sc-ad-sr {position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+        .sc-ad-preview {padding:.4rem 0;border-top:1px solid var(--line);font-size:.82rem;line-height:1.35}
+        .sc-ad-preview strong,.sc-ad-preview a,.sc-ad-preview span {display:block}
         .sc-meta-more,.sc-meta-full button {margin-top:.35rem;padding:.3rem .6rem;font:inherit;font-weight:650;
             border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit;cursor:pointer}
-        .sc-meta-full {width:min(37rem,calc(100vw - 2rem));max-height:80dvh;padding:1rem;
+        .sc-meta-full {width:min(54rem,calc(100vw - 2rem));max-height:80dvh;padding:1rem;overflow-y:auto;overscroll-behavior:contain;
             border:1px solid var(--line);border-radius:14px;background:var(--background-color,#fff);color:inherit}
         .sc-meta-full::backdrop {background:#181512a0}
-        .sc-meta-full header {display:flex;justify-content:space-between;align-items:center;gap:.7rem}
+        .sc-meta-full header {display:flex;justify-content:space-between;align-items:center;gap:.7rem;position:sticky;top:-1rem;padding:.4rem 0;background:inherit;z-index:1}
         .sc-meta-insight {margin-top:.45rem;border:1px solid var(--line);border-radius:12px;
             background:var(--background-color,#fff);overflow-wrap:anywhere}
         .sc-meta-insight summary {padding:.45rem .75rem;font-size:.8rem;font-weight:700;cursor:pointer}

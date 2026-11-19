@@ -52,9 +52,12 @@ The researcher additionally verifies availability and weighs exact-product ad/or
 history before current sports relevance; absent performance is an `Unproven test`.
 This recommendation workflow does not publish products or ads.
 
-Home shows every sport with only main/secondary design titles collapsed. Each
-recommendation has its own Read more disclosure, including full sport context,
-performance evidence, ad coverage and action. There is no hidden overall shortlist.
+Home shows the top eligible main recommendation for each primary market in the
+edition's sales-priority order: Australia, USA and UK. A compact See more button
+opens the complete all-sports list in a scrollable popup. Every main and secondary
+recommendation in that popup retains its own Read more disclosure, including full
+sport context, performance evidence, ad coverage and action. All-sports research
+and publication remain complete; only the Home preview is shortened.
 On a first-page Meta history request with refresh enabled, the reporting connector
 also reads the current non-deleted ad inventory, including paused and zero-delivery
 ads. Exact creative destination handles are returned; unmapped Instant Experience

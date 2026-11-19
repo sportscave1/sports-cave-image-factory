@@ -7,6 +7,7 @@ import home_meta_morning_brief as meta
 import home_sports_morning_brief as sports
 import os_accounts
 from tests.test_brief_opportunity_upgrade import edition, ad
+from tests.test_all_live_ad_recommendations import row
 
 
 def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_path):
@@ -22,7 +23,10 @@ def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_pat
     # Old reporting data previously triggered provider reads automatically on Home.
     meta.render(st, {}, today, snapshot=dict(saved=dict(date='2026-11-16',report_date='2026-11-15',
         roas=None,orders=None,actions=[],summary='Review the saved recommendations.',
-        recommendations=[],ad_recommendations=[ad()]),refresh=''))
+        recommendations=[],ad_recommendations=[row(),
+            dict(ad(),sport='Cricket',market='AUS',product_title='Australia Top Design',product_url='https://www.sportscaveshop.com/products/australia-top',collection_url='https://www.sportscaveshop.com/collections/cricket',event_title="Women's Big Bash League"),
+            dict(ad(),sport='Football',market='UK',product_title='UK Top Design',product_url='https://www.sportscaveshop.com/products/uk-top',collection_url='https://www.sportscaveshop.com/collections/football',event_title='Premier League season'),
+            dict(ad(),sport='NFL',market='USA',product_title='Lower-ranked USA Design',product_url='https://www.sportscaveshop.com/products/lower-usa',collection_url='https://www.sportscaveshop.com/collections/nfl',event_title='NFL regular season')]),refresh=''))
     fragments = ''.join(call.args[0] for call in st.html.call_args_list)
     html = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:12px;font:14px Arial}*{box-sizing:border-box}</style>'+fragments
     with sync_playwright() as p:
@@ -42,6 +46,25 @@ def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_pat
             expect(page.locator('.sc-legends .sc-brief-row')).to_have_count(4)
             expect(page.locator('.sc-daily-summary')).to_contain_text('A concise summary')
             expect(page.locator('.sc-meta-review')).to_contain_text('Test Star Wall Art')
+            expect(page.locator('.sc-ad-preview')).to_have_count(3)
+            expect(page.locator('.sc-ad-preview').nth(0)).to_contain_text('Australia Top Design')
+            expect(page.locator('.sc-ad-preview').nth(1)).to_contain_text('Test Star Wall Art')
+            expect(page.locator('.sc-ad-preview').nth(2)).to_contain_text('UK Top Design')
+            expect(page.get_by_role('dialog',name='All ad recommendations')).not_to_be_visible()
+            page.get_by_role('button',name='See more',exact=True).click()
+            popup=page.get_by_role('dialog',name='All ad recommendations')
+            expect(popup).to_be_visible()
+            expect(popup.get_by_text('Lower-ranked USA Design',exact=True)).to_be_visible()
+            expect(popup.get_by_text('Another Star Wall Art',exact=True)).to_be_visible()
+            expect(popup.get_by_text('Live basketball creates a timely collector opportunity.',exact=True)).not_to_be_visible()
+            popup.locator('.sc-ad-detail summary').first.click()
+            expect(popup.get_by_text('Live basketball creates a timely collector opportunity.',exact=True)).to_be_visible()
+            for width in (1600,820,390,320):
+                page.set_viewport_size(dict(width=width,height=900))
+                assert page.evaluate('document.documentElement.scrollWidth')<=width
+                assert popup.evaluate('(e)=>e.scrollWidth<=e.clientWidth')
+            popup.get_by_role('button',name='Close',exact=True).click()
+            expect(popup).not_to_be_visible()
             page.get_by_role('button',name='Read the full Morning Brief').click()
             expect(page.get_by_role('dialog',name='Full Sports Morning Brief')).to_contain_text('Rivalries Brief')
             page.get_by_role('dialog',name='Full Sports Morning Brief').get_by_role('button',name='Close',exact=True).click()
