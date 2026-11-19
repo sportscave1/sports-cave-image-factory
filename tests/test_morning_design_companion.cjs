@@ -63,6 +63,24 @@ test('one design submits through the existing mutex and never resubmit on repeat
   assert.equal(restart.sent.length,0);
 });
 
+test('two designs submit once through the mutex and both retain progress across ticks and restart',async()=>{
+  const f=fixture(), jobs=[job(1),job(2)];
+  f.respond({enabled:true,jobs});
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,2);
+  assert.equal(f.opened.length,2);
+  assert.equal(new Set(Object.values(f.records.get('morningDesignJobs')).map(j=>j.tab)).size,2);
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.events().capacity,2);
+  assert.equal(f.events().events.length,2);
+  assert.ok(f.events().events.every(e=>e.state==='submitted'));
+  assert.equal(f.sent.length,2);
+  const restart=fixture(f.records);restart.respond({jobs});
+  await restart.run('designQueueTick()');await restart.run('queue');
+  assert.equal(restart.sent.length,0);
+  assert.equal(restart.events().events.length,2);
+});
+
 test('persisted sending state after restart is reported uncertain, without opening another chat',async()=>{
   const f=fixture(), j=job(1);
   f.records.set('upload:'+j.receipt,{state:'sending'});

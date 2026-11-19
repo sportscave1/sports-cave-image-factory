@@ -1203,7 +1203,45 @@
       meter:root.querySelector(`#sc-os-${name}-meter`),
       list:root.querySelector(`#sc-os-${name}-list`),
     }]));
+    let designRotation = 0, designRunningKey = '', lastCompanionStatus = null;
+    const renderCompanionSummary = (name, elements, control, status) => {
+      const jobs = control.jobs;
+      const running = jobs.filter(item => item.state === 'running');
+      if (name === 'design') {
+        const key = running.map(item => item.id).join('|');
+        if (key !== designRunningKey) {designRunningKey = key; designRotation = 0;}
+      }
+      const rotating = name === 'design' && running.length > 1;
+      const job = (rotating ? running[designRotation % running.length] : running[0]) || jobs.find(item => item.state === 'waiting') || jobs[0];
+      const online = name === 'ads' ? control.online : status.online;
+      const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
+      let label = job ? job.label : idle;
+      if (rotating) label = `${running.length} working · ${designRotation % running.length + 1}/${running.length} · ${label}`;
+      if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
+      if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
+      if (control.waiting) label += ` · ${control.waiting} waiting`;
+      const changed = elements.title.dataset.jobId && elements.title.dataset.jobId !== job?.id;
+      elements.title.dataset.jobId = job?.id || '';
+      elements.title.textContent = job?.title || 'No current job';
+      elements.stage.textContent = label;
+      elements.panel.title = '';
+      elements.panel.dataset.state = job?.state || 'idle';
+      elements.panel.dataset.stale = 'false';
+      elements.meter.value = job?.percent || 0;
+      elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
+      if (rotating && changed && !parentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        elements.title.animate([{opacity:0},{opacity:1}], {duration:250});
+      }
+    };
+    timers.add(parentWindow.setInterval(() => {
+      const elements = companionPanels.design, control = queues.design;
+      if (doc.hidden || elements.card.hidden || !Array.isArray(control?.jobs) || !lastCompanionStatus) return;
+      if (control.jobs.filter(item => item.state === 'running').length < 2) return;
+      designRotation++;
+      renderCompanionSummary('design', elements, control, lastCompanionStatus);
+    }, 5000));
     const renderCompanions = status => {
+      lastCompanionStatus = status;
       if(adQuickScope && (adQuickScope!==state.config.uploadScope || !queues.ads?.jobs)) {
         adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
         root.querySelector('#sc-ad-products').replaceChildren();
@@ -1213,20 +1251,7 @@
         elements.card.hidden = !Array.isArray(control?.jobs);
         if (elements.card.hidden) {elements.panel.open=false;continue;}
         const jobs = control.jobs;
-        const job = jobs.find(item => item.state === 'running') || jobs.find(item => item.state === 'waiting') || jobs[0];
-        const online = name === 'ads' ? control.online : status.online;
-        const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
-        let label = job ? job.label : idle;
-        if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
-        if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
-        if (control.waiting) label += ` · ${control.waiting} waiting`;
-        elements.title.textContent = job?.title || 'No current job';
-        elements.stage.textContent = label;
-        elements.panel.title = '';
-        elements.panel.dataset.state = job?.state || 'idle';
-        elements.panel.dataset.stale = 'false';
-        elements.meter.value = job?.percent || 0;
-        elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
+        renderCompanionSummary(name, elements, control, status);
         elements.list.replaceChildren(...jobs.slice(0,10).map(item => {
           const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
           title.textContent=item.title;

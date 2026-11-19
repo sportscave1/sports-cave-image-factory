@@ -390,9 +390,12 @@ def verify_outputs(jobs):
     return results
 
 
-def tick(token, events):
-    if not isinstance(events, list) or len(events) > 1 or any(not isinstance(e, dict) for e in events):
-        raise ValueError('Send at most one design job report.')
+def tick(token, events, capacity=1):
+    # Older installed companions retain their single-slot protocol until updated.
+    if type(capacity) is not int or capacity not in (1, 2):
+        raise ValueError('Choose one or two design slots.')
+    if not isinstance(events, list) or len(events) > capacity or any(not isinstance(e, dict) for e in events):
+        raise ValueError('Send at most one report per design slot.')
     with connect() as conn, conn.cursor() as cur:
         # Same singleton lock as Product Uploads serializes all desktop claims.
         cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
@@ -449,8 +452,13 @@ def tick(token, events):
         discover(cur)
         cur.execute('SELECT enabled FROM morning_design_control WHERE singleton')
         enabled = cur.fetchone()['enabled']
-        cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
-        if enabled and cur.fetchone()['n'] == 0:
+        cur.execute('SELECT slot FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
+        occupied = {row['slot'] for row in cur.fetchall()}
+        for slot in range(1, capacity + 1) if enabled else ():
+            if len(occupied) >= capacity:
+                break
+            if slot in occupied:
+                continue
             cur.execute('''SELECT id,title,prompt,section FROM morning_design_jobs
                 WHERE stage=0 ORDER BY edition_date,created_at,id LIMIT 1 FOR UPDATE''')
             waiting = cur.fetchone()
@@ -461,13 +469,14 @@ def tick(token, events):
                     cur.execute('''UPDATE morning_design_jobs SET stage=5,message=%s,updated_at=now()
                         WHERE id=%s AND stage=0''', (str(error), waiting['id']))
                 else:
-                    cur.execute('''UPDATE morning_design_jobs SET stage=1,prompt=%s,updated_at=now()
-                        WHERE id=%s AND stage=0''', (prompt, waiting['id']))
-        cur.execute('SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 ORDER BY created_at,id')
+                    cur.execute('''UPDATE morning_design_jobs SET stage=1,slot=%s,prompt=%s,updated_at=now()
+                        WHERE id=%s AND stage=0''', (slot, prompt, waiting['id']))
+                    occupied.add(slot)
+        cur.execute('SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 ORDER BY slot')
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL
     return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], kind=r['section'], project=PROJECT_URL,
-        prompt=r['prompt'], receipt=_receipt(r)) for r in jobs])
+        prompt=r['prompt'], receipt=_receipt(r)) for r in jobs[:capacity]])
 
 
 async def tick_route(request):
@@ -481,7 +490,7 @@ async def tick_route(request):
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError('Invalid design report.')
-        result = await run_in_threadpool(tick, authorization[7:], body.get('events', []))
+        result = await run_in_threadpool(tick, authorization[7:], body.get('events', []), body.get('capacity', 1))
         return JSONResponse(result, headers=HEADERS)
     except Exception as error:
         return failure(error)

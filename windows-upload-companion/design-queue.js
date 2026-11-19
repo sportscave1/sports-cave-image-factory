@@ -48,7 +48,7 @@ async function designQueueTick() {
     if (!token) return;
     const jobs = await staffRead(designStorage) || {};
     const events = [];
-    for (const job of Object.values(jobs).slice(0, 1)) {
+    for (const job of Object.values(jobs).slice(0, 2)) {
       const report = await health(job.receipt);
       const tab = job.tab ? await chrome.tabs.get(job.tab).catch(() => null) : null;
       const progress = tab && report.state === 'submitted' ? await companionMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
@@ -58,11 +58,11 @@ async function designQueueTick() {
     }
     const response = await fetch(osOrigin + '/api/morning-designs/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
-      body:JSON.stringify({events}), credentials:'omit', signal:AbortSignal.timeout(25000),
+      body:JSON.stringify({events, capacity:2}), credentials:'omit', signal:AbortSignal.timeout(25000),
     });
     if (!response.ok) return;
     const result = await response.json();
-    if (!Array.isArray(result.jobs) || result.jobs.length > 1) return;
+    if (!Array.isArray(result.jobs) || result.jobs.length > 2) return;
     const activeIds = new Set(result.jobs.map(job => job.id));
     // Reload after the network wait so a concurrent submission's tab is retained.
     await updateDesignJobs(current => Object.fromEntries(Object.entries(current).filter(([id]) => activeIds.has(id))));

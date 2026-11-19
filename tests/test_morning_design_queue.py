@@ -17,7 +17,7 @@ def store(database, monkeypatch):
     monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Provider', (), {
         'metadata_if_present': lambda self, path: {'id': path}})())
     db, cur = database
-    for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql', '20261118070000_product_upload_manual_restart.sql'):
+    for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql', '20261118070000_product_upload_manual_restart.sql', '20261119063000_two_design_slots.sql'):
         cur.execute((ROOT / 'migrations' / name).read_text(encoding='utf8'))
     cur.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     cur.execute('''CREATE TABLE IF NOT EXISTS shopify_products (
@@ -42,6 +42,47 @@ def publish(cur, day='2026-11-17', count=5):
     cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',
                 (HISTORY_PREFIX + day, json.dumps(edition)))
     return edition
+
+
+def test_two_slots_fill_once_and_replace_only_the_completed_job(store, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    cur, token = store
+    publish(cur)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: queue.tick(token, [], capacity=2)['jobs'], range(2)))
+    first = responses[0]
+    ids = {job['id'] for job in first}
+    assert len(ids) == 2 and ids == {job['id'] for job in responses[1]}
+    assert {job['receipt'] for job in first} == {job['receipt'] for job in responses[1]}
+    queue.tick(token, [dict(id=job['id'], state='submitted') for job in first], capacity=2)
+    # The database independently rejects a third active job, including bypasses.
+    with pytest.raises(Exception, match='morning_design_active_slot'):
+        with queue.connect() as conn, conn.cursor() as check:
+            check.execute('UPDATE morning_design_jobs SET stage=1,slot=1 WHERE id=(SELECT id FROM morning_design_jobs WHERE stage=0 LIMIT 1)')
+    cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
+    assert cur.fetchone()['n'] == 2
+    completed, remaining = first
+    queue.settings(False)
+    monkeypatch.setattr(queue, 'verify_outputs', lambda _: {completed['id']:dict(stage=4, message='',
+        source=dict(id='id:dual-final', rev='r1', path_display='/Review/Dual.psd'))})
+    assert [job['id'] for job in queue.tick(token, [], capacity=2)['jobs']] == [remaining['id']]
+    queue.settings(True)
+    following = queue.tick(token, [], capacity=2)['jobs']
+    assert len(following) == 2 and completed['id'] not in {job['id'] for job in following}
+    assert next(job for job in following if job['id'] == remaining['id'])['receipt'] == remaining['receipt']
+
+
+def test_two_slots_stalled_job_releases_without_replaying_neighbour(store):
+    cur, token = store
+    publish(cur, count=3)
+    first, other = queue.tick(token, [], capacity=2)['jobs']
+    queue.tick(token, [dict(id=job['id'], state='submitted') for job in (first, other)], capacity=2)
+    cur.execute("UPDATE morning_design_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (first['id'],))
+    jobs = queue.tick(token, [dict(id=first['id'], state='submitted',activity='unchanged')], capacity=2)['jobs']
+    assert len(jobs) == 2 and first['id'] not in {job['id'] for job in jobs}
+    assert next(job for job in jobs if job['id'] == other['id'])['receipt'] == other['receipt']
+    with pytest.raises(ValueError):
+        queue.tick(token, [], capacity=3)
 
 
 @pytest.mark.parametrize('finished,minutes',[(True,6),(False,31)])
