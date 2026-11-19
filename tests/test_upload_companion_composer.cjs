@@ -248,6 +248,13 @@ test('Only a new Companion-owned upload tab backs up a restored draft and sends 
 });
 
 
+test('Design queue backs up restored drafts without sending their content', async () => {
+  const app=fixture({design:true,initialDraft:'Unsent user draft'});
+  assert.equal((await app.invoke({type:'project:send',id:'design-job',prompt:'Exact queued refresh'})).sent,true);
+  assert.deepEqual(app.backups,['Unsent user draft']);
+  assert.deepEqual(app.sent,['Exact queued refresh']);
+});
+
 test('Designs uses the same second-from-top thinking level for inline and attached prompts', async () => {
   for (const asAttachment of [false, true]) {
     const app = fixture({design:true, asAttachment, start:6});
