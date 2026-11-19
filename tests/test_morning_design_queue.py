@@ -32,6 +32,7 @@ def store(database, monkeypatch):
     monkeypatch.setattr(queue, 'connect', db.connect)
     monkeypatch.setattr(uploads, 'connect', db.connect)
     monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {})
+    monkeypatch.setattr(queue, 'poll_outputs', lambda jobs: queue.verify_outputs(jobs))
     return cur, uploads.pair({'id': 'desktop'})
 
 

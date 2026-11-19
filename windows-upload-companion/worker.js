@@ -152,6 +152,10 @@ function isOsComponent(address) {
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let action;
+  if(message?.type==='os:wake-designs' && sender.frameId===0 &&
+      sender.url && new URL(sender.url).origin===osOrigin) {
+    action=designQueueTick().then(()=>({accepted:true}));
+  } else
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
   } else if (message?.type === 'project:backup-draft') {

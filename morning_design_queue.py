@@ -13,6 +13,35 @@ LABELS = ('Pending', 'Opening ChatGPT', 'Generating', 'Uploaded · checking revi
 CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?/c/[a-f0-9-]{36}')
 LOG = logging.getLogger(__name__)
 
+# Dropbox scans can outlive the desktop's HTTP deadline. One bounded background
+# scan returns on a later poll; the existing prompt snapshot check rejects stale
+# results after an explicit retry. Never queue an unbounded backlog of scans.
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+_verification_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='design-receipts')
+_verification_lock = Lock()
+_verification_future = None
+_verification_prompts = {}
+
+
+def poll_outputs(jobs):
+    global _verification_future, _verification_prompts
+    with _verification_lock:
+        results = {}
+        if _verification_future is not None and _verification_future.done():
+            try:
+                scanned = _verification_future.result()
+                current = {str(job['id']): job['prompt'] for job in jobs}
+                results = {key: result for key, result in scanned.items()
+                           if current.get(str(key)) == _verification_prompts.get(str(key))}
+            except Exception:
+                LOG.warning('Design receipt scan failed; retrying on a later poll', exc_info=True)
+            _verification_future = None
+        if _verification_future is None and jobs:
+            _verification_prompts = {str(job['id']): job['prompt'] for job in jobs}
+            _verification_future = _verification_pool.submit(verify_outputs, jobs)
+        return results
+
 
 def _receipt(job):
     # Keep existing send journals valid; explicit retries get a fresh journal.
@@ -373,7 +402,7 @@ def tick(token, events):
         active = cur.fetchall()
     # Provider calls are deliberately outside the claim transaction.
     try:
-        verified = verify_outputs(active)
+        verified = poll_outputs(active)
     except Exception:
         verified = {}  # Connectivity failure is not proof of completion or failure.
     with connect() as conn, conn.cursor() as cur:
