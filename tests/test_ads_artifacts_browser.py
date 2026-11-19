@@ -94,6 +94,16 @@ def test_work_pasted_brief_requires_bound_chat_and_finished_original_files():
         first=request(chat=url)
         assert first['clicked']
         assert page.evaluate('clicked.at(-1)')=='CSV download'
+        page.evaluate("""() => document.querySelector('h4[data-conversation-role="assistant"]').nextElementSibling.insertAdjacentHTML('beforeend',
+          '<table><tr><td>ad_copy.csv</td><td><a href="https://chatgpt.com/library?file_id=libfile_abc123&amp;account_id=personal">Open original</a></td></tr>'+
+          '<tr><td>man-cave.jpg</td><td><a href="https://chatgpt.com/library?file_id=libfile_def456">Open original</a></td></tr></table>')""")
+        first=request(chat=url)
+        assert first['library']=='https://chatgpt.com/library?file_id=libfile_abc123'
+        # A second conflicting Library source is not a safe fallback.
+        page.evaluate("""() => document.querySelector('tr').insertAdjacentHTML('beforeend','<td><a href="https://chatgpt.com/library?file_id=libfile_999">Other</a></td>')""")
+        assert not request(chat=url).get('library')
+        page.evaluate("document.querySelector('tr').lastChild.remove()")
+        first=request(chat=url)
         page.evaluate("""() => document.body.insertAdjacentHTML('beforeend','<ol><li role="status">Failed to download file. Please try again later.</li></ol>')""")
         status=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
             dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))

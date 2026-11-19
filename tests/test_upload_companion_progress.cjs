@@ -29,6 +29,11 @@ test('does not mistake resolved historical moderation for a current failure',()=
 test('preserves existing explicit stage blockers',()=>{
   assert.match(progress('SC_UPLOAD_BLOCKED: PSD_MAPPING').reason,/PSD_MAPPING/);
 });
+test('ad missing-file marker retains the reported provider rejection',()=>{
+  const result=progress('The provider returned moderation_blocked.\nSC_AD_BLOCKED: architectural-wall.jpg is missing.',false,'6a6bd98cd6f081918788b544dcdecfc2');
+  assert.equal(result.blocked,true);assert.match(result.reason,/moderation_blocked/);
+  assert.match(result.reason,/architectural-wall.jpg/);
+});
 test('does not apply upload fallback to Design',()=>{
   assert.equal(progress('moderation_blocked; pending publication',false,'6a1e449948e881919c1e345006d63654').blocked,false);
 });

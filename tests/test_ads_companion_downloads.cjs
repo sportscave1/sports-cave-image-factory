@@ -8,11 +8,11 @@ const chat='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+id;
 function fixture(records=new Map()) {
   const calls=[],opens=[],messages=[],reloads=[];
   const job={id,receipt:'a'.repeat(64),chat_url:chat,missing:['ad_copy.csv']};
-  let downloads=[],valid=true,downloadError='',claim=null;
+  let downloads=[],valid=true,downloadError='',claim=null,staged=false,library=null;
   const chrome={runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{onAlarm:{addListener(){}}},
-    tabs:{get:async()=>({id:1,url:chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:1,...options};},
-      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return message.type==='project:ad-download-status'?{error:downloadError}:message.type==='project:ad-repair-status'?{ready:true,found:false}:{clicked:true,response:'response-1',chat};}},
+    tabs:{get:async id=>({id,url:id===2&&library?library:chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:opens.length,...options};},
+      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);return message.type==='project:ad-download-status'?{error:downloadError}:message.type==='project:ad-repair-status'?{ready:true,found:false,staged}:{clicked:true,response:'response-1',chat,library};}},
     downloads:{search:async()=>downloads}};
   const context=vm.createContext({chrome,setTimeout,clearTimeout,URL,URLSearchParams,AbortSignal,Uint8Array,Date,
     queueId:/^[a-f0-9-]{36}$/,suppliedReceipt:/^[a-f0-9]{64}$/,staffAlarm:'alarm',osOrigin:'https://os.test',
@@ -27,8 +27,32 @@ function fixture(records=new Map()) {
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/ad-queue.js'),'utf8'),context);
   context.job=job;
   return {records,calls,opens,messages,reloads,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),
-    downloads:value=>downloads=value,valid:value=>valid=value,downloadError:value=>downloadError=value,claim:value=>claim=value};
+    downloads:value=>downloads=value,valid:value=>valid=value,downloadError:value=>downloadError=value,claim:value=>claim=value,
+    staged:value=>staged=value,library:value=>library=value};
 }
+
+test('a consumed permit can continue only a proven unclicked draft',async()=>{
+  const f=fixture();await f.run();f.job.repair={id,state:'sending',names:['ad_copy.csv']};
+  await f.run();assert.equal(f.messages.filter(m=>m.type==='project:ad-repair-send').length,0);
+  f.staged(true);await f.run();
+  const sent=f.messages.find(m=>m.type==='project:ad-repair-send');
+  assert.equal(sent.resume,true);assert.equal(sent.permit,undefined);assert.equal(f.calls.length,0);
+  assert.deepEqual(Array.from(sent.names),['ad_copy.csv']);
+});
+
+test('timestamped Library originals retain exact file and chat provenance',async()=>{
+  const library='https://chatgpt.com/library?file_id=libfile_123abc';
+  const f=fixture();await f.run();f.library(library);await f.run();
+  f.records.get('publishAdJob').transfer.started='2000-01-01T00:00:00Z';
+  await f.run();assert.equal(f.opens.at(-1).url,library);assert.equal(f.opens.at(-1).active,false);
+  await f.run();assert.equal(f.messages.at(-1).type,'project:ad-library');
+  assert.equal(f.records.get('publishAdJob').transfer.librarySent,true);
+  f.downloads([{referrer:library,filename:'ad_copy(20261119-213046).csv',state:'complete',url:'https://files.oaiusercontent.com/original'}]);
+  await f.run();assert.equal(f.calls.length,2);assert.equal(f.records.get('publishAdJob').transfer,null);
+  const unrelated=fixture();await unrelated.run();unrelated.library(library);await unrelated.run();
+  unrelated.downloads([{referrer:library,filename:'ad_copy(20261119-213046).csv',state:'complete',url:'https://files.oaiusercontent.com/original'}]);
+  await unrelated.run();assert.equal(unrelated.calls.length,0);
+});
 
 test('only a fresh server permit can send a repair; lost claim response never resends',async()=>{
   const f=fixture();await f.run();

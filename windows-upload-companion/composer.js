@@ -300,7 +300,9 @@
       /\bbefore I could\b[^.!?\n]{0,160}\b(?:save|deliver|finish)\b/i.test(clean);
     const designFailure = /\b(?:image (?:service|tool)|generation)\b[^.!?\n]{0,100}\b(?:rejected|blocked|failed|cancelled|canceled)\b|\b(?:workspace|session)\b[^.!?\n]{0,80}\bdisconnected\b|\b(?:cannot|could not|unable to)\s+(?:complete|finish|deliver)\b/i.test(clean);
     const designBlocked = design && !generating && designIncomplete && designFailure;
-    const reason = marker ? (design || ad ? marker[1] : 'ChatGPT reported an upload failure: ' + marker[1]) :
+    const reason = marker ? (ad && /\bmoderation_blocked\b/i.test(clean)
+      ? 'Image provider moderation_blocked. ' + marker[1]
+      : design || ad ? marker[1] : 'ChatGPT reported an upload failure: ' + marker[1]) :
       designBlocked ? 'Design stopped before delivery: ' + clean.trim() :
       moderationBlocked ? 'ChatGPT reported an upload failure: MODERATION' :
       alert ? 'ChatGPT error: ' + alert.innerText : '';

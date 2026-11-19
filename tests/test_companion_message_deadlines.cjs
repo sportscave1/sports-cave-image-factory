@@ -3,6 +3,14 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const helper=fs.readFileSync('windows-upload-companion/message-deadline.js','utf8');
 const worker=fs.readFileSync('windows-upload-companion/worker.js','utf8');
 const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
+test('repair Send gets the full composer readiness window',async()=>{
+ const delays=[];
+ const c=vm.createContext({chrome:{tabs:{sendMessage:async()=>({found:true})}},
+ setTimeout:(f,ms)=>{delays.push(ms);return 1;},clearTimeout(){}});
+ vm.runInContext(helper,c);
+ await vm.runInContext("companionMessage(1,{type:'project:ad-repair-send'},{frameId:0})",c);
+ assert.deepEqual(delays,[180000]);
+});
 test('hung progress expires, clears its timer and permits the next read',async()=>{
  const timers=new Map();let id=0,resolve,hang=true;
  const c=vm.createContext({chrome:{tabs:{sendMessage:()=>hang?new Promise(r=>resolve=r):Promise.resolve({ok:true})}},

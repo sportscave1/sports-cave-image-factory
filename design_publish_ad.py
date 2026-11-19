@@ -184,6 +184,10 @@ final response, with exactly these filenames (the companion will save them to th
 - CSV: {folder}/ad_copy.csv
 
 Return actual JPEGs under the given .jpg filenames, not preview thumbnails or contact sheets.
+Keep the original bytes available until delivery is confirmed. Check that each attachment
+points to the actual exported file, rather than renaming only its link label. Include a
+table with each exact filename in its first column and its original Library link when
+available, so the companion can recover a broken chat-card download without regenerating art.
 Keep the current CSV format. Do not add image URLs to the CSV. Do not publish Meta ads or
 operate the Ads app. The companion downloads these four attachments, saves and verifies them
 in the job's Dropbox folder, selects verified targeting, and submits the existing posting job.

@@ -90,7 +90,27 @@
       if(!matches.length && recover && messages[0])messages[0].node.scrollIntoView({block:'start'});
       throw Error(matches.length?'Ambiguous ad attachment; original files retained':'Waiting for '+name+' in the saved chat');
     }
-    return matches[0];
+    // A Work chat card can fail while its explicitly linked Library original
+    // still downloads. Accept only the unique link in this file's own table row
+    // within the same pinned assistant response, never an arbitrary Library file.
+    const selected=matches[0],libraries=new Set();
+    for(const message of messages.slice(start+1)) {
+      if(message.role==='user'){if(recover && !repair)continue;break;}
+      if(message.role!=='assistant' || !message.body?.contains(selected.link))continue;
+      for(const row of message.body.querySelectorAll('tr')) {
+        if(row.querySelector('td')?.textContent.trim()!==name)continue;
+        for(const link of row.querySelectorAll('a[href]')) {
+          const url=new URL(link.href,location.origin);
+          if(url.origin==='https://chatgpt.com' && url.pathname==='/library' &&
+            /^libfile_[a-f0-9]+$/.test(url.searchParams.get('file_id')||'') &&
+            [...url.searchParams.keys()].every(k=>['file_id','account_id'].includes(k)) &&
+            (!url.searchParams.has('account_id') || url.searchParams.get('account_id')==='personal')) {
+            url.searchParams.delete('account_id');libraries.add(url.href);
+          }
+        }
+      }
+    }
+    return {...selected,library:libraries.size===1?[...libraries][0]:undefined};
   }
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(sender.id===chrome.runtime.id && message?.type==='project:ad-download-status') {
@@ -121,7 +141,7 @@
       downloadAttempt={job:message.job,name:message.name,response:found.response};
       // Use the site's existing authenticated download action, including sandbox links.
       found.link.click();
-      reply({clicked:true,response:found.response,chat:location.href});
+      reply({clicked:true,response:found.response,chat:location.href,library:found.library});
     })().catch(error=>reply({clicked:false,reason:error.message}));
     return true;
   });

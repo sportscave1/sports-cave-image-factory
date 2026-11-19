@@ -10,18 +10,25 @@ function followUpAdTransfer(outcome) {
   adFollowupTimer = setTimeout(() => {adFollowupTimer=null;void adQueueTick();}, outcome==='received'?250:1000);
 }
 const adChat = /^https:\/\/chatgpt\.com\/g\/g-p-6a6bd98cd6f081918788b544dcdecfc2(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/;
+const adLibrary=/^https:\/\/chatgpt\.com\/library\?file_id=libfile_[a-f0-9]+$/;
 
 async function repairAd(job,tab,token,local) {
   const repair=job.repair;
   local={...local,chat_url:job.chat_url};
   await staffWrite(adStorage,{...local,repair});
-  const message={job:job.id,repair:repair.id,chat:job.chat_url};
+  const message={job:job.id,repair:repair.id,chat:job.chat_url,names:repair.names};
   const status=await companionMessage(tab.id,{type:'project:ad-repair-status',...message},{frameId:0}).catch(()=>null);
   if(!status && local.repairReload!==repair.id) {
     await staffWrite(adStorage,{...local,repair,repairReload:repair.id});
     await chrome.tabs.reload(tab.id);return;
   }
-  if(status?.found || !status?.ready || repair.state!=='ready')return;
+  if(status?.found)return;
+  // Continue only our exact journalled, unclicked draft. Never reissue a Send
+  // after a click or infer non-submission from virtualized/absent chat history.
+  if(repair.state==='sending' && status?.staged) {
+    await companionMessage(tab.id,{type:'project:ad-repair-send',...message,resume:true},{frameId:0});return;
+  }
+  if(!status?.ready || repair.state!=='ready')return;
   // The server's job lease serializes claims across tabs/restarts. A lost
   // response consumes the permit: reconcile the marker, never repeat Send.
   const response=await fetch(osOrigin+'/api/staff-product-uploads/ad-tick',{
@@ -76,18 +83,31 @@ async function collectAd(job, token) {
     if(!result?.clicked) {
       await staffWrite(adStorage,{...local,transfer:null,transferError:result?.reason||'Waiting for downloadable attachments'});return;
     }
-    transfer={name,started,response:result.response};
+    transfer={name,started,response:result.response,library:adLibrary.test(result.library||'')?result.library:undefined};
     await staffWrite(adStorage,{...local,transfer,transferError:''});return 'download-started';
   }
   const downloads=await chrome.downloads.search({startedAfter:transfer.started,limit:30});
   // Cross-origin downloads may reduce the native referrer to the ChatGPT origin.
   // Require a unique named download after our recorded click in either case.
-  const candidates=downloads.filter(item=>[job.chat_url,'https://chatgpt.com/'].includes(item.referrer) &&
-    item.filename.replaceAll('\\','/').split('/').pop().replace(/ \(\d+\)(?=\.[^.]+$)/,'')===name);
+  const candidates=downloads.filter(item=>[job.chat_url,'https://chatgpt.com/',...(transfer.libraryTab?[transfer.library]:[])].includes(item.referrer) &&
+    item.filename.replaceAll('\\','/').split('/').pop().replace(/ \(\d+\)(?=\.[^.]+$)/,'')
+      .replace(transfer.libraryTab?/\(\d{8}-\d{6}\)(?=\.[^.]+$)/:/$^/,'')===name);
   if(candidates.length!==1) {
     const status=await companionMessage(tab.id,{type:'project:ad-download-status',job:job.id,name,
       response:transfer.response,chat:job.chat_url},{frameId:0}).catch(()=>null);
     if(status?.error || Date.now()-Date.parse(transfer.started)>120000) {
+      if(adLibrary.test(transfer.library||'') && !transfer.librarySent) {
+        let original=transfer.libraryTab?await chrome.tabs.get(transfer.libraryTab).catch(()=>null):null;
+        if(!original) {
+          original=await chrome.tabs.create({url:transfer.library,active:false});
+          await staffWrite(adStorage,{...local,transfer:{...transfer,libraryTab:original.id}});return;
+        }
+        if(original.url!==transfer.library){await failedAdDownload(local,tab,'Library original changed');return;}
+        const restored=await companionMessage(original.id,{type:'project:ad-library',job:job.id,name,url:transfer.library},{frameId:0}).catch(()=>null);
+        if(restored?.clicked) {
+          await staffWrite(adStorage,{...local,transfer:{...transfer,started:new Date().toISOString(),librarySent:true}});return 'download-started';
+        }
+      }
       await failedAdDownload(local,tab,status?.error||'No browser download receipt');
     }
     return;
@@ -98,7 +118,9 @@ async function collectAd(job, token) {
   const url=new URL(item.finalUrl||item.url);
   let data;
   if(url.protocol==='blob:' && url.origin==='https://chatgpt.com') {
-    const result=await companionMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,repair:job.repair?.id,chat:job.chat_url,url:url.href},{frameId:0});
+    const result=transfer.librarySent
+      ? await companionMessage(transfer.libraryTab,{type:'project:ad-library-blob',job:job.id,name,url:transfer.library,blob:url.href},{frameId:0})
+      : await companionMessage(tab.id,{type:'project:ad-blob',job:job.id,name,response:transfer.response,recover:job.recover,repair:job.repair?.id,chat:job.chat_url,url:url.href},{frameId:0});
     if(!result?.data) {
       await failedAdDownload(local,tab,result?.error||'Original download expired');return;
     }
@@ -161,7 +183,7 @@ async function adQueueTick() {
     const local = await staffRead(adStorage);
     const repairStatus=local?.repair && local.repair.state!=='submitted' && local.tab
       ? await companionMessage(local.tab,{type:'project:ad-repair-status',job:local.id,repair:local.repair.id,
-          chat:local.chat_url},{frameId:0}).catch(()=>null) : null;
+          chat:local.chat_url,names:local.repair.names},{frameId:0}).catch(()=>null) : null;
     const report = local?.receipt ? await health(local.receipt) : {};
     // A missed send receipt is not a failed generation. Reconcile only the
     // exact tab created for this job; never resend or adopt an unrelated chat.
