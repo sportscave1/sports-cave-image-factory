@@ -36,9 +36,10 @@ def test_reset_rearms_mapping_version_without_losing_moved_psd(monkeypatch):
     assert task['state'] == 'Mapped' and task['moved'] == source
 
 
-@pytest.mark.parametrize('refresh', [False, True])
-@pytest.mark.parametrize('lost_move_response', [False, True, 'already_moved'])
-def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response, refresh):
+@pytest.mark.parametrize('refresh,old_mapping,lost_move_response',
+    [(refresh, old, lost) for refresh, old in [(False, None), (True, None), (True, 'different'), (True, 'same')]
+     for lost in [False, True, 'already_moved']] + [(True, fault, False) for fault in ['changed', 'busy', 'wrong_target']])
+def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response, refresh, old_mapping):
     service, intake_id, original, listing = setup(env, arrived=False)
     store, sql, provider = env
     sql.execute((Path(__file__).resolve().parents[1] /
@@ -80,6 +81,12 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
                 'design_origin': 'designs_to_refresh',
             })
     row = store.read(intake_id, ADMIN['id'])
+    if old_mapping:
+        sql.execute('ALTER TABLE auto_edition_onboarding ADD COLUMN IF NOT EXISTS replacement jsonb')
+        old_id = original['id'] if old_mapping == 'same' else 'id:prior-master'
+        sql.execute("INSERT INTO product_psd_mappings(shopify_product_gid,dropbox_file_id,file_path,source,actor_id) VALUES(%s,%s,%s,'manual',%s)",
+                    (PID, old_id, '/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/old-master.psd', ADMIN['id']))
+        sql.execute("INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,attempts) VALUES(%s,%s,'Needs PSD Repair','Old plaque needs repair',3)", (PID, old_id))
     handoff = prepare(result, row, receipt, 'Exact saved scenes.', staff_job=str(job_id))
     prompt = handoff['prompt']
     saved = handoff['staff_mapping']
@@ -125,6 +132,26 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         path = f'{folder}/WEBP/{name}'
         provider.files.setdefault(path, dict(id='id:' + name, rev='new', content_hash='a' * 64,
                                              size=90, path_display=path, name=name))
+    if old_mapping in ('changed', 'busy', 'wrong_target'):
+        if old_mapping == 'changed':
+            sql.execute("UPDATE product_psd_mappings SET updated_at=now()+interval '1 second' WHERE shopify_product_gid=%s", (PID,))
+        elif old_mapping == 'busy':
+            sql.execute("UPDATE auto_edition_onboarding SET status='Preparing' WHERE product_gid=%s", (PID,))
+        else:
+            with store.locked(intake_id, ADMIN['id']) as (row, cur):
+                row['data']['staff_mapping']['target'] = 'gid://shopify/Product/111'
+        queue.tick(token, {})
+        assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == (5 if old_mapping == 'busy' else 7)
+        assert not provider.api.move_path.called
+        assert service.mappings.read_one(PID)['dropbox_file_id'] == old_id
+        assert count(sql, 'auto_edition_onboarding') == 1
+        assert read_edition(store.connect, PID) == before
+        if old_mapping == 'busy':
+            sql.execute("UPDATE auto_edition_onboarding SET status='Needs PSD Repair' WHERE product_gid=%s", (PID,))
+            queue.tick(token, {})
+            assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == 6
+            assert provider.api.move_path.call_count == 1
+        return
     if lost_move_response == 'already_moved':
         from product_upload_dropbox import ROOTS
         provider.api.move_path(provider.token, original['id'], ROOTS['live'] + '/' + original['name'],
@@ -139,13 +166,15 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         provider.api.move_path.side_effect = lose_response
         queue.tick(token, {})
         done = queue.list_jobs('staff-fixture')['jobs'][0]
-        assert done['stage'] == 5 and 'Moving PSD failed' in done['detail']
-        assert count(sql, 'product_psd_mappings') == 0
-        assert count(sql, 'auto_edition_onboarding') == 0
+        assert done['stage'] == 5
+        if not old_mapping:
+            assert 'Moving PSD failed' in done['detail']
+        assert count(sql, 'product_psd_mappings') == bool(old_mapping)
+        assert count(sql, 'auto_edition_onboarding') == bool(old_mapping)
         provider.api.move_path.side_effect = original_move
     queue.tick(token, {})
     done = queue.list_jobs('staff-fixture')['jobs'][0]
-    assert done['stage'] == 6 and done['percent'] == 100
+    assert done['stage'] == 6 and done['percent'] == 100, (done, service.status(intake_id, ADMIN))
     assert done['storefront'] == listing['online_store_url'] and 'Auto Editions' in done['detail']
     assert provider.api.move_path.call_count == 1
     mapping = service.mappings.read_one(PID)
@@ -158,6 +187,11 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
     assert count(sql, 'auto_edition_onboarding') == 1
     assert read_edition(store.connect, PID) == before
     assert service.status(intake_id, ADMIN)['state'] == 'Mapped'
+    assert service.map(intake_id, ADMIN, product_id=PID, confirm_product=True,
+                       source_version=saved['version'], staff_job=str(job_id))['state'] == 'Mapped'
+    if old_mapping:
+        sql.execute("SELECT count(*) AS n FROM product_psd_mapping_audit WHERE action='replace'")
+        assert sql.fetchone()['n'] == 1
     assert queue.tick(token, {}) == {}
     assert provider.api.move_path.call_count == 1
 

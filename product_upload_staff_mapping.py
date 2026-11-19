@@ -45,6 +45,10 @@ def arm(connect, key, actor, handoff):
         if row['data']['source'] != handoff['source'] or row['mode'] != handoff['mode']:
             raise ValueError('The saved PSD or upload action changed before handoff.')
         if not old:
+            from product_upload_refresh_mapping import target, snapshot
+            pid = target(row)
+            if pid:
+                handoff = dict(handoff, mapping_before=snapshot(cur, pid))
             row['data']['staff_mapping'] = handoff
             task = (row['data'].get('upload_operation') or {}).get('sync_map') or {}
             if (row['data'].get('staff_upload_attempt') == handoff['job']

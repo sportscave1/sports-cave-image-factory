@@ -348,6 +348,14 @@ class Mapping:
         from product_upload_mapping_hold import acquire, verify
         if not os_accounts.can_attach_missing_psd(actor):
             raise PermissionError('Your account needs permission to attach a product PSD.')
+        if staff_job:
+            from product_upload_refresh_mapping import run, target
+            refresh_target = target(self.store.read(key, actor['id']))
+            if refresh_target and product_id and product_id != refresh_target:
+                raise ValueError('A supplied product ID conflicts with the approved refresh target.')
+            refreshed = run(self, key, actor, source_version, staff_job)
+            if refreshed is not None:
+                return refreshed
         prior = self.store.read(key, actor['id'])
         prior_task = ((prior or {}).get('data',{}).get('upload_operation') or {}).get('sync_map') or {}
         if prior_task.get('manual_takeover'):
