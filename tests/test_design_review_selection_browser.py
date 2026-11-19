@@ -35,14 +35,14 @@ def test_selection_icons_and_refresh_remain_visible_on_desktop_and_mobile():
 def test_card_pencil_and_publish_buttons_share_one_row():
     css = (Path(__file__).resolve().parents[1] / 'components/design_review_gallery.css').read_text(encoding='utf8')
     markup = """
-<div class="st-key-design-review-grid"><div class="st-key-design-review-card-fixture"><div data-testid="stHorizontalBlock">
+<div class="st-key-design-review-grid"><div data-testid="stHorizontalBlock"><div data-testid="stColumn"><div class="st-key-design-review-card-fixture"><div data-testid="stHorizontalBlock">
 <div data-testid="stColumn"><div data-testid="stCheckbox"><input type="checkbox" checked></div></div>
 <div data-testid="stColumn"><h3 class="sc-review-title" title="Forever Panda – Pablo Sandoval Wall Art">Forever Panda – Pablo Sandoval Wall Art</h3><div class="sc-review-status">Needs attention</div></div>
 <div data-testid="stColumn"><a class="sc-review-edit" href="#" aria-label="Edit design"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 20 20 4" stroke="currentColor"/></svg></a></div>
 <div data-testid="stColumn"><div class="st-key-design-review-delete-fixture"><button>Delete</button></div></div>
 <div data-testid="stColumn"><button>Publish now</button></div>
 <div data-testid="stColumn"><button>Publish + ad</button></div>
-</div></div></div>"""
+</div></div></div></div></div>"""
     with sync_playwright() as p:
         browser = p.chromium.launch(channel='msedge', headless=True)
         try:
@@ -57,6 +57,8 @@ def test_card_pencil_and_publish_buttons_share_one_row():
                 assert boxes[-1]['x']+boxes[-1]['width'] <= width
                 page.get_by_role('checkbox').uncheck()
                 assert not page.get_by_role('button', name='Delete').is_visible()
+                assert page.locator('h3').is_visible()
+                assert page.get_by_role('button', name='Publish now').is_visible()
                 assert page.locator('h3').evaluate('(el)=>getComputedStyle(el).textOverflow') == 'ellipsis'
                 page.close()
         finally:
