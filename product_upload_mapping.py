@@ -149,10 +149,16 @@ class Mapping:
             from product_upload_dropbox import ROOTS, within
             source = op['source']
             saved = row['data'].get('staff_mapping') or {}
+            live_path = ROOTS['live'] + '/' + source['path_display'].rsplit('/', 1)[-1]
+            destinations = {live_path}
+            if saved.get('mapping_before'):
+                from product_upload_refresh_mapping import refresh_path, target
+                if target(row):
+                    destinations.add(refresh_path(live_path, source))
             if (meta and saved.get('verified') and saved.get('source') == row['data'].get('source')
                     and source.get('content_hash') and source.get('size')
                     and within(source.get('path_display', ''), ROOTS['review'])
-                    and meta.get('path_display') == ROOTS['live'] + '/' + source['path_display'].rsplit('/', 1)[-1]
+                    and meta.get('path_display') in destinations
                     and all(meta.get(k) == source.get(k) for k in ('id', 'content_hash', 'size'))):
                 return meta
             raise ValueError('The captured PSD changed or is inaccessible. Restore that revision or start a new upload; no replacement was made.')

@@ -16,6 +16,7 @@ LOG = logging.getLogger(__name__)
 CONTROL_KEY = 'product_upload_queue_enabled'
 STALL_MINUTES = 30
 CANCELLED = 'Cancelled by user.'
+MAPPING_RESUME = 'Verified publication · waiting to resume PSD mapping'
 
 
 def connect():
@@ -158,7 +159,7 @@ def delivery(row):
 
 
 def restart(key, user, expected):
-    """Restart Publish now for this failed snapshot, regenerating its web-image package."""
+    """Resume verified mapping conflicts; otherwise restart the failed image package."""
     key = UUID(str(key))
     if not isinstance(expected, str) or not expected:
         raise ValueError('Refresh the upload status before restarting.')
@@ -183,6 +184,20 @@ def restart(key, user, expected):
             raise PermissionError('This upload is unavailable to this account.')
         if job['stage'] != 7 or job['updated_at'] != datetime.fromisoformat(expected):
             raise ValueError('This upload changed or is no longer failed. Refresh its status.')
+        if intake and job['message'].startswith('Destination conflict:'):
+            data = dict(intake['data'])
+            saved = data.get('staff_mapping') or {}
+            dispatch = str(job.get('dispatch_id') or job['id'])
+            if (saved.get('verified') and saved.get('job') == dispatch
+                    and saved.get('source') == data.get('source')
+                    and saved.get('source', {}).get('id') == job['source_id']
+                    and saved.get('source', {}).get('rev') == job['source_rev']):
+                data['staff_mapping_resume'] = dispatch
+                cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb,updated_at=now() WHERE id=%s',
+                            (json.dumps(data), job['intake_id']))
+                cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,message=%s,updated_at=now()
+                    WHERE id=%s RETURNING *''', (MAPPING_RESUME, key))
+                return public(cur.fetchone())
         attempt = uuid4()
         if intake:
             data = dict(intake['data'])
@@ -295,6 +310,15 @@ def desktop_tick(token):
                 WHERE id=(SELECT id FROM product_upload_staff_jobs WHERE stage=0 ORDER BY created_at,id LIMIT 1)
                 RETURNING *''', (device['actor_id'],))
             job = cur.fetchone()
+            if job and job['message'] == MAPPING_RESUME:
+                cur.execute('SELECT data FROM product_upload_intakes WHERE id=%s', (job['intake_id'],))
+                intake = cur.fetchone()
+                if not intake or intake['data'].get('staff_mapping_resume') != str(job.get('dispatch_id') or job['id']):
+                    raise ValueError('The saved PSD mapping resume receipt changed.')
+                cur.execute('''UPDATE product_upload_staff_jobs SET stage=5,
+                    message='Resuming verified publication · mapping the original PSD'
+                    WHERE id=%s RETURNING *''', (job['id'],))
+                job = cur.fetchone()
     return delivery(job)
 
 

@@ -1,6 +1,14 @@
 """Exact, administrator-approved refresh handoff; retains edition history and old files."""
 from copy import deepcopy
+from hashlib import sha256
 import json
+from pathlib import PurePosixPath
+
+
+def refresh_path(destination, source):
+    name = PurePosixPath(destination)
+    suffix = sha256(source['id'].encode()).hexdigest()[:12]
+    return str(name.with_name(name.stem[:200] + '__refresh_' + suffix + name.suffix))
 
 
 def snapshot(cur, pid):
@@ -85,11 +93,16 @@ def run(service, key, actor, version, job):
             raise ValueError('The edition run changed before refresh mapping. Its history was preserved.')
         destination = roots['live']['path'] + '/' + source['path_display'].rsplit('/', 1)[-1]
         current = service.source(row)
-        if current['path_display'] != destination and not within(current['path_display'], roots['review']['path']):
-            raise ValueError('The refreshed PSD is outside the approved Review folder.')
         occupied = service.provider.metadata_if_present(destination)
         if occupied and occupied['id'] != source['id']:
-            raise ValueError('Destination conflict: the old PSD is retained. Rename the refreshed source before approval.')
+            # Keep the previous master in place. The stable source-ID suffix
+            # also lets a lost move response reconcile to exactly the same path.
+            destination = refresh_path(destination, source)
+            occupied = service.provider.metadata_if_present(destination)
+            if occupied and occupied['id'] != source['id']:
+                raise ValueError('Destination conflict: the reserved refresh path contains another PSD. Nothing was overwritten.')
+        if current['path_display'] != destination and not within(current['path_display'], roots['review']['path']):
+            raise ValueError('The refreshed PSD is outside the approved Review folder.')
         if current['path_display'] != destination:
             service.provider.api.move_path(service.provider.token, source['id'], destination,
                                            root_path=service.provider.context['root_path'])

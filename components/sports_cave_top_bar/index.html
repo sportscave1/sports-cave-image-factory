@@ -1399,6 +1399,9 @@
     const bindRestart = (button, item) => {
       button.hidden = item?.stage !== 7 || item?.restartable === false;
       button.disabled = pendingRestarts.has(item?.id);
+      button.title = item?.detail?.startsWith('Destination conflict:')
+        ? 'Retry the saved PSD mapping; retain the published image package'
+        : 'Restart from the original PSD and regenerate mockups';
       button.onclick = async event => {
         event?.preventDefault();
         event?.stopPropagation();

@@ -38,7 +38,8 @@ def test_reset_rearms_mapping_version_without_losing_moved_psd(monkeypatch):
 
 @pytest.mark.parametrize('refresh,old_mapping,lost_move_response',
     [(refresh, old, lost) for refresh, old in [(False, None), (True, None), (True, 'different'), (True, 'same')]
-     for lost in [False, True, 'already_moved']] + [(True, fault, False) for fault in ['changed', 'busy', 'wrong_target']])
+     for lost in [False, True, 'already_moved']] + [(True, fault, False) for fault in ['changed', 'busy', 'wrong_target']]
+     + [(True, 'different', kind) for kind in ['collision', 'collision_lost']])
 def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response, refresh, old_mapping):
     service, intake_id, original, listing = setup(env, arrived=False)
     store, sql, provider = env
@@ -132,6 +133,25 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         path = f'{folder}/WEBP/{name}'
         provider.files.setdefault(path, dict(id='id:' + name, rev='new', content_hash='a' * 64,
                                              size=90, path_display=path, name=name))
+    collision = lost_move_response in ('collision', 'collision_lost')
+    if collision:
+        from copy import deepcopy
+        from product_upload_dropbox import ROOTS
+        occupied_path = ROOTS['live'] + '/' + original['name']
+        retained = dict(id='id:prior-master', rev='prior', content_hash='b' * 64,
+                        size=123, name=original['name'], path_display=occupied_path)
+        provider.files[occupied_path] = deepcopy(retained)
+        # Resume a previously failed mapping without new generation or dispatch.
+        with store.locked(intake_id, ADMIN['id']) as (row, cur):
+            row['data']['staff_mapping']['verified'] = True
+            verified_before = deepcopy(row['data']['staff_mapping'])
+        queue.advance(job_id, ADMIN['id'], 7, 'Destination conflict: the old PSD is retained.', allowed=[5])
+        failed = queue.list_jobs('staff-fixture')['jobs'][0]
+        monkeypatch.setattr(queue, 'can_control_queues', lambda user: True)
+        assert queue.restart(job_id, ADMIN, failed['updated_at'])['stage'] == 0
+        resumed = store.read(intake_id, ADMIN['id'])
+        assert resumed['data']['staff_mapping'] == verified_before
+        assert resumed['data']['staff_mapping_resume'] == str(job_id)
     if old_mapping in ('changed', 'busy', 'wrong_target'):
         if old_mapping == 'changed':
             sql.execute("UPDATE product_psd_mappings SET updated_at=now()+interval '1 second' WHERE shopify_product_gid=%s", (PID,))
@@ -156,7 +176,7 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         from product_upload_dropbox import ROOTS
         provider.api.move_path(provider.token, original['id'], ROOTS['live'] + '/' + original['name'],
                                root_path=provider.context['root_path'])
-    if lost_move_response is True:
+    if lost_move_response is True or lost_move_response == 'collision_lost':
         original_move = provider.api.move_path.side_effect
 
         def lose_response(*args, **kwargs):
@@ -174,12 +194,16 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         provider.api.move_path.side_effect = original_move
     queue.tick(token, {})
     done = queue.list_jobs('staff-fixture')['jobs'][0]
-    assert done['stage'] == 6 and done['percent'] == 100, (done, service.status(intake_id, ADMIN))
+    assert done['stage'] == 6 and done['percent'] == 100, done['detail']
     assert done['storefront'] == listing['online_store_url'] and 'Auto Editions' in done['detail']
     assert provider.api.move_path.call_count == 1
     mapping = service.mappings.read_one(PID)
     assert mapping['verified'] and mapping['dropbox_file_id'] == original['id']
-    assert mapping['file_path'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/' + original['name'])
+    if collision:
+        assert '__refresh_' in mapping['file_path']
+        assert provider.files[occupied_path] == retained
+    else:
+        assert mapping['file_path'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/' + original['name'])
     sql.execute('SELECT product_gid, file_id, status, source FROM auto_edition_onboarding')
     job = sql.fetchone()
     assert (job['product_gid'], job['file_id'], job['status']) == (PID, original['id'], 'Awaiting preparation')
