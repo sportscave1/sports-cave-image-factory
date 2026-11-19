@@ -1245,7 +1245,9 @@
     }, 5000));
     const pendingDesignActions = new Set();
     const pendingAdActions = new Set(), deletedAdJobs = new Set();
-    let adActionScope = state.config.uploadScope;
+    // Controller state is initialized below. Bind the scope on first render,
+    // after install supplies the account configuration.
+    let adActionScope;
     const renderCompanions = status => {
       if(adActionScope!==state.config.uploadScope) {
         pendingAdActions.clear();deletedAdJobs.clear();adActionScope=state.config.uploadScope;

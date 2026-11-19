@@ -58,6 +58,14 @@ def test_two_designs_rotate_in_one_card_without_changing_other_panels():
             page.clock.run_for(5000)
             expect(title).to_have_text('Second design')
             assert not errors
+            # A cold reload must initialize the entire controller, not only
+            # queue functions evaluated with a pre-created fixture state.
+            page.reload()
+            expect(page.locator('#sc-os-companion-status')).to_be_visible()
+            expect(page.locator('#sc-os-design-title')).to_have_text('Second design')
+            expect(page.locator('#sc-os-ads-title')).to_have_text('Current ad')
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Current upload')
+            assert not errors
         finally:
             browser.close()
 
