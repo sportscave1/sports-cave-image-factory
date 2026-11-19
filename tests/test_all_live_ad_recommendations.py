@@ -20,6 +20,15 @@ def row():
                     ad_coverage_evidence='No exact product match in the reviewed active and paused ads. Unmapped canvas destinations remain unknown.'))
 
 
+def test_inventory_outage_allows_one_verified_secondary_enrichment():
+    from daily_brief_worker import contract_upgrade
+    prior=dict(ad_format_version=3,ad_recommendations=[dict(ad(),secondary_reason='Inventory unavailable.')])
+    enriched=dict(ad_format_version=3,ad_recommendations=[row()])
+    assert contract_upgrade('meta',prior,enriched)
+    assert not contract_upgrade('meta',enriched,enriched)
+    assert not contract_upgrade('meta',prior,prior)
+
+
 def test_secondary_is_distinct_and_requires_explicit_review_evidence():
     parsed=meta._ad_recommendations([row()],all_live=True)
     assert parsed[0]['secondary_product']['product_title']=='Another Star Wall Art'

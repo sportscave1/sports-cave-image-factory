@@ -102,7 +102,13 @@ def test_current_ad_inventory_includes_paused_zero_delivery_and_unknown_destinat
     reader.pages.assert_called_once()
     monkeypatch.setattr(history, '_inventory_cache', {})
     reader.pages.side_effect = ValueError('pagination time limit')
-    assert history.ad_inventory(CONFIG)['status'] == 'unavailable'
+    failed=history.ad_inventory(CONFIG)
+    assert failed['status'] == 'unavailable' and failed['failure_type']=='ValueError'
+    monkeypatch.setattr(history, '_inventory_cache', {})
+    reader.pages.side_effect=[ValueError('expanded destinations unavailable'),[dict(id='12',name='Undelivered ad',effective_status='PAUSED',creative={'id':'13'})]]
+    lean=history.ad_inventory(CONFIG)
+    assert lean['status']=='complete' and lean['unmapped_ads']==1
+    assert lean['ads'][0]['creative_id']=='13'
 
 
 def test_provider_field_fallback_and_wrong_account_rejection():

@@ -32,6 +32,10 @@ LATEST_KEYS = {"sports": sports.SETTING_KEY, "meta": meta.SETTING_KEY,
 def contract_upgrade(kind, previous, incoming):
     if kind == 'meta' and incoming.get('ad_format_version') == 3 and previous.get('ad_format_version', 0) < 3:
         return True
+    if (kind == 'meta' and incoming.get('ad_format_version') == previous.get('ad_format_version') == 3
+            and not any(row.get('secondary_product') for row in previous.get('ad_recommendations', []))
+            and any(row.get('secondary_product') for row in incoming.get('ad_recommendations', []))):
+        return True  # One evidence-backed enrichment after an inventory outage.
     field = {"sports": "design_recommendations", "meta": "ad_recommendations"}.get(kind)
     return bool(field and field in incoming and field not in previous)
 
@@ -147,6 +151,9 @@ def status(kind):
         result['format_version'] = 3 if kind == 'meta' and published.get('ad_format_version') == 3 else 2 if (kind == 'sports' and 'design_recommendations' in published
                                          or kind == 'meta' and 'ad_recommendations' in published) else 1
         result["publication_sha256"] = digest(published)
+        if kind == 'meta':
+            result['live_sport_count'] = len(published.get('ad_recommendations', []))
+            result['secondary_product_count'] = sum(bool(row.get('secondary_product')) for row in published.get('ad_recommendations', []))
         result["matches_submission"] = (published == BRIEFS[kind][0](
             json.dumps(job["edition"], ensure_ascii=False), day)) if job else None
     elif job.get("error"):

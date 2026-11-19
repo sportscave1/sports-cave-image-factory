@@ -55,17 +55,27 @@ def ad_inventory(config):
         return set()
 
     try:
-        reader = live.Reader(config, max_pages=30, seconds=25)
-        rows = reader.pages(config['ad_account_id'] + '/ads', {'fields': live.AD_FIELDS})
+        # Inventory needs destinations, not image/video previews or historical metrics.
+        # Keep the expansion small enough to enumerate zero-delivery ads as well.
+        fields = 'id,name,effective_status,creative{link_url,object_story_spec,asset_feed_spec}'
+        try:
+            reader = live.Reader(config, max_pages=100, seconds=45)
+            rows = reader.pages(config['ad_account_id'] + '/ads', {'fields': fields})
+        except (meta.MetaAdsApiError, TimeoutError, ValueError):
+            reader = live.Reader(config, max_pages=100, seconds=45)
+            rows = reader.pages(config['ad_account_id'] + '/ads', {'fields': 'id,name,effective_status,creative{id}'})
         ads = [dict(ad_id=row['id'], name=row.get('name', ''), status=row.get('effective_status') or row.get('status'),
+                    creative_id=(row.get('creative') or {}).get('id'),
                     product_handles=sorted(handles(row.get('creative', {})))) for row in rows]
         result = dict(status='complete', captured_at=datetime.now(timezone.utc).isoformat(), ads=ads,
                       unmapped_ads=sum(not row['product_handles'] for row in ads),
                       basis='Current non-deleted ad inventory, including paused and zero-delivery ads. '
                             'Product handles are exact creative destination matches. Unmapped, dynamic catalogue or '
                             'Instant Experience destinations remain unknown; no historical absence claim is established.')
-    except (meta.MetaAdsApiError, TimeoutError, OSError, ValueError, KeyError):
-        result = dict(status='unavailable', ads=[], basis='Current ad inventory could not be completely verified. Do not infer absence from performance rows.')
+    except (meta.MetaAdsApiError, TimeoutError, OSError, ValueError, KeyError) as error:
+        result = dict(status='unavailable', ads=[], failure_type=type(error).__name__,
+                      failure_code=str(getattr(error, 'error_code', '') or ''),
+                      basis='Current ad inventory could not be completely verified. Do not infer absence from performance rows.')
     with _lock:
         _inventory_cache[key] = monotonic() + CACHE_TTL, result
         while len(_inventory_cache) > CACHE_LIMIT:
