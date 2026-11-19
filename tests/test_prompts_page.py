@@ -70,7 +70,7 @@ class PageTests(unittest.TestCase):
                 page = AppTest.from_string(source, default_timeout=30).run()
                 self.assertFalse(page.exception)
                 rows = [p for p in catalog() if p.category == category]
-                self.assertEqual([e.label for e in page.expander], ['Test prompt before activating'] + [p.title for p in rows] + ['Source & template details'])
+                self.assertEqual([e.label for e in page.expander], ['Prepare prompt to copy'] + [p.title for p in rows] + ['Source & template details'])
                 self.assertEqual(len(page.text_area), 1)
                 self.assertTrue(next(b for b in page.button if b.label == 'Activate version').disabled)
                 page.text_input[0].set_value('no matches xyz').run()

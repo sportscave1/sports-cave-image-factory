@@ -1,16 +1,15 @@
 """Lazy, session-local text test panel for unsaved prompt edits."""
-import json
 import logging
 import secrets
-from prompt_test_runner import WORKFLOWS, configuration, fingerprint, run
-from prompt_test_inputs import load_choices, prepare
+from prompt_test_runner import WORKFLOWS, build_prompt
+from prompt_test_inputs import load_choices
 
 
 def render(st, prompt, text, user, valid=True):
     key = 'prompt-test-' + prompt.key
-    with st.expander('Test prompt before activating'):
-        st.caption('Generate a text result using this editor draft. Tests do not activate prompts, generate artwork, create queue jobs or publish products or ads.')
-        if not st.toggle('Set up a test', key=key + '-enabled'):
+    with st.expander('Prepare prompt to copy'):
+        st.caption('Apply a product to the current draft, then copy the full prompt to test it yourself. No AI connection or generation.')
+        if not st.toggle('Select a product', key=key + '-enabled'):
             return
         workflow = st.selectbox('Test workflow', WORKFLOWS[prompt.category], key=key + '-workflow')
         source_key = key + '-' + workflow
@@ -46,31 +45,10 @@ def render(st, prompt, text, user, valid=True):
                     choice = next(r for r in rows if r['id'] == chosen)
         if choice:
             st.caption('Test input: ' + choice['title'] + ' - ' + choice['source'])
-        configured = bool(configuration()[0])
-        if not configured:
-            st.info('The server OpenAI connection is required to run a text test.')
-        if st.button('Test prompt', key=key + '-run', disabled=not valid or not choice or not configured):
-            try:
-                with st.spinner('Testing the current draft...'):
-                    item, image = prepare(choice)
-                    result = run(text, workflow, item, image)
-                result['selection_fingerprint'] = fingerprint(text, workflow, choice)
-                st.session_state[key + '-result'] = result
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception:
-                logging.getLogger(__name__).exception('Prompt test failed')
-                st.error('The test could not finish. Your draft is retained; retry explicitly.')
-        result = st.session_state.get(key + '-result')
-        if result:
-            if not choice or result['selection_fingerprint'] != fingerprint(text, workflow, choice):
-                st.warning('Previous test result: the draft, workflow or selected input has changed. Run Test prompt again to test the current version.')
-            if result['incomplete']:
-                st.warning('The model reached its response limit. This is a partial result.')
-            st.subheader('Test result')
-            st.caption(result['item']['title'] + ' - ' + result['model'] + ' - ' + result['created_at'][:19] + ' UTC')
-            st.markdown(result['text'])
-            st.download_button('Download test result', result['text'], file_name='prompt-test-result.txt', key=key + '-download')
-            with st.expander('Draft and input used for this test'):
-                st.json(result['item'])
-                st.code(result['draft'], language=None, wrap_lines=True)
+        if choice and valid:
+            compiled = build_prompt(text, workflow, choice)
+            st.subheader('Full prompt with product applied')
+            st.caption('Use the copy button at the top-right of the prompt below to copy everything. Changes to the draft or product update this prompt automatically.')
+            st.code(compiled, language=None, wrap_lines=True)
+        elif not valid:
+            st.info('Fix the editor validation errors to prepare this prompt.')
