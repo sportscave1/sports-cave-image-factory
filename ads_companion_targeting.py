@@ -10,6 +10,7 @@ class CatalogPending(ValueError):
 
 
 FORMULA_ONE_PRODUCT_SET = 'FORMULA 1 WALL ART POPULAR'
+NBA_PRODUCT_SET = 'NBA WALL ART POPULAR BLACK FRAMES'
 
 
 def contains_product(products, result):
@@ -44,11 +45,12 @@ def select(refs, result, *, client, saved=None):
         not ' '.join(tokens(row.get('name'))).endswith('wall art'),
     ))
     required_name = f'{sport or result["category"]} Wall Art'
-    if sport == 'Formula One':
-        required_name = FORMULA_ONE_PRODUCT_SET
+    preferred_name = {'Formula One': FORMULA_ONE_PRODUCT_SET, 'NBA': NBA_PRODUCT_SET}.get(sport)
+    if preferred_name:
+        required_name = preferred_name
         ranked = [row for row in product_sets
                   if ' '.join(str(row.get('name') or '').split()).casefold()
-                  == FORMULA_ONE_PRODUCT_SET.casefold()]
+                  == preferred_name.casefold()]
     if not ranked:
         raise CatalogPending(f'Meta has not yet confirmed the {required_name} collection.')
     # The cover and CTA promote the featured product; the Collection tiles use

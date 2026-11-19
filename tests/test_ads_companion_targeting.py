@@ -75,7 +75,7 @@ def test_optional_membership_api_is_not_a_posting_gate(monkeypatch):
     assert select(refs,result,client=actual)['product_set_id']=='2'
 
 
-@pytest.mark.parametrize('category,name', [('NBA','NBA Wall Art'),('Basketball','NBA Wall Art'),
+@pytest.mark.parametrize('category,name', [('NBA','NBA WALL ART POPULAR BLACK FRAMES'),('Basketball','NBA WALL ART POPULAR BLACK FRAMES'),
     ('Soccer','Football Wall Art'),('NFL','NFL Wall Art'),('Formula 1','FORMULA 1 WALL ART POPULAR'),
     ('NRL','Rugby League Wall Art'),('NHL','Ice Hockey Wall Art')])
 def test_selected_sport_wins_over_title_and_stale_saved_set(category,name):
@@ -90,7 +90,7 @@ def test_selected_sport_wins_over_title_and_stale_saved_set(category,name):
 def test_missing_sport_collection_never_falls_back_to_other_sport():
     result,refs,client=fixture()
     result['category']='NBA'
-    with pytest.raises(ValueError,match='NBA Wall Art'):
+    with pytest.raises(ValueError,match='NBA WALL ART POPULAR BLACK FRAMES'):
         select(refs,result,client=client)
 
 
@@ -114,7 +114,7 @@ def test_formula_one_always_uses_popular_even_with_saved_old_selection(category)
 
 
 @pytest.mark.parametrize('category,name', [
-    ('NBA','NBA Wall Art'), ('NFL','NFL Wall Art'), ('Soccer','Football Wall Art'),
+    ('NBA','NBA WALL ART POPULAR BLACK FRAMES'), ('NFL','NFL Wall Art'), ('Soccer','Football Wall Art'),
     ('AFL','AFL Wall Art'), ('NRL','Rugby League Wall Art'), ('NHL','Ice Hockey Wall Art'),
     ('Cricket','Cricket Wall Art'), ('Tennis','Tennis Wall Art'), ('Golf','Golf Wall Art'),
     ('Formula One','FORMULA 1 WALL ART POPULAR'),
@@ -127,3 +127,21 @@ def test_sport_sets_work_without_featured_product_membership(category,name):
         pytest.fail('No per-product membership dependency for any sport')
     client.product_set_members=membership
     assert select(refs,result,client=client)['product_set_id']=='selected'
+
+
+@pytest.mark.parametrize('category', ['NBA', 'Basketball', 'nba-wall-art'])
+def test_nba_always_uses_popular_black_frames_even_with_saved_old_selection(category):
+    result,refs,client=fixture()
+    result['category']=category
+    refs['product_sets']=[
+        dict(id='1',name='NBA Wall Art'),
+        dict(id='2',name='NBA WALL ART POPULAR'),
+        dict(id='3',name='NBA WALL ART POPULAR BLACK FRAMES USA'),
+        dict(id='4',name='  NBA Wall Art Popular  Black Frames  '),
+        dict(id='5',name='FORMULA 1 WALL ART POPULAR'),
+    ]
+    client.product_set_members=lambda *a, **kw: []
+    assert select(refs,result,client=client,saved={'product_set_id':'1'})['product_set_id']=='4'
+    refs['product_sets'].pop(3)
+    with pytest.raises(ValueError,match='NBA WALL ART POPULAR BLACK FRAMES'):
+        select(refs,result,client=client)
