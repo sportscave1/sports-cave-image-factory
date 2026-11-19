@@ -131,11 +131,15 @@ def _waiting_prompt(job):
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
         from design_new_composition import PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES, POSTER_IMAGE_SELECTION
         from home_morning_brief_actions import REVIEW_SAVE_NAMING
+        from design_photographic_composition import STORY_FIRST_CROP, GENERATE_PHOTOGRAPHIC_UNIT, FINAL_PHOTOGRAPHIC_REVIEW
+        from design_subject_authenticity import CREATE_DESIGN_AUTHENTICITY_CHECK
         from design_motorsport import (
             MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
             MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK,
         )
         if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, POSTER_IMAGE_SELECTION, PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES, REVIEW_SAVE_NAMING,
+                                          STORY_FIRST_CROP, GENERATE_PHOTOGRAPHIC_UNIT, FINAL_PHOTOGRAPHIC_REVIEW,
+                                          CREATE_DESIGN_AUTHENTICITY_CHECK,
                                           MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
                                           MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK)):
             return prompt

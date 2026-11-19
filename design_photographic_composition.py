@@ -1,0 +1,25 @@
+"""Photographic decisions within the existing single-generation artwork stages."""
+
+STORY_FIRST_CROP = """**Photographic realism and composition — define the moment before generation**
+
+Name the one visible detail that makes this edition worth owning: the step over the opponent, the expression after the win, the grip on the trophy, or the driver beside the exact race car. Choose the source and crop that show that detail most clearly. Fit that photographic composition to the actual master canvas before placing the title, border and plaque. If the crop weakens the moment, change it while the layout is editable. Negative space serves the story; do not sacrifice a decisive gesture or another participant to reserve an empty half-canvas for decoration or text.
+
+Treat people and objects involved in the same physical action as one photographic unit. Preserve their relative size, spacing, overlap, contact points and camera perspective. Check both hands and the ball together, or both interacting bodies and the space between them. Preserve genuine foreshortening, natural motion blur and detail hidden in the photograph. Never guess an obscured finger, face, logo or letter. Keep the whole defining interaction readable inside the safe area; move or proportionally scale the unit together. An opponent or teammate integral to that same action belongs to the primary moment, not optional background imagery to shrink, fade or omit under secondary-image rules. A genuine shared action takes priority over a forced face-off or a tighter portrait. Honour explicit approved-edit and photograph locks.
+
+"""
+
+GENERATE_PHOTOGRAPHIC_UNIT = """**Generate the subject into the complete design**
+
+Use the selected full-resolution originals as actual inputs to the one authorised creative generation, alongside the reviewed layout. Generate the complete composition, including the people and their interaction, integrated lighting and atmosphere, title and collector treatment. Preserve the exact photographed facial features, proportions, gaze, expression, pose and sporting detail; a recognisable approximation or lookalike is insufficient. Carry the reviewed crop and whole photographic unit into the request, including both hands with their equipment and both participants in a defining interaction. Do not independently move or redraw connected parts. Keep the verified originals available throughout assembly.
+
+A raw source photograph or rectangular stock preview with a generated background, border and title around it is not a completed creative generation. Do not bypass subject integration by pasting an untouched photograph or cutout over the entire generated subject. Preserve a faithful generated subject; use original source pixels to repair actual drift during the existing finishing pass. Source repairs are corrective work, not a substitute for generating the complete artwork. If generation produces no usable output, retain the existing technical-failure allowance and clearly provisional fallback; never present a photo-only assembly as the completed generated design.
+
+"""
+
+FINAL_PHOTOGRAPHIC_REVIEW = """**Verify the story in the finished composition**
+
+At storefront thumbnail size (250 px wide), verify that a fan can recognise the subject and understand the moment. Check the defining expression or gesture, the complete interaction, the intended title reading order and the plaque over quiet space. Adjust crop, proportional scale, spacing or typography when these compete with the moment. Keep the original official plaque and live editable edition number together under the existing collector-layer rules.
+
+A design passes visual review only after the source comparisons and final-composition checks have actually been completed. If a visible defect remains or the source cannot verify a critical detail, continue the authorised Review delivery with needs_attention. In REVIEW NOTES and matching review_notes, name the exact affected area and the repair or stronger source still needed; distinguish inspected checks from unverified ones. This uses the existing finishing and Review checks, with no approval pause, extra generation, additional research round or new reason to stop. Preserve the master PSD, edition identity, signature rules, approved-edit scope and verified delivery requirements.
+
+"""

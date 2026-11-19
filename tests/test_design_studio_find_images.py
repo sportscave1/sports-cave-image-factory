@@ -22,6 +22,9 @@ def assert_short_find_images(test, prompt):
         "locked defining moment or verified signature action/celebration",
         "Exclude training jerseys, warm-ups and routine posed photos",
         "not the first result",
+        "crop preserves the defining gesture and complete physical interaction",
+        "hands with a ball or trophy",
+        "Avoid watermarked previews",
     ):
         test.assertIn(required, prompt)
     for obsolete in (
