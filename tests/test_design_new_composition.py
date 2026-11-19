@@ -187,3 +187,44 @@ def test_action_emotion_pairing_and_required_darts_action_reach_all_shared_flows
     assert COMPLEMENTARY_IMAGES in upgraded and 'Keep the verified sporting story.' in upgraded
     assert queue._receipt(dict(saved, prompt=upgraded)) == queue._receipt(saved)
     assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded
+
+
+def test_rivalry_direction_survives_all_shared_stages_and_queue_upgrade():
+    from home_design_refresh import _refresh_prompt
+    from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+    import morning_design_queue as queue
+
+    brief = 'Verified rivalry; select natural opposing profiles.'
+    variants = [
+        _prompt('Rivals', brief),
+        _refresh_prompt(dict(title='Rivals', product_id='123'), 'https://example.test/rivals'),
+        _prompt('Rivals', brief, edit={
+            'source': {'id': 'id:rivals', 'rev': 'r1', 'path_display': '/Review/Rivals.psd'},
+            'metadata': {'upload_intent': 'new_product'}}),
+    ]
+    for prompt in variants:
+        research, rest = prompt.split('**2.', 1)
+        layout, rest = rest.split('**3.', 1)
+        generation, rest = rest.split('**4.', 1)
+        finishing, saving = rest.split('**5.', 1)
+        assert 'the left rival looks right and the right rival looks left' in research
+        assert 'Never turn heads, redirect eyes, manufacture expressions' in research
+        assert 'two intense opposing portraits are valid' in research
+        assert 'Do not shrink or omit one rival' in layout
+        assert 'background grading and hero-dominance wording must not weaken the confrontation' in layout
+        assert 'carry the reviewed inward gaze, fierce natural expressions, balanced scale and interaction' in generation
+        assert 'Rivalry face-offs may use two intense opposing portraits' in generation
+        assert 'For rivalries, verify both primary rivals remain readable' in finishing
+        assert 'both primary rivals and their face-off/competitive relationship' in saving
+        assert 'one creative image-generation call' in generation
+        assert 'Completion requires one full generation, verified final Review PSD, matching JSON and final display' in prompt
+    assert 'same four-candidate comparison' in variants[0]
+    assert 'Do not draft replacement titles' in variants[1]
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in variants[2]
+    key = queue.identity('2026-11-19', 'rivalries', {'title': 'Rivals'})
+    current = queue._job_prompt(key, 'Rivals', brief)
+    saved = dict(id=key, title='Rivals', prompt=current.replace(COMPLEMENTARY_IMAGES, 'Old source rules.').replace(NEW_DESIGN_TITLE_GUIDANCE, 'Old title rules.'))
+    upgraded = queue._waiting_prompt(saved)
+    assert COMPLEMENTARY_IMAGES in upgraded and NEW_DESIGN_TITLE_GUIDANCE in upgraded
+    assert brief in upgraded and queue._receipt(saved) == queue._receipt(dict(saved, prompt=upgraded))
+    assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded
