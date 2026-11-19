@@ -12,7 +12,7 @@ import streamlit as st
 
 from design_review_metadata import (
     handoff_paths, is_refresh_staging, is_working_file, legacy_metadata, read_gallery_handoff, read_handoff,
-    resolve_review_sport, review_key,
+    resolve_review_sport, review_key, save_review_sport,
 )
 from product_upload_dropbox import REVIEW, approved, select, within
 from product_upload_intake import Intakes, action_mode, stored_mode
@@ -83,6 +83,8 @@ def _review(provider, user, entry, command, *, selected_sport=None):
         details = resolve_review_sport(original_details, saved_data.get('review_sport') or selected_sport)
         if not details.get('sport'):
             raise ValueError('The sport could not be resolved from this PSD or its metadata.')
+        if details != original_details or details.get('sport_normalization_pending'):
+            details = save_review_sport(provider, current, details['sport']) or details
         if details.get('refresh_target_pending'):
             raise ValueError('Verify the Shopify refresh target for this PSD revision in Design Studio.')
         if details.get('shopify_product_id'):
@@ -270,6 +272,15 @@ def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
     if pending:
         details = {key: value for key, value in details.items() if key != 'title_sync_pending'}
     title = details.get('design_name')
+    if (sidecars and not reason and not editing and not has_edit_files
+            and details.get('sport_normalization_pending') and not pending
+            and not is_refresh_staging(source['name']) and details.get('cleanup_status') != 'pending'):
+        try:
+            details = save_review_sport(provider, source, details['sport'], candidates=sidecars) or details
+            sidecars = tuple(provider.metadata_if_present(item['id']) for item in sidecars)
+        except Exception:
+            logging.getLogger(__name__).exception('Review sport JSON save failed')
+            reason = 'The sport could not be saved to the matching JSON. Refresh Design Studio to retry.'
     if (sidecars and title and not reason and not has_edit_files
             and not is_refresh_staging(source['name']) and details.get('cleanup_status') != 'pending'):
         from design_review_title import resume_review_title, sync_review_title, title_destination, unclaimed_artwork
@@ -309,11 +320,11 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         chosen_sport = (row or {}).get('data', {}).get('review_sport')
         needs_sport = not (published or editing or staged or resumable or chosen_sport or details.get('sport'))
         if selectable and not staged:
-            check, name, edit_button, publish, publish_ad = st.columns((.5, 4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
+            check, name, edit_button, delete_button, publish, publish_ad = st.columns((.5, 4, .6, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
             check.checkbox(f'Select {title}', key=_selection_key(source), label_visibility='collapsed',
                            on_change=_selection_changed)
         else:
-            name, edit_button, publish, publish_ad = st.columns((4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
+            name, edit_button, delete_button, publish, publish_ad = st.columns((4, .6, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
         label = 'Needs attention' if reason and current in ('In review', 'Ready to publish') else current
         if cleanup_pending:
@@ -328,6 +339,15 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 st.button('Edit', key=key+'-edit', disabled=True, help='Edit '+title)
             else:
                 _edit_link(source, title)
+        from os_accounts import can_delete_files
+        if selectable and not staged and can_delete_files(user):
+            with delete_button:
+                with st.container(key='design-review-delete-'+card_key):
+                    remove = st.button('Delete', key=card_key+'-delete', help='Delete '+title,
+                                       disabled=not st.session_state.get(_selection_key(source)))
+            if remove:
+                st.session_state['_review_delete_selection'] = [(source, title)]
+                st.rerun()
         sport_picker = st.empty() if needs_sport else None
         clicked = False
         ad_clicked = False
@@ -565,11 +585,11 @@ def _gallery(app, user):
             st.success('Original kept and selected drafts removed: ' + name)
             st.session_state['design-review-view'] = 'Review'
     with st.container(key='design-review-toolbar'):
-        tabs, search, sport = st.columns((1, 1.5, 1))
+        tabs, create, sport = st.columns((1, 1.5, 1))
         view = tabs.segmented_control('Designs', ('Review', 'Editing', 'Published'), default='Review',
                                       key='design-review-view', label_visibility='collapsed') or 'Review'
-        query = search.text_input('Search designs', placeholder='Search designs…',
-                                  label_visibility='collapsed').strip().casefold()
+        create.html('<a class="sc-review-create" href="#create-design" data-design-create="true" role="button">Create design</a>')
+        query = ''
     if view == 'Published':
         _published(user, query)
         return

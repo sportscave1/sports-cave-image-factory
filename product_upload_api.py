@@ -540,6 +540,46 @@ async def review_edit_enqueue(request):
         return failure(error)
 
 
+async def review_create_enqueue(request):
+    """Submit a user's design brief to the existing single-generation companion queue."""
+    try:
+        user = await _gallery_review_user(request)
+        from files_upload_api import _same_origin
+        if not request.headers.get('origin') or not _same_origin(request):
+            raise PermissionError('Request origin rejected.')
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError('Enter the design you want to create.')
+        brief = body.get('brief')
+        if not isinstance(brief, str) or not brief.strip() or len(brief) > 20000:
+            raise ValueError('Enter a design brief of up to 20,000 characters.')
+        from uuid import UUID, uuid5, NAMESPACE_URL
+        try:
+            request_id = str(UUID(str(body.get('request_id', ''))))
+        except ValueError as error:
+            raise ValueError('Reload the design form and submit again.') from error
+        brief = brief.strip()
+        key = str(uuid5(NAMESPACE_URL, 'sports-cave-create-design:' + str(user['id']) + ':' + request_id))
+        title = ' '.join(brief.splitlines()[0].split())[:160]
+        from morning_design_queue import _job_prompt, connect
+        from sports_sales_calendar import sydney_date
+        prompt = _job_prompt(key, title, '**USER-REQUESTED NEW DESIGN**\n' + brief)
+        def enqueue_create():
+            with connect() as conn, conn.cursor() as cur:
+                cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+                cur.execute("SELECT prompt FROM morning_design_jobs WHERE id=%s", (key,))
+                existing = cur.fetchone()
+                if existing and existing['prompt'] != prompt:
+                    raise ValueError('This submission already has a different brief. Reopen Create design to start another.')
+                cur.execute("""INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt)
+                    VALUES(%s,%s,'create',%s,%s) ON CONFLICT(id) DO NOTHING""",
+                    (key,sydney_date(),title,prompt))
+            return dict(queued=True,id=key)
+        return JSONResponse(await run_in_threadpool(enqueue_create), headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
 async def review_source(request):
     """Download the selected, immutable Review PSD through the signed-in Files session."""
     from starlette.responses import StreamingResponse
@@ -582,6 +622,7 @@ ROUTES = (*RENDER_ROUTES, *STAFF_QUEUE_ROUTES, *MORNING_DESIGN_ROUTES, ('/produc
           ('/api/design-review/thumbnail', review_thumbnail, ('GET',)),
           ('/api/design-review/edit-prompt', review_edit_prompt, ('GET',)),
           ('/api/design-review/edit-queue', review_edit_enqueue, ('POST',)),
+          ('/api/design-review/create-queue', review_create_enqueue, ('POST',)),
           ('/api/product-uploads/source-preview', source_preview, ('GET',)),
           ('/api/product-uploads/mapping-status', mapping_status, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),

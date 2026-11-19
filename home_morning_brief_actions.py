@@ -23,6 +23,7 @@ from design_subject_authenticity import (
 )
 from home_brief_calendar import MARKETS, PRODUCT_QUERY, calendar_rows, display_markets, product_handle
 from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER
+from sports_categories import CANONICAL_SPORT_CATEGORIES
 
 PROJECT_URL = "https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d63654/project"
 REVIEW_SAVE_NAMING = """**Review filename and website product title**
@@ -180,6 +181,8 @@ In that inspection, compare sources at 100% for authenticity and generation 1 be
 **6. Write the Smart Upload JSON and deliver**
 
 {MOTORSPORT_JSON}
+
+For JSON sport, use one exact canonical upload category: {', '.join(CANONICAL_SPORT_CATEGORIES)}. Basketball in the NBA must save sport="NBA" and league="NBA"; use "Ice Hockey" for NHL and "Football" for association football. For motorsport use the verified specific discipline as instructed above. Resolve this from the researched subject, league and event before writing, then read back sport with the PSD binding; never omit a known sport or use a broad alias when its canonical category is established. Retain the existing uncertainty handling for genuinely unknown sport.
 
 After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), {handoff_fields}, dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. {handoff_identity} Follow any automatic queue receipt instructions.{market_note}
 

@@ -121,3 +121,29 @@ def test_upload_access_without_delete_permission_allows_bulk_queue(ui, monkeypat
     app.checkbox(key=gallery._selection_key(entries[0])).check().run()
     assert not app.exception and not app.button(key='design-review-enqueue').disabled
     assert not any(button.key == 'design-review-trash' for button in app.button)
+
+
+def test_selected_card_delete_opens_existing_confirmation_for_only_that_card(ui, monkeypatch):
+    app, entries, _, enqueue, _, _ = ui
+    removed = Mock(return_value=[])
+    monkeypatch.setattr('design_review_delete.delete_design', removed)
+    monkeypatch.setattr('files_upload_api.invalidate_directory_cache', Mock())
+    monkeypatch.setattr('files_upload_api.invalidate_thumbnail_cache', Mock())
+    key = gallery.review_key(entries[0]) + '-delete'
+    assert app.button(key=key).disabled
+    app.checkbox(key=gallery._selection_key(entries[0])).check().run()
+    app.checkbox(key=gallery._selection_key(entries[1])).check().run()
+    app.button(key=key).click().run()
+    assert not app.exception
+    removed.assert_not_called()
+    app.button(key='design-review-delete-confirm').click().run()
+    assert not app.exception
+    assert [call.args[1] for call in removed.call_args_list] == [entries[0]]
+    enqueue.assert_not_called()
+
+
+def test_toolbar_replaces_search_with_create_design(ui):
+    app, *_ = ui
+    assert not any(widget.label == 'Search designs' for widget in app.text_input)
+    from pathlib import Path
+    assert 'data-design-create' in Path(gallery.__file__).read_text(encoding='utf-8')

@@ -722,3 +722,35 @@ def test_waiting_refresh_rebuilds_old_shared_brief_with_edition_lock():
     assert upgraded.endswith(tail)
     assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
     assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+
+
+def test_create_design_queues_shared_prompt_once_and_dispatches_to_companion(store, monkeypatch):
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import product_upload_api as api
+    cur, token = store
+    monkeypatch.setattr(api, '_gallery_review_user', AsyncMock(return_value={'id': 'reviewer'}))
+    app = Starlette(routes=[Route('/api/design-review/create-queue', api.review_create_enqueue, methods=['POST'])])
+    brief = 'Anthony Edwards dunk and roar in Timberwolves competition kit'
+    payload = dict(brief=brief, request_id=str(uuid4()))
+    with TestClient(app) as client:
+        kwargs = dict(json=payload, headers={'Origin': 'http://testserver'})
+        first = client.post('/api/design-review/create-queue', **kwargs)
+        assert first.status_code == 200, first.text
+        assert client.post('/api/design-review/create-queue', **kwargs).json() == first.json()
+        assert client.post('/api/design-review/create-queue', json=payload, headers={'Origin': 'https://untrusted.test'}).status_code == 403
+        assert client.post('/api/design-review/create-queue', json=dict(payload, brief=''), headers=kwargs['headers']).status_code >= 400
+        assert client.post('/api/design-review/create-queue', json=dict(payload, brief='Different design'), headers=kwargs['headers']).status_code >= 400
+    cur.execute("SELECT * FROM morning_design_jobs WHERE section='create'")
+    rows = cur.fetchall()
+    assert len(rows) == 1
+    expected = queue._job_prompt(first.json()['id'], brief, '**USER-REQUESTED NEW DESIGN**\n' + brief)
+    assert rows[0]['prompt'] == expected
+    job = queue.tick(token, [])['jobs'][0]
+    assert job['kind'] == 'create' and job['prompt'] == expected
+    assert 'one creative image-generation call' in job['prompt']
+    assert 'sport="NBA"' in job['prompt']
+    assert first.json()['id'] in job['prompt']
