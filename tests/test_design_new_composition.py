@@ -1,7 +1,7 @@
 """New-design creative guidance stays separate from existing edit and delivery rules."""
 from home_morning_brief_actions import _prompt
 from design_new_composition import (
-    COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
+    POSTER_IMAGE_SELECTION, COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
     PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS,
 )
 from design_collector_assets import NEW_BADGE_LAYOUT, COLLECTOR_LAYER_RULES
@@ -10,7 +10,7 @@ from design_motorsport import MOTORSPORT_ARTWORK
 
 def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     prompt = _prompt('Collector', 'Verified story')
-    for guidance in (COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
+    for guidance in (POSTER_IMAGE_SELECTION, COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
                      PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, NEW_BADGE_LAYOUT):
         assert prompt.count(guidance) == 1
     assert prompt.index(COMPLEMENTARY_IMAGES) < prompt.index('**2.')
@@ -45,7 +45,7 @@ def test_edit_inherits_shared_creative_rules():
         'source': {'id': 'id:Original', 'rev': 'abcdef123', 'path_display': '/Review/Collector.psd'},
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
     })
-    for guidance in (COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
+    for guidance in (POSTER_IMAGE_SELECTION, COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
                      PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, NEW_BADGE_LAYOUT,
                      MOTORSPORT_ARTWORK):
         assert prompt.count(guidance) == 1
@@ -208,19 +208,30 @@ def test_rivalry_direction_survives_all_shared_stages_and_queue_upgrade():
         generation, rest = rest.split('**4.', 1)
         finishing, saving = rest.split('**5.', 1)
         assert 'the left rival looks right and the right rival looks left' in research
+        assert research.count(POSTER_IMAGE_SELECTION) == 1
+        assert 'Do not select training jerseys, practice sessions, warm-ups' in research
+        assert 'event/opponent, team and year/era' in research
+        assert 'Do not source a finished poster, trading card, AI image or fan edit' in research
         assert 'Never turn heads, redirect eyes, manufacture expressions' in research
         assert 'two intense opposing portraits are valid' in research
         assert 'Do not shrink or omit one rival' in layout
+        assert 'Test the chosen peak action or signature celebration at poster scale' in layout
         assert 'background grading and hero-dominance wording must not weaken the confrontation' in layout
         assert 'carry the reviewed inward gaze, fierce natural expressions, balanced scale and interaction' in generation
         assert 'Rivalry face-offs may use two intense opposing portraits' in generation
+        assert 'Use those selected photographs as actual image inputs' in generation
+        assert 'do not substitute a routine pose, training kit or generic celebration' in generation
         assert 'For rivalries, verify both primary rivals remain readable' in finishing
+        assert 'no lost signature gesture, cropped decisive action, training-kit substitution' in finishing
         assert 'both primary rivals and their face-off/competitive relationship' in saving
+        assert 'the selected defining action and emotional payoff' in saving
         assert 'one creative image-generation call' in generation
         assert 'Completion requires one full generation, verified final Review PSD, matching JSON and final display' in prompt
     assert 'same four-candidate comparison' in variants[0]
     assert 'Do not draft replacement titles' in variants[1]
+    assert 'without substituting an unrelated famous moment' in variants[1]
     assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in variants[2]
+    assert 'respect explicit photo locks and the requested edit scope' in variants[2]
     key = queue.identity('2026-11-19', 'rivalries', {'title': 'Rivals'})
     current = queue._job_prompt(key, 'Rivals', brief)
     saved = dict(id=key, title='Rivals', prompt=current.replace(COMPLEMENTARY_IMAGES, 'Old source rules.').replace(NEW_DESIGN_TITLE_GUIDANCE, 'Old title rules.'))
@@ -228,3 +239,7 @@ def test_rivalry_direction_survives_all_shared_stages_and_queue_upgrade():
     assert COMPLEMENTARY_IMAGES in upgraded and NEW_DESIGN_TITLE_GUIDANCE in upgraded
     assert brief in upgraded and queue._receipt(saved) == queue._receipt(dict(saved, prompt=upgraded))
     assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded
+    old_search = dict(saved, prompt=current.replace(POSTER_IMAGE_SELECTION, 'Old generic image search.'))
+    upgraded_search = queue._waiting_prompt(old_search)
+    assert POSTER_IMAGE_SELECTION in upgraded_search and brief in upgraded_search
+    assert queue._receipt(old_search) == queue._receipt(dict(old_search, prompt=upgraded_search))
