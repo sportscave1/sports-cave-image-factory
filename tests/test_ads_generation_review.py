@@ -32,7 +32,7 @@ def build_ie():
 
 def test_review_before_export_and_existing_companion_delivery_is_preserved():
     prompt = build_ie()
-    assert prompt.index('4. Immediately generate Image 3') < prompt.index('4a. Complete the final creative review') < prompt.index('5. Create and attach')
+    assert prompt.index('4. Immediately generate Image 3') < prompt.index('4b. Complete the final creative review') < prompt.index('5. Create and attach')
     result = {'master_prompt': prompt}
     delivered = companion.delivery_prompt(result, 'Synthetic reference', '/fixture', 'fixture-job')
     assert prompt in delivered

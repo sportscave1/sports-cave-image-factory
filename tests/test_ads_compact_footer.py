@@ -20,7 +20,8 @@ class CompactFooterTests(unittest.TestCase):
                     i, row, product_name='Synthetic Collector Edition', category='Cricket', country='Australia')
                 self.assertIn('HEADLINE: ' + row['headline_text'], prompt)
                 self.assertIn('CTA: CLAIM YOUR EDITION', prompt)
-                self.assertIn('SUPPORTING LINE: ' + row['supporting_line'], prompt)
+                self.assertNotIn('SUPPORTING LINE:', prompt)
+                self.assertIn('FINAL COMPOSITOR DATA', prompt)
 
     def test_all_public_formats_and_refresh_receive_central_policy(self):
         for campaign in ('Instant Experience', 'Carousel', 'Single Image / Video'):

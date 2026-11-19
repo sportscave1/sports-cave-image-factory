@@ -1,15 +1,15 @@
 {
   "ebffbedac545beb011dc654c": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "05f6ffdd2af1ed970803ba383a66f47a40dd2dc82864c42ace73545acdd7a64f",
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "db867066354f480ec856bb14e4aef96b716dca7b901839c99622db2a563420fb",
     "path": "@category/Ads",
     "symbol": ""
   },
   "e4c95a923482686ea19136c3": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "400687bf5cb0c88b5de2e4510d57f6a939fdb806633db00728e554c7def80049",
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "84f32cd083a75e0add4737f2f2be66fe4ed2d6f3194aa2b52c2c438e3b2f53e6",
     "path": "ads_footer.py",
     "symbol": "COMPACT_FOOTER_RULES"
   },
@@ -21,16 +21,16 @@
     "symbol": ""
   },
   "0df0799f598199ac309d066e": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "8a9473f7b1d98acfe9df43f5897077f539d72ee6fb2a5340c76f3b8cd1981b0c",
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "f5da7bfd6010aa22743bfd568e0318112575af218c36abe1a7dd257e7ce21328",
     "path": "ads_page.py",
     "symbol": "IE_EXECUTION_CHECKLIST"
   },
   "29739817000c06f922bc9c1b": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "18f1d3eee8ddc6c0eeefbc4fe4d02f136ffc621c27609662efa004237d92622c",
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "24084690838182ea03c60c08f9952ee6bd0faff10038e5eec0819948f929d8d5",
     "path": "ads_page.py",
     "symbol": "SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2"
   },
@@ -42,17 +42,31 @@
     "symbol": "SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1"
   },
   "d9d02cb110b7f42fd61b3196": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "f556fa1772182cf583c8d7ef64c2dbcca1b52a2ec838eb6e2820df9ec8971ea8",
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "708623222421b90b4aca4ec187d9891b490b3fe20b3935773b261a32b1349491",
     "path": "ads_page.py",
     "symbol": "INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE"
   },
   "704462a5b422e7982db8880f": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "477cba4c9dd13f135b3bc25fe888d2c6e9b69b6c94978665352a1ae4c01b9c86",
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "5ab03e7a37908578a91f48084e3f2926670129224f04e007432850ec3917844e",
     "path": "ads_generation_review.py",
     "symbol": "RULES"
+  },
+  "7c37c4b9ddc9337b4253c1cc": {
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "6ac30c62b85bf54ff53ad6e0d7d33c1108de3612288f84076b1ba28fc422341b",
+    "path": "ads_page.py",
+    "symbol": "IE_FOOTER_TEXT_CLARIFICATION"
+  },
+  "6137aef6ef1b942197a3aa91": {
+    "version": "1.6",
+    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
+    "hash": "d00efb41e86dd9cdf436c9392cff28c03d0de83fd5365fe4ed4a09f9ac7ae98e",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1"
   }
 }
