@@ -108,7 +108,7 @@ def test_inline_script_does_not_resemble_html_tags():
     import re
     from home_design_refresh import render_html
     script = render_html(None).split('<script>', 1)[1].split('</script>', 1)[0]
-    assert not re.search(r'<[A-Za-z]', script)
+    assert not re.search(r'<[/\w!]', script)
 
 
 def test_cold_companion_status_is_loading_not_unavailable(monkeypatch):

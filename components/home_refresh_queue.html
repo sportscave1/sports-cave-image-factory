@@ -52,7 +52,7 @@ if(!dialog){
    const data=await api(params);
    if(!dialog.open)return;
    showQueue(data);
-   if(data.enabled&&Object.values(data.jobs||{}).some(stage=>stage>=0&&stage<4))delay=3000;
+   if(data.enabled&&Object.values(data.jobs||{}).some(stage=>stage>=0&&stage < 4))delay=3000;
    for(const button of buttons){
     const stage=data.jobs?.[button.dataset.jobId];
     if(stage==null)continue;
