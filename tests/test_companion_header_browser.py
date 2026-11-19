@@ -186,6 +186,11 @@ def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_re
             page.evaluate('(cfg)=>window.SportsCaveTopBar.install(cfg)',dict(config,uploadNotice=notice))
             expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Requested artwork')
             assert page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            # A cancelled pinned receipt must yield the summary to the next active job.
+            new.update(stage=7,label='Cancelled',cancelled=True)
+            old.update(stage=2,label='Generating mockups',percent=34)
+            page.evaluate("document.dispatchEvent(new CustomEvent('sc-design-edit-queued'))")
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Previous upload')
             assert not writes and not errors
         finally:
             browser.close()

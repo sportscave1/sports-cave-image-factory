@@ -1635,7 +1635,7 @@
         const adLabel = job => "Ad · " + job.ad.label;
         const newestCompleted = jobs.filter(item=>item.stage===6)
           .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))[0];
-        const job = jobs.find(item=>item.id===requestedUploadId) || jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
+        const job = jobs.find(item=>item.id===requestedUploadId && !item.cancelled) || jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
         bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
         const currentLabel = label(job)
