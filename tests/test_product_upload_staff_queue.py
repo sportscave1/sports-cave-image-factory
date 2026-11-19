@@ -396,3 +396,80 @@ def test_lightweight_desktop_heartbeat(store):
     with store() as conn, conn.cursor() as cur:
         cur.execute("UPDATE product_upload_desktop SET seen_at=now()-interval '96 seconds'")
     assert queue.desktop_online() is False
+
+
+def test_publish_now_resumes_paused_uploads_and_claims_exact_request_once(store, monkeypatch):
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: user['id'] == 'admin')
+    token = queue.pair({'id': 'desktop'})
+    queue.settings(False)
+    key = queue.enqueue({'id':'admin'}, {'id':'id:publish','rev':'R1'}, 'Publish now', 'NBA', start=True)
+    assert queue.settings() == {'enabled': True}
+    assert queue.tick(token, {})['job']['id'] == str(key)
+    assert queue.enqueue({'id':'admin'}, {'id':'id:publish','rev':'R1'}, 'Publish now', 'NBA', start=True) == key
+    assert queue.tick(token, {})['job']['id'] == str(key)
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT count(*) AS n FROM product_upload_staff_jobs')
+        assert cur.fetchone()['n'] == 1
+
+
+def test_bulk_queue_and_nonadministrator_publish_preserve_admin_pause(store, monkeypatch):
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: user['id'] == 'admin')
+    token = queue.pair({'id':'desktop'})
+    queue.settings(False)
+    queue.enqueue({'id':'admin'}, {'id':'id:bulk','rev':'R1'}, 'Bulk request', 'NBA')
+    key = queue.enqueue({'id':'staff'}, {'id':'id:staff','rev':'R1'}, 'Staff request', 'NBA', start=True)
+    assert queue.settings() == {'enabled': False}
+    assert queue.tick(token, {}) == {}
+    assert queue.requested_status({'id':'staff'}, str(key))['job']['stage'] == 0
+
+
+def test_publish_queue_resume_rolls_back_with_failed_request(store, monkeypatch):
+    import design_publish_ad as ad
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: True)
+    monkeypatch.setattr(ad, 'check_request', lambda *args: ('NBA', 'AUS'))
+    def unavailable(*args):
+        raise RuntimeError('Synthetic request save failure')
+    monkeypatch.setattr(ad, 'enqueue', unavailable)
+    queue.settings(False)
+    with pytest.raises(RuntimeError, match='Synthetic'):
+        queue.enqueue({'id':'admin'}, {'id':'id:atomic','rev':'R1'}, 'Atomic request', 'NBA', ad_country='AUS', start=True)
+    assert queue.settings() == {'enabled': False}
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT count(*) AS n FROM product_upload_staff_jobs')
+        assert cur.fetchone()['n'] == 0
+
+
+def test_requested_upload_status_is_private_and_survives_header_history_limit(store, monkeypatch):
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: user['id'] == 'admin')
+    key = submit('owner')
+    for n in range(21):
+        submit('owner', str(n))
+    assert str(key) not in {job['id'] for job in queue.list_jobs('owner',display_only=True)['jobs']}
+    assert queue.requested_status({'id':'owner'}, key)['job']['id'] == str(key)
+    assert queue.requested_status({'id':'admin'}, key)['job']['id'] == str(key)
+    with pytest.raises(PermissionError):
+        queue.requested_status({'id':'other'}, key)
+
+
+def test_requested_status_route_bypasses_warming_history_without_leaking_requests(store, monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import files_upload_api
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: False)
+    key = submit('owner')
+    active = {'id':'owner'}
+    monkeypatch.setattr(files_upload_api, '_request_user', lambda *args, **kwargs: dict(active))
+    monkeypatch.setattr(queue, '_header_display', lambda _: dict(display_state='loading', jobs=[]))
+    app = Starlette(routes=[Route('/api/staff-product-uploads/status',queue.status_route)])
+    with TestClient(app) as client:
+        query = dict(display='1',job_id=str(key))
+        response = client.get('/api/staff-product-uploads/status',params=query)
+        assert response.status_code == 200, response.text
+        assert response.json()['display_state'] == 'ready'
+        assert response.json()['jobs'][0]['id'] == str(key)
+        active['id'] = 'other'
+        assert client.get('/api/staff-product-uploads/status',params=query).status_code == 403
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s',(key,))
+        assert cur.fetchone()['stage'] == 0  # Status reads never start or publish work.

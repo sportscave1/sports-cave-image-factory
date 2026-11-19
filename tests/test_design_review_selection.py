@@ -32,7 +32,7 @@ def ui(monkeypatch):
     monkeypatch.setattr(gallery, '_selection_fixture', (None, user), raising=False)
     monkeypatch.setattr(api, 'Dropbox', lambda: SimpleNamespace(
         metadata_if_present=lambda key: next((source for source in entries if source['id']==key), None)))
-    enqueue = Mock(side_effect=lambda *args: 'job-'+args[1]['id'])
+    enqueue = Mock(side_effect=lambda *args, **kwargs: 'job-'+args[1]['id'])
     monkeypatch.setattr(queue, 'enqueue', enqueue)
     app = AppTest.from_string("""
 import streamlit as st
@@ -147,3 +147,41 @@ def test_toolbar_replaces_search_with_create_design(ui):
     assert not any(widget.label == 'Search designs' for widget in app.text_input)
     from pathlib import Path
     assert 'data-design-create' in Path(gallery.__file__).read_text(encoding='utf-8')
+
+
+def test_publish_now_resumes_uploads_and_reveals_the_exact_receipt(ui):
+    app, entries, _, enqueue, _, _ = ui
+    key = gallery.review_key(entries[0])
+    app.button(key=key+'-approved').click().run()
+    assert not app.exception
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs == {'start': True}
+    notice = app.session_state['_product_upload_notice']
+    assert notice['open_upload'] and notice['job_id'] == 'job-'+entries[0]['id']
+    assert any('Track progress in Uploads' in item.value for item in app.success)
+
+
+def test_publish_now_continues_after_sport_choice_without_a_second_click(ui):
+    app, entries, details, enqueue, _, _ = ui
+    details[0].pop('sport')
+    app.run()
+    key = gallery.review_key(entries[0])
+    app.button(key=key+'-approved').click().run()
+    enqueue.assert_not_called()
+    app.selectbox(key=key+'-sport').select('NBA').run()
+    assert not app.exception
+    enqueue.assert_called_once()
+    assert enqueue.call_args.args[3] == 'NBA'
+    app.run()
+    enqueue.assert_called_once()
+
+
+def test_publish_failure_is_visible_and_does_not_auto_retry(ui):
+    app, entries, _, enqueue, _, _ = ui
+    enqueue.side_effect = ValueError('Upload could not be saved.')
+    app.button(key=gallery.review_key(entries[0])+'-approved').click().run()
+    assert not app.exception
+    assert any('Upload could not be saved' in item.value for item in app.error)
+    assert app.session_state['_product_upload_notice']['kind'] == 'error'
+    app.run()
+    enqueue.assert_called_once()

@@ -23,23 +23,34 @@ def connect():
     return upload_connect()
 
 
-def enqueue(user, source, title, sport, *, ad_country=None):
+def enqueue(user, source, title, sport, *, ad_country=None, start=False):
     if ad_country is not None:
         import design_publish_ad as ad
         sport, ad_country = ad.check_request(user, sport, ad_country)
     from design_review_page import final_psd
     if not final_psd(source) or not source.get('id') or not source.get('rev'):
         raise ValueError('Choose a current PSD from Design Studio Review.')
+    resume = start and can_control_queues(user)
     with connect() as conn, conn.cursor() as cur:
+        if resume:
+            # Same lock as Pause and desktop claims: Publish now commits its
+            # durable request and explicit resume as one operation.
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
         cur.execute('''INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport)
             VALUES (%s,%s,%s,%s,%s)
             ON CONFLICT(source_id,source_rev) DO UPDATE SET source_id=EXCLUDED.source_id
-            RETURNING id''', (uuid4(), source['id'], source['rev'], title, sport))
-        key = cur.fetchone()['id']
+            RETURNING id,stage''', (uuid4(), source['id'], source['rev'], title, sport))
+        saved = cur.fetchone()
+        key = saved['id']
+        if resume and saved['stage'] < 6:
+            cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,'true'::jsonb,now())
+                ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''', (CONTROL_KEY,))
         cur.execute('''INSERT INTO product_upload_staff_requests(requester,job_id)
             VALUES (%s,%s) ON CONFLICT DO NOTHING''', (user['id'], key))
         if ad_country is not None:
             ad.enqueue(cur, key, user['id'], sport, ad_country)
+    # A committed request must not leave the header showing a cached completion.
+    _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
     return key
 
 
@@ -381,6 +392,24 @@ def _header_display(user):
             'checked_at': snapshot['checked_at']}
 
 
+def requested_status(user, key):
+    """Read the exact durable receipt, including jobs outside the header's latest 20."""
+    key = UUID(str(key))
+    admin = can_control_queues(user)
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT j.* FROM product_upload_staff_jobs j WHERE j.id=%s
+            AND (%s OR EXISTS(SELECT 1 FROM product_upload_staff_requests r
+                WHERE r.job_id=j.id AND r.requester=%s))""", (key, admin, user['id']))
+        row = cur.fetchone()
+        if not row:
+            raise PermissionError('This upload request is unavailable to this account.')
+        cur.execute("SELECT seen_at > now()-interval '95 seconds' AS online FROM product_upload_desktop WHERE singleton")
+        device = cur.fetchone()
+        enabled = _enabled(cur)
+    return dict(job=public(row), online=bool(device and device['online']), enabled=enabled)
+
+
 async def status_route(request):
     from files_upload_api import _request_user
     from product_upload_api import HEADERS, failure
@@ -389,7 +418,17 @@ async def status_route(request):
     try:
         user = await run_in_threadpool(_request_user, request, required_page='Design Studio')
         if request.query_params.get('display') == '1':
-            return JSONResponse(_header_display(user), headers=HEADERS)
+            result = _header_display(user)
+            requested = request.query_params.get('job_id')
+            if requested:
+                receipt = await run_in_threadpool(requested_status, user, requested)
+                prior = next((job for job in result.get('jobs', []) if job['id'] == receipt['job']['id']), {})
+                result['jobs'] = [dict(prior, **receipt['job']), *(job for job in result.get('jobs', []) if job['id'] != receipt['job']['id'])]
+                result['online'] = receipt['online']
+                result['display_state'] = 'ready'
+                queues = result.setdefault('queues', {})
+                queues['upload'] = dict(queues.get('upload') or {}, enabled=receipt['enabled'], display=True)
+            return JSONResponse(result, headers=HEADERS)
         result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
             result['queues'] = await run_in_threadpool(header_queue_status)

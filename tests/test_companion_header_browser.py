@@ -136,3 +136,52 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
             page.screenshot(path=str(output/'companion-header-mobile.png'))
         finally:
             browser.close()
+
+
+def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_requeueing():
+    source = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
+    config = dict(appName='Sports Cave OS', filesEnabled=True, uploadScope='publish-fixture',
+                  staffUploadProgress=True, currentRouteKey='design_studio', revision='publish-fixture',
+                  searchIndex=[], navigationRouteLabels={}, navigationRouteKeys={})
+    old = dict(id='old', title='Previous upload', stage=6, label='Published and PSD mapped', percent=100, updated_at='old')
+    new = dict(id='new', title='Requested artwork', stage=0, label='Waiting for desktop companion', percent=0, updated_at='new')
+    requests, writes = [], []
+    payload = dict(online=True, jobs=[old], queues=dict(upload=dict(enabled=True,display=True,waiting=0)))
+    html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page = browser.new_page(viewport={'width':1600,'height':700})
+            errors = []
+            page.on('pageerror',lambda error: errors.append(str(error)))
+            def respond(route):
+                if route.request.method != 'GET':
+                    writes.append(route.request.url)
+                if route.request.url == 'http://fixture.test/':
+                    route.fulfill(body=html,content_type='text/html')
+                elif route.request.url.split('?')[0].endswith('/status'):
+                    requests.append(route.request.url)
+                    route.fulfill(json=payload)
+                else:
+                    route.fulfill(json={})
+            page.route('**/*',respond)
+            page.goto('http://fixture.test/')
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Previous upload')
+            before = len(requests)
+            payload['jobs'] = [old,new]  # Do not rely on API ordering to focus the request.
+            notice = dict(id='new',job_id='new',interaction_id='click-1',title='Requested artwork',open_upload=True,kind='success',text='Request saved')
+            page.evaluate('(cfg)=>window.SportsCaveTopBar.install(cfg)',dict(config,uploadNotice=notice))
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Requested artwork')
+            expect(page.locator('#sc-os-staff-upload-stage')).to_contain_text('Waiting for desktop companion')
+            assert page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            assert len(requests) > before and any('job_id=new' in url for url in requests)
+            # Repeat a deliberate click: reopen status, never submit another upload.
+            page.locator('#sc-os-staff-upload-summary').click()
+            assert not page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            notice['interaction_id'] = 'click-2'
+            page.evaluate('(cfg)=>window.SportsCaveTopBar.install(cfg)',dict(config,uploadNotice=notice))
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Requested artwork')
+            assert page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            assert not writes and not errors
+        finally:
+            browser.close()

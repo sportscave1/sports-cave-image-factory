@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v4";
+  const CONTROLLER_VERSION = "companion-header-v5-publish-status";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1549,6 +1549,24 @@
         }
       }
     };
+    let requestedUploadId = '', uploadInteraction = '', pendingUploadReveal = false;
+    const revealRequestedUpload = notice => {
+      if (!notice?.open_upload || !notice.job_id || !state.config.staffUploadProgress) return;
+      const interaction = notice.interaction_id || notice.id;
+      if (interaction === uploadInteraction) return;
+      uploadInteraction = interaction;
+      requestedUploadId = notice.job_id;
+      pendingUploadReveal = true;
+      staffProgress.hidden = false;
+      root.querySelector('#sc-os-upload-card').hidden = false;
+      companionStatus.hidden = false;
+      root.querySelector('#sc-os-staff-upload-title').textContent = notice.title || 'Upload request saved';
+      root.querySelector('#sc-os-staff-upload-stage').textContent = 'Checking this upload…';
+      for (const {panel} of Object.values(companionPanels)) panel.open = false;
+      staffProgress.open = true;
+      lastStaffStatus = '';
+      void refreshStaffProgress(false);
+    };
     doc.addEventListener('sc-design-edit-queued', () => {
       lastStaffStatus = '';
       void refreshStaffProgress(false);
@@ -1565,7 +1583,7 @@
       listenerController.signal.addEventListener('abort', abort, {once:true});
       const timeout = parentWindow.setTimeout(abort, 8000);
       try {
-        const response = await parentWindow.fetch("/api/staff-product-uploads/status?display=1", {
+        const response = await parentWindow.fetch("/api/staff-product-uploads/status?display=1" + (requestedUploadId ? "&job_id=" + encodeURIComponent(requestedUploadId) : ""), {
           credentials:"same-origin", cache:"no-store", signal:controller.signal,
         });
         if (listenerController.signal.aborted) return;
@@ -1585,12 +1603,20 @@
         if (serialized === lastStaffStatus) return;
         if (revision === queueRevision && !pendingQueues.size) queues = status.queues || {};
         renderCompanions(status);
-        staffProgress.hidden = !jobs.length && !queues.upload?.display;
+        staffProgress.hidden = !jobs.length && !queues.upload?.display && !pendingUploadReveal;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
         staffProgress.dataset.stale=String(status.display_state === 'stale');
         for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale');
         renderQueueButtons();
         lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
+        if (pendingUploadReveal) {
+          if (!jobs.some(item=>item.id===requestedUploadId)) {
+            staffDelay = 1000;
+            return; // An older in-flight status read must not hide this receipt.
+          }
+          staffProgress.open = true;
+          pendingUploadReveal = false;
+        }
         if (!jobs.length) {
           staffProgress.open = false;
           summaryReset.hidden = true;
@@ -1601,12 +1627,13 @@
           root.querySelector('#sc-os-staff-upload-list').replaceChildren();
           return;
         }
-        const label = job => job.stage > 0 && job.stage < 6 && !status.online
+        const label = job => job.stage === 0 && queues.upload?.enabled === false
+          ? 'Queued · uploads paused' : job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
         const adLabel = job => "Ad · " + job.ad.label;
         const newestCompleted = jobs.filter(item=>item.stage===6)
           .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))[0];
-        const job = jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
+        const job = jobs.find(item=>item.id===requestedUploadId) || jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
         bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
         const currentLabel = label(job)
@@ -3829,6 +3856,12 @@
           renderCompanions({});
           renderQueueButtons();
         }
+        if (revisionChanged) {
+          requestedUploadId = '';
+          pendingUploadReveal = false;
+          uploadInteraction = '';
+        }
+        revealRequestedUpload(state.config.uploadNotice);
         if (revisionChanged) {
           cancelPendingReads();
           state.notifications = null;

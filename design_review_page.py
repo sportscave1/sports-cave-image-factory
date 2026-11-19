@@ -366,10 +366,14 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             st.session_state[ad_mode] = True
         if (clicked or ad_clicked) and needs_sport:
             st.session_state[key+'-needs-sport'] = True
+            if clicked:
+                st.session_state[key+'-pending-publish'] = True
         if sport_picker is not None and st.session_state.get(key+'-needs-sport'):
             from sports_categories import CANONICAL_SPORT_CATEGORIES
             chosen_sport = sport_picker.selectbox('Sport for ' + title, CANONICAL_SPORT_CATEGORIES,
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
+        if chosen_sport and st.session_state.get(key+'-pending-publish'):
+            clicked = True
         ad_country = None
         if st.session_state.get(ad_mode) and not clicked and not (published or editing or staged):
             from design_publish_ad import COUNTRIES, primary_country
@@ -384,16 +388,19 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 ad_clicked = st.button('Queue publish + ad', key=key+'-confirm-ad',
                                        disabled=not chosen_sport)
         if (clicked or (ad_clicked and ad_country)) and (not needs_sport or chosen_sport):
+            # Consume only once; a failed request needs an explicit retry.
+            st.session_state.pop(key+'-pending-publish', None)
             from product_upload_staff_queue import enqueue
             try:
                 if clicked:
-                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
+                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), start=True)
                     text = f'Added to upload queue · {title}'
                 else:
-                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), ad_country=ad_country)
+                    job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), ad_country=ad_country, start=True)
                     text = f'Added to upload and ad queue · {title}'
                 st.session_state.pop(ad_mode, None)
-                notice = dict(id=str(job_id), kind='success', text=text)
+                notice = dict(id=str(job_id), job_id=str(job_id), interaction_id=uuid.uuid4().hex,
+                              kind='success', text=text, title=title, open_upload=True)
             except ValueError as exc:
                 notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:
@@ -402,6 +409,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 notice = dict(id=uuid.uuid4().hex, kind='error',
                               text=f'Upload could not start. Your PSD is retained. Try {action} again.')
             st.session_state['_product_upload_notice'] = notice
+            st.session_state['_review_publish_notice'] = notice
             st.rerun()
         if show_replacement and editing and not resumable and not staged:
             _staged_replacement(user, source, key)
@@ -553,6 +561,12 @@ def _gallery(app, user):
     with st.container(key='design-review-header'):
         heading, sync, refresh = st.columns((5, 1.5, 1), vertical_alignment='center')
         heading.title('Design Studio')
+    publish_notice = st.session_state.pop('_review_publish_notice', None)
+    if publish_notice:
+        if publish_notice['kind'] == 'error':
+            st.error(publish_notice['text'])
+        else:
+            st.success(publish_notice['text'] + ' · Track progress in Uploads above.')
     removed = st.session_state.pop('_review_delete_result', None)
     if removed:
         count, warnings = removed
