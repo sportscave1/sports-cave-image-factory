@@ -17,7 +17,7 @@ def render(st, prompt, text, user, valid=True):
         custom = st.checkbox('Enter a custom test product', key=source_key + '-custom')
         choice = None
         if custom:
-            title = st.text_input('Test product name', key=source_key + '-title')
+            title = st.text_input('Test product name or Sports Cave URL', key=source_key + '-title')
             details = st.text_area('Test product details', key=source_key + '-details', height=120)
             if title.strip():
                 choice = dict(id='custom', title=title.strip(), context={'details': details}, source='Custom test product')

@@ -5,10 +5,13 @@ from unittest.mock import Mock, patch
 from contextlib import nullcontext
 from streamlit.testing.v1 import AppTest
 from prompt_test_inputs import database_choices, design_choices, prepare
-from prompt_test_runner import run
+from prompt_test_runner import run, configuration, _MODEL_CACHE
 
 
 class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        _MODEL_CACHE.clear()
+
     def test_draft_and_selected_item_sent_without_tools_or_storage(self):
         response = Mock(ok=True)
         response.json.return_value = {'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Trial listing'}]}]}
@@ -38,12 +41,27 @@ class RunnerTests(unittest.TestCase):
         success = Mock(ok=True)
         success.json.return_value = {'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Trial'}]}]}
         models = Mock(ok=True)
-        models.json.return_value = {'data': [{'id': 'gpt-4.1-mini'}]}
+        models.json.return_value = {'data': [{'id': 'gpt-6.1-sol'}]}
         post = Mock(side_effect=[rejected, success])
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'synthetic', 'OPENAI_PROMPT_TEST_MODEL': ''}):
             result = run('draft', 'Ads', {'title': 'Product'}, post=post, get=Mock(return_value=models))
-        self.assertEqual(result['model'], 'gpt-4.1-mini')
+        self.assertEqual(result['model'], 'gpt-6.1-sol')
         self.assertEqual(post.call_count, 2)
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'synthetic', 'OPENAI_PROMPT_TEST_MODEL': ''}):
+            next_post, next_get = Mock(return_value=success), Mock()
+            second = run('another draft', 'Ads', {'title': 'Product'}, post=next_post, get=next_get)
+        self.assertEqual(second['model'], 'gpt-6.1-sol')
+        next_get.assert_not_called()
+        self.assertEqual(next_post.call_count, 1)
+
+    def test_default_ignores_unrelated_review_model_and_uses_low_reasoning(self):
+        with patch.dict(os.environ, {'OPENAI_PROMPT_TEST_MODEL': '', 'OPENAI_AD_REVIEW_MODEL': 'retired', 'OPENAI_API_KEY': 'synthetic'}):
+            self.assertEqual(configuration()[1], 'gpt-6.2-sol')
+            response = Mock(ok=True)
+            response.json.return_value = {'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Trial'}]}]}
+            post = Mock(return_value=response)
+            run('draft', 'Ads', {'title': 'Product'}, post=post)
+            self.assertEqual(post.call_args.kwargs['json']['reasoning'], {'effort': 'low'})
 
     def test_timeout_never_retries(self):
         import requests
@@ -63,6 +81,21 @@ class InputTests(unittest.TestCase):
         conn = Mock()
         conn.cursor.return_value = nullcontext(cur)
         return lambda: nullcontext(conn)
+
+    def test_product_url_resolves_catalogue_context_without_fetching_url(self):
+        choice = {'title': 'https://www.sportscaveshop.com/products/shane-warne-framed-art', 'source': 'Custom test product', 'context': {'details': 'Copy trial'}}
+        row = {'title': 'Shane Warne', 'context': {'description': 'Verified catalogue description'}, 'source': 'Product catalogue'}
+        with patch('prompt_test_inputs.database_choices', return_value=[row]) as lookup:
+            result, image = prepare(choice)
+        lookup.assert_called_once_with('Ads', handle='shane-warne-framed-art')
+        self.assertEqual(result['title'], 'Shane Warne')
+        self.assertEqual(result['context']['test_details'], 'Copy trial')
+        self.assertIsNone(image)
+
+    def test_untrusted_url_is_rejected_before_lookup(self):
+        with patch('prompt_test_inputs.database_choices') as lookup, self.assertRaises(ValueError):
+            prepare({'title': 'https://localhost/products/test', 'source': 'Custom test product'})
+        lookup.assert_not_called()
 
     def test_new_design_uses_home_design_suggestions(self):
         cur = Mock()

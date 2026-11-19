@@ -1,8 +1,10 @@
 """Read-only inputs for owner-requested prompt trials; never create queue jobs."""
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit, unquote
+import re
 
 
-def database_choices(workflow, connect=None):
+def database_choices(workflow, connect=None, *, handle=None):
     if connect is None:
         from supabase_backend import read_connection
         connect = read_connection
@@ -24,7 +26,8 @@ def database_choices(workflow, connect=None):
             COALESCE(to_jsonb(p)->>'body_html', to_jsonb(p)->'raw'->>'descriptionHtml',
                      to_jsonb(p)->'raw'->>'body_html') AS description,
             to_jsonb(p)->'tags' AS tags, to_jsonb(p)->>'product_type' AS product_type FROM shopify_products p
-            WHERE lower(to_jsonb(p)->>'status')='active' ORDER BY lower(title), shopify_product_id LIMIT 10001""")
+            WHERE lower(to_jsonb(p)->>'status')='active'
+            AND (%s::text IS NULL OR handle=%s) ORDER BY lower(title), shopify_product_id LIMIT 10001""", (handle, handle))
         products = cur.fetchall()
         if len(products) > 10000:
             raise ValueError('Product catalogue is too large. Narrow the test catalogue before continuing.')
@@ -70,6 +73,18 @@ def load_choices(workflow):
 
 def prepare(choice, provider=None):
     result = dict(choice)
+    if choice['source'] == 'Custom test product' and '://' in choice['title']:
+        url = urlsplit(choice['title'].strip())
+        match = re.fullmatch(r'(?:/collections/[^/]+)?/products/([a-zA-Z0-9_-]+)/?', unquote(url.path))
+        if url.scheme != 'https' or url.netloc not in ('www.sportscaveshop.com', 'sportscaveshop.com') or not match:
+            raise ValueError('Enter a Sports Cave product URL, or use a product name and details.')
+        rows = database_choices('Ads', handle=match.group(1))
+        if not rows:
+            raise ValueError('This product is not in the synced active catalogue. Select a catalogue product or enter its name and details.')
+        result = dict(rows[0])
+        result['context'] = {**result['context'], 'product_url': choice['title'],
+                             'test_details': choice.get('context', {}).get('details', '')}
+        return result, None
     if choice['source'] != 'Design Studio':
         return result, None
     if provider is None:

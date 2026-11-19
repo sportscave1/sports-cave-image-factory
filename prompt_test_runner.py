@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import logging
+import time
+from threading import Lock
 import requests
 from urllib.parse import urlsplit
 
@@ -19,8 +22,34 @@ POLICY = """Run a TEXT-ONLY PROMPT TRIAL. Apply the supplied draft instructions 
 
 
 def configuration():
-    return (os.getenv('OPENAI_API_KEY') or os.getenv('SPORTS_CAVE_OPENAI_API_KEY') or '',
-            os.getenv('OPENAI_PROMPT_TEST_MODEL') or os.getenv('OPENAI_AD_REVIEW_MODEL') or 'gpt-5')
+    return ((os.getenv('OPENAI_API_KEY') or os.getenv('SPORTS_CAVE_OPENAI_API_KEY') or '').strip(),
+            os.getenv('OPENAI_PROMPT_TEST_MODEL', '').strip() or 'gpt-6.2-sol')
+
+
+_MODEL_CACHE = {}
+_MODEL_LOCK = Lock()
+
+
+def _cached_model(key, configured):
+    identity = (hashlib.sha256(key.encode()).hexdigest(), configured)
+    with _MODEL_LOCK:
+        cached = _MODEL_CACHE.get(identity)
+    return identity, cached[0] if cached and cached[1] > time.monotonic() else configured
+
+
+def _remember_model(identity, model):
+    with _MODEL_LOCK:
+        if len(_MODEL_CACHE) >= 16:
+            _MODEL_CACHE.clear()
+        _MODEL_CACHE[identity] = (model, time.monotonic() + 1800)
+
+
+def _payload(model, content):
+    payload = {'model': model, 'store': False, 'instructions': POLICY,
+               'input': [{'role': 'user', 'content': content}], 'max_output_tokens': 6000}
+    if model.startswith('gpt-6'):
+        payload['reasoning'] = {'effort': 'low'}
+    return payload
 
 
 def fingerprint(text, workflow, item):
@@ -49,8 +78,8 @@ def run(text, workflow, item, image=None, *, post=None, get=None):
         parsed = urlsplit(url)
         if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password:
             content.append({'type': 'input_image', 'image_url': url})
-    payload = {'model': model, 'store': False, 'instructions': POLICY,
-               'input': [{'role': 'user', 'content': content}], 'max_output_tokens': 6000}
+    identity, model = _cached_model(key, model)
+    payload = _payload(model, content)
     try:
         response = (post or requests.post)('https://api.openai.com/v1/responses',
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
@@ -64,9 +93,10 @@ def run(text, workflow, item, image=None, *, post=None, get=None):
                     available = (get or requests.get)('https://api.openai.com/v1/models',
                         headers={'Authorization': 'Bearer ' + key}, timeout=(10, 15))
                     ids = {entry.get('id') for entry in available.json().get('data', [])} if available.ok else set()
-                    fallback = next((name for name in ('gpt-4.1', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4o-mini') if name in ids and name != model), None)
+                    fallback = next((name for name in ('gpt-6.2-sol', 'gpt-6.1-sol', 'gpt-6.1-terra') if name in ids and name != model), None)
                     if fallback:
-                        model = payload['model'] = fallback
+                        model = fallback
+                        payload = _payload(model, content)
                         response = (post or requests.post)('https://api.openai.com/v1/responses',
                             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
                             json=payload, timeout=(10, 90))
@@ -82,7 +112,7 @@ def run(text, workflow, item, image=None, *, post=None, get=None):
             reasons = {
                 'insufficient_quota': 'The OpenAI account has no available API quota. Check API billing and project budget.',
                 'invalid_api_key': 'The server OpenAI API key is invalid. Update its configured connection.',
-                'model_not_found': 'The configured test model is unavailable to the server OpenAI project.',
+                'model_not_found': f'The test model {model} is unavailable to the server OpenAI project. Set OPENAI_PROMPT_TEST_MODEL to a permitted current model.',
                 'rate_limit_exceeded': 'The OpenAI rate limit was reached. Wait briefly before retrying.',
                 'invalid_image': 'The selected preview image was rejected. Try a custom text-only product.',
                 'context_length_exceeded': 'This prompt exceeds the model context limit. Test an individual section.',
@@ -94,9 +124,11 @@ def run(text, workflow, item, image=None, *, post=None, get=None):
                                 400: 'The model rejected the test request format or input.',
                                 502: 'OpenAI is temporarily unavailable.',
                                 503: 'OpenAI is temporarily unavailable.'}.get(status, 'The model service could not complete this test.')
+            logging.getLogger(__name__).warning('Prompt trial rejected: model=%s status=%s code=%s', model, status, code if isinstance(code, str) and code in reasons else 'unknown')
             suffix = f' (HTTP {status})' if isinstance(status, int) else ''
             raise ValueError(reason + suffix + ' Your draft is retained; no automatic retry was made.')
         data = response.json()
+        _remember_model(identity, model)
     except requests.RequestException:
         raise ValueError('The test connection timed out or was interrupted. No automatic retry was made; your draft is retained.') from None
     except (TypeError, json.JSONDecodeError):
