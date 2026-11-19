@@ -154,3 +154,36 @@ def test_dark_arena_direction_survives_prompt_assembly_and_finishing():
     assert 'never generate again for visual criticism' in finishing
     assert 'Do not restore malformed generated corners over a corrected border' in saving
     assert 'short inner corner returns derived from the sporting story' not in prompt
+
+
+def test_action_emotion_pairing_and_required_darts_action_reach_all_shared_flows():
+    from home_design_refresh import _refresh_prompt
+    import morning_design_queue as queue
+    variants = [
+        _prompt('The Giant Killer', 'Verified darts tribute with an emotional hero.'),
+        _refresh_prompt(dict(title='Current darts design', product_id='123'), 'https://example.test/products/darts'),
+        _prompt('The Giant Killer', 'Verified darts tribute', edit={
+            'source': {'id':'id:art', 'rev':'r1', 'path_display':'/Review/Darts.psd'},
+            'metadata': {'upload_intent':'new_product'}}),
+    ]
+    for prompt in variants:
+        research, rest = prompt.split('**2.', 1)
+        layout, rest = rest.split('**3.', 1)
+        generation, rest = rest.split('**4.', 1)
+        finishing = rest.split('**5.', 1)[0]
+        assert prompt.count(COMPLEMENTARY_IMAGES) == 1
+        assert 'Darts always requires a verified throwing-action photograph' in research
+        assert 'If only one suitable source is available, use a verified throwing shot as the hero' in research
+        assert 'every darts layout shows genuine throwing action' in layout
+        assert 'every darts design must retain its genuine throwing-action photograph' in generation
+        assert 'Do not turn a reaction photograph into invented sporting action' in generation
+        assert 'never two emotional shots; when a secondary is used with an emotional hero, it must show action' in finishing
+        assert 'one creative image-generation call' in generation
+        assert 'never generate again for visual criticism' in finishing
+    key = queue.identity('2026-11-19', 'recommendations', {'title':'Darts tribute'})
+    current = queue._job_prompt(key, 'Darts tribute', 'Keep the verified sporting story.')
+    saved = dict(id=key, title='Darts tribute', prompt=current.replace(COMPLEMENTARY_IMAGES, 'Old optional imagery guidance.'))
+    upgraded = queue._waiting_prompt(saved)
+    assert COMPLEMENTARY_IMAGES in upgraded and 'Keep the verified sporting story.' in upgraded
+    assert queue._receipt(dict(saved, prompt=upgraded)) == queue._receipt(saved)
+    assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded

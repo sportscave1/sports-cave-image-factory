@@ -105,13 +105,13 @@ def _waiting_prompt(job):
         return _waiting_refresh_prompt(job)
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
-        from design_new_composition import PURPOSEFUL_ABSTRACT
+        from design_new_composition import PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES
         from home_morning_brief_actions import REVIEW_SAVE_NAMING
         from design_motorsport import (
             MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
             MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK,
         )
-        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, REVIEW_SAVE_NAMING,
+        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES, REVIEW_SAVE_NAMING,
                                           MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
                                           MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK)):
             return prompt
