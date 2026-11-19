@@ -23,6 +23,8 @@ const context={state, timers:new Set(), URLSearchParams, icon:name=>name,
  root:{querySelector:id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},classList:{toggle(){}}},
  listenerController:new AbortController(), listenerOptions:{}, later:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
  parentWindow:{AbortController,
+ // Summary rotation is covered by browser tests; this fixture exercises polling timers only.
+ setInterval:()=>1,
  setTimeout:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
  clearTimeout:timer=>{const i=timers.indexOf(timer);if(i>=0)timers.splice(i,1);},
  addEventListener:(event,callback)=>windowEvents[event]=callback,
