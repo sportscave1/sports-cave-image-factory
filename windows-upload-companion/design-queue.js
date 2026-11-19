@@ -79,4 +79,15 @@ async function ensureDesignAlarm() {
 }
 chrome.alarms.onAlarm.addListener(alarm => {if (alarm.name === designAlarm) void designQueueTick();});
 chrome.runtime.onStartup.addListener(() => {void ensureDesignAlarm().then(designQueueTick);});
-chrome.runtime.onInstalled.addListener(() => {void ensureDesignAlarm().then(designQueueTick);});
+chrome.runtime.onInstalled.addListener(async () => {
+  // Existing saved chats still hold the previous content scripts after an
+  // extension update. Reload only submitted chats, never a pending Send tab.
+  const jobs=await staffRead(designStorage)||{};
+  for(const job of Object.values(jobs)) {
+    if((await health(job.receipt)).state!=='submitted' || !job.tab)continue;
+    const tab=await chrome.tabs.get(job.tab).catch(()=>null);
+    if(tab?.url?.startsWith(designProject.replace('/project','/c/')) ||
+      /^https:\/\/chatgpt\.com\/g\/g-p-6a1e449948e881919c1e345006d63654-[a-z0-9-]+\/c\/[a-f0-9-]{36}$/.test(tab?.url||''))await chrome.tabs.reload(tab.id);
+  }
+  await ensureDesignAlarm();void designQueueTick();
+});
