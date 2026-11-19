@@ -1,5 +1,11 @@
 # Meta Ads Baseline project alignment — 20 November 2026
 
+Follow-up task 20261119-71f798a9 replaces the two earlier uploaded prompt files
+with the canonical filenames in this folder. Live project settings and both
+source previews were verified for exact three-line footer text, inline headline
+number emphasis and technical-only reserve scenes. See
+[the follow-up diagnosis](../ADS_EXACT_FOOTER_LINES_20261120.md).
+
 Task 20261119-fd4ae96d, owner codex-meta-footer-20261120-02. The user authorized project/source changes, Git push and deployment to the existing Render application.
 
 The supplied Shane Warne cover visibly has only a headline and CTA, with a flat gold separator. The live Sports Cave Meta Ads project settings contained the direct instruction “Render no supporting sentence.” The PROJECT-ROLE-AND-TASK-PRIORITY.txt source repeated that ban. SPORTS-CAVE-—-PREMIUM-COLLECTOR-FOOTER-TYPOGRAPHY.txt additionally required a headline/CTA group, checked “both lines” and specified a thin gold separator.

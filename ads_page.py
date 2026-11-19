@@ -4796,7 +4796,7 @@ MEANINGFUL SPORTS CAVE GOLD UNDERLINE
 - If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
 - Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately {targets['underline_px']} px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
 - Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
-- Always highlight all three digits of 100 in antique gold and underline their measured glyph bounds. This emphasis is mandatory for every approved headline, wherever 100 occurs in the line.
+- When the assigned headline contains 100, colour and underline those existing headline digits in place. Keep the number on that same baseline; emphasis never adds another text row or repeats the quantity.
 - Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; underline only the approved important scarcity word, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
 - No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text."""
 
@@ -8131,6 +8131,7 @@ Resolved on-image copy — use exactly:
 HEADLINE: {visual['headline_text']}
 SUPPORTING LINE: {visual['supporting_line']}
 CTA: {visual['cta_text']}
+Footer baseline map: HEADLINE on line 1; SUPPORTING LINE on line 2; CTA on line 3. Gold digits stay inside line 1. No additional footer text baseline.
 
 {ie_copy.ad_copy(visual['route'])}"""
 

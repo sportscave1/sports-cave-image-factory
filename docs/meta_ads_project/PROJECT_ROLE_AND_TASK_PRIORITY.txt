@@ -28,7 +28,7 @@ If the OS prompt contains an obsolete or unapproved headline, replace only that 
 
 GOLD UNDERLINE AND CTA
 
-Always render 100 in restrained antique gold and place a fine matching underline directly beneath the full number 100 only. The underline follows the number’s actual position and width—not the whole headline or another word.
+Apply restrained antique gold to the digits already present in the assigned headline. Underline those existing headline digits in place, following their actual position and width. Keep the digits on the headline baseline; never repeat or extract the number into a separate text row.
 
 Keep the on-image CTA exactly CLAIM YOUR EDITION.
 Render the current OS Baseline footer as exactly three visible lines: the assigned headline, its exact assigned supporting/FOMO sentence directly below it, then CLAIM YOUR EDITION. Preserve all three lines verbatim in every individual image-generation call and final image. Prior two-line examples, reference-image text and older project sources must not remove or replace the assigned supporting sentence.
@@ -39,3 +39,16 @@ Replace only the existing top separator in place with a fine continuous metallic
 Within the existing final creative review, inspect each completed cover for all three exact footer lines and the visible top shimmer. Correct missing footer elements in the existing review workflow before delivery; do not add another approval step or stop the requested sequence.
 
 Preserve the existing product-fidelity, realistic-scale, glazing, compact opaque-footer and restrained-typography rules. Do not alter unrelated scene instructions or ad content.
+
+
+EXACT FOOTER TEXT AND LINE COUNT
+Use exactly three visible text baselines: line 1 = the assigned HEADLINE; line 2 = the assigned SUPPORTING LINE; line 3 = the assigned CTA. Each field occupies one centred line. These three fields are the complete footer text, not examples to embellish.
+Apply gold colour and the fine underline only to digits already inside the assigned headline. Keep those digits on the headline baseline; never extract, repeat or retype the number as a separate caption, quantity label, badge or scarcity row. An underline is a non-text stroke and does not create another text baseline. The top shimmer is also a non-text seam.
+Do not append an additional scarcity phrase, stock label, product subtitle, slogan or microcopy. Preserve text printed inside the original framed edition; it is not footer copy and must not be erased or copied into the footer.
+During final creative review and JPEG export, read the actual footer from top to bottom and count visible text baselines. Compare each line verbatim with its assigned field. Any extra text, missing field or wrapped field requires correction in that existing review before delivery. Correct only the footer while retaining the approved room and complete framed edition. Inspect the exported JPEG again at full size and mobile size. Emit the completion marker only after that exported image has exactly these three lines; report an unresolved defect honestly instead of claiming verification.
+
+
+RESERVE ROOMS — TECHNICAL FAILURES ONLY
+Applies only to a three-cover Instant Experience task, never Carousel or Single Image.
+If an initial image call produces no image and the provider explicitly identifies a retryable technical failure, allow at most one reserve-room attempt for that missing slot. Choose a private collector study or a sunlit reading lounge, whichever is distinct from the other completed rooms. Keep a premium residential interior, quiet uninterrupted wall, believable light and the same approved original product reference. This is the sole conditional exception to that slot's assigned room type; retain its camera role, product scale, footer wording, route identity, filename and CSV row. Deliver three final covers, never an additional fourth cover. Reuse completed images.
+A safety rejection, moderation_blocked result or unexplained rejection never authorizes a reserve room, reworded retry or substitute generation. Preserve completed outputs and copy, finish independent unattempted slots, and identify the missing slot with the provider's actual reason. A downloaded/display error requires recovery of the existing bytes, not another image generation.

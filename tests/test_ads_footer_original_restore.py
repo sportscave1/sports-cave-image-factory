@@ -14,7 +14,12 @@ def test_non_footer_original_sections_are_byte_exact():
     for key, expected in ORIGINAL_SECTIONS.items():
         if key == '7ca8830571db316b90527e08':
             continue  # Project execution/three-line footer alignment is covered separately.
-        assert hashlib.sha256(current[key].encode()).hexdigest() == expected, key
+        text = current[key]
+        if key == '704462a5b422e7982db8880f':
+            # Preserve every original review instruction; only append the
+            # newly authorized technical-reserve policy.
+            text = text.split('RESERVE ROOMS — TECHNICAL FAILURES ONLY')[0].rstrip() + '\n'
+        assert hashlib.sha256(text.encode()).hexdigest() == expected, key
 
 
 def test_standalone_and_google_preserve_baseline_footer_with_shimmer():
