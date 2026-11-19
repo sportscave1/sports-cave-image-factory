@@ -143,7 +143,7 @@ def test_only_selected_companion_tab_runs(monkeypatch):
     import upload_companion_page as page
     calls = []
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda *args: True)
-    monkeypatch.setattr(page, 'render_design_queue', lambda: calls.append('design'))
+    monkeypatch.setattr(page, 'render_design_queue', lambda user: calls.append('design'))
     monkeypatch.setattr(page, 'render_queue', lambda user: calls.append('upload'))
     monkeypatch.setattr(page, 'render_ad_queue', lambda: calls.append('ads'))
     app = AppTest.from_string("from upload_companion_page import render_page\nrender_page({'id': 'fixture'})").run()

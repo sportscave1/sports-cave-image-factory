@@ -48,6 +48,11 @@ def action(user, job, operation):
             # A cancel cannot undo a Meta operation already accepted. Retain its receipt.
             cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()',
                         (PREFIX+job,json.dumps(dict(action=operation,actor=str(user['id'])))))
+    # Invalidate only after commit, including the separate Streamlit queue view.
+    from product_upload_staff_queue import _HEADER_DISPLAYS
+    from companion_display import invalidate
+    _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
+    invalidate()
     return {'id':job,'action':operation}
 
 

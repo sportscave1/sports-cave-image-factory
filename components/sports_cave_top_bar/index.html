@@ -1244,18 +1244,34 @@
       renderCompanionSummary('design', elements, control, lastCompanionStatus);
     }, 5000));
     const pendingDesignActions = new Set();
+    const pendingAdActions = new Set(), deletedAdJobs = new Set();
+    let adActionScope = state.config.uploadScope;
     const renderCompanions = status => {
+      if(adActionScope!==state.config.uploadScope) {
+        pendingAdActions.clear();deletedAdJobs.clear();adActionScope=state.config.uploadScope;
+      }
       lastCompanionStatus = status;
       if(adQuickScope && (adQuickScope!==state.config.uploadScope || !queues.ads?.jobs)) {
         adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
         root.querySelector('#sc-ad-products').replaceChildren();
       }
       for (const [name, elements] of Object.entries(companionPanels)) {
-        const control = queues[name];
+        const rawControl = queues[name];
+        const control = name==='ads' && Array.isArray(rawControl?.jobs)
+          ? {...rawControl, jobs:rawControl.jobs.filter(item=>!deletedAdJobs.has(item.id)),
+             waiting:Math.max(0,(rawControl.waiting || 0)-rawControl.jobs.filter(item=>item.state==='waiting' && deletedAdJobs.has(item.id)).length)}
+          : rawControl;
         elements.card.hidden = !Array.isArray(control?.jobs);
         if (elements.card.hidden) {elements.panel.open=false;continue;}
         const jobs = control.jobs;
         renderCompanionSummary(name, elements, control, status);
+        // Status timestamps change while the user is pressing a control.
+        // Keep unchanged ad buttons mounted so polling cannot swallow the click.
+        if(name==='ads') {
+          const signature=JSON.stringify([state.config.uploadScope,jobs.slice(0,10),[...pendingAdActions]]);
+          if(elements.list.dataset.signature===signature)continue;
+          elements.list.dataset.signature=signature;
+        }
         elements.list.replaceChildren(...jobs.slice(0,10).map(item => {
           const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
           let designActions;
@@ -1287,16 +1303,32 @@
             const actions=doc.createElement('span');actions.className='sc-ad-actions';
             for(const [action,glyph,label,allowed] of [['play','▶','Play / resume job',item.can_play],['cancel','■','Cancel job',item.can_cancel],['delete','🗑','Delete from queue',true]]) {
               const button=doc.createElement('button');button.type='button';button.textContent=glyph;button.title=label;button.setAttribute('aria-label',label+' · '+item.title);
-              button.disabled=!allowed;button.onclick=async()=>{
+              button.disabled=!allowed || pendingAdActions.has(item.id);button.onclick=async()=>{
+                if(pendingAdActions.has(item.id))return;
+                pendingAdActions.add(item.id);
                 button.disabled=true;const scope=state.config.uploadScope;
+                if(action==='delete') {
+                  deletedAdJobs.add(item.id);
+                  renderCompanions(lastCompanionStatus);
+                  renderQueueButtons();
+                }
                 try {
                   const response=await parentWindow.fetch('/api/staff-product-uploads/ad-control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,action})});
                   const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update job');
                   if(scope!==state.config.uploadScope)return;
                   root.querySelector('#sc-ad-message').textContent=action==='play'?'Resuming saved job':action==='cancel'?'Job cancelled':'Removed from queue';
+                  lastStaffStatus='';
                   await refreshStaffProgress(false);
-                }catch(error){if(scope===state.config.uploadScope)root.querySelector('#sc-ad-message').textContent=error.message;}
-                finally{button.disabled=!allowed;}
+                }catch(error){if(scope===state.config.uploadScope){
+                  deletedAdJobs.delete(item.id);
+                  root.querySelector('#sc-ad-message').textContent=error.message;
+                  showUploadNotice({id:'ad-'+item.id+'-'+Date.now(),kind:'error',text:error.message});
+                }}
+                finally{if(scope===state.config.uploadScope){
+                  pendingAdActions.delete(item.id);
+                  renderCompanions(lastCompanionStatus);
+                  renderQueueButtons();
+                }}
               };actions.append(button);
             }article.append(actions);
           }
@@ -1509,7 +1541,9 @@
         if (button.hidden) continue;
         const name = queue === "design" ? "Design" : queue === "ads" ? "Ads" : "Upload";
         const action = control.enabled ? "Pause" : "Play";
-        const count = control.waiting;
+        const count = queue==='ads' && Array.isArray(control.jobs)
+          ? Math.max(0,(control.waiting || 0)-control.jobs.filter(item=>item.state==='waiting' && deletedAdJobs.has(item.id)).length)
+          : control.waiting;
         const knownCount = typeof count === 'number' && Number.isFinite(count) && count >= 0;
         const label = `${action} ${queue} queue` + (knownCount ? ` (${count} waiting)` : '');
         button.innerHTML = icon(action.toLowerCase()) + `<span>${name}` + (knownCount ? ` (${count})` : '') + `</span>`;
