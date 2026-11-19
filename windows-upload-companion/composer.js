@@ -182,7 +182,7 @@
   }
   async function preserveRestoredDraft(id, node, form, freshUpload) {
     if (!node.innerText.trim()) return true;
-    if (design || !freshUpload || existingTurn() || attachments(form).length) return false;
+    if ((!design && !freshUpload) || existingTurn() || attachments(form).length) return false;
     const text=node.innerText;
     const saved=await chrome.runtime.sendMessage({type:'project:backup-draft',id,text});
     if (!saved?.ok || !inProject() || input()!==node || node.innerText!==text ||
@@ -287,20 +287,54 @@
     const generating = Boolean(document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"], button[aria-label="Stop"]'));
     const clean = text.replace(/[*`]/g, '');
     const marker = !generating && clean.match(ad ? /(?:^|\n)\s*SC_AD_BLOCKED:\s*([^\n]+)/ : design ? /(?:^|\n)\s*SC_DESIGN_BLOCKED:\s*([^\n]+)/ : /(?:^|\n)\s*SC_UPLOAD_BLOCKED:\s*([A-Z_]+)/);
-    const alert = [...document.querySelectorAll('[role="alert"]')].find(node =>
+    const alert = !generating && [...document.querySelectorAll('[role="alert"]')].find(node =>
       node.getClientRects?.().length && /something went wrong|network error|failed to|unable to|error generating|conversation not found|try again/i.test(node.innerText || ''));
     // A completed response can report a tool rejection without emitting our
     // status marker. Preserve that concrete blocker instead of an idle timeout.
     const moderationBlocked = !design && !ad && !generating &&
       /\bmoderation_blocked\b/i.test(clean) &&
       /\b(?:pending|unfinished|remain(?:s)? blocked|cannot complete)\b/i.test(clean);
+    // Require both a concrete failure and unfinished delivery. Review concerns,
+    // repaired failures and a still-streaming answer must not release the slot.
+    const designIncomplete = /\b(?:replacement PSD|updated JSON|delivery|deliverables?|treatment|revision|handoff)\b[^.!?\n]{0,180}\b(?:still |remain(?:s)? )?(?:pending|unfinished|not (?:saved|delivered|completed))\b/i.test(clean) ||
+      /\bbefore I could\b[^.!?\n]{0,160}\b(?:save|deliver|finish)\b/i.test(clean);
+    const designFailure = /\b(?:image (?:service|tool)|generation)\b[^.!?\n]{0,100}\b(?:rejected|blocked|failed|cancelled|canceled)\b|\b(?:workspace|session)\b[^.!?\n]{0,80}\bdisconnected\b|\b(?:cannot|could not|unable to)\s+(?:complete|finish|deliver)\b/i.test(clean);
+    const designBlocked = design && !generating && designIncomplete && designFailure;
     const reason = marker ? (design || ad ? marker[1] : 'ChatGPT reported an upload failure: ' + marker[1]) :
+      designBlocked ? 'Design stopped before delivery: ' + clean.trim() :
       moderationBlocked ? 'ChatGPT reported an upload failure: MODERATION' :
       alert ? 'ChatGPT error: ' + alert.innerText : '';
     let activity = 0;
     for (let i = 0; i < text.length; i++) activity = ((activity << 5) - activity + text.charCodeAt(i)) | 0;
     return {blocked:Boolean(reason), reason:reason.slice(0,1600), generating,
       finished:!generating && Boolean(text.trim()), activity:String(activity), chat_url:location.href};
+  }
+  function watchDesignResponse() {
+    if (!design || typeof setInterval !== 'function') return;
+    let previous = '', notified = '';
+    const timer = setInterval(() => {
+      if (!conversation.test(location.href)) return;
+      const progress = projectProgress();
+      const signature = progress.blocked ? location.href + ':' + progress.activity : '';
+      // Two matching observations avoid waking on a transient render between
+      // tool calls. The worker re-reads progress from the owned tab itself.
+      if (signature && signature === previous && signature !== notified) {
+        try {
+          const runtime = globalThis.chrome?.runtime;
+          if (runtime?.id && typeof runtime.sendMessage === 'function') {
+            notified = signature;
+            Promise.resolve(runtime.sendMessage({type:'project:design-progress'})).then(result => {
+              if (typeof result?.accepted === 'boolean') clearInterval(timer);
+              if (!result?.accepted) notified = '';
+            }, () => {notified = '';});
+          } else clearInterval(timer);
+        } catch { notified = ''; }
+      }
+      previous = signature;
+    }, 1500);
+    timer?.unref?.();
+    const expiry = setTimeout(() => clearInterval(timer), 2 * 60 * 60 * 1000);
+    expiry?.unref?.();
   }
   function watchStaffResponse() {
     const timer = setInterval(() => {
@@ -334,4 +368,5 @@
     send(message).then(reply, error => reply({sent:false, reason:'Companion submission error: ' + String(error?.message || error).slice(0,240)}));
     return true;
   });
+  watchDesignResponse();
 })();

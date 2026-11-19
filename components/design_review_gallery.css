@@ -35,13 +35,13 @@
 .sc-review-artwork img {display:block;width:100%;height:100%;object-fit:contain;color:transparent}
 .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"] {
   display:grid;
-  grid-template-columns:minmax(0, 1fr) auto auto auto;
+  grid-template-columns:minmax(0, 1fr) auto auto auto auto;
   align-items:center;
   gap:.5rem;
   padding:.45rem .6rem;
 }
 .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stCheckbox"]) {
-  grid-template-columns:auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns:auto minmax(0, 1fr) auto auto auto auto;
 }
 .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stColumn"] {
   width:auto !important;
@@ -59,8 +59,9 @@
   overflow:hidden;
   text-overflow:ellipsis;
 }
+.st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"]:has([data-testid="stCheckbox"] input:not(:checked)) > [data-testid="stColumn"]:has([class*="st-key-design-review-delete-"]) {display:none}
 .sc-review-status {font-size:.76rem;opacity:.78;margin-top:.15rem}
-.st-key-design-review-grid a.sc-review-edit {
+.sc-review-create, .st-key-design-review-grid a.sc-review-edit {
   display:inline-flex;
   justify-content:center;
   align-items:center;
@@ -111,13 +112,13 @@
   .st-key-design-review-toolbar [data-testid="stColumn"]:first-child {grid-column:1 / -1}
   .st-key-design-review-toolbar [data-testid="stColumn"]:nth-child(2):not(:has(+ [data-testid="stColumn"] [data-testid="stSelectbox"])) {grid-column:1 / -1}
   .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"] {
-    grid-template-columns:minmax(0,1fr) auto auto;
+    grid-template-columns:auto auto auto auto;
   }
   .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stCheckbox"]) {
-    grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-columns:auto auto auto auto;
   }
-  .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.sc-review-title) {grid-column:span 2}
-  .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.sc-review-edit) {grid-column:1}
+  .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.sc-review-title) {grid-column:1 / -1}
+  .st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.sc-review-edit) {grid-column:auto}
   .st-key-design-review-grid [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .sc-review-artwork) {
     flex-wrap:wrap;
   }

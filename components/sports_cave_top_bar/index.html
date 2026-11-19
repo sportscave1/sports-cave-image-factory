@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v3";
+  const CONTROLLER_VERSION = "companion-header-v5-publish-status";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -982,12 +982,18 @@
     .sc-ad-actions {display:inline-flex;gap:4px;float:right;margin-left:5px;}
     .sc-ad-actions button {width:26px;height:26px;padding:2px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
     .sc-ad-actions button:disabled {opacity:.4;cursor:default;}
+    .sc-design-actions {display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;}
+    .sc-design-actions button {min-height:30px;padding:4px 8px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
+    .sc-design-actions button:disabled {opacity:.4;cursor:default;}
     .sc-ad-quick {border-top:1px solid #63512d;margin-top:6px;padding-top:6px;}
     .sc-ad-quick summary {border:0!important;padding:4px!important;font:600 12px Arial!important;color:#f3ce7e!important;cursor:pointer;}
     .sc-ad-quick form {display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:5px;margin-top:6px;}
     .sc-ad-quick label {font:11px Arial!important;color:#e7ddc7!important;display:grid;gap:3px;min-width:0;}
     .sc-ad-quick label:first-child {grid-column:1/-1;}
     .sc-ad-quick select,.sc-ad-quick input,.sc-ad-quick button {width:100%;box-sizing:border-box;min-width:0;background:#252017;color:#f8edcf;border:1px solid #6f5a2e;border-radius:4px;padding:6px;font:12px Arial;}
+    #sc-ad-products {max-height:220px;overflow-y:auto;background:#fff;color:#272727;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px #0003;}
+    #sc-ad-products [role="option"] {padding:9px 8px;cursor:pointer;font:12px/1.4 Arial;overflow-wrap:anywhere;}
+    #sc-ad-products [aria-selected="true"] {background:#f0eee7;}
     .sc-ad-quick button {grid-column:1/-1;cursor:pointer;color:#17140e;background:#d1a444;}
     #sc-ad-message {font:11px/1.3 Arial!important;color:#f3ce7e!important;white-space:normal;}
     .sc-companion-popup a {color:#f3ce7e;display:inline-block;margin:4px 12px 4px 0;}
@@ -1080,7 +1086,7 @@
       <div id="sc-os-ads-card" class="sc-companion-card" hidden>
         <details id="sc-os-ads-status" class="sc-companion-details">
           <summary><span class="sc-companion-name">Ads</span><span id="sc-os-ads-title" class="sc-companion-title"></span><span id="sc-os-ads-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-ads-meter" max="100" aria-label="Ads stage progress"></progress></summary>
-          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" list="sc-ad-products" placeholder="Search products" required autocomplete="off"><datalist id="sc-ad-products"></datalist></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" role="combobox" aria-autocomplete="list" aria-controls="sc-ad-products" aria-expanded="false" placeholder="Search products" required autocomplete="off"><div id="sc-ad-products" role="listbox" aria-label="Edition Ops products" hidden></div></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
         </details>
       </div>
     </div>
@@ -1200,7 +1206,46 @@
       meter:root.querySelector(`#sc-os-${name}-meter`),
       list:root.querySelector(`#sc-os-${name}-list`),
     }]));
+    let designRotation = 0, designRunningKey = '', lastCompanionStatus = null;
+    const renderCompanionSummary = (name, elements, control, status) => {
+      const jobs = control.jobs;
+      const running = jobs.filter(item => item.state === 'running');
+      if (name === 'design') {
+        const key = running.map(item => item.id).join('|');
+        if (key !== designRunningKey) {designRunningKey = key; designRotation = 0;}
+      }
+      const rotating = name === 'design' && running.length > 1;
+      const job = (rotating ? running[designRotation % running.length] : running[0]) || jobs.find(item => item.state === 'waiting') || jobs[0];
+      const online = name === 'ads' ? control.online : status.online;
+      const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
+      let label = job ? job.label : idle;
+      if (rotating) label = `${running.length} working · ${designRotation % running.length + 1}/${running.length} · ${label}`;
+      if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
+      if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
+      if (control.waiting) label += ` · ${control.waiting} waiting`;
+      const changed = elements.title.dataset.jobId && elements.title.dataset.jobId !== job?.id;
+      elements.title.dataset.jobId = job?.id || '';
+      elements.title.textContent = job?.title || 'No current job';
+      elements.stage.textContent = label;
+      elements.panel.title = '';
+      elements.panel.dataset.state = job?.state || 'idle';
+      elements.panel.dataset.stale = 'false';
+      elements.meter.value = job?.percent || 0;
+      elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
+      if (rotating && changed && !parentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        elements.title.animate([{opacity:0},{opacity:1}], {duration:250});
+      }
+    };
+    timers.add(parentWindow.setInterval(() => {
+      const elements = companionPanels.design, control = queues.design;
+      if (doc.hidden || elements.card.hidden || !Array.isArray(control?.jobs) || !lastCompanionStatus) return;
+      if (control.jobs.filter(item => item.state === 'running').length < 2) return;
+      designRotation++;
+      renderCompanionSummary('design', elements, control, lastCompanionStatus);
+    }, 5000));
+    const pendingDesignActions = new Set();
     const renderCompanions = status => {
+      lastCompanionStatus = status;
       if(adQuickScope && (adQuickScope!==state.config.uploadScope || !queues.ads?.jobs)) {
         adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
         root.querySelector('#sc-ad-products').replaceChildren();
@@ -1210,25 +1255,34 @@
         elements.card.hidden = !Array.isArray(control?.jobs);
         if (elements.card.hidden) {elements.panel.open=false;continue;}
         const jobs = control.jobs;
-        const job = jobs.find(item => item.state === 'running') || jobs.find(item => item.state === 'waiting') || jobs[0];
-        const online = name === 'ads' ? control.online : status.online;
-        const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
-        let label = job ? job.label : idle;
-        if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
-        if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
-        if (control.waiting) label += ` · ${control.waiting} waiting`;
-        elements.title.textContent = job?.title || 'No current job';
-        elements.stage.textContent = label;
-        elements.panel.title = '';
-        elements.panel.dataset.state = job?.state || 'idle';
-        elements.panel.dataset.stale = 'false';
-        elements.meter.value = job?.percent || 0;
-        elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
+        renderCompanionSummary(name, elements, control, status);
         elements.list.replaceChildren(...jobs.slice(0,10).map(item => {
           const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
+          let designActions;
           title.textContent=item.title;
           detail.textContent=item.label + (item.detail ? ' · '+item.detail : '');
           detail.title=detail.textContent;
+          if(name==='design') {
+            const actions=doc.createElement('span');actions.className='sc-design-actions';
+            for(const [action,label,allowed] of [['defer','Move to pending',item.can_defer],['cancel','Cancel design',item.can_cancel]]) {
+              if(!allowed)continue;
+              const button=doc.createElement('button');button.type='button';button.textContent=label;
+              button.setAttribute('aria-label',label+' · '+item.title);
+              button.disabled=pendingDesignActions.has(item.id);
+              button.onclick=async()=>{
+                if(pendingDesignActions.has(item.id))return;
+                pendingDesignActions.add(item.id);button.disabled=true;
+                try {
+                  const response=await parentWindow.fetch('/api/morning-designs/control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,updated_at:item.updated_at,action})});
+                  const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update design');
+                  pendingDesignActions.delete(item.id);
+                  doc.dispatchEvent(new parentWindow.CustomEvent('sc-design-edit-queued'));
+                  lastStaffStatus='';await refreshStaffProgress(false);
+                }catch(error){showUploadNotice({id:'design-'+item.id+'-'+Date.now(),kind:'error',text:error.message});}
+                finally{pendingDesignActions.delete(item.id);button.disabled=false;}
+              };actions.append(button);
+            }designActions=actions;
+          }
           if(name==='ads') {
             const actions=doc.createElement('span');actions.className='sc-ad-actions';
             for(const [action,glyph,label,allowed] of [['play','▶','Play / resume job',item.can_play],['cancel','■','Cancel job',item.can_cancel],['delete','🗑','Delete from queue',true]]) {
@@ -1247,6 +1301,7 @@
             }article.append(actions);
           }
           article.append(title,detail);
+          if(designActions)article.append(designActions);
           if (/^https:\/\/chatgpt\.com\//.test(item.chat_url || '')) {
             const chat=doc.createElement('a');chat.href=item.chat_url;chat.target='_blank';chat.rel='noopener';chat.textContent='Open chat';article.append(chat);
           }
@@ -1258,34 +1313,70 @@
         const queueLink=doc.createElement('a');queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';elements.list.append(queueLink);
       }
     };
-    let adProducts=[],adQuickScope='',adRequest='';
+    let adProducts=[],adQuickScope='',adRequest='',adSelected='',adOptions=[],adActive=-1;
     const adMessage=root.querySelector('#sc-ad-message'),adProduct=root.querySelector('#sc-ad-product');
     const quick=root.querySelector('#sc-ad-quick');
+    const adList=root.querySelector('#sc-ad-products');
+    const closeProducts=()=>{adList.hidden=true;adProduct.setAttribute('aria-expanded','false');adProduct.removeAttribute('aria-activedescendant');};
+    const activateProduct=index=>{
+      adActive=index;
+      [...adList.children].forEach((node,i)=>node.setAttribute('aria-selected',String(i===index)));
+      if(adList.children[index]){adProduct.setAttribute('aria-activedescendant',adList.children[index].id);adList.children[index].scrollIntoView({block:'nearest'});}
+    };
+    const chooseProduct=product=>{
+      adSelected=product.id;adProduct.value=product.name;adRequest='';closeProducts();
+      root.querySelector('#sc-ad-sport').value=product.sport;
+      root.querySelector('#sc-ad-country').value=product.country;
+    };
+    const showProducts=()=>{
+      const query=adSelected?'':adProduct.value.trim().toLocaleLowerCase();
+      adOptions=adProducts.filter(p=>p.name.toLocaleLowerCase().includes(query));
+      adList.replaceChildren();adActive=-1;
+      adProduct.removeAttribute('aria-activedescendant');
+      for(const [index,product] of adOptions.entries()){
+        const option=doc.createElement('div');option.id='sc-ad-option-'+index;option.setAttribute('role','option');
+        option.setAttribute('aria-selected','false');option.textContent=product.name;
+        option.addEventListener('mousedown',event=>event.preventDefault());
+        option.addEventListener('click',()=>{chooseProduct(product);adProduct.focus();closeProducts();});
+        adList.append(option);
+      }
+      if(!adOptions.length){const empty=doc.createElement('div');empty.textContent='No matching products';empty.setAttribute('role','status');adList.append(empty);}
+      adList.hidden=false;adList.scrollTop=0;adProduct.setAttribute('aria-expanded','true');
+    };
+    adProduct.addEventListener('focus',showProducts,listenerOptions);
+    adProduct.addEventListener('click',showProducts,listenerOptions);
+    adProduct.addEventListener('blur',closeProducts,listenerOptions);
+    adProduct.addEventListener('keydown',event=>{
+      if(event.key==='Escape'&&!adList.hidden){event.preventDefault();event.stopPropagation();closeProducts();return;}
+      if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();if(adList.hidden)showProducts();
+        if(adOptions.length)activateProduct(Math.max(0,Math.min(adOptions.length-1,adActive+(event.key==='ArrowDown'?1:-1))));
+      }else if(event.key==='Enter'&&!adList.hidden){
+        event.preventDefault();if(adOptions.length)chooseProduct(adOptions[Math.max(0,adActive)]);
+      }
+    },listenerOptions);
+
     quick.addEventListener('toggle',async()=>{
       if(!quick.open || adQuickScope===state.config.uploadScope)return;
-      const scope=state.config.uploadScope;adProducts=[];adProduct.value='';
+      const scope=state.config.uploadScope;adProducts=[];adSelected='';adProduct.value='';closeProducts();
       try {
         const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{credentials:'same-origin',signal:listenerController.signal});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load products');
         if(scope!==state.config.uploadScope)return;
-        adProducts=data.products;adQuickScope=scope;
-        const list=root.querySelector('#sc-ad-products');list.replaceChildren();
-        for(const product of adProducts){const option=doc.createElement('option');option.value=product.name;list.append(option);}
+        adProducts=data.products.slice().sort((a,b)=>a.name.localeCompare(b.name));adQuickScope=scope;
         for(const [name,values] of [['sport',data.sports],['country',data.countries]]) {
           const select=root.querySelector('#sc-ad-'+name);select.replaceChildren();
           for(const value of values){const option=doc.createElement('option');option.value=value;option.textContent=value;select.append(option);}
         }
         adMessage.textContent='Choose a product and check its market.';
+        if(doc.activeElement===adProduct)showProducts();
       }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
     },listenerOptions);
-    adProduct.addEventListener('input',()=>{
-      const product=adProducts.find(p=>p.name===adProduct.value);adRequest='';
-      if(product){root.querySelector('#sc-ad-sport').value=product.sport;root.querySelector('#sc-ad-country').value=product.country;}
-    },listenerOptions);
+    adProduct.addEventListener('input',()=>{adSelected='';adRequest='';showProducts();},listenerOptions);
     for(const name of ['sport','country','type'])root.querySelector('#sc-ad-'+name).addEventListener('change',()=>{adRequest='';},listenerOptions);
     root.querySelector('#sc-ad-form').addEventListener('submit',async event=>{
       event.preventDefault();const scope=state.config.uploadScope;
-      const matches=adProducts.filter(p=>p.name===adProduct.value);
+      const matches=adProducts.filter(p=>p.id===adSelected&&p.name===adProduct.value);
       if(matches.length!==1){adMessage.textContent='Select one product from the list.';return;}
       const button=root.querySelector('#sc-ad-submit');if(button.disabled)return;button.disabled=true;
       adRequest=adRequest||parentWindow.crypto.randomUUID();
@@ -1335,6 +1426,9 @@
     const bindRestart = (button, item) => {
       button.hidden = item?.stage !== 7 || item?.restartable === false;
       button.disabled = pendingRestarts.has(item?.id);
+      button.title = item?.detail?.startsWith('Destination conflict:')
+        ? 'Retry the saved PSD mapping; retain the published image package'
+        : 'Restart from the original PSD and regenerate mockups';
       button.onclick = async event => {
         event?.preventDefault();
         event?.stopPropagation();
@@ -1406,11 +1500,14 @@
         if (button.hidden) continue;
         const name = queue === "design" ? "Design" : queue === "ads" ? "Ads" : "Upload";
         const action = control.enabled ? "Pause" : "Play";
-        const label = `${action} ${queue} queue (${control.waiting} waiting)`;
-        button.innerHTML = icon(action.toLowerCase()) + `<span>${name} (${Number(control.waiting)})</span>`;
+        const count = control.waiting;
+        const knownCount = typeof count === 'number' && Number.isFinite(count) && count >= 0;
+        const label = `${action} ${queue} queue` + (knownCount ? ` (${count} waiting)` : '');
+        button.innerHTML = icon(action.toLowerCase()) + `<span>${name}` + (knownCount ? ` (${count})` : '') + `</span>`;
         button.title = label;
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-busy", String(pendingQueues.has(queue)));
+        button.disabled = pendingQueues.has(queue);
       }
       companionStatus.hidden = staffProgress.hidden && Object.values(queueButtons).every(button => button.hidden) && Object.values(companionPanels).every(item=>item.card.hidden);
       root.classList.toggle("sc-has-staff-upload", !companionStatus.hidden);
@@ -1484,6 +1581,28 @@
         }
       }
     };
+    let requestedUploadId = '', uploadInteraction = '', pendingUploadReveal = false;
+    const revealRequestedUpload = notice => {
+      if (!notice?.open_upload || !notice.job_id || !state.config.staffUploadProgress) return;
+      const interaction = notice.interaction_id || notice.id;
+      if (interaction === uploadInteraction) return;
+      uploadInteraction = interaction;
+      requestedUploadId = notice.job_id;
+      pendingUploadReveal = true;
+      staffProgress.hidden = false;
+      root.querySelector('#sc-os-upload-card').hidden = false;
+      companionStatus.hidden = false;
+      root.querySelector('#sc-os-staff-upload-title').textContent = notice.title || 'Upload request saved';
+      root.querySelector('#sc-os-staff-upload-stage').textContent = 'Checking this upload…';
+      for (const {panel} of Object.values(companionPanels)) panel.open = false;
+      staffProgress.open = true;
+      lastStaffStatus = '';
+      void refreshStaffProgress(false);
+    };
+    doc.addEventListener('sc-design-edit-queued', () => {
+      lastStaffStatus = '';
+      void refreshStaffProgress(false);
+    }, listenerOptions);
     doc.addEventListener('visibilitychange', () => {
       if (!doc.hidden && state.config.staffUploadProgress) void refreshStaffProgress();
     }, listenerOptions);
@@ -1496,13 +1615,14 @@
       listenerController.signal.addEventListener('abort', abort, {once:true});
       const timeout = parentWindow.setTimeout(abort, 8000);
       try {
-        const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
+        const response = await parentWindow.fetch("/api/staff-product-uploads/status?display=1" + (requestedUploadId ? "&job_id=" + encodeURIComponent(requestedUploadId) : ""), {
           credentials:"same-origin", cache:"no-store", signal:controller.signal,
         });
         if (listenerController.signal.aborted) return;
-        if (!response.ok) throw new Error('Companion status unavailable');
+        if (!response.ok) throw new Error([401,403].includes(response.status) ? 'Session needs refreshing' : 'Companion status unavailable');
         const status = await response.json();
         if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
+        if (status.display_state && !["ready", "stale"].includes(status.display_state)) throw new Error("Status refreshing");
         const jobs = status.jobs || [];
         staffFailures = 0;
         const active = jobs.some(item => item.stage > 0 && item.stage < 6
@@ -1515,11 +1635,20 @@
         if (serialized === lastStaffStatus) return;
         if (revision === queueRevision && !pendingQueues.size) queues = status.queues || {};
         renderCompanions(status);
-        staffProgress.hidden = !jobs.length && !queues.upload?.display;
+        staffProgress.hidden = !jobs.length && !queues.upload?.display && !pendingUploadReveal;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
-        staffProgress.dataset.stale='false';
+        staffProgress.dataset.stale=String(status.display_state === 'stale');
+        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale');
         renderQueueButtons();
         lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
+        if (pendingUploadReveal) {
+          if (!jobs.some(item=>item.id===requestedUploadId)) {
+            staffDelay = 1000;
+            return; // An older in-flight status read must not hide this receipt.
+          }
+          staffProgress.open = true;
+          pendingUploadReveal = false;
+        }
         if (!jobs.length) {
           staffProgress.open = false;
           summaryReset.hidden = true;
@@ -1530,13 +1659,16 @@
           root.querySelector('#sc-os-staff-upload-list').replaceChildren();
           return;
         }
-        const label = job => job.stage > 0 && job.stage < 6 && !status.online
+        const label = job => job.stage === 0 && queues.upload?.enabled === false
+          ? 'Queued · uploads paused' : job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
         const adLabel = job => "Ad · " + job.ad.label;
-        const job = jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || jobs[0];
+        const newestCompleted = jobs.filter(item=>item.stage===6)
+          .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))[0];
+        const job = jobs.find(item=>item.id===requestedUploadId && !item.cancelled) || jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
         bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
-        const currentLabel = (job.ad && !Array.isArray(queues.ads?.jobs) ? label(job) + " · " + adLabel(job) : label(job))
+        const currentLabel = label(job)
           + (queues.upload?.waiting ? ` · ${queues.upload.waiting} waiting` : '');
         uploadSummary.title = job.title + " · " + currentLabel;
         root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
@@ -1611,12 +1743,13 @@
       } catch (_error) {
         if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
         lastStaffStatus='';
-        staffDelay = Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
+        for (const button of Object.values(queueButtons)) button.disabled=true;
+        staffDelay = _error.message === 'Status refreshing' ? 1000 : Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
         for (const {panel,stage} of Object.values(companionPanels)) {
-          panel.dataset.stale='true';stage.textContent='Status unavailable · retrying';
+          panel.dataset.stale='true';stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
         }
         staffProgress.dataset.stale='true';
-        root.querySelector('#sc-os-staff-upload-stage').textContent='Status unavailable · retrying';
+        root.querySelector('#sc-os-staff-upload-stage').textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
       } finally {
         parentWindow.clearTimeout(timeout);
         listenerController.signal.removeEventListener('abort', abort);
@@ -2262,6 +2395,7 @@
       if (method === "GET" && pendingReads.has(key)) return pendingReads.get(key).promise;
       const controller = new AbortController();
       const entry = {controller};
+      const deadline = method === "GET" ? parentWindow.setTimeout(() => controller.abort(), 8000) : null;
       const headers = {Authorization: `Bearer ${state.config.authToken || ""}`};
       if (options.body !== undefined) headers["Content-Type"] = "application/json";
       entry.promise = (async () => {
@@ -2280,6 +2414,7 @@
       if (!response.ok) throw new Error(payload.error || "Request failed");
       return payload;
       })().finally(() => {
+        if (deadline !== null) parentWindow.clearTimeout(deadline);
         if (pendingReads.get(key) === entry) pendingReads.delete(key);
       });
       if (method === "GET") pendingReads.set(key, entry);
@@ -2601,6 +2736,8 @@
       }, {remember: true});
     };
     const refreshOrderStatus = async () => {
+      if (state.destroyed) return;
+      if (doc.hidden) { later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS); return; }
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
@@ -2617,7 +2754,10 @@
       const previousOrders = readStatusCache("orders");
       const confirmedAt = Number(previousOrders.payload?.confirmed_at || previousOrders.checked_at || 0);
       const expireOrdersBadge = () => {
-        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) updateOrdersBadge(0, "");
+        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) {
+          const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
+          if (badge) { badge.title = "Last known count · status delayed"; badge.dataset.stale = "true"; }
+        }
       };
       expireOrdersBadge();
       writeStatusCache("orders", {...(previousOrders.payload || {}), confirmed_at: confirmedAt});
@@ -2630,6 +2770,8 @@
             confirmed_at: Date.now(),
           });
           updateOrdersBadge(payload.action_required_count, payload.badge_label);
+          const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
+          if (badge) { badge.title = "Orders requiring action"; badge.dataset.stale = "false"; }
         }
         else expireOrdersBadge();
         showOrderToast(payload.notification);
@@ -2795,7 +2937,8 @@
     };
     const schedulePlannerStatus = (delay=PLANNER_STATUS_REFRESH_MS) => {
       if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
-      state.plannerStatusTimer = parentWindow.setTimeout(() => refreshPlannerStatus(), delay);
+      if (state.destroyed) return;
+      state.plannerStatusTimer = later(() => refreshPlannerStatus(), delay);
     };
     const refreshPlannerStatus = async ({immediate=false} = {}) => {
       if (!state.config.dailyPlannerEnabled || !state.config.dailyPlannerStatusUrl) {
@@ -2803,11 +2946,14 @@
         if (plannerTimerPill) plannerTimerPill.hidden = true;
         return;
       }
+      if (state.destroyed) return;
+      if (doc.hidden) { schedulePlannerStatus(); return; }
       if (state.plannerStatusPending) return;
       state.plannerStatusPending = true;
       writeStatusCache("planner");
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
+        if (payload.available === false) throw new Error("Planner status delayed");
         writeStatusCache("planner");
         const rolloverTimerIds = (payload.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean);
         rolloverTimerIds.forEach((timerId) => state.terminalPlannerTimerIds.add(timerId));
@@ -3676,13 +3822,23 @@
         root.dataset.installStage = "config";
         const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
-        if (state.config.uploadScope !== nextConfig.uploadScope) {
+        if (root.dataset.uploadScope !== nextConfig.uploadScope) {
+          clearStaffTimer();staffProgressStarted=false;
           dismissUploadOverlays();queues={};lastStaffStatus='';
           staffProgress.hidden=true;summaryReset.hidden=true;
+          uploadSummary.title='';
+          root.querySelector('#sc-os-staff-upload-meter').value=0;
+          root.querySelector('#sc-os-staff-upload-title').textContent='';
+          root.querySelector('#sc-os-staff-upload-stage').textContent='';
+          root.querySelector('#sc-os-staff-upload-list').replaceChildren();
+          for (const {title,stage,list,meter} of Object.values(companionPanels)) {
+            title.textContent='';stage.textContent='';list.replaceChildren();meter.value=0;
+          }
           renderCompanions({});renderQueueButtons();
         }
         if (state.config.currentRouteKey !== nextConfig.currentRouteKey) dismissUploadOverlays();
         state.config = {...nextConfig};
+        root.dataset.uploadScope = nextConfig.uploadScope || "";
         state.searchIndex = prepareSearchIndex(state.config.searchIndex);
         root.dataset.configRevision = state.config.revision || "none";
         root.dataset.currentRouteKey = state.config.currentRouteKey || "dashboard";
@@ -3706,6 +3862,21 @@
         showUploadNotice(state.config.uploadNotice);
         if (state.config.staffUploadProgress && !staffProgressStarted) {
           staffProgressStarted = true;
+          // Reserve visible cards before any network response. Unknown is not idle.
+          staffProgress.hidden = false;
+          root.querySelector('#sc-os-upload-card').hidden = false;
+          if (!root.querySelector('#sc-os-staff-upload-title').textContent) {
+            root.querySelector('#sc-os-staff-upload-title').textContent = 'Checking uploads';
+            root.querySelector('#sc-os-staff-upload-stage').textContent = 'Connecting…';
+          }
+          for (const {card,title,stage} of Object.values(companionPanels)) {
+            if (state.config.companionQueuesEnabled) {
+              card.hidden = false;
+              if (!title.textContent) { title.textContent = 'Checking queue'; stage.textContent = 'Connecting…'; }
+            }
+          }
+          companionStatus.hidden = false;
+          root.classList.add('sc-has-staff-upload');
           void refreshStaffProgress();
         } else if (!state.config.staffUploadProgress) {
           clearStaffTimer();
@@ -3717,6 +3888,12 @@
           renderCompanions({});
           renderQueueButtons();
         }
+        if (revisionChanged) {
+          requestedUploadId = '';
+          pendingUploadReveal = false;
+          uploadInteraction = '';
+        }
+        revealRequestedUpload(state.config.uploadNotice);
         if (revisionChanged) {
           cancelPendingReads();
           state.notifications = null;

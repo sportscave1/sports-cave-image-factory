@@ -24,6 +24,9 @@ def failure(error):
     import uuid,logging
     if getattr(error,'sqlstate',None) in ('55P03','57014'):
         return JSONResponse(dict(error='The queue is busy with another operation. Wait briefly and retry the same request; no duplicate job will be created.'),status_code=503,headers=HEADERS)
+    if isinstance(error,TimeoutError):
+        return JSONResponse(dict(error='Status is refreshing. Please retry shortly.',state='loading'),
+                            status_code=503,headers={**HEADERS,'Retry-After':'2'})
     known=isinstance(error,(PermissionError,ValueError))
     trace='WH-'+uuid.uuid4().hex[:12]
     if not known:logging.getLogger(__name__).warning('worker_health_unavailable trace=%s error_type=%s',trace,type(error).__name__)
@@ -45,12 +48,12 @@ async def snapshot(request):
         await actor(request)
         category=request.query_params.get('filter','All')
         if category not in ('All','Active','Queued','Failed','Needs Review','Completed'):raise ValueError('Invalid job filter.')
-        offset=max(0,min(1000,int(request.query_params.get('offset','0'))))
-        from worker_health_cache import snapshot as cached_snapshot
-        data=await run_in_threadpool(cached_snapshot,store())
-        jobs=data.pop('jobs');data['filters']={name:len([j for j in jobs if name=='All' or j['category']==name]) for name in ('All','Active','Queued','Failed','Needs Review','Completed')}
-        if category!='All':jobs=[j for j in jobs if j['category']==category]
-        data.update(jobs=jobs[offset:offset+25],offset=offset,total_rows=len(jobs),page_size=25)
+        offset=max(0,min(10000,int(request.query_params.get('offset','0'))))
+        from worker_health_cache import index, summary
+        view, freshness=await run_in_threadpool(index,store())
+        data=summary(view,freshness)
+        data.update(jobs=view.select(category,limit=25,offset=offset,ranked=True),offset=offset,
+                    total_rows=view.filters[category],page_size=25)
         return JSONResponse(data,headers=HEADERS)
     except Exception as error:return failure(error)
 

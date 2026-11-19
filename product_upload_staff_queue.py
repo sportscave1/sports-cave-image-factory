@@ -16,6 +16,7 @@ LOG = logging.getLogger(__name__)
 CONTROL_KEY = 'product_upload_queue_enabled'
 STALL_MINUTES = 30
 CANCELLED = 'Cancelled by user.'
+MAPPING_RESUME = 'Verified publication · waiting to resume PSD mapping'
 
 
 def connect():
@@ -23,14 +24,19 @@ def connect():
     return upload_connect()
 
 
-def enqueue(user, source, title, sport, *, ad_country=None):
+def enqueue(user, source, title, sport, *, ad_country=None, start=False):
     if ad_country is not None:
         import design_publish_ad as ad
         sport, ad_country = ad.check_request(user, sport, ad_country)
     from design_review_page import final_psd
     if not final_psd(source) or not source.get('id') or not source.get('rev'):
         raise ValueError('Choose a current PSD from Design Studio Review.')
+    resume = start and can_control_queues(user)
     with connect() as conn, conn.cursor() as cur:
+        if resume:
+            # Same lock as Pause and desktop claims: Publish now commits its
+            # durable request and explicit resume as one operation.
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
         cur.execute('''INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport)
             VALUES (%s,%s,%s,%s,%s)
             ON CONFLICT(source_id,source_rev) DO UPDATE SET source_id=EXCLUDED.source_id
@@ -41,28 +47,35 @@ def enqueue(user, source, title, sport, *, ad_country=None):
         if job['stage'] == 6:
             raise ValueError('This design has already been published and PSD mapped. Open Uploads to view the completed upload.')
         key = job['id']
+        if resume and job['stage'] < 6:
+            cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,'true'::jsonb,now())
+                ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''', (CONTROL_KEY,))
         cur.execute('''INSERT INTO product_upload_staff_requests(requester,job_id)
             VALUES (%s,%s) ON CONFLICT DO NOTHING''', (user['id'], key))
         if ad_country is not None:
             ad.enqueue(cur, key, user['id'], sport, ad_country)
+    # A committed request must not leave the header showing a cached completion.
+    _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
     return key
 
 
-def list_jobs(actor=None):
+def list_jobs(actor=None, *, display_only=False):
     from design_publish_ad import PREFIX, public as ad_public
-    with connect() as conn, conn.cursor() as cur:
+    from companion_read_connection import read_connection
+    with (read_connection(connect) if display_only else connect()) as conn, conn.cursor() as cur:
         if actor is None:
             cur.execute('''SELECT * FROM product_upload_staff_jobs
-                ORDER BY (stage < 6) DESC, updated_at DESC LIMIT 20''')
+                ORDER BY (stage BETWEEN 1 AND 5) DESC, (stage = 0) DESC,
+                    (stage = 6) DESC, updated_at DESC LIMIT 20''')
         else:
             cur.execute('''SELECT j.* FROM product_upload_staff_requests r
                 JOIN product_upload_staff_jobs j ON j.id=r.job_id WHERE r.requester=%s
                 ORDER BY (j.stage BETWEEN 1 AND 5) DESC, (j.stage = 0) DESC,
-                j.updated_at DESC LIMIT 20''', (actor,))
+                (j.stage = 6) DESC, j.updated_at DESC LIMIT 20''', (actor,))
         rows = cur.fetchall()
         # Status remains truthful even when the desktop is disconnected.
         for row in rows:
-            if 1 <= row['stage'] <= 5 and row['updated_at'] < datetime.now(timezone.utc) - timedelta(minutes=STALL_MINUTES):
+            if not display_only and 1 <= row['stage'] <= 3 and row['updated_at'] < datetime.now(timezone.utc) - timedelta(minutes=STALL_MINUTES):
                 cur.execute('''UPDATE product_upload_staff_jobs SET stage=7,
                     message=%s,updated_at=now() WHERE id=%s AND stage BETWEEN 1 AND 5
                     AND updated_at=%s RETURNING *''',
@@ -78,7 +91,8 @@ def list_jobs(actor=None):
             for job in jobs:
                 if job['id'] in ads:
                     job['ad'] = ads[job['id']]
-            jobs.sort(key=lambda job: job['stage'] >= 6 and not (job.get('ad') or {}).get('active'))
+            # Upload order must not change while a completed upload's ad waits
+            # for Meta. The independent Ads panel owns that unfinished work.
         cur.execute('SELECT seen_at FROM product_upload_desktop WHERE singleton')
         desktop = cur.fetchone()
     online = bool(desktop and desktop['seen_at'] and
@@ -96,7 +110,7 @@ def public(row):
     if cancelled:
         label = 'Cancelled'
     elif stalled:
-        label = 'Needs attention · no verified progress for 10 minutes'
+        label = 'Waiting for verified progress · check conversation' if stage == 5 else 'Taking longer · check companion'
     return dict(id=str(row['id']), title=row['title'], stage=stage, label=label,
                 percent=percent, detail=row['message'], storefront=row['storefront'],
                 updated_at=row['updated_at'].isoformat(), restartable=stage == 7,
@@ -149,7 +163,7 @@ def delivery(row):
 
 
 def restart(key, user, expected):
-    """Restart Publish now for this failed snapshot, regenerating its web-image package."""
+    """Resume verified mapping conflicts; otherwise restart the failed image package."""
     key = UUID(str(key))
     if not isinstance(expected, str) or not expected:
         raise ValueError('Refresh the upload status before restarting.')
@@ -174,6 +188,20 @@ def restart(key, user, expected):
             raise PermissionError('This upload is unavailable to this account.')
         if job['stage'] != 7 or job['updated_at'] != datetime.fromisoformat(expected):
             raise ValueError('This upload changed or is no longer failed. Refresh its status.')
+        if intake and job['message'].startswith('Destination conflict:'):
+            data = dict(intake['data'])
+            saved = data.get('staff_mapping') or {}
+            dispatch = str(job.get('dispatch_id') or job['id'])
+            if (saved.get('verified') and saved.get('job') == dispatch
+                    and saved.get('source') == data.get('source')
+                    and saved.get('source', {}).get('id') == job['source_id']
+                    and saved.get('source', {}).get('rev') == job['source_rev']):
+                data['staff_mapping_resume'] = dispatch
+                cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb,updated_at=now() WHERE id=%s',
+                            (json.dumps(data), job['intake_id']))
+                cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,message=%s,updated_at=now()
+                    WHERE id=%s RETURNING *''', (MAPPING_RESUME, key))
+                return public(cur.fetchone())
         attempt = uuid4()
         if intake:
             data = dict(intake['data'])
@@ -242,6 +270,15 @@ def settings(enabled=None):
         return dict(enabled=_enabled(cur))
 
 
+def desktop_online():
+    """Read only the heartbeat; displaying designs must not load/reconcile uploads."""
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
+        cur.execute("SELECT seen_at > now()-interval '95 seconds' AS online FROM product_upload_desktop WHERE singleton")
+        row = cur.fetchone()
+    return bool(row and row['online'])
+
+
 def header_queue_status():
     from companion_header import enrich_queues
     with connect() as conn, conn.cursor() as cur:
@@ -269,7 +306,7 @@ def desktop_tick(token):
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
         device = cur.fetchone()
         if not device:
-            raise PermissionError('Pair this Edge profile in Developer → Upload Companion.')
+            raise PermissionError('Pair this Edge profile in Companion → Companion Queues.')
         cur.execute('SELECT * FROM product_upload_staff_jobs WHERE stage BETWEEN 1 AND 5')
         job = cur.fetchone()
         if not job and _enabled(cur):
@@ -277,6 +314,15 @@ def desktop_tick(token):
                 WHERE id=(SELECT id FROM product_upload_staff_jobs WHERE stage=0 ORDER BY created_at,id LIMIT 1)
                 RETURNING *''', (device['actor_id'],))
             job = cur.fetchone()
+            if job and job['message'] == MAPPING_RESUME:
+                cur.execute('SELECT data FROM product_upload_intakes WHERE id=%s', (job['intake_id'],))
+                intake = cur.fetchone()
+                if not intake or intake['data'].get('staff_mapping_resume') != str(job.get('dispatch_id') or job['id']):
+                    raise ValueError('The saved PSD mapping resume receipt changed.')
+                cur.execute('''UPDATE product_upload_staff_jobs SET stage=5,
+                    message='Resuming verified publication · mapping the original PSD'
+                    WHERE id=%s RETURNING *''', (job['id'],))
+                job = cur.fetchone()
     return delivery(job)
 
 
@@ -357,6 +403,41 @@ def verify(job):
         advance(job['id'], job['worker_actor'], 6, storefront=product['online_store_url'], allowed=[5])
 
 
+from display_snapshot import Snapshots
+_HEADER_DISPLAYS = Snapshots(workers=2, ttl=2, retry=3, max_age=120, limit=32, byte_limit=8_000_000)
+
+
+def _header_display(user):
+    from workspace_display_cache import user_scope
+    admin = can_control_queues(user)
+    def load():
+        result = list_jobs(None if admin else user['id'], display_only=True)
+        if admin:
+            result['queues'] = header_queue_status()
+        return result
+    snapshot = _HEADER_DISPLAYS.read((user_scope(user), admin), load)
+    return {**(snapshot['value'] or {}), 'display_state': snapshot['state'],
+            'checked_at': snapshot['checked_at']}
+
+
+def requested_status(user, key):
+    """Read the exact durable receipt, including jobs outside the header's latest 20."""
+    key = UUID(str(key))
+    admin = can_control_queues(user)
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT j.* FROM product_upload_staff_jobs j WHERE j.id=%s
+            AND (%s OR EXISTS(SELECT 1 FROM product_upload_staff_requests r
+                WHERE r.job_id=j.id AND r.requester=%s))""", (key, admin, user['id']))
+        row = cur.fetchone()
+        if not row:
+            raise PermissionError('This upload request is unavailable to this account.')
+        cur.execute("SELECT seen_at > now()-interval '95 seconds' AS online FROM product_upload_desktop WHERE singleton")
+        device = cur.fetchone()
+        enabled = _enabled(cur)
+    return dict(job=public(row), online=bool(device and device['online']), enabled=enabled)
+
+
 async def status_route(request):
     from files_upload_api import _request_user
     from product_upload_api import HEADERS, failure
@@ -364,6 +445,22 @@ async def status_route(request):
     from starlette.responses import JSONResponse
     try:
         user = await run_in_threadpool(_request_user, request, required_page='Design Studio')
+        if request.query_params.get('display') == '1':
+            result = _header_display(user)
+            requested = request.query_params.get('job_id')
+            if requested:
+                receipt = await run_in_threadpool(requested_status, user, requested)
+                prior = next((job for job in result.get('jobs', []) if job['id'] == receipt['job']['id']), {})
+                result['jobs'] = [dict(prior, **receipt['job']), *(job for job in result.get('jobs', []) if job['id'] != receipt['job']['id'])]
+                result['online'] = receipt['online']
+                result['display_state'] = 'ready'
+                queues = result.setdefault('queues', {})
+                upload = dict(queues.get('upload') or {}, enabled=receipt['enabled'], display=True)
+                # A direct receipt can arrive before the cached queue counts.
+                # Omit unknown counts rather than manufacturing a zero.
+                upload.setdefault('waiting', None)
+                queues['upload'] = upload
+            return JSONResponse(result, headers=HEADERS)
         result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
             result['queues'] = await run_in_threadpool(header_queue_status)
@@ -391,6 +488,8 @@ async def queue_control_route(request):
         from design_publish_ad import settings as ad_settings
         update = {'design': design_settings, 'upload': settings, 'ads': ad_settings}[body['queue']]
         control = await run_in_threadpool(update, body['enabled'])
+        from workspace_display_cache import user_scope
+        _HEADER_DISPLAYS.invalidate((user_scope(user), True))
         return JSONResponse({'enabled': control['enabled']}, headers=HEADERS)
     except Exception as error:
         return failure(error)
@@ -450,6 +549,16 @@ def tick(token, event):
         if stage == 4 and state == 'submitted':
             advance(key, actor, 5, allowed=[4])
             stage = 5
+        elif stage == 4 and state == 'uncertain':
+            # Browser acknowledgement can be lost while ChatGPT publishes. A
+            # package-specific ready tag is positive evidence, never a resend.
+            from product_upload_staff_mapping import publication_ready
+            try:
+                if publication_ready(connect, job):
+                    advance(key, actor, 5, allowed=[4])
+                    stage = 5
+            except Exception:
+                LOG.warning('Could not reconcile the unconfirmed upload receipt', exc_info=True)
     if stage == 5:
         try:
             verify(job)
@@ -463,11 +572,28 @@ def tick(token, event):
     current = worker_job(str(key), actor)
     if not current:
         return stop
-    if str(key) == event.get('id') and current['stage'] >= 4 and event.get('state') in ('failed', 'uncertain', 'blocked', 'stalled'):
+    # Older installed companions report observation timeouts as blockers. Those
+    # are not failed provider operations and must not cancel a running response.
+    observation_only = str(event.get('reason') or '').startswith((
+        'ChatGPT finished responding, but publication and PSD mapping remain unverified.',
+        'The companion cannot read the upload conversation.',
+        'The upload conversation tab was closed before publication and PSD mapping were verified.',
+    ))
+    if str(key) == event.get('id') and current['stage'] == 4 and event.get('state') == 'uncertain':
+        advance(key, actor, 4, 'ChatGPT handoff unconfirmed · check the existing conversation; no duplicate prompt will be sent.', allowed=[4])
+    if str(key) == event.get('id') and current['stage'] >= 4 and not observation_only and event.get('state') in ('failed', 'blocked'):
         advance(key, actor, 7, str(event.get('reason') or 'ChatGPT stopped without a verified upload result.'), allowed=[4, 5])
         return {'stop': {'id': str(key)}}
     timeout = timedelta(minutes=STALL_MINUTES)
-    if current['updated_at'] < datetime.now(timezone.utc) - timeout:
+    if (str(key) == event.get('id') and current['stage'] == 4
+            and event.get('state') == 'uncertain'
+            and current['updated_at'] < datetime.now(timezone.utc) - timeout):
+        advance(key, actor, 7,
+                'ChatGPT handoff remains unconfirmed after 30 minutes. Queue slot released; '
+                'saved files and the existing conversation are retained. Check that conversation '
+                'before explicitly restarting; no duplicate prompt was sent.', allowed=[4])
+        return {'stop': {'id': str(key)}}
+    if current['stage'] < 4 and current['updated_at'] < datetime.now(timezone.utc) - timeout:
         detail = f"{current['message'] or LABELS[stage]} · timed out. Review Product Uploads and the ChatGPT conversation."
         advance(key, actor, 7, detail, storefront=current['storefront'],
                 allowed=[stage])

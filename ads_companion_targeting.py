@@ -5,6 +5,10 @@ from urllib.parse import urlsplit
 from ads_target_relevance import rank_relevant_meta_options, tokens, extract_relevance_terms
 
 
+class CatalogPending(ValueError):
+    """Membership is not verified yet; retain the generated package for retry."""
+
+
 def contains_product(products, result):
     pid = str(result.get('product_id') or '').rsplit('/', 1)[-1]
     expected = urlsplit(result['product_url'])
@@ -39,7 +43,7 @@ def select(refs, result, *, client, saved=None):
     chosen = None
     for row in ranked:
         try:
-            products = client.product_set_members(str(row['id']))
+            products = client.product_set_members(str(row['id']), product=result)
         except MetaAdsApiError as error:
             if str(error.error_code) in ('3', '10', '190', '200') and not error.is_transient:
                 raise ValueError(
@@ -52,7 +56,7 @@ def select(refs, result, *, client, saved=None):
             chosen = row
             break
     if not chosen:
-        raise ValueError('No eligible product set contains this product. Files are saved; correct the catalog membership and Resume import.')
+        raise CatalogPending('Meta has not yet confirmed this product in an eligible product set.')
     country = posting.COUNTRY_META_CODES[canonical_posting_country(result['country'])]
     audiences = posting._audience_options(refs)
     saved_geo = {str(row['id']): (row.get('targeting') or {}).get('geo_locations') or {}

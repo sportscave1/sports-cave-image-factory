@@ -3,7 +3,7 @@
 Task: 20261119-0d8d1411
 Owner: codex-queue-20261119-01a1f2f2
 
-Implemented locally, without committing or deploying.
+User authorized deployment and companion update on 19 November 2026, then explicitly added the tested prompts-page layout update from task 20261119-ed6be71a.
 
 ## Findings
 
@@ -29,7 +29,7 @@ Add to queue. Release integration must reconcile the deployed revision.
 - Send a small wake message through the existing authenticated-origin companion
   bridge after persistence. Keep the periodic alarm as recovery for disconnection
   or older extensions. No extra polling loop or worker is created.
-- Package companion version 1.5.5. Immediate wake requires that version to be
+- Package companion version 1.7.5. Immediate wake requires that version to be
   installed/reloaded in the paired desktop profile after an authorized release.
 
 Paused queues remain paused; offline desktops retain durable pending requests.
@@ -49,3 +49,18 @@ Node companion-origin/instant-wake test completed, including duplicate-tick
 protection. Four cancellation and worker-lifetime cases passed. JavaScript syntax
 checks and git diff --check passed. The origin harness now supplies worker timer
 APIs and a watchdog, preventing a pending promise from falsely exiting as success.
+
+
+## Combined release validation
+
+Integrated current production a4d991252da91c9ee00f9915427d7ac80ae8aed5,
+preserving its sport resolution, queue pause controls, receipt metadata, design
+queue behavior and companion 1.7.4 improvements. Added the three reviewed files
+from prompts task 20261119-ed6be71a without changing its source worktree.
+
+93 focused Python cases passed (92 in combined run; corrected existing
+render_design_queue mock signature passed separately). Origin/wake test completed
+after adding the timer API required by the current message-deadline helper.
+Seven Node cancellation/lifetime cases and Render topology validation passed.
+Checkbox selection explicitly reruns the gallery while queue actions stay local
+to the card, preserving selection toolbar and delete behavior.

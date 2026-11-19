@@ -32,7 +32,7 @@ def ui(monkeypatch):
     monkeypatch.setattr(gallery, '_selection_fixture', (None, user), raising=False)
     monkeypatch.setattr(api, 'Dropbox', lambda: SimpleNamespace(
         metadata_if_present=lambda key: next((source for source in entries if source['id']==key), None)))
-    enqueue = Mock(side_effect=lambda *args: 'job-'+args[1]['id'])
+    enqueue = Mock(side_effect=lambda *args, **kwargs: 'job-'+args[1]['id'])
     monkeypatch.setattr(queue, 'enqueue', enqueue)
     app = AppTest.from_string("""
 import streamlit as st
@@ -136,7 +136,7 @@ def test_card_queue_error_is_visible_beside_design(ui):
     enqueue.side_effect = RuntimeError('unavailable')
     app.button(key=gallery.review_key(entries[0])+'-approved').click().run()
     assert not app.exception
-    assert any('Upload could not start' in item.value for item in app.error)
+    assert any('Upload could not be queued' in item.value for item in app.error)
 
 
 def test_card_missing_sport_finishes_pending_enqueue_on_selection(ui):
@@ -151,3 +151,93 @@ def test_card_missing_sport_finishes_pending_enqueue_on_selection(ui):
     assert enqueue.call_args.args[3] == 'NBA'
     app.run()
     assert enqueue.call_count == 1
+
+
+def test_selected_card_delete_opens_existing_confirmation_for_only_that_card(ui, monkeypatch):
+    app, entries, _, enqueue, _, _ = ui
+    removed = Mock(return_value=[])
+    monkeypatch.setattr('design_review_delete.delete_design', removed)
+    monkeypatch.setattr('files_upload_api.invalidate_directory_cache', Mock())
+    monkeypatch.setattr('files_upload_api.invalidate_thumbnail_cache', Mock())
+    key = gallery.review_key(entries[0]) + '-delete'
+    assert app.button(key=key).disabled
+    app.checkbox(key=gallery._selection_key(entries[0])).check().run()
+    app.checkbox(key=gallery._selection_key(entries[1])).check().run()
+    app.button(key=key).click().run()
+    assert not app.exception
+    removed.assert_not_called()
+    app.button(key='design-review-delete-confirm').click().run()
+    assert not app.exception
+    assert [call.args[1] for call in removed.call_args_list] == [entries[0]]
+    enqueue.assert_not_called()
+
+
+def test_toolbar_replaces_search_with_create_design(ui):
+    app, *_ = ui
+    assert not any(widget.label == 'Search designs' for widget in app.text_input)
+    from pathlib import Path
+    assert 'data-design-create' in Path(gallery.__file__).read_text(encoding='utf-8')
+
+
+def test_add_to_queue_preserves_pause_and_keeps_gallery_open(ui):
+    app, entries, _, enqueue, _, _ = ui
+    key = gallery.review_key(entries[0])
+    app.button(key=key+'-approved').click().run()
+    assert not app.exception
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs == {}
+    notice = app.session_state['_product_upload_notice']
+    assert not notice['open_upload'] and notice['job_id'] == 'job-'+entries[0]['id']
+    assert any('view the queue in Uploads' in item.value for item in app.success)
+
+
+def test_publish_now_continues_after_sport_choice_without_a_second_click(ui):
+    app, entries, details, enqueue, _, _ = ui
+    details[0].pop('sport')
+    app.run()
+    key = gallery.review_key(entries[0])
+    app.button(key=key+'-approved').click().run()
+    enqueue.assert_not_called()
+    app.selectbox(key=key+'-sport').select('NBA').run()
+    assert not app.exception
+    enqueue.assert_called_once()
+    assert enqueue.call_args.args[3] == 'NBA'
+    app.run()
+    enqueue.assert_called_once()
+
+
+def test_publish_failure_is_visible_and_does_not_auto_retry(ui):
+    app, entries, _, enqueue, _, _ = ui
+    enqueue.side_effect = ValueError('Upload could not be saved.')
+    app.button(key=gallery.review_key(entries[0])+'-approved').click().run()
+    assert not app.exception
+    assert any('Upload could not be saved' in item.value for item in app.error)
+    assert app.session_state['_product_upload_notice']['kind'] == 'error'
+    app.run()
+    enqueue.assert_called_once()
+
+
+def test_card_queue_actions_allow_multiple_designs_without_opening_status(ui):
+    app, entries, _, enqueue, _, _ = ui
+    for source in entries:
+        app.button(key=gallery.review_key(source)+'-approved').click().run()
+        assert not app.exception
+        assert not app.session_state['_product_upload_notice']['open_upload']
+        assert app.button(key=gallery.review_key(entries[1])+'-approved').label == 'Add to queue'
+    assert [call.args[1]['id'] for call in enqueue.call_args_list] == [s['id'] for s in entries]
+    assert all(call.kwargs == {} for call in enqueue.call_args_list)
+    app.run()
+    assert enqueue.call_count == 2
+
+
+def test_publish_ad_queues_targeting_without_resuming_or_opening_status(ui, monkeypatch):
+    app, entries, _, enqueue, _, _ = ui
+    monkeypatch.setattr('design_publish_ad.primary_country', lambda details: 'Australia')
+    app.button(key=gallery.review_key(entries[0])+'-approved-ad').click().run()
+    assert not app.exception
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs == {'ad_country': 'Australia'}
+    assert not app.session_state['_product_upload_notice']['open_upload']
+    assert any('Added to upload and ad queue' in item.value for item in app.success)
+    app.run()
+    enqueue.assert_called_once()

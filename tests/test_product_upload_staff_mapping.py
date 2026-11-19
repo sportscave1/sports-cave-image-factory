@@ -36,8 +36,11 @@ def test_reset_rearms_mapping_version_without_losing_moved_psd(monkeypatch):
     assert task['state'] == 'Mapped' and task['moved'] == source
 
 
-@pytest.mark.parametrize('lost_move_response', [False, True])
-def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response):
+@pytest.mark.parametrize('refresh,old_mapping,lost_move_response',
+    [(refresh, old, lost) for refresh, old in [(False, None), (True, None), (True, 'different'), (True, 'same')]
+     for lost in [False, True, 'already_moved']] + [(True, fault, False) for fault in ['changed', 'busy', 'wrong_target']]
+     + [(True, 'different', kind) for kind in ['collision', 'collision_lost']])
+def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response, refresh, old_mapping):
     service, intake_id, original, listing = setup(env, arrived=False)
     store, sql, provider = env
     sql.execute((Path(__file__).resolve().parents[1] /
@@ -72,10 +75,28 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
     with store.locked(intake_id, ADMIN['id']) as (row, cur):
         # ChatGPT saves the three lifestyle files outside the regular Save All UI.
         row['data']['mockups_exported'] = False
+        if refresh:
+            row['mode'] = 'UPDATE'
+            row['data'].update(smart_upload=True, metadata={
+                'upload_intent': 'existing_product_refresh', 'shopify_product_id': PID,
+                'design_origin': 'designs_to_refresh',
+            })
     row = store.read(intake_id, ADMIN['id'])
+    if old_mapping:
+        sql.execute('ALTER TABLE auto_edition_onboarding ADD COLUMN IF NOT EXISTS replacement jsonb')
+        old_id = original['id'] if old_mapping == 'same' else 'id:prior-master'
+        sql.execute("INSERT INTO product_psd_mappings(shopify_product_gid,dropbox_file_id,file_path,source,actor_id) VALUES(%s,%s,%s,'manual',%s)",
+                    (PID, old_id, '/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/old-master.psd', ADMIN['id']))
+        sql.execute("INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,attempts) VALUES(%s,%s,'Needs PSD Repair','Old plaque needs repair',3)", (PID, old_id))
     handoff = prepare(result, row, receipt, 'Exact saved scenes.', staff_job=str(job_id))
     prompt = handoff['prompt']
     saved = handoff['staff_mapping']
+    if refresh:
+        assert saved['mode'] == 'UPDATE' and saved['target'] == PID
+        assert 'Update only the exact linked existing Shopify product' in prompt
+        assert 'Use ACTIVE from the first Shopify create call' not in prompt
+        assert 'A different moment, title or collector concept is a new product' not in prompt
+        assert PID in prompt
     assert saved['ready_tag'] in prompt
     assert 'Original PSD identity:' not in prompt and 'Use Add / Attach PSD' not in prompt
     assert 'Upload Companion owns this step' in prompt
@@ -91,12 +112,12 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
                          for i in range(8)]
     assert tag(intake_id) in listing['tags']
     monkeypatch.setattr(shopify_sync, 'fetch_catalog_page', lambda **kw: {'products': [listing]})
-    queue.tick(token, {'id': str(job_id), 'state': 'submitted'})
-    assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == 5
+    queue.tick(token, {'id': str(job_id), 'state': 'uncertain'})
+    assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == 4
     assert not provider.api.move_path.called
 
     listing['tags'].append(saved['ready_tag'])
-    queue.tick(token, {})
+    queue.tick(token, {'id': str(job_id), 'state': 'uncertain'})
     progress = queue.list_jobs('staff-fixture')['jobs'][0]
     assert progress['stage'] == 5 and progress['percent'] == 96
     assert 'waiting for Edition Ops' in progress['detail']
@@ -112,7 +133,50 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         path = f'{folder}/WEBP/{name}'
         provider.files.setdefault(path, dict(id='id:' + name, rev='new', content_hash='a' * 64,
                                              size=90, path_display=path, name=name))
-    if lost_move_response:
+    collision = lost_move_response in ('collision', 'collision_lost')
+    if collision:
+        from copy import deepcopy
+        from product_upload_dropbox import ROOTS
+        occupied_path = ROOTS['live'] + '/' + original['name']
+        retained = dict(id='id:prior-master', rev='prior', content_hash='b' * 64,
+                        size=123, name=original['name'], path_display=occupied_path)
+        provider.files[occupied_path] = deepcopy(retained)
+        # Resume a previously failed mapping without new generation or dispatch.
+        with store.locked(intake_id, ADMIN['id']) as (row, cur):
+            row['data']['staff_mapping']['verified'] = True
+            verified_before = deepcopy(row['data']['staff_mapping'])
+        queue.advance(job_id, ADMIN['id'], 7, 'Destination conflict: the old PSD is retained.', allowed=[5])
+        failed = queue.list_jobs('staff-fixture')['jobs'][0]
+        monkeypatch.setattr(queue, 'can_control_queues', lambda user: True)
+        assert queue.restart(job_id, ADMIN, failed['updated_at'])['stage'] == 0
+        resumed = store.read(intake_id, ADMIN['id'])
+        assert resumed['data']['staff_mapping'] == verified_before
+        assert resumed['data']['staff_mapping_resume'] == str(job_id)
+    if old_mapping in ('changed', 'busy', 'wrong_target'):
+        if old_mapping == 'changed':
+            sql.execute("UPDATE product_psd_mappings SET updated_at=now()+interval '1 second' WHERE shopify_product_gid=%s", (PID,))
+        elif old_mapping == 'busy':
+            sql.execute("UPDATE auto_edition_onboarding SET status='Preparing' WHERE product_gid=%s", (PID,))
+        else:
+            with store.locked(intake_id, ADMIN['id']) as (row, cur):
+                row['data']['staff_mapping']['target'] = 'gid://shopify/Product/111'
+        queue.tick(token, {})
+        assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == (5 if old_mapping == 'busy' else 7)
+        assert not provider.api.move_path.called
+        assert service.mappings.read_one(PID)['dropbox_file_id'] == old_id
+        assert count(sql, 'auto_edition_onboarding') == 1
+        assert read_edition(store.connect, PID) == before
+        if old_mapping == 'busy':
+            sql.execute("UPDATE auto_edition_onboarding SET status='Needs PSD Repair' WHERE product_gid=%s", (PID,))
+            queue.tick(token, {})
+            assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == 6
+            assert provider.api.move_path.call_count == 1
+        return
+    if lost_move_response == 'already_moved':
+        from product_upload_dropbox import ROOTS
+        provider.api.move_path(provider.token, original['id'], ROOTS['live'] + '/' + original['name'],
+                               root_path=provider.context['root_path'])
+    if lost_move_response is True or lost_move_response == 'collision_lost':
         original_move = provider.api.move_path.side_effect
 
         def lose_response(*args, **kwargs):
@@ -122,18 +186,24 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         provider.api.move_path.side_effect = lose_response
         queue.tick(token, {})
         done = queue.list_jobs('staff-fixture')['jobs'][0]
-        assert done['stage'] == 5 and 'Moving PSD failed' in done['detail']
-        assert count(sql, 'product_psd_mappings') == 0
-        assert count(sql, 'auto_edition_onboarding') == 0
+        assert done['stage'] == 5
+        if not old_mapping:
+            assert 'Moving PSD failed' in done['detail']
+        assert count(sql, 'product_psd_mappings') == bool(old_mapping)
+        assert count(sql, 'auto_edition_onboarding') == bool(old_mapping)
         provider.api.move_path.side_effect = original_move
     queue.tick(token, {})
     done = queue.list_jobs('staff-fixture')['jobs'][0]
-    assert done['stage'] == 6 and done['percent'] == 100
+    assert done['stage'] == 6 and done['percent'] == 100, done['detail']
     assert done['storefront'] == listing['online_store_url'] and 'Auto Editions' in done['detail']
     assert provider.api.move_path.call_count == 1
     mapping = service.mappings.read_one(PID)
     assert mapping['verified'] and mapping['dropbox_file_id'] == original['id']
-    assert mapping['file_path'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/' + original['name'])
+    if collision:
+        assert '__refresh_' in mapping['file_path']
+        assert provider.files[occupied_path] == retained
+    else:
+        assert mapping['file_path'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/' + original['name'])
     sql.execute('SELECT product_gid, file_id, status, source FROM auto_edition_onboarding')
     job = sql.fetchone()
     assert (job['product_gid'], job['file_id'], job['status']) == (PID, original['id'], 'Awaiting preparation')
@@ -141,5 +211,24 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
     assert count(sql, 'auto_edition_onboarding') == 1
     assert read_edition(store.connect, PID) == before
     assert service.status(intake_id, ADMIN)['state'] == 'Mapped'
+    assert service.map(intake_id, ADMIN, product_id=PID, confirm_product=True,
+                       source_version=saved['version'], staff_job=str(job_id))['state'] == 'Mapped'
+    if old_mapping:
+        sql.execute("SELECT count(*) AS n FROM product_psd_mapping_audit WHERE action='replace'")
+        assert sql.fetchone()['n'] == 1
     assert queue.tick(token, {}) == {}
     assert provider.api.move_path.call_count == 1
+
+
+def test_refresh_mapping_rejects_any_other_shopify_listing():
+    from unittest.mock import Mock
+    from product_upload_staff_mapping import published_product
+    row = {'id': str(uuid4())}
+    saved = {'target': PID, 'ready_tag': 'ready-fixture', 'files': []}
+    other = {'shopify_product_id': 'gid://shopify/Product/999999',
+             'tags': [tag(row['id']), saved['ready_tag']]}
+    shopify = Mock()
+    shopify.fetch_catalog_page.return_value = {'products': [other], 'has_next_page': False}
+    shopify.shopify_gid.side_effect = lambda kind, value: value
+    with pytest.raises(ValueError, match='other than the saved refresh target'):
+        published_product(row, saved, shopify)

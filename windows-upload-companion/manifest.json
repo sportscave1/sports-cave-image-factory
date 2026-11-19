@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sports Cave Companion",
   "description": "Processes Product Uploads, morning designs and new Meta Ads through the paired Edge desktop.",
-  "version": "1.5.5",
+  "version": "1.7.5",
   "permissions": [
     "storage",
     "alarms",
@@ -17,6 +17,11 @@
     "service_worker": "worker.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://sports-cave-image-factory.onrender.com/*"],
+      "js": ["queue-wake.js"],
+      "run_at": "document_idle"
+    },
     {
       "matches": ["https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2*"],
       "js": ["ad-downloads.js"],
@@ -41,6 +46,7 @@
       ],
       "js": [
         "composer.js",
+        "ad-repair.js",
         "ad-artifacts.js"
       ],
       "run_at": "document_idle"

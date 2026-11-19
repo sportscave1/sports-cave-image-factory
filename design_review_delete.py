@@ -55,4 +55,6 @@ def delete_design(provider, source):
             _remove(provider, item)
         except Exception:
             warnings.append(f'Could not remove upload JSON at {path}.')
+    from design_deletion_status import invalidate
+    invalidate()
     return warnings

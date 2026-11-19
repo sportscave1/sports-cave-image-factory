@@ -13,7 +13,7 @@ async function main() {
     storage: {local: {get: async key => ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
     alarms:{get:async()=>alarm,create:async name=>{alarm={name};},onAlarm:{addListener(){}}},
   };
-  const context = vm.createContext({chrome, URL, AbortSignal, setTimeout, setInterval, clearInterval, crypto:require('node:crypto').webcrypto, atob, Uint8Array, fetch:(...args)=>fetchQueue(...args)});
+  const context = vm.createContext({chrome, URL, AbortSignal, setTimeout, clearTimeout, setInterval, clearInterval, crypto:require('node:crypto').webcrypto, atob, Uint8Array, fetch:(...args)=>fetchQueue(...args)});
   context.importScripts = file => vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
   const raw=Buffer.from('original reference bytes');

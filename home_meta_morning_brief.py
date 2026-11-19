@@ -31,7 +31,7 @@ PERIODS = {"yesterday": "Yesterday", "week": "Last 7 days", "month": "Last 30 da
 RESULTS_CACHE = MemoryReports(max_bytes=65536)
 RESULTS_POOL = ThreadPoolExecutor(max_workers=4)
 SETTING_KEY = "home_meta_morning_brief"
-MAX_PAYLOAD = 16000
+MAX_PAYLOAD = 96000
 ACTIONS = {
     "check_reporting": "Check Meta reporting coverage",
     "review_delivery": "Review active ad delivery",
@@ -49,7 +49,6 @@ INSIGHT_LABELS = {
     "sports": "Sports · opportunities to test",
 }
 MAX_RECOMMENDATIONS = 8
-VISIBLE_RECOMMENDATIONS = 3
 PRIORITY_PREFIX = re.compile(r"^(?:first|second|third|fourth|fifth|sixth|seventh|eighth)\s*:\s*", re.IGNORECASE)
 FINANCIAL_TEXT = re.compile(
     r"\b(?:aud|usd|nzd|cad|gbp|eur|jpy|inr|chf|dollars?|cents?|euros?|pounds?|"
@@ -90,7 +89,7 @@ def parse_edition(raw, today, *, stored=False):
         edition = json.loads(raw)
     except (ValueError, RecursionError):
         raise ValueError("Enter valid Meta Morning Brief JSON.") from None
-    optional = {"insights"} | ({"ga4_orders"} if stored else set())
+    optional = {"insights", "ad_recommendations", "ad_format_version"} | ({"ga4_orders"} if stored else set())
     if (not isinstance(edition, dict) or not FIELDS <= set(edition) <= FIELDS | REVIEW_FIELDS | optional
             or set(edition) & REVIEW_FIELDS not in (set(), REVIEW_FIELDS)):
         raise ValueError("Include date, report_date, roas, orders and actions. Add summary and recommendations together.")
@@ -114,7 +113,7 @@ def parse_edition(raw, today, *, stored=False):
     if "summary" in edition:
         edition["summary"] = _home_text(edition["summary"], 240, "Summary")
         items = edition["recommendations"]
-        if not isinstance(items, list) or not 1 <= len(items) <= MAX_RECOMMENDATIONS:
+        if not isinstance(items, list) or not (0 if "ad_recommendations" in edition else 1) <= len(items) <= MAX_RECOMMENDATIONS:
             raise ValueError(f"Include one to {MAX_RECOMMENDATIONS} recommendations.")
         edition["recommendations"] = [_home_text(item, 190, "Recommendation") for item in items]
         distinct = {}
@@ -124,6 +123,12 @@ def parse_edition(raw, today, *, stored=False):
         if not stored and len(distinct) != len(items):
             raise ValueError("Each recommendation must be distinct.")
         edition["recommendations"] = list(distinct.values())
+    if 'ad_format_version' in edition and (type(edition['ad_format_version']) is not int or edition['ad_format_version'] != 3):
+        raise ValueError('Use ad_format_version three for all-live-sports recommendations.')
+    if "ad_recommendations" in edition:
+        edition["ad_recommendations"] = _ad_recommendations(edition["ad_recommendations"], all_live=edition.get('ad_format_version') == 3)
+    elif 'ad_format_version' in edition:
+        raise ValueError('Include all live sports in ad_recommendations.')
     if "insights" in edition:
         insights = edition["insights"]
         if not isinstance(insights, dict) or not set(insights) <= INSIGHT_LABELS.keys():
@@ -147,6 +152,128 @@ def parse_edition(raw, today, *, stored=False):
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError("Invalid saved GA4 time zone.") from None
     return edition
+
+
+def _ad_recommendations(items, *, all_live=False):
+    from home_sports_morning_brief import _link
+    from home_brief_calendar import shop_product_handle
+    from sports_categories import normalize_sport_category, CANONICAL_SPORT_CATEGORIES
+    from urllib.parse import urlsplit
+    fields = {"sport", "market", "event_title", "product_title", "product_url", "collection_url",
+              "rationale", "performance_evidence", "action"}
+    if not isinstance(items, list) or len(items) > len(CANONICAL_SPORT_CATEGORIES):
+        raise ValueError("Include one recommendation per live sport.")
+    result = []
+    for item in items:
+        extras = {'sport_summary', 'secondary_product', 'secondary_reason'}
+        gap_fields = {'sport', 'market', 'event_title', 'sport_summary', 'unavailable_reason'}
+        if isinstance(item, dict) and set(item) == gap_fields:
+            row = {field: _text(item[field], 800, field) for field in gap_fields}
+            if normalize_sport_category(row['sport']) != row['sport'] or row['market'] not in {'AUS', 'USA', 'UK'}:
+                raise ValueError('Use a canonical ad sport and market.')
+            if any(prior['sport'] == row['sport'] for prior in result):
+                raise ValueError('Recommend one row per distinct live sport.')
+            result.append(row)
+            continue
+        if not isinstance(item, dict) or not fields <= set(item) <= fields | extras:
+            raise ValueError("Each ad needs sport, market, event_title, product_title, product_url, collection_url, rationale, performance_evidence and action.")
+        row = {field: _text(item[field], 1200 if field.endswith('_url') else 500, field) for field in fields}
+        for field in ('rationale', 'performance_evidence', 'action'):
+            row[field] = _home_text(row[field], 500, field)
+        if normalize_sport_category(row['sport']) != row['sport'] or row['market'] not in {'AUS', 'USA', 'UK'}:
+            raise ValueError("Use a canonical ad sport and AUS, USA or UK market.")
+        for field in ('product_url', 'collection_url'):
+            _link(dict(label=field, url=row[field]))
+        collection = urlsplit(row['collection_url'])
+        if (not shop_product_handle(row['product_url']) or collection.hostname not in
+                {'www.sportscaveshop.com', 'sportscaveshop.com', 'www.sportscave.com.au', 'sportscave.com.au'}
+                or not re.fullmatch(r'/collections/[a-z0-9][a-z0-9-]*/?', collection.path)):
+            raise ValueError("Use exact Sports Cave product and collection URLs.")
+        if any(prior['sport'] == row['sport'] or prior.get('product_url') == row['product_url'] for prior in result):
+            raise ValueError("Recommend one best product per distinct live sport.")
+        if 'sport_summary' in item:
+            row['sport_summary'] = _home_text(item['sport_summary'], 800, 'Sport summary')
+        if 'secondary_product' in item:
+            secondary = item['secondary_product']
+            evidence_fields = {'ad_coverage', 'ad_coverage_evidence'}
+            if not isinstance(secondary, dict) or set(secondary) != fields | evidence_fields:
+                raise ValueError('Secondary product needs the product recommendation fields and ad coverage evidence.')
+            trial = _ad_recommendations([{key: secondary[key] for key in fields}])[0]
+            if any(trial[key] != row[key] for key in ('sport', 'market', 'event_title')) or trial['product_url'] == row['product_url']:
+                raise ValueError('Secondary product must be different and in the same sport, market and event.')
+            if secondary['ad_coverage'] != 'not_found_in_reviewed_ads':
+                raise ValueError('Secondary trials require no matching product ad in the reviewed inventory.')
+            trial.update(ad_coverage=secondary['ad_coverage'], ad_coverage_evidence=_text(secondary['ad_coverage_evidence'], 1200, 'Ad coverage evidence'))
+            row['secondary_product'] = trial
+        if 'secondary_reason' in item:
+            row['secondary_reason'] = _text(item['secondary_reason'], 800, 'Secondary review gap')
+        if all_live and (not row.get('sport_summary') or ('secondary_product' in row) == ('secondary_reason' in row)):
+            raise ValueError('Each live sport needs sport_summary and either secondary_product or secondary_reason.')
+        result.append(row)
+    return result
+
+
+def ad_rows_html(edition, today, *, compact=False):
+    from home_brief_opportunities import live_events
+    from home_brief_calendar import PRODUCT_QUERY, shop_product_handle
+    from urllib.parse import urlencode
+
+    def choice(item, label, sport_summary=''):
+        create_url = '/?' + urlencode(dict(page='ads', **{PRODUCT_QUERY: shop_product_handle(item['product_url'])}))
+        details = [sport_summary, item.get('event_title'), item['rationale'], item['performance_evidence'],
+                   item.get('ad_coverage_evidence'), item['action']]
+        paragraphs = ''.join(f'<p>{escape(text)}</p>' for text in details if text)
+        return (f'<div class="sc-ad-choice"><span class="sc-ad-label">{label}</span> '
+                f'<a href="{escape(item["product_url"], quote=True)}">{escape(item["product_title"])}</a>'
+                f'<details class="sc-ad-detail"><summary>Read more<span class="sc-ad-sr"> about {escape(item["product_title"])}</span></summary>'
+                f'{paragraphs}<a href="{escape(create_url, quote=True)}">Create Ad</a></details></div>')
+
+    current_events = live_events(today)
+    live_sports = {event.sport for event in current_events}
+    rows = [item for item in edition.get('ad_recommendations', []) if item['sport'] in live_sports]
+    present = {item['sport'] for item in rows}
+    # Older editions can be displayed immediately without hiding a live sport.
+    for event in current_events:
+        if event.sport not in present:
+            rows.append(dict(sport=event.sport, market=next((m for m in ('AUS', 'USA', 'UK') if m in event.markets or 'ALL' in event.markets), 'AUS'),
+                             event_title=event.title, sport_summary='Live sport; catalogue and advertising review pending.',
+                             unavailable_reason='No verified product recommendation has been supplied for this sport yet.'))
+            present.add(event.sport)
+    cards = []
+    for item in rows:
+        body = f'<h5>{escape(item["sport"])} · {escape(item["market"])}</h5>'
+        if 'unavailable_reason' in item:
+            body += ('<div class="sc-ad-choice">No verified product'
+                     f'<details class="sc-ad-detail"><summary>Read more<span class="sc-ad-sr"> about {escape(item["sport"])}</span></summary>'
+                     f'<p>{escape(item["sport_summary"])}</p><p>{escape(item["unavailable_reason"])}</p></details></div>')
+        else:
+            body += choice(item, 'Main', item.get('sport_summary', ''))
+            if item.get('secondary_product'):
+                body += choice(item['secondary_product'], 'Secondary trial')
+            else:
+                secondary_label = 'Secondary trial — no verified pick' if item.get('secondary_reason') else 'Secondary trial review pending'
+                body += (f'<div class="sc-ad-choice">{secondary_label}'
+                         '<details class="sc-ad-detail"><summary>Read more</summary>'
+                         f'<p>{escape(item.get("secondary_reason", "The catalogue and existing ad coverage need review before selecting a secondary product."))}</p></details></div>')
+        cards.append(f'<article class="sc-ad-sport">{body}</article>')
+    full = ''.join(cards) or '<p>No sports are currently Live on the Home calendar.</p>'
+    if not compact:
+        return full
+    previews = []
+    for market, label in (('AUS', 'Australia'), ('USA', 'USA'), ('UK', 'UK')):
+        candidates = [item for item in rows if item['market'] == market]
+        item = next((item for item in candidates if item.get('product_url')), None)
+        if item:
+            content = (f'<strong>{label} · {escape(item["sport"])}</strong>'
+                       f'<a href="{escape(item["product_url"], quote=True)}">{escape(item["product_title"])}</a>')
+        else:
+            content = f'<strong>{label}</strong><span>No verified recommendation available.</span>'
+        previews.append(f'<div class="sc-ad-preview">{content}</div>')
+    return (''.join(previews)
+            + '<button type="button" class="sc-meta-more" aria-haspopup="dialog">See more</button>'
+            + '<dialog class="sc-meta-full" aria-label="All ad recommendations">'
+            + '<header><h4>All ad recommendations</h4><form method="dialog"><button>Close</button></form></header>'
+            + full + '</dialog>')
 
 
 def account_roas(day, end=None):
@@ -218,6 +345,9 @@ def publish(raw, user):
     edition = parse_edition(raw, today)
     if edition["date"] != today.isoformat():
         raise ValueError("Publish only today's Sydney Meta brief.")
+    if "ad_recommendations" in edition:
+        from home_brief_opportunities import validate_ad_products
+        validate_ad_products(edition['ad_recommendations'], today, require_all=edition.get('ad_format_version') == 3)
     try:
         edition["roas"] = account_roas(_day(edition["report_date"]))
     except (meta_ads_client.MetaAdsApiError, TimeoutError, OSError, ValueError, ZoneInfoNotFoundError) as error:
@@ -244,12 +374,12 @@ def publish(raw, user):
     return edition
 
 
-def render(st, user, today):
+def render(st, user, today, *, snapshot=None):
     if not can_view(user):
         return
     st.subheader("Meta CRM — Morning Brief")
     try:
-        saved = get_app_setting(SETTING_KEY, ensure_schema_first=False)
+        saved = snapshot['saved'] if snapshot is not None else get_app_setting(SETTING_KEY, ensure_schema_first=False)
         if not saved:
             st.caption("No Meta brief has been published yet.")
             return
@@ -280,22 +410,10 @@ def render(st, user, today):
     )
     review = ""
     if edition and edition.get("summary"):
-        items = [
-            f"<li>{escape(PRIORITY_PREFIX.sub('', item) or item)}</li>"
-            for item in edition["recommendations"]
-        ]
-        extra = items[VISIBLE_RECOMMENDATIONS:]
-        more = (
-            '<button type="button" class="sc-meta-more" aria-haspopup="dialog">More recommendations</button>'
-            '<dialog class="sc-meta-full" aria-label="More ad recommendations">'
-            '<header><h4>More ad recommendations</h4><form method="dialog"><button>Close</button></form></header>'
-            f'<ol start="{VISIBLE_RECOMMENDATIONS + 1}">{"".join(extra)}</ol></dialog>'
-            if extra else ""
-        )
         review = (
             '<section class="sc-meta-review" aria-label="Daily ad review">'
             f'<p>{escape(edition["summary"])}</p>'
-            f'<h4>Ad recommendations</h4><ol>{"".join(items[:VISIBLE_RECOMMENDATIONS])}</ol>{more}</section>'
+            f'<h4>Ad recommendations</h4>{ad_rows_html(edition, today, compact=True)}</section>'
         )
     insights = (edition or {}).get("insights", {})
     insight_cards = "".join(
@@ -305,7 +423,7 @@ def render(st, user, today):
         for section, label in INSIGHT_LABELS.items() if section in insights
     )
     try:
-        refresh = home_design_refresh.render_html(today)
+        refresh = snapshot['refresh'] if snapshot is not None else home_design_refresh.render_html(today)
     except Exception as error:
         LOG.warning("home_design_refresh_unavailable type=%s", type(error).__name__)
         refresh = ""
@@ -333,12 +451,21 @@ def render(st, user, today):
         .sc-meta-review li {padding:.48rem 0 .48rem .15rem}
         .sc-meta-review li::marker {color:#8c601a;font-weight:650}
         .sc-meta-review li+li {border-top:1px solid var(--line)}
+        .sc-ad-sport {padding:.6rem 0;border-top:1px solid var(--line)}
+        .sc-ad-sport h5 {font-size:.85rem;margin:0 0 .35rem}
+        .sc-ad-choice {font-size:.82rem;margin:.3rem 0;line-height:1.45;overflow-wrap:anywhere}
+        .sc-ad-label {font-weight:600}
+        .sc-ad-detail summary {display:inline-block;color:#8c601a;text-decoration:underline;cursor:pointer;font-size:.76rem;margin:.15rem 0}
+        .sc-ad-detail p {margin:.3rem 0}
+        .sc-ad-sr {position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+        .sc-ad-preview {padding:.4rem 0;border-top:1px solid var(--line);font-size:.82rem;line-height:1.35}
+        .sc-ad-preview strong,.sc-ad-preview a,.sc-ad-preview span {display:block}
         .sc-meta-more,.sc-meta-full button {margin-top:.35rem;padding:.3rem .6rem;font:inherit;font-weight:650;
             border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit;cursor:pointer}
-        .sc-meta-full {width:min(37rem,calc(100vw - 2rem));max-height:80dvh;padding:1rem;
+        .sc-meta-full {width:min(54rem,calc(100vw - 2rem));max-height:80dvh;padding:1rem;overflow-y:auto;overscroll-behavior:contain;
             border:1px solid var(--line);border-radius:14px;background:var(--background-color,#fff);color:inherit}
         .sc-meta-full::backdrop {background:#181512a0}
-        .sc-meta-full header {display:flex;justify-content:space-between;align-items:center;gap:.7rem}
+        .sc-meta-full header {display:flex;justify-content:space-between;align-items:center;gap:.7rem;position:sticky;top:-1rem;padding:.4rem 0;background:inherit;z-index:1}
         .sc-meta-insight {margin-top:.45rem;border:1px solid var(--line);border-radius:12px;
             background:var(--background-color,#fff);overflow-wrap:anywhere}
         .sc-meta-insight summary {padding:.45rem .75rem;font-size:.8rem;font-weight:700;cursor:pointer}
@@ -377,6 +504,7 @@ def render(st, user, today):
               }
               const controller = new AbortController();
               request = controller;
+              const deadline = setTimeout(() => controller.abort(), 8000);
               render(["…", "…", "…"], "Loading results");
               try {
                 const response = await fetch("/ops/meta-morning-brief/results?period=" + encodeURIComponent(period),
@@ -386,11 +514,11 @@ def render(st, user, today):
                 if (!controller.signal.aborted) render([data.roas, data.desktop, data.mobile],
                   period === "today" ? "Today is partial. Reporting may lag." : "");
               } catch {
-                if (!controller.signal.aborted) render([], "Results temporarily unavailable");
-              }
+                if (request === controller) render([], "Results temporarily unavailable · retry by selecting a period");
+              } finally { clearTimeout(deadline); }
             }
             select.addEventListener("change", load);
-            if (panel.dataset.saved !== "1") load();
+            // Saved Home data paints first. Provider reads are requested only on selection.
           }
         }</script>""",
         unsafe_allow_javascript=True,

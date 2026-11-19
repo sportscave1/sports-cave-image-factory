@@ -6,15 +6,8 @@ from html import escape
 import json
 import re
 
-from design_collector_assets import BADGE_FOOTPRINT, BADGE_PLACEMENT_VERIFICATION
-from design_signature_free import SIGNATURE_FREE_COMPOSITION
-from design_collector_titles import COLLECTOR_TITLE_GUIDANCE
-from design_collector_background import BACKGROUND_RESEARCH, COLLECTOR_BACKGROUND
-from design_motorsport import MOTORSPORT_ARTWORK
-from design_refresh_replacement import REVIEW_REPLACEMENT_RULE
-from design_subject_authenticity import AUTHENTICITY_CHECK, IDENTITY_OVERRIDES_CONTINUITY
-from home_morning_brief_actions import PROJECT_URL
-from psd_directory import REVIEW_FOLDER, REVIEW_METADATA_FOLDER, ROOT as LIVE_FOLDER
+from home_morning_brief_actions import PROJECT_URL, _prompt
+from psd_directory import ROOT as LIVE_FOLDER
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -27,137 +20,32 @@ REVIEW_FIELDS = {"product_id", "handle", "title", "reason", "evidence",
                  "sessions", "orders", "suggestion"}
 REASONS = {"low_conversion": "Weak sales signal", "artwork": "Artwork review"}
 RECOMMENDATION_GUIDANCE = (
-    "Write each suggestion as a testable creative problem and opportunity for a complete redesign. "
-    "Describe the collector appeal, story, subject hierarchy or thumbnail recognition worth "
-    "investigating. Commission fresh image research and reconsider the hero, scene, title and "
-    "composition. Treat existing artwork and the recommendation as research leads. Avoid "
+    "Write each suggestion as a testable creative problem and opportunity for an imagery and collector-finish upgrade. "
+    "Preserve the existing edition name, title wording, quotation and sporting story or moment. "
+    "Describe the subject hierarchy, image quality, background or thumbnail recognition worth "
+    "investigating. Commission moment-led image research for defining competitive action, signature celebrations and fan-recognisable emotion, excluding training kit and routine portraits. Reconsider the hero, scene and "
+    "composition within that same story. Treat existing artwork as the edition reference. Avoid "
     "prescribing only a crop, brightness or text-size change. Weak sales warrant investigation "
     "and a creative test. They do not establish that artwork caused the result."
 )
 
 
 def _refresh_prompt(row, product_url):
-    return f"""Create a complete new Sports Cave collector design for the verified existing product.
-Use the New Product / Create Design research and creative process for both full artwork passes.
+    """One shared creative workflow; only the brief and publication target differ."""
+    evidence = row.get('evidence') or f"{row.get('sessions', 0):,} GA4 landing sessions"
+    context = f"""EXISTING PRODUCT REFRESH — NEW ARTWORK FOR THE SAME LISTING
 
-{IDENTITY_OVERRIDES_CONTINUITY}Start now. Use the project guide for reusable standards and the recommendation as research context.
-Product: {row["title"]}
-Shopify product ID: {row["product_id"]}
-Product page: {product_url}
-Research hypothesis from the Home recommendation: {row["suggestion"]}
-Decision context: {row.get("evidence") or f'{row["sessions"]:,} GA4 landing sessions'}
-Use the recommendation to start research and follow the evidence when it points elsewhere.
-Weak sales are a reason to investigate and test a creative direction. They do not establish
-that the artwork caused poor sales.
+Existing edition/product title (preserve): {row['title']}
+Shopify product ID: {row['product_id']}
+Product page and current artwork reference: {product_url}
+Research hypothesis from the Home recommendation: {row.get('suggestion') or 'Upgrade the imagery and collector finish for this existing edition.'}
+Decision context: {evidence}
 
-1. Find the current master PSD in Dropbox Live: {LIVE_FOLDER}/
-   Match it to this product using the product ID or handle, filename and live artwork.
-   Exclude the Review folder, drafts, mockups and previous refreshes. If the exact master or
-   render is unavailable, continue independent research, both artwork passes and display using
-   verified sources. Defer any comparison, master-dependent assembly or replacement that cannot
-   be verified, and report the exact missing input.
-   Open the original for read-only reference. Record its path and revision if available,
-   inspect its artwork and preserve its canvas dimensions, orientation and print settings.
+Inspect the listing and its current artwork; where available, use its matching master in Dropbox Live ({LIVE_FOLDER}/) for read-only reference. Preserve the existing edition name, exact headline and quotation wording, and the same subject, sporting story, event or career angle and emotional meaning. Use the artwork and listing together to distinguish the printed headline from the full product title and to establish the original story. The recommendation is an imagery and finish research lead only; any older suggestion to rename the edition or change its story is superseded by this preservation brief. Research fresh authentic photographs for that same story, and upgrade the composition, background, typography treatment and collector finish through the shared New Design workflow below. The old layout, photographs and master plaque transform are not locked. Preserve edition wording and original collector assets while recomposing the imagery, recognisable venue feature, restrained abstraction, typography, plaque group and border together under the shared integrated collector direction. Compare fresh, memorable competition frames under the shared poster-image criteria; do not retain an ordinary image merely because it was used before. Find stronger action and emotional storytelling for this same edition, without substituting an unrelated famous moment. Weak sales warrant investigation, not an assumption that the artwork caused them.
 
-2. Research a fresh collector concept using the New Product workflow.
-   Treat the existing artwork as a comparison baseline and product-identity reference, not a
-   layout to preserve. Briefly identify its three biggest visually supported weaknesses and
-   describe storefront mockup or listing presentation issues separately. Independently reconsider
-   the hero photograph, supporting imagery, scene, background, title, typography, composition,
-   colours and border. Preserve the verified subject identity, any defining event or rivalry
-   promised by the product, official collector assets, production requirements and explicit
-   user locks. Develop the new concept for that same subject and existing product.
-
-   Review relevant verified Sports Cave bestsellers in the sport or collection where reporting
-   is available. Inspect the actual artwork for story, hierarchy, typography and use of space.
-   Use approved Sports Cave Collector Series examples when sales evidence is unavailable.
-   Use those examples as style references.
-
-{MOTORSPORT_ARTWORK}
-
-   Run a fresh web image search before designing. Aim to inspect 4–8 suitable candidates on
-   their original source pages and show the strongest usable references in chat as a progress
-   checkpoint. Compare authentic action, achievement, celebration and legacy photographs
-   appropriate to the subject. Rank story fit and emotional impact first, then recognisability,
-   readable pose, composition potential and source quality at print size. For a promised event
-   or rivalry, keep the imagery faithful to it. Reuse a photo from the existing PSD only when
-   it wins the comparison. Consider stronger alternatives even when the existing photo is
-   technically sound. Develop the headline alongside the shortlisted photos using the title guidance below. Briefly state
-   the strongest hero, story, title treatment and creative direction before generating.
-
-{COLLECTOR_TITLE_GUIDANCE}{BACKGROUND_RESEARCH}{COLLECTOR_BACKGROUND}
-
-   {BADGE_FOOTPRINT}
-
-3. Generate and inspect two complete designs with ChatGPT image generation.
-   Pass 1 must be a complete new flat design, with a materially new composition and visual
-   treatment. Supply the selected authentic photographs as identity references and relevant
-   Sports Cave artwork as style references. Use the old artwork only for diagnosis and comparison.
-   Cosmetic changes such as repositioning portraits, resizing text or applying a filter are
-   insufficient. If the same photo or title wins the research, rebuild its presentation around
-   a distinctly stronger concept. Keep the planned badge footprint clear in both passes.
-   Generate the artwork itself without a frame, wall or room.
-
-   Inspect Pass 1. In a separate full image-generation call, make Pass 2 a refinement of that
-   new design. Use Pass 1 for successful composition and styling. Resolve visible weaknesses within the fresh
-   concept and keep the surrounding artwork free to evolve. Do not revert to the old layout.
-   If Pass 1 was unavailable after recovery, use the chosen fresh concept and verified photos
-   for Pass 2. Use the New Product allowance of at most two additional generation attempts
-   total across both passes, including recovery. Preserve the strongest inspected work and
-   report any incomplete pass.
-
-   Apply the source-photo checklist after each pass, correction and final assembly.
-
-{SIGNATURE_FREE_COMPOSITION}
-
-{AUTHENTICITY_CHECK}4. Compare and score the original, Pass 1 and Pass 2 side by side at matching full and
-   thumbnail display sizes. Score photographic realism, collector appeal and Sports Cave style
-   from 0 to 10 for each and report the mean and a short reason. A replacement must have a
-   materially new composition and visual treatment and clearly improve all three areas:
-   - Subject hierarchy and emotional impact.
-   - Composition and photographic integration.
-   - Typography, spacing and collector finish.
-   Choose the strongest eligible redesign from either pass. Facial identity and clear improvement
-   are required regardless of score. If neither pass qualifies, make any feasible
-   finishing corrections and compare again, keeping any additional generation within the
-   existing retry cap. If issues remain, retain the current version and
-   mark any staged result needs_attention with the specific problems in review_notes.
-
-5. Use a separate working copy to prepare a valid Photoshop PSD at the original size.
-   Keep usable editable layers and place the selected generated artwork in a named layer.
-
-{BADGE_PLACEMENT_VERIFICATION}   Save in create-only mode at a unique staging path in {REVIEW_FOLDER}/, using
-   [Original PSD stem] - REFRESH - STAGING - [unique run token].psd. Reopen the staged
-   PSD and confirm its exact Dropbox ID, path and revision before preparing its JSON. Verify
-   the original plaque and editable text layer are visible, readable and aligned at their
-   chosen position and scale in the saved PSD.
-   Never claim an unverified save or rename a PNG or JPEG to .psd.
-
-SMART UPLOAD HANDOFF METADATA
-
-After the staged PSD is saved and verified, record its categorisation and Dropbox identity in
-a UTF-8 JSON file named [Staged PSD stem].upload.json in {REVIEW_METADATA_FOLDER}/. Create
-this JSON subfolder if needed and keep the staged PSD directly in Review.
-
-Include design_title, design_story, sport, league, teams and athletes (arrays),
-intended_collections (array of confirmed Shopify collection IDs or handles),
-upload_intent (existing_product_refresh), existing_shopify_product_id (the exact Shopify
-product ID above), dropbox_file_id, dropbox_revision, dropbox_path, review_status and cleanup_status.
-Record what improved in design_story. Use the verified original product's sport and existing
-collection mappings. Set review_status to ready_for_review only when the PSD is verified,
-the original product link and required metadata are confirmed, and the visual comparison
-passes with all visible defects resolved. Otherwise use needs_attention and document the
-specific unresolved artwork issues, missing fields or incomplete checks in review_notes.
-Use null or empty arrays for unknown values. Never substitute a similar product as the
-refresh target.
-
-{REVIEW_REPLACEMENT_RULE}
-Display the strongest generated artwork and three-design scorecard in chat. Report what
-changed and give the verified final Dropbox paths, or the staged paths and pending steps if
-closeout is incomplete. If Dropbox
-access, visual inspection, image generation, PSD export or upload is unavailable, explain
-exactly what is blocked and report only what actually completed.
+Save the new PSD and matching JSON to Design Studio Review. Leave the existing live PSD and Shopify listing untouched during design creation. This is new imagery for the same named edition and story; the exact product ID above remains the publication target. The JSON must retain that linkage for Publish Now and Publish + ads. Never create a new Shopify product for this request.
 """
+    return _prompt(row['title'], context, refresh_product_id=row['product_id'], preserve_refresh_edition=True)
 
 
 def _render_candidate(row):
@@ -315,20 +203,9 @@ def publish(raw, user):
 
 
 def render_html(today):
-    saved = get_app_setting(KEY, ensure_schema_first=False) or {}
-    handoff = ""
-    if saved.get("date") != today.isoformat():
-        body = "<p>Today's shortlist is pending.</p>"
-    else:
-        items = "".join(_render_candidate(row) for row in saved["candidates"])
-        body = f"<ul>{items}</ul>" if items else "<p>No eligible designs were verified today.</p>"
-        if items:
-            body += '<p class="sc-refresh-status" role="status"></p>'
-            handoff = REFRESH_HANDOFF
-    return (
-        '<details class="sc-meta-insight sc-design-refresh">'
-        f'<summary>Designs to Refresh</summary>{body}</details>{handoff}'
-    )
+    # No catalogue, companion or prompt work until the popup is opened.
+    from pathlib import Path
+    return (Path(__file__).parent / 'components/home_refresh_queue.html').read_text(encoding='utf-8')
 
 
 def _render_evidence(row):

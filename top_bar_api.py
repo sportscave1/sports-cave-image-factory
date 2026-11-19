@@ -1005,8 +1005,7 @@ def load_daily_planner_status(claims):
             except TypeError:
                 timer = supabase_backend.get_daily_execution_active_timer(user_id)
     except Exception:
-        events = []
-        timer = {}
+        return {"enabled": True, "available": False, "events": []}
     safe_events = [
         {
             "event": str(event.get("event") or ""),

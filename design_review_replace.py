@@ -135,8 +135,8 @@ def apply(provider, original, trial_path, staged_path, *, title='', review_notes
     """Replace the exact verified revision and keep its ID even if the title changes."""
     if not approved(original) or not within(original['path_display'], REVIEW):
         raise ValueError('Only originals inside the Review folder can be replaced here.')
-    trial = _staged(provider, original, trial_path, 'TRIAL')
     staged = _staged(provider, original, staged_path, 'STAGING')
+    trial = _staged(provider, original, trial_path, 'TRIAL') if trial_path.strip() else staged
     current = provider.metadata_if_present(original['id'])
     if not _same(current, original):
         raise ValueError('The original revision changed. The current original and staged result were retained.')
@@ -146,7 +146,19 @@ def apply(provider, original, trial_path, staged_path, *, title='', review_notes
     api, token, root = provider.api, provider.token, provider.context['root_path']
     path = original['path_display']
     record = read_handoff_record(provider, original)
-    title = title.strip()
+    staged_record = read_handoff_record(provider, staged)
+    if staged_record and any(staged_record[0].get(field) != staged[key] for field, key in
+                             (('dropbox_file_id', 'id'), ('dropbox_revision', 'rev'), ('dropbox_path', 'path_display'))):
+        staged_record = None
+    if record and staged_record:
+        from psd_directory import product_id
+        before, after = record[0], staged_record[0]
+        if (before.get('upload_intent') != after.get('upload_intent') or
+                product_id({'shopify_product_id': before.get('existing_shopify_product_id')}) !=
+                product_id({'shopify_product_id': after.get('existing_shopify_product_id')})):
+            raise ValueError('The staged edit must preserve the original upload intent and exact Shopify target.')
+    title = title.strip() or (str(staged_record[0].get('design_title') or '').strip()
+                              if record and staged_record else '')
     review_notes = review_notes.strip()
     if review_notes and not record:
         raise ValueError('A matching upload JSON is required to retain unresolved review notes during replacement.')
@@ -200,6 +212,10 @@ def apply(provider, original, trial_path, staged_path, *, title='', review_notes
         metadata_saved = False
         if record:
             data, sidecar = record
+            if staged_record:
+                data.update({key: staged_record[0][key] for key in
+                             ('design_title', 'design_story', 'review_status', 'review_notes')
+                             if key in staged_record[0]})
             data.update(dropbox_file_id=final['id'], dropbox_revision=final['rev'],
                         dropbox_path=final['path_display'])
             if title:
@@ -219,8 +235,13 @@ def apply(provider, original, trial_path, staged_path, *, title='', review_notes
             except Exception:
                 warnings.append('The canonical PSD is verified. Its upload metadata still needs a revision update.')
                 logging.getLogger(__name__).warning('Design replacement metadata update failed')
+        if staged_record and not record:
+            warnings.append('The verified staging JSON is retained until canonical upload metadata is created and verified.')
         if not warnings:
-            warnings.extend(_cleanup(provider, final, (trial, staged, backup)))
+            temporary = (trial, staged, backup) if trial['id'] != staged['id'] else (staged, backup)
+            if staged_record:
+                temporary += (staged_record[1],)
+            warnings.extend(_cleanup(provider, final, temporary))
         if title and metadata_saved:
             from design_review_title import sync_review_title
             try:

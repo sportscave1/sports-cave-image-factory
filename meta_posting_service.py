@@ -1387,16 +1387,13 @@ def build_adset_payload(
             "Acquire new customers cannot be sent until Meta's complete "
             "existing-customer audience contract is configured."
         )
-    # Meta v26 exposes acquisition configuration through ad_set_goal and
-    # existing_customer_budget_percentage, but its generated models expose no
-    # documented ALL_AUDIENCES enum/value. The non-acquisition contract is
-    # therefore deliberately explicit in Sports Cave state and deliberately
-    # omitted from the Graph payload. Audience targeting and PURCHASE
-    # optimisation remain unchanged.
+    # Explicitly select Ads Manager's "Get conversions from all audiences".
+    # Graph v26 requires numeric BROAD (0) on write and read.
     return {
         "name": str(name), "campaign_id": str(campaign_id), "status": "PAUSED",
         "billing_event": "IMPRESSIONS", "optimization_goal": "OFFSITE_CONVERSIONS",
         "destination_type": "WEBSITE",
+        "ad_set_goal": {"type": 0},
         "promoted_object": {
             "pixel_id": str(pixel_id), "custom_event_type": "PURCHASE",
             "product_set_id": str(product_set_id),
@@ -1439,6 +1436,7 @@ def build_carousel_adset_payload(
             "smart_pse_enabled": False,
         },
         "is_dynamic_creative": False,
+        "ad_set_goal": {"type": 0},
         "targeting": dict(targeting or {}),
         "start_time": begins.astimezone(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -1455,7 +1453,19 @@ def classify_adset_customer_lifecycle(adset, *, acquisition_fields_requested=Fal
     adset = dict(adset or {})
     goal = adset.get("ad_set_goal")
     existing_customer_budget = adset.get("existing_customer_budget_percentage")
-    if goal not in (None, "", {}) or existing_customer_budget not in (None, ""):
+    if existing_customer_budget not in (None, ""):
+        return CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
+    if goal not in (None, "", {}):
+        if isinstance(goal, dict):
+            goal_type = goal.get("type")
+            # bool is not a Graph enum, even though False == 0 in Python.
+            broad = type(goal_type) is int and goal_type == 0
+            broad = broad or goal_type in ("0", "BROAD")
+            exclusions = any(goal.get(key) for key in (
+                "existing_customers_exclusions", "engaged_audiences_exclusions",
+            ))
+            if broad and not exclusions:
+                return CUSTOMER_LIFECYCLE_ALL_AUDIENCES
         return CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS
     fields_present = {
         "ad_set_goal",
@@ -1468,15 +1478,26 @@ def classify_adset_customer_lifecycle(adset, *, acquisition_fields_requested=Fal
     return CUSTOMER_LIFECYCLE_UNKNOWN
 
 
-def customer_lifecycle_verification(adset, *, acquisition_fields_requested=False):
+def customer_lifecycle_verification(
+    adset, *, acquisition_fields_requested=False, require_explicit_goal=False,
+):
     strategy = classify_adset_customer_lifecycle(
         adset,
         acquisition_fields_requested=acquisition_fields_requested,
     )
+    explicit_goal = isinstance((adset or {}).get("ad_set_goal"), dict) and bool(
+        (adset or {}).get("ad_set_goal")
+    )
+    if require_explicit_goal and not explicit_goal and strategy == CUSTOMER_LIFECYCLE_ALL_AUDIENCES:
+        strategy = CUSTOMER_LIFECYCLE_UNKNOWN
     if strategy == CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS:
         source = "Meta Graph returned acquisition-only Ad Set configuration"
     elif strategy == CUSTOMER_LIFECYCLE_ALL_AUDIENCES:
-        source = "Meta Graph read-back returned no acquisition-only configuration"
+        source = (
+            "Meta Graph read-back confirmed the explicit BROAD Ad Set goal"
+            if explicit_goal else
+            "Meta Graph read-back returned no acquisition-only configuration"
+        )
     else:
         source = "Meta Graph lifecycle fields were not available in this read"
     return {
@@ -2895,6 +2916,7 @@ class MetaPostingService:
                 lifecycle_verification = customer_lifecycle_verification(
                     configured_adset,
                     acquisition_fields_requested=True,
+                    require_explicit_goal=True,
                 )
                 record = self.store.update_stage(
                     submission_id,
@@ -3498,6 +3520,7 @@ class MetaPostingService:
                 lifecycle_verification = customer_lifecycle_verification(
                     configured_adset,
                     acquisition_fields_requested=True,
+                    require_explicit_goal=True,
                 )
                 record = self.store.update_stage(
                     submission_id,

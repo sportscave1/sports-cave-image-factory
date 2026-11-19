@@ -7205,6 +7205,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     social_media.WALL_PREVIEW_ROUTE: ":material/photo_library:",
     "Product Uploads": ":material/upload_file:",
     "Design Studio": ":material/palette:",
+    "Prompts": ":material/chat:",
     "Ads": ":material/ads_click:",
     ads_nav.CREATIVE_REFRESH_ROUTE: ":material/auto_awesome_motion:",
     ads_nav.POSTING_ROUTE: ":material/publish:",
@@ -7267,7 +7268,9 @@ def _active_sidebar_group(route):
     import crm_navigation
     if route in (*analytics_nav.WEBSITE_ROUTES, *analytics_nav.ANALYTICS_ROUTES):
         return "website"
-    if route in {"Developer", "Worker Health", "Upload Companion", "Task Recorder", "Image Protection"}:
+    if route in {"Worker Health", "Upload Companion"}:
+        return "companion"
+    if route in {"Developer", "Developer Studio", "Task Recorder", "Image Protection"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
@@ -7387,7 +7390,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                 social_media.AI_REELS_ROUTE,
                 icon=SIDEBAR_ICON_BY_ROUTE[social_media.AI_REELS_ROUTE],
             )
-    for route in ("Product Uploads", "Design Studio"):
+    for route in ("Product Uploads", "Design Studio", "Prompts"):
         _sidebar_route_button(route, current_page, allowed_routes, root=st)
 
     if ads_nav.ADS_CREATE_ROUTE in allowed_routes:
@@ -7449,16 +7452,21 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if ({'Worker Health', 'Upload Companion', 'Task Recorder', 'Developer'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
-        'developer','Developer',':material/developer_mode:','Worker Health',
-        can_open_overview='Worker Health' in allowed_routes,
+    if {'Worker Health', 'Upload Companion'}.intersection(allowed_routes) and disclosure(
+        'companion', 'Companion', ':material/smart_toy:', 'Upload Companion',
+        can_open_overview='Upload Companion' in allowed_routes,
+    ):
+        children = st.container(key="sidebar-companion-children")
+        if 'Upload Companion' in allowed_routes:
+            child_button(children, 'Upload Companion', 'Companion Queues', icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
+        if 'Worker Health' in allowed_routes:
+            child_button(children, 'Worker Health', 'Editions Companion', icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+    if ({'Task Recorder', 'Developer', 'Developer Studio'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
+        'developer','Developer',':material/developer_mode:','Developer',
+        can_open_overview='Developer' in allowed_routes,
     ):
         children=st.container(key="sidebar-developer-children")
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
-        if 'Worker Health' in allowed_routes:
-            child_button(children,'Worker Health','Editions Companion',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
-        if 'Upload Companion' in allowed_routes:
-            child_button(children,'Upload Companion','Companion Queues',icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
         if 'Task Recorder' in allowed_routes:
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Image Protection' in history_routes:
@@ -10660,15 +10668,15 @@ def _home_duration_label(seconds):
     return f"{minutes}m"
 
 
-@st.fragment(parallel=True)
-def render_home_weekly_work(user, local_now):
+def render_home_weekly_work(user, local_now, *, snapshot=None):
     render_html_section_title("This Week's Work")
     started = time.perf_counter()
     try:
         from workspace_display_cache import home_weekly_snapshot
-        snapshot = home_weekly_snapshot(
-            st.session_state, user, local_now, sports_cave_dashboard.build_home_weekly_work_snapshot
-        )
+        if snapshot is None:
+            snapshot = home_weekly_snapshot(
+                st.session_state, user, local_now, sports_cave_dashboard.build_home_weekly_work_snapshot
+            )
     except sports_cave_dashboard.DashboardStorageError:
         st.markdown(
             '<div class="sc-empty-note">Weekly work analytics are unavailable right now.</div>',
@@ -10724,6 +10732,8 @@ def render_home_weekly_work(user, local_now):
             )
 
     render_html_section_title("Completed Work This Week")
+    if snapshot.get("completed_work_total", 0) > 100:
+        st.caption("Showing the latest 100 entries. Open the full report for all work.")
     work_rows = [
         {
             "Date/time": format_dashboard_timestamp(row.get("timestamp")),
@@ -12524,20 +12534,12 @@ def render_lightweight_dashboard_page():
     local_now = account_local_now(user)
     today = sports_sales_calendar.sydney_date(local_now)
     with st.container(key="home-ops-dashboard"):
-        import home_meta_morning_brief
-        import home_sports_morning_brief
-
-        if home_meta_morning_brief.can_view(user):
-            sports_column, meta_column = st.columns([3, 2], gap="medium")
-            with sports_column:
-                home_sports_morning_brief.render(st, user, today)
-            with meta_column, st.container(key="home-meta-brief"):
-                home_meta_morning_brief.render(st, user, today)
-        else:
-            home_sports_morning_brief.render(st, user, today)
+        import home_fast
+        home_fast.render_briefs(st, user, today)
         home_daily_planner.render_status(st, user, local_now)
         with st.container(key="home-weekly-card"):
-            render_home_weekly_work(user, local_now)
+            home_fast.render_weekly(st, user, local_now,
+                sports_cave_dashboard.build_home_weekly_work_snapshot, render_home_weekly_work)
     # The weekly-work fragment completes independently of shell dispatch.
     safe_startup_print(f"PERF Dashboard shell_dispatch={(time.perf_counter() - started):.3f}s")
 
@@ -13858,6 +13860,9 @@ def render_selected_page(current_page):
         render_lightweight_dashboard_page()
     elif current_page == "Task Recorder":
         from task_recorder_page import render_page
+        render_page(current_os_user())
+    elif current_page == "Prompts":
+        from prompts_page import render_page
         render_page(current_os_user())
     elif current_page == "Developer Studio":
         from developer_studio_page import render_page

@@ -17,7 +17,7 @@ def store(database, monkeypatch):
     monkeypatch.setattr(product_upload_services, 'Dropbox', lambda: type('Provider', (), {
         'metadata_if_present': lambda self, path: {'id': path}})())
     db, cur = database
-    for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql', '20261118070000_product_upload_manual_restart.sql'):
+    for name in ('20261117110000_product_upload_staff_queue.sql', '20261117150000_morning_design_queue.sql', '20261118070000_product_upload_manual_restart.sql', '20261119063000_two_design_slots.sql'):
         cur.execute((ROOT / 'migrations' / name).read_text(encoding='utf8'))
     cur.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     cur.execute('''CREATE TABLE IF NOT EXISTS shopify_products (
@@ -32,6 +32,7 @@ def store(database, monkeypatch):
     monkeypatch.setattr(queue, 'connect', db.connect)
     monkeypatch.setattr(uploads, 'connect', db.connect)
     monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {})
+    monkeypatch.setattr(queue, 'poll_outputs', lambda jobs: queue.verify_outputs(jobs))
     return cur, uploads.pair({'id': 'desktop'})
 
 
@@ -41,6 +42,178 @@ def publish(cur, day='2026-11-17', count=5):
     cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',
                 (HISTORY_PREFIX + day, json.dumps(edition)))
     return edition
+
+
+def test_single_design_limit_even_with_concurrent_two_slot_clients(store, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    cur, token = store
+    publish(cur)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: queue.tick(token, [], capacity=2), range(2)))
+    first = responses[0]['jobs'][0]
+    assert all(result['capacity'] == 1 and len(result['jobs']) == 1 for result in responses)
+    assert responses[1]['jobs'][0]['receipt'] == first['receipt']
+    queue.tick(token, [dict(id=first['id'], state='submitted')], capacity=2)
+    assert queue.tick(token, [], capacity=2)['jobs'][0]['id'] == first['id']
+    cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
+    assert cur.fetchone()['n'] == 1
+    monkeypatch.setattr(queue, 'verify_outputs', lambda _: {first['id']:dict(stage=4, message='',
+        source=dict(id='id:final', rev='r1', path_display='/Review/Final.psd'))})
+    following = queue.tick(token, [], capacity=2)['jobs']
+    assert len(following) == 1 and following[0]['id'] != first['id']
+
+
+def test_existing_two_designs_drain_without_any_additional_start(store, monkeypatch):
+    cur, token = store
+    publish(cur, count=4)
+    first = queue.tick(token, [], capacity=2)['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=2 WHERE id=%s", (first['id'],))
+    cur.execute("""UPDATE morning_design_jobs SET stage=2,slot=2
+        WHERE id=(SELECT id FROM morning_design_jobs WHERE stage=0 ORDER BY created_at,id LIMIT 1)
+        RETURNING id""")
+    other = str(cur.fetchone()['id'])
+    assert len(queue.tick(token, [], capacity=2)['jobs']) == 2
+    monkeypatch.setattr(queue, 'verify_outputs', lambda _: {first['id']:dict(stage=4, message='',
+        source=dict(id='id:final', rev='r1', path_display='/Review/Final.psd'))})
+    remaining = queue.tick(token, [dict(id=first['id'],state='submitted'),
+                                   dict(id=other,state='submitted')], capacity=1)['jobs']
+    assert len(remaining) == 1 and remaining[0]['id'] == other
+    assert queue.tick(token, [], capacity=2)['jobs'][0]['id'] == other
+    cur.execute('UPDATE morning_design_jobs SET stage=5 WHERE id=%s', (other,))
+    following = queue.tick(token, [], capacity=2)['jobs']
+    assert len(following) == 1 and following[0]['id'] not in (first['id'], other)
+    with pytest.raises(ValueError):
+        queue.tick(token, [], capacity=3)
+
+
+@pytest.mark.parametrize('finished,minutes',[(True,6),(False,31)])
+def test_stalled_design_releases_slot_without_resending_and_accepts_late_receipt(store,monkeypatch,finished,minutes):
+    cur,token=store;publish(cur,count=2)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    cur.execute("UPDATE morning_design_jobs SET updated_at=now()-(%s * interval '1 minute') WHERE id=%s",(minutes,first['id']))
+    event=dict(id=first['id'],state='submitted',activity='unchanged',finished=finished,generating=not finished)
+    if finished:
+        assert queue.tick(token,[event])['jobs'][0]['id']==first['id']
+        cur.execute("UPDATE app_settings SET value=jsonb_set(value,'{finished_at}',to_jsonb(extract(epoch from now())-360)) WHERE key=%s",('design_queue_progress:'+first['id'],))
+    next_job=queue.tick(token,[event])['jobs'][0]
+    assert next_job['id']!=first['id']
+    cur.execute('SELECT stage,message FROM morning_design_jobs WHERE id=%s',(first['id'],))
+    stopped=cur.fetchone();assert stopped['stage']==5 and 'Queue continues' in stopped['message']
+    assert queue.tick(token,[event])['jobs'][0]['id']==next_job['id']
+    # Late delivery with review warnings is still reconciled, including edit jobs
+    # that already store their original source ID before dispatch.
+    cur.execute("UPDATE morning_design_jobs SET file_id='id:original' WHERE id=%s",(first['id'],))
+    monkeypatch.setattr(queue,'verify_outputs',lambda _: {first['id']:dict(stage=5,message='Delivered; review needed',source=dict(id='id:original',rev='new',path_display='/Review/Final.psd'))})
+    queue.tick(token,[])
+    cur.execute('SELECT file_rev,file_path FROM morning_design_jobs WHERE id=%s',(first['id'],))
+    assert cur.fetchone()['file_rev']=='new'
+
+
+def test_fresh_activity_keeps_slot_and_finished_response_has_grace(store):
+    cur,token=store;publish(cur,count=2)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    assert queue.tick(token,[dict(id=first['id'],state='submitted',activity='one',finished=False,generating=True)])['jobs'][0]['id']==first['id']
+    cur.execute("UPDATE app_settings SET value=jsonb_set(value,'{changed_at}',to_jsonb(extract(epoch from now())-1900)) WHERE key=%s",('design_queue_progress:'+first['id'],))
+    assert queue.tick(token,[dict(id=first['id'],state='submitted',activity='two',finished=True,generating=False)])['jobs'][0]['id']==first['id']
+
+
+def test_missing_browser_reports_cannot_bypass_stall_release(store):
+    cur,token=store;publish(cur,count=2)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    cur.execute("UPDATE morning_design_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s",(first['id'],))
+    next_job=queue.tick(token,[])['jobs'][0]
+    assert next_job['id']!=first['id']
+    old=next(j for j in queue.list_jobs(display_only=True) if j['id']==first['id'])
+    assert old['stage']==5 and old['can_cancel'] and not old['can_defer']
+    assert old['label']=='Pending · queue continues'
+    assert 'unavailable browser reports' in old['detail']
+
+
+@pytest.mark.parametrize('action',['cancel','defer'])
+def test_design_controls_release_slot_with_private_stale_safe_actions(store,monkeypatch,action):
+    cur,token=store;publish(cur,count=3)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    row=next(j for j in queue.list_jobs(display_only=True) if j['id']==first['id'])
+    monkeypatch.setattr(uploads,'can_control_queues',lambda user:user['id']=='admin')
+    with pytest.raises(PermissionError):
+        queue.control(first['id'],{'id':'other'},row['updated_at'],action)
+    with pytest.raises(ValueError):
+        queue.control(first['id'],{'id':'admin'},'2020-01-01T00:00:00+00:00',action)
+    queue.control(first['id'],{'id':'admin'},row['updated_at'],action)
+    with pytest.raises(ValueError):
+        queue.control(first['id'],{'id':'admin'},row['updated_at'],action)
+    next_job=queue.tick(token,[dict(id=first['id'],state='submitted')])['jobs']
+    assert len(next_job)==1 and next_job[0]['id']!=first['id']
+    old=next(j for j in queue.list_jobs(display_only=True) if j['id']==first['id'])
+    assert old['stage']==5 and 'Queue continues' in old['detail']
+    assert old['cancelled']==(action=='cancel')
+
+
+def test_cancel_waiting_design_preserves_pause_and_never_starts_it(store,monkeypatch):
+    cur,token=store;publish(cur,count=2)
+    queue.tick(token,[])
+    queue.settings(False)
+    waiting=next(j for j in queue.list_jobs(display_only=True) if j['stage']==0)
+    monkeypatch.setattr(uploads,'can_control_queues',lambda user:True)
+    queue.control(waiting['id'],{'id':'admin'},waiting['updated_at'],'cancel')
+    assert not queue.settings()['enabled']
+    assert all(j['id']!=waiting['id'] for j in queue.tick(token,[])['jobs'])
+
+
+def test_review_edit_apply_is_idempotent_and_keeps_prompt_unchanged(store,monkeypatch):
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import product_upload_api as api
+    import design_review_metadata as metadata
+    from home_morning_brief_actions import _prompt
+    cur,token=store
+    record=dict(id='id:edit',rev='original',name='Selected.psd',path_display='/Review/Selected.psd')
+    monkeypatch.setattr(api,'_gallery_review_user',AsyncMock(return_value={'id':'reviewer'}))
+    monkeypatch.setattr(api,'Dropbox',lambda:SimpleNamespace())
+    monkeypatch.setattr(api,'_review_metadata',lambda *args:record)
+    monkeypatch.setattr(metadata,'read_handoff',lambda *args:dict(design_name='Selected',product_context='Original story'))
+    app=Starlette(routes=[Route('/api/design-review/edit-queue',api.review_edit_enqueue,methods=['POST'])])
+    with TestClient(app) as client:
+        kwargs=dict(params=dict(id=record['id'],rev=record['rev']),json=dict(comments='Fix the spacing'),headers={'Origin':'http://testserver'})
+        first=client.post('/api/design-review/edit-queue',**kwargs)
+        assert first.status_code==200,first.text
+        assert client.post('/api/design-review/edit-queue',**kwargs).json()==first.json()
+        kwargs['json']=dict(comments='Conflicting request')
+        assert client.post('/api/design-review/edit-queue',**kwargs).status_code>=400
+    result=queue.tick(token,[])['jobs'][0]
+    assert result['kind']=='edit'
+    expected='**USER-REQUESTED DESIGN CHANGES**\nFix the spacing\n\n'+_prompt('Selected','Original story',edit=dict(source=record,metadata=dict(design_name='Selected',product_context='Original story')))
+    assert result['prompt']==expected
+    cur.execute("SELECT count(*) AS n FROM morning_design_jobs WHERE section='edit'")
+    assert cur.fetchone()['n']==1
+
+
+def test_edit_completion_requires_changed_canonical_revision_and_matching_sidecar(monkeypatch):
+    from uuid import uuid4
+    import product_upload_services,design_review_page,design_review_metadata
+    from psd_directory import REVIEW_FOLDER,REVIEW_METADATA_FOLDER
+    jid=str(uuid4())
+    job=dict(id=jid,section='edit',file_id='id:canonical',file_rev='old',prompt='unchanged')
+    source=dict(id='id:canonical',rev='old',name='Selected.psd',path_display=REVIEW_FOLDER+'/Selected.psd',size=100,**{'.tag':'file'})
+    sidecar=dict(id='id:json',rev='j1',name='Selected.upload.json',path_display=REVIEW_METADATA_FOLDER+'/Selected.upload.json')
+    value=dict(dropbox_file_id=source['id'],dropbox_revision='old',dropbox_path=source['path_display'])
+    provider=type('Provider',(),{'metadata_if_present':lambda self,key:source})()
+    monkeypatch.setattr(product_upload_services,'Dropbox',lambda:provider)
+    monkeypatch.setattr(design_review_page,'_folder_entries',lambda *args:[sidecar])
+    monkeypatch.setattr(design_review_metadata,'_read_sidecar',lambda *args:(value,sidecar))
+    monkeypatch.setattr(design_review_metadata,'_handoff_details',lambda *args:dict(review_status='ready_for_review'))
+    assert VERIFY_OUTPUTS([job])=={}
+    value['dropbox_revision']='new'
+    assert VERIFY_OUTPUTS([job])=={}  # JSON alone cannot complete the edit.
+    source['rev']='new'
+    assert VERIFY_OUTPUTS([job])[jid]['stage']==4
 
 
 def test_header_counts_waiting_jobs_and_reads_both_control_states(store, monkeypatch):
@@ -235,7 +408,7 @@ def test_current_suggestion_can_be_queued_once_without_backfill(store):
         queue.enqueue_selected('not-current')
 
 
-def test_explicit_retry_only_for_failed_jobs_without_saved_artwork(store):
+def test_explicit_retry_for_all_finished_jobs(store):
     from home_sports_morning_brief import SETTING_KEY
     cur, token = store
     edition = publish(cur, count=1)
@@ -252,10 +425,10 @@ def test_explicit_retry_only_for_failed_jobs_without_saved_artwork(store):
                                  (3, '', ''), (4, '', ''), (2, '', ''), (0, '', '')):
         cur.execute('UPDATE morning_design_jobs SET stage=%s,file_id=%s,file_path=%s WHERE id=%s',
                     (stage, file_id, path, first['id']))
-        assert queue.enqueue_selected(first['id']) is False
+        assert queue.enqueue_selected(first['id']) is (stage in (3, 4, 5))
 
 
-def test_late_verified_artwork_blocks_explicit_retry(store, monkeypatch):
+def test_late_verified_artwork_does_not_block_explicit_retry(store, monkeypatch):
     from home_sports_morning_brief import SETTING_KEY
     cur, token = store
     edition = publish(cur, count=1)
@@ -263,18 +436,17 @@ def test_late_verified_artwork_blocks_explicit_retry(store, monkeypatch):
     first = queue.tick(token, [])['jobs'][0]
     queue.tick(token, [dict(id=first['id'], state='failed')])
     monkeypatch.setattr(queue, 'verify_outputs', lambda jobs: {first['id']: {'stage': 4}})
-    with pytest.raises(ValueError, match='already been uploaded'):
-        queue.enqueue_selected(first['id'])
-    assert queue.list_jobs()[0]['stage'] == 5
+    assert queue.enqueue_selected(first['id']) is True
+    assert queue.list_jobs()[0]['stage'] == 0
 
 
 @pytest.mark.parametrize('status', [None, 'Pending', 'Generating', 'Opening ChatGPT',
     'Ready for review', 'Completed · uploaded', 'Uploaded · needs review', 'Uploaded · checking review metadata'])
-def test_home_queue_button_disabled_unless_attention(status):
+def test_home_queue_button_enabled_regardless_of_status(status):
     from home_morning_brief_actions import article_html
     item = dict(title='Champion', recommendation='Brief', links=[])
     markup = article_html(item, design_key='fixture', design_status=status)
-    assert ' disabled>Add to Queue</button>' in markup
+    assert ' disabled>Add to Queue</button>' not in markup
     assert 'data-prompt=' not in markup
     enabled = article_html(item, design_key='fixture', design_status='Needs attention')
     assert ' disabled' not in enabled and 'Add to Queue</button>' in enabled
@@ -322,6 +494,13 @@ def test_real_file_verification_rejects_wrong_revision_and_missing_metadata(monk
     monkeypatch.setattr(design_review_page, 'final_psd', lambda source: True)
     monkeypatch.setattr(design_review_metadata, '_read_sidecar', lambda *args: (value, sidecar))
     assert queue.verify_outputs([{'id': key}])[key]['stage'] == 4
+    output = '00000000-0000-0000-0000-000000000099'
+    repeated = {'id': key, 'prompt': f'\nQueue output receipt: {output}\n'}
+    assert queue.verify_outputs([repeated]) == {}
+    value['morning_design_job_id'] = output
+    assert queue.verify_outputs([repeated])[key]['stage'] == 4
+    value['morning_design_job_id'] = key
+
     value['review_status'] = 'needs_attention'
     assert queue.verify_outputs([{'id': key}])[key]['stage'] == 5
     value['review_status'] = 'ready_for_review'
@@ -497,7 +676,7 @@ def test_deleted_design_redo_blocks_existing_unverified_or_posted_artwork(store,
     if signal == 'receipt':
         cur.execute("INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport,stage) VALUES ('00000000-0000-0000-0000-000000000001','id:saved','R1','Final','NBA',6)")
     assert queue.list_jobs()[0]['label'] != 'Deleted · ready to redo'
-    assert queue.enqueue_selected(first['id']) is False
+    assert queue.enqueue_selected(first['id']) is True
 
 
 def test_restored_design_is_rechecked_when_redo_is_clicked(store, monkeypatch):
@@ -513,4 +692,114 @@ def test_restored_design_is_rechecked_when_redo_is_clicked(store, monkeypatch):
         'metadata_if_present': lambda self, path: {'id': path} if present else None})())
     assert queue.list_jobs()[0]['label'] == 'Deleted · ready to redo'
     present.append(True)
-    assert queue.enqueue_selected(first['id']) is False
+    assert queue.enqueue_selected(first['id']) is True
+
+
+def test_display_only_uses_cached_deletions_without_provider_reads(store, monkeypatch):
+    import design_deletion_status
+    cur, token = store
+    publish(cur, count=1)
+    job=queue.tick(token, [])['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=5,file_id='id:deleted',file_rev='R1',file_path='/Review/Final.psd' WHERE id=%s", (job['id'],))
+    monkeypatch.setattr(design_deletion_status,'deleted',lambda jobs,posted:{r['id'] for r in jobs})
+    monkeypatch.setattr(queue,'_deleted_designs',lambda *args: (_ for _ in ()).throw(AssertionError('foreground Dropbox call')))
+    assert queue.list_jobs(display_only=True)[0]['label']=='Deleted · ready to redo'
+
+
+def test_requeue_during_output_lookup_ignores_previous_attempt(store, monkeypatch):
+    from home_sports_morning_brief import SETTING_KEY
+    cur, token = store
+    edition = publish(cur, count=1)
+    cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)', (SETTING_KEY, json.dumps(edition)))
+    first = queue.tick(token, [])['jobs'][0]
+    queue.tick(token, [dict(id=first['id'], state='failed')])
+
+    def late_output(jobs):
+        assert queue.enqueue_selected(first['id']) is True
+        return {first['id']: dict(stage=4, message='', source=dict(
+            id='id:old', rev='R1', path_display='/Review/Old.psd'))}
+
+    monkeypatch.setattr(queue, 'verify_outputs', late_output)
+    restarted = queue.tick(token, [])['jobs'][0]
+    assert restarted['id'] == first['id']
+    assert restarted['receipt'] != first['receipt']
+    record = queue.list_jobs()[0]
+    assert record['stage'] == 1 and record['file_path'] == ''
+
+
+def test_waiting_refresh_upgrades_old_two_pass_snapshot_and_keeps_receipts():
+    job_id = '00000000-0000-0000-0000-000000000123'
+    old = ('SPORTS CAVE EXISTING DESIGN REFRESH\nOld two-pass refresh workflow.\n'
+           'Product: Collector\nShopify product ID: 123\n'
+           'Product page: https://example.test/products/collector\n'
+           'Research hypothesis from the Home recommendation: Improve the title.\n'
+           'Decision context: Selected by owner.\n1. Old workflow rules.\n'
+           f'Include morning_design_job_id = "{job_id}" in the final .upload.json handoff. '
+           'Save to Design Studio Review only; do not publish or alter the live product.\n'
+           'Queue retry receipt: 00000000-0000-0000-0000-000000000001\n')
+    job = dict(id=job_id, title='Collector', prompt=old)
+    upgraded = queue._waiting_prompt(job)
+    assert 'one creative image-generation call' in upgraded
+    assert 'Old two-pass' not in upgraded and 'Old workflow rules' not in upgraded
+    assert 'Improve the title.' in upgraded and 'Selected by owner.' in upgraded
+    assert f'morning_design_job_id = "{job_id}"' in upgraded
+    assert 'gid://shopify/Product/123' in upgraded
+    assert 'design_origin (designs_to_refresh)' in upgraded
+    assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+
+
+def test_waiting_refresh_rebuilds_old_shared_brief_with_edition_lock():
+    from home_design_refresh import _refresh_prompt
+    job_id = '00000000-0000-0000-0000-000000000123'
+    prompt = _refresh_prompt(dict(title='Collector', product_id='123', suggestion='Try a newer achievement.',
+                                 evidence='Selected by owner.'), 'https://example.test/products/collector')
+    prompt = prompt.replace('Existing edition/product title (preserve):',
+                            'Current title (suggestion, not an approved title lock):')
+    prompt = prompt.replace('Preserve the existing edition name, exact headline',
+                            'Reconsider the title, photographs, composition and treatment freely. Preserve exact headline')
+    tail = (f'\nInclude morning_design_job_id = "{job_id}" in the final .upload.json handoff.\n'
+            'Queue retry receipt: 00000000-0000-0000-0000-000000000001\n'
+            'Queue output receipt: 00000000-0000-0000-0000-000000000002\n')
+    job = dict(id=job_id, title='Collector', prompt='SPORTS CAVE EXISTING DESIGN REFRESH\n'+prompt+tail)
+    upgraded = queue._waiting_prompt(job)
+    assert 'Reconsider the title, photographs, composition and treatment freely' not in upgraded
+    assert 'Current title (suggestion' not in upgraded
+    assert 'Existing edition/product title (preserve): Collector' in upgraded
+    assert 'Try a newer achievement.' in upgraded and 'Selected by owner.' in upgraded
+    assert 'any older suggestion to rename the edition or change its story is superseded' in upgraded
+    assert upgraded.endswith(tail)
+    assert queue._receipt(dict(job, prompt=upgraded)) == queue._receipt(job)
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+
+
+def test_create_design_queues_shared_prompt_once_and_dispatches_to_companion(store, monkeypatch):
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import product_upload_api as api
+    cur, token = store
+    monkeypatch.setattr(api, '_gallery_review_user', AsyncMock(return_value={'id': 'reviewer'}))
+    app = Starlette(routes=[Route('/api/design-review/create-queue', api.review_create_enqueue, methods=['POST'])])
+    brief = 'Anthony Edwards dunk and roar in Timberwolves competition kit'
+    payload = dict(brief=brief, request_id=str(uuid4()))
+    with TestClient(app) as client:
+        kwargs = dict(json=payload, headers={'Origin': 'http://testserver'})
+        first = client.post('/api/design-review/create-queue', **kwargs)
+        assert first.status_code == 200, first.text
+        assert client.post('/api/design-review/create-queue', **kwargs).json() == first.json()
+        assert client.post('/api/design-review/create-queue', json=payload, headers={'Origin': 'https://untrusted.test'}).status_code == 403
+        assert client.post('/api/design-review/create-queue', json=dict(payload, brief=''), headers=kwargs['headers']).status_code >= 400
+        assert client.post('/api/design-review/create-queue', json=dict(payload, brief='Different design'), headers=kwargs['headers']).status_code >= 400
+    cur.execute("SELECT * FROM morning_design_jobs WHERE section='create'")
+    rows = cur.fetchall()
+    assert len(rows) == 1
+    expected = queue._job_prompt(first.json()['id'], brief, '**USER-REQUESTED NEW DESIGN**\n' + brief)
+    assert rows[0]['prompt'] == expected
+    job = queue.tick(token, [])['jobs'][0]
+    assert job['kind'] == 'create' and job['prompt'] == expected
+    assert 'one creative image-generation call' in job['prompt']
+    assert 'sport="NBA"' in job['prompt']
+    assert first.json()['id'] in job['prompt']
