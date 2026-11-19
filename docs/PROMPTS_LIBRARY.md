@@ -23,6 +23,8 @@ Tests use synthetic credentials and mocked providers. AppTest mounts only the pr
 
 Account regression check: 80 tests ran with six failures; the same six failures reproduced with the unchanged f6cbb674 app source (legacy account UI, owner-only access assertion, Home UI and Files/upload fixtures). No new account failures identified.
 
-## Entire category view
+## Entire category editor
 
-Each category defaults to Entire prompt · all sections in the prompt selector. An expanded, untruncated full-text dropdown contains every deployed template in that category, with a text download. Individual section dropdowns follow it; select a section in the top selector to use the existing versioned editor. Search filters individual selector choices, never the complete view. The complete view is read-only deployed source, not an executable assembled product prompt or unsaved draft. Runtime placeholders remain visible.
+Each category defaults to Entire prompt - all sections. The full editor and individual section editors share unsaved session buffers in both directions. SECTION and END headings identify each block; leave these headings and every template placeholder intact. Invalid/incomplete combined text remains in the full editor with an error and cannot be saved or activated. Downloads and a full preview remain available, with expandable individual section previews below.
+
+Save draft stores one immutable category version containing the full text and the changed sections with their original source hashes. No live content changes until the saved category version is activated. Activation validates every changed section against current Git, folds multiple changes to the same source file together, then publishes all source files and their individual release manifest entries in one commit and one non-force main update. A conflict prevents the whole release. Existing individual draft histories remain intact; deployed individual editors load the new section text after deployment. The full category view includes all deployed templates, not a product-specific runtime prompt. Search filters selector choices without truncating the entire editor.

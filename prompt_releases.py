@@ -11,7 +11,8 @@ import uuid
 
 import requests
 
-from prompt_library import digest, replace_source, validate_text
+from prompt_library import Prompt, catalog, digest, replace_source, validate_text
+from prompt_bundle import changes, is_bundle
 
 REPO = 'sportscave1/sports-cave-image-factory'
 SERVICE = 'srv-d8kl4on7f7vs73dvavv0'
@@ -74,7 +75,11 @@ class GitStore:
         return result['content']['sha']
 
     def save(self, prompt, text, note, actor, history, expected_sha):
-        validate_text(prompt.text, text)
+        sections = changes(prompt, text, catalog()) if is_bundle(prompt) else None
+        if sections is not None and not sections:
+            raise ValueError('No section changes to save.')
+        if sections is None:
+            validate_text(prompt.text, text)
         rows = history['versions']
         if rows and rows[-1]['text'] == text:
             raise ValueError('This text is already saved. Select its existing version.')
@@ -85,6 +90,8 @@ class GitStore:
         item = {'id': uuid.uuid4().hex, 'version': f'1.{len(rows)}', 'text': text,
                 'base_hash': digest(prompt.text), 'note': str(note)[:1000], 'author': actor,
                 'created_at': datetime.now(timezone.utc).isoformat()}
+        if sections is not None:
+            item['sections'] = sections
         updated = {**history, 'path': prompt.path, 'symbol': prompt.symbol, 'versions': [*rows, item]}
         self.write_history(prompt, updated, expected_sha)
         return item
@@ -102,15 +109,29 @@ class GitStore:
                 or service.get('repo', '').removesuffix('.git') != 'https://github.com/' + REPO):
             raise ReleaseError('The existing Render service does not match the approved release configuration.')
         parent = self.head()
-        source, _ = self.read(prompt.path, parent)
-        changed = replace_source(prompt, source, item['base_hash'], item['text'])
+        sections = item.get('sections') if is_bundle(prompt) else None
+        if is_bundle(prompt) and not sections:
+            raise ReleaseError('Save a new entire-prompt draft before publishing.')
+        entries = sections or [{'path': prompt.path, 'symbol': prompt.symbol, 'key': prompt.key,
+                                'base_hash': item['base_hash'], 'text': item['text']}]
+        sources = {}
+        for entry in entries:
+            path = entry['path']
+            if path not in sources:
+                sources[path], _ = self.read(path, parent)
+            section = Prompt(path, entry['symbol'], prompt.category, '')
+            sources[path] = replace_source(section, sources[path], entry['base_hash'], entry['text'])
         manifest_text, _ = self.read(MANIFEST, parent, missing=True)
         manifest = json.loads(manifest_text) if manifest_text else {}
         manifest[prompt.key] = {'version': item['version'], 'id': item['id'], 'hash': digest(item['text']),
                                 'path': prompt.path, 'symbol': prompt.symbol}
+        for entry in entries:
+            manifest[entry['key']] = {'version': item['version'], 'id': item['id'],
+                'hash': digest(entry['text']), 'path': entry['path'], 'symbol': entry['symbol']}
         parent_commit = self.request('GET', 'git/commits/' + parent)
         tree = self.request('POST', 'git/trees', {'base_tree': parent_commit['tree']['sha'], 'tree': [
-            {'path': prompt.path, 'mode': '100644', 'type': 'blob', 'content': changed},
+            *[{'path': path, 'mode': '100644', 'type': 'blob', 'content': text}
+              for path, text in sources.items()],
             {'path': MANIFEST, 'mode': '100644', 'type': 'blob', 'content': json.dumps(manifest, indent=2)},
         ]})
         commit = self.request('POST', 'git/commits', {'message': f'Activate prompt {prompt.title} v{item["version"]}',
@@ -136,8 +157,11 @@ class GitStore:
                 exact = deploy.get('status')
             if deploy.get('status') == 'live' and sha:
                 text, _ = self.read(MANIFEST, sha, missing=True)
-                active = (json.loads(text) if text else {}).get(prompt.key, {})
-                if active.get('id') == item['id'] and active.get('hash') == digest(item['text']):
+                manifest = json.loads(text) if text else {}
+                active = manifest.get(prompt.key, {})
+                sections_match = all(manifest.get(entry['key'], {}).get('hash') == digest(entry['text'])
+                                     for entry in item.get('sections', []))
+                if sections_match and active.get('id') == item['id'] and active.get('hash') == digest(item['text']):
                     return 'Live'
         if exact in {'build_failed', 'update_failed', 'pre_deploy_failed', 'canceled'}:
             return 'Deployment failed'

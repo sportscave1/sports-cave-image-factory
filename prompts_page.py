@@ -5,6 +5,7 @@ import json
 import os
 
 from prompt_library import ROOT, catalog
+from prompt_bundle import bundle_prompt, combine, is_bundle, split
 from prompt_releases import GitStore, ReleaseError
 
 
@@ -57,10 +58,9 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
     rows = [p for p in category_rows if search.casefold() in (p.title + ' ' + p.text).casefold()]
     key = select_col.selectbox('Prompt library', ['entire'] + [p.key for p in rows],
                        format_func=lambda k: 'Entire prompt · all sections' if k == 'entire' else next(p.title for p in rows if p.key == k), key='prompt-select-' + category, label_visibility='collapsed')
-    if key == 'entire':
-        _entire_category(st, category_rows, category)
-        return
-    prompt = next(p for p in rows if p.key == key)
+    entire = bundle_prompt(category_rows, category)
+    prompt = entire if key == 'entire' else next(p for p in rows if p.key == key)
+    key = prompt.key
     history, history_sha = {'versions': []}, None
     if store.token:
         try:
@@ -86,7 +86,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
     with left:
         with st.container(border=True):
             heading, status = st.columns([4, 1.2], vertical_alignment='center')
-            heading.subheader(prompt.title)
+            heading.subheader(category + ' - Entire prompt' if is_bundle(prompt) else prompt.title)
             badge = (('Release v' if selected.get('commit') else 'Baseline v' if selected.get('baseline') else 'Draft v') + selected['version']) if selected else ('Deployed v' + deployed.get('version', '1.0'))
             status.html('<span class="prompt-badge">' + html.escape(badge) + '</span>')
             edit, preview = st.tabs(['Edit prompt', 'Full prompt preview'])
@@ -95,11 +95,36 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                 buffers = st.session_state.setdefault('prompt-editor-buffers', {})
                 widget_key = 'prompt-text-' + buffer_key
                 def retain_buffer():
-                    st.session_state['prompt-editor-buffers'][buffer_key] = st.session_state[widget_key]
-                text = st.text_area('Prompt instructions', buffers.get(buffer_key, initial), height=460,
+                    value = st.session_state[widget_key]
+                    buffers[buffer_key] = value
+                    try:
+                        if is_bundle(prompt):
+                            values = split(category_rows, value)
+                            for section_key, section_text in values.items():
+                                target = section_key + '-deployed'
+                                buffers[target] = section_text
+                                st.session_state['prompt-text-' + target] = section_text
+                        else:
+                            values = {p.key: buffers.get(p.key + '-deployed', p.text) for p in category_rows}
+                            values[prompt.key] = value
+                            target = entire.key + '-deployed'
+                            buffers[target] = combine(category_rows, values)
+                            st.session_state['prompt-text-' + target] = buffers[target]
+                    except ValueError:
+                        pass  # Keep incomplete edits; validation below explains how to repair them.
+                if is_bundle(prompt):
+                    st.caption('Edit inside each SECTION / END pair; keep those headings and placeholders intact. Changes sync to individual section editors. Save a draft, then activate it to publish all changed sections together.')
+                text = st.text_area('Prompt instructions', buffers.get(buffer_key, initial), height=700 if is_bundle(prompt) else 460,
                                     key=widget_key, on_change=retain_buffer, label_visibility='collapsed')
                 if '\u27easlot:' in text or '{' in text:
                     st.caption('Keep placeholders intact; the app fills them when building each prompt.')
+            valid = True
+            if is_bundle(prompt):
+                try:
+                    split(category_rows, text)
+                except ValueError as exc:
+                    valid = False
+                    st.error(str(exc))
             with preview:
                 st.html('<div class="prompt-preview">' + html.escape(text) + '</div>')
                 st.download_button('Download prompt', text, file_name=prompt.title + '.txt', key='prompt-download-' + key)
@@ -111,14 +136,14 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                 delta = '\n'.join(difflib.unified_diff(before.splitlines(), text.splitlines(), fromfile='Comparison', tofile='Editor', lineterm=''))
                 st.code(delta or 'No changes.', language='diff', wrap_lines=True)
             note = st.text_input('Version note', placeholder='What changed, and why?', key='prompt-note-' + key)
-            if save_action.button('Save draft', key='prompt-save-' + key, use_container_width=True, disabled=not store.token):
+            if save_action.button('Save draft', key='prompt-save-' + key, use_container_width=True, disabled=not store.token or not valid):
                 try:
                     store.save(prompt, text, note, str(user.get('email') or user.get('id')), history, history_sha)
                     st.success('Version saved. Open it in Version history to activate.')
                     st.rerun()
                 except (ReleaseError, ValueError) as exc:
                     st.error(str(exc))
-            can_activate = bool(selected and store.token and store.render_token and text == initial
+            can_activate = bool(valid and selected and store.token and store.render_token and text == initial
                                 and not selected.get('commit') and not selected.get('baseline'))
             if activate_action.button('Activate version', type='primary', key='prompt-activate-' + key,
                                    use_container_width=True, disabled=not can_activate):
@@ -142,22 +167,15 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                     st.caption(selected['note'])
                 if selected.get('commit'):
                     _deployment(st, store, prompt, selected)
+            if is_bundle(prompt) and valid:
+                st.subheader('Individual sections')
+                values = split(category_rows, text)
+                for section in category_rows:
+                    with st.expander(section.title):
+                        st.html('<div class="prompt-preview">' + html.escape(values[section.key]) + '</div>')
             with st.expander('Source & template details'):
                 st.code(prompt.path + (':' + prompt.symbol if prompt.symbol else ''), language=None)
                 st.caption('Editing template text cannot change Python interpolation expressions. Activation rejects stale prompt content and concurrent Git changes.')
-
-
-def _entire_category(st, prompts, category):
-    st.subheader(category + ' · Entire prompt')
-    st.caption('All deployed templates and instruction sections in this category. Product-specific values are filled in when a prompt runs. Select an individual section above to edit or view its versions.')
-    combined = '\n\n'.join(p.title + '\n' + ('─' * len(p.title)) + '\n' + p.text for p in prompts)
-    with st.expander('Entire prompt · all sections', expanded=True):
-        st.html('<div class="prompt-preview">' + html.escape(combined) + '</div>')
-        st.download_button('Download entire prompt', combined, file_name=category.lower() + '-entire-prompt.txt', key='prompt-entire-download-' + category)
-    st.subheader('Individual sections')
-    for prompt in prompts:
-        with st.expander(prompt.title):
-            st.html('<div class="prompt-preview">' + html.escape(prompt.text) + '</div>')
 
 
 def _deployment(st, store, prompt, selected):

@@ -19,7 +19,7 @@ class PageTests(unittest.TestCase):
             self.assertFalse(page.exception)
             self.assertEqual([t.label for t in page.tabs][:1], ['Design'])
             self.assertTrue({'Design', 'Upload', 'Ads'}.issubset({t.label for t in page.tabs}))
-            if not page.text_area:
+            if page.selectbox[0].value == 'entire':
                 picker = next(s for s in page.selectbox if s.label == 'Prompt library')
                 picker.set_value(next(p.key for p in catalog() if p.category == page.session_state['prompt-category'])).run()
             self.assertEqual(len(page.text_area), 1)
@@ -70,11 +70,28 @@ class PageTests(unittest.TestCase):
                 page = AppTest.from_string(source, default_timeout=30).run()
                 self.assertFalse(page.exception)
                 rows = [p for p in catalog() if p.category == category]
-                self.assertEqual([e.label for e in page.expander], ['Entire prompt · all sections'] + [p.title for p in rows])
-                self.assertEqual(len(page.text_area), 0)
-                self.assertFalse(any(b.label == 'Activate version' for b in page.button))
+                self.assertEqual([e.label for e in page.expander], [p.title for p in rows] + ['Source & template details'])
+                self.assertEqual(len(page.text_area), 1)
+                self.assertTrue(next(b for b in page.button if b.label == 'Activate version').disabled)
                 page.text_input[0].set_value('no matches xyz').run()
                 self.assertEqual(len(page.expander), len(rows) + 1)
+
+    def test_entire_edits_sync_both_directions_and_reject_broken_boundaries(self):
+        from prompt_bundle import combine, split
+        rows = [p for p in catalog() if p.category == 'Upload']
+        source = "import streamlit as st\nfrom prompts_page import _category\nfrom prompt_library import catalog\nfrom unittest.mock import Mock\n_category(st, Mock(token=''), catalog(), 'Upload', {}, st.empty(), st.empty())"
+        page = AppTest.from_string(source, default_timeout=30).run()
+        edited = combine(rows, {rows[0].key: rows[0].text + '\nFull view change'})
+        page.text_area[0].set_value(edited).run()
+        self.assertFalse(page.exception)
+        page.selectbox[0].set_value(rows[0].key).run()
+        self.assertEqual(page.text_area[0].value, rows[0].text + '\nFull view change')
+        page.text_area[0].set_value(rows[0].text + '\nSection view change').run()
+        page.selectbox[0].set_value('entire').run()
+        self.assertEqual(split(rows, page.text_area[0].value)[rows[0].key], rows[0].text + '\nSection view change')
+        page.text_area[0].set_value('Missing all headings').run()
+        self.assertTrue(page.error)
+        self.assertTrue(next(b for b in page.button if b.label == 'Save draft').disabled)
 
     def test_unauthorised_user_cannot_open_editor(self):
         accounts = types.ModuleType('os_accounts')
