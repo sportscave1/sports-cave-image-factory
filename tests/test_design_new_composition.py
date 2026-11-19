@@ -23,7 +23,7 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert 'For an event-specific design, supporting photographs must belong to that verified event.' in prompt
     assert 'select the strongest hero using the existing best-image rules' in prompt
     assert 'Run a focused search for that complementary photograph' in prompt
-    assert 'Use a supporting photograph only when it adds meaning and remains subordinate to the hero.' in prompt
+    assert 'Make a meaningful supporting photograph the default: it must add a distinct story beat and remain subordinate to the hero.' in prompt
     assert 'continue with the hero and verified setting' in prompt
     assert 'Include the hero and selected secondary source with its distinct story role' in prompt
     assert "start with the supporting face smaller than the hero's face" in prompt
@@ -88,7 +88,8 @@ def test_layout_review_precedes_only_generation_and_final_handoff():
 
 def test_venue_and_master_fallbacks_preserve_forward_flow():
     prompt = _prompt('Collector', 'Verified story')
-    assert prompt.count('Where a verified venue view is available') >= 3
+    assert 'Test the strongest usable verified feature in the existing layout review before fallback' in prompt
+    assert 'This fallback is for a genuine source limitation' in prompt
     assert 'abstract fallback makes no claim to depict the actual venue' in prompt
     assert 'otherwise use verified dimensions and a reserved plaque footprint' in prompt
     assert 'review the reserved footprint provisionally and run them once the master is available, before saving the final PSD' in prompt
@@ -140,12 +141,12 @@ def test_dark_arena_direction_survives_prompt_assembly_and_finishing():
     generation, rest = rest.split('**4.', 1)
     finishing, saving = rest.split('**5.', 1)
     assert 'For hockey and NBA, retain the chosen venue feature and placement' in research
-    assert prompt.count('**HOCKEY AND NBA — DARK ABSTRACT COLLECTOR DIRECTION**') == 1
-    assert 'greater visual presence than the subdued arena layer' in layout
+    assert prompt.count('**HOCKEY AND BASKETBALL — DARK ABSTRACT COLLECTOR DIRECTION**') == 1
+    assert 'never bury it under abstraction or flatten it into featureless black' in layout
     assert 'selected venue feature retained subtly in place' in generation
     assert 'predominantly dark abstract setting, sparse team-colour marks' in finishing
-    assert 'retaining the reviewed dark abstract hierarchy and subdued venue' in saving
-    assert 'For sports other than hockey and NBA' in layout
+    assert 'retaining the reviewed dark abstract hierarchy and recognisable subdued venue' in saving
+    assert 'For sports other than hockey and basketball' in layout
     assert 'fine brushed antique-gold edges or inlays' in layout
     assert 'fine brushed antique-gold contours or inlays' in generation
     assert 'fine antique-gold detail defines the abstract forms' in finishing
@@ -243,3 +244,40 @@ def test_rivalry_direction_survives_all_shared_stages_and_queue_upgrade():
     upgraded_search = queue._waiting_prompt(old_search)
     assert POSTER_IMAGE_SELECTION in upgraded_search and brief in upgraded_search
     assert queue._receipt(old_search) == queue._receipt(dict(old_search, prompt=upgraded_search))
+
+
+def test_integrated_collector_contract_survives_all_flows_and_waiting_snapshots():
+    from home_design_refresh import _refresh_prompt
+    variants = lambda: [
+        _prompt("Collector", "Verified story"),
+        _refresh_prompt(dict(title="Approved edition", product_id="123"), "https://example.test/edition"),
+        _prompt("Collector", "Improve integration", edit={"source": {"id": "id:source", "rev": "r1", "path_display": "/Review/Collector.psd"}, "metadata": {"upload_intent": "new_product"}}),
+    ]
+    from design_collector_background import NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND
+    from design_new_composition import CREATIVE_REVIEW
+    import morning_design_queue as queue
+
+    blocks = (COMPLETE_COMPOSITION, NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND,
+              NEW_BADGE_LAYOUT, CREATIVE_REVIEW, REVIEW_RELATIONSHIPS)
+    for prompt in variants():
+        for block in blocks:
+            assert prompt.count(block) == 1
+        assert 'generic hoop or anonymous court does not identify an arena' in prompt
+        assert 'do not retain a weak relationship merely because it matches the recorded or master transform' in prompt
+        assert 'Do not restore an incomplete generation over those verified collector-composition corrections' in prompt
+        assert 'one creative image-generation call' in prompt
+        assert 'matching JSON and final display' in prompt
+        for obsolete in ('greater visual presence than the subdued arena layer',
+                         'before placing the title, border or plaque',
+                         'Restore the recorded transform during final assembly and adjust only a named placement defect'):
+            assert obsolete not in prompt
+
+    key = queue.identity('2026-11-19', 'recommendations', {'title': 'Collector'})
+    current = queue._job_prompt(key, 'Collector', 'Keep the verified story.')
+    for block in blocks:
+        saved = dict(id=key, title='Collector', prompt=current.replace(block, 'Obsolete collector guidance.'))
+        upgraded = queue._waiting_prompt(saved)
+        assert all(rule in upgraded for rule in blocks)
+        assert 'Keep the verified story.' in upgraded
+        assert queue._receipt(saved) == queue._receipt(dict(saved, prompt=upgraded))
+        assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded

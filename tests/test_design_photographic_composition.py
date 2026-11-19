@@ -27,7 +27,8 @@ def test_crop_generation_repair_and_review_are_integrated_in_existing_stages(pro
     finishing, save = rest.split('**5.', 1)
     assert 'visibly watermarked stock preview or agency comp' in research
     assert layout.count(STORY_FIRST_CROP) == 1
-    assert 'Fit that photographic composition to the actual master canvas before placing the title' in layout
+    assert 'Compose the hero, meaningful supporting moment, verified venue feature' in layout
+    assert 'source fidelity does not lock the original background' in research
     assert 'both interacting bodies and the space between them' in layout
     assert 'genuine foreshortening, natural motion blur' in layout
     assert 'not optional background imagery to shrink, fade or omit' in layout

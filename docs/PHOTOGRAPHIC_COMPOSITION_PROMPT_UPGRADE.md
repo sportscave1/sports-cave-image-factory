@@ -13,8 +13,8 @@ template before editing. Preserve the existing workflow and delivery rules.
 
 - Research: verify useful original detail and select clean final-use sources.
   Short Find Images prompts now carry the defining crop and physical interaction.
-- Layout: identify the detail worth owning; fit the photographic unit to the
-  master before type and plaque. Keep real spacing, overlap, camera perspective,
+- Layout: identify the detail worth owning; preserve the photographic unit while composing it with
+  the venue, abstraction, type, plaque footprint and border on the master. Keep real spacing, overlap, camera perspective,
   foreshortening and motion blur. Primary action participants outrank optional
   supporting-photo and forced face-off defaults.
 - Generation: include the photographed people and their interaction in the
@@ -60,3 +60,29 @@ The complete rendered New Design prompt is in
 
 Prompt instructions improve decisions and make defects explicit; they do not
 establish that uninspected artwork has perfect likeness or print quality.
+
+
+## Integrated collector reconciliation — 19 November 2026
+
+The shared New Design, Refresh and Edit renderer now composes the verified
+photographic unit, recognisable venue, meaningful supporting moment, restrained
+source-derived abstraction, gold title, original plaque footprint and collector
+border together in stage 2. Dark grading must retain a source-matchable venue;
+a generic hoop is insufficient. Supporting imagery is the default for individual
+tributes, with documented source/story exceptions and the existing depiction cap.
+Genuine shared interactions and rivalry pairs remain primary photographic units.
+
+Refresh preserves exact edition words, quotation and sporting story, while its
+layout and master plaque transform remain open to improvement. Edit applies the
+same direction within the user's scope and explicit locks. The official plaque
+and editable number stay excluded from generation and are restored as original
+assets. Missing selected collector elements and detached title–badge placement
+are named local finishing defects; preserving generation 1 must not undo repairs.
+
+These directions replace photo-first layout, dominant abstraction that hides the
+venue, easy omission and transform-preservation defaults. They retain source
+truth, signature rules, print requirements, existing six stages, one creative
+generation and verified PSD/JSON Review delivery. No new approval or generation
+is introduced. Unclaimed New Design snapshots refresh when any shared collector
+block is stale, preserving job receipts; selected-revision Edit snapshots and
+running jobs retain their established ownership behavior.
