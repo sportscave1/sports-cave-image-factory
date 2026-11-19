@@ -421,7 +421,7 @@ def tick(token, events):
             source = result['source']
             cur.execute('''UPDATE morning_design_jobs SET stage=%s,file_id=%s,file_rev=%s,file_path=%s,
                 message=%s,updated_at=CASE WHEN stage<>%s THEN now() ELSE updated_at END
-                WHERE id=%s AND (stage BETWEEN 1 AND 3 OR (stage=5 AND (%s=4 OR file_id='')))''',
+                WHERE id=%s AND (stage BETWEEN 1 AND 3 OR (stage=5 AND (%s=4 OR file_path='')))''',
                 (result['stage'], source['id'], source['rev'], source['path_display'], result['message'], result['stage'], key, result['stage']))
         for event in events:
             try:
@@ -429,6 +429,8 @@ def tick(token, events):
             except ValueError:
                 continue
             state = event.get('state')
+            from design_queue_watchdog import observe
+            observe(cur,key,event)
             stage = 2 if state == 'submitted' else 5 if state in ('failed', 'uncertain', 'blocked') else None
             if stage is None:
                 continue
@@ -442,7 +444,8 @@ def tick(token, events):
                 (stage, str(event.get('reason') or '')[:1600], chat, chat, key, stage))
         cur.execute('''UPDATE morning_design_jobs SET stage=5,
             message='Timed out. Inspect the saved ChatGPT conversation and Review folder; Queue continues; automatic resubmission is disabled.',
-            updated_at=now() WHERE stage BETWEEN 1 AND 3 AND updated_at < now()-interval '3 hours' ''')
+            updated_at=now() WHERE (stage=1 AND updated_at < now()-interval '5 minutes')
+                OR (stage BETWEEN 2 AND 3 AND updated_at < now()-interval '90 minutes') ''')
         discover(cur)
         cur.execute('SELECT enabled FROM morning_design_control WHERE singleton')
         enabled = cur.fetchone()['enabled']

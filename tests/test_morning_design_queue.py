@@ -44,6 +44,36 @@ def publish(cur, day='2026-11-17', count=5):
     return edition
 
 
+@pytest.mark.parametrize('finished,minutes',[(True,6),(False,31)])
+def test_stalled_design_releases_slot_without_resending_and_accepts_late_receipt(store,monkeypatch,finished,minutes):
+    cur,token=store;publish(cur,count=2)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    cur.execute("UPDATE morning_design_jobs SET updated_at=now()-(%s * interval '1 minute') WHERE id=%s",(minutes,first['id']))
+    event=dict(id=first['id'],state='submitted',activity='unchanged',finished=finished,generating=not finished)
+    next_job=queue.tick(token,[event])['jobs'][0]
+    assert next_job['id']!=first['id']
+    cur.execute('SELECT stage,message FROM morning_design_jobs WHERE id=%s',(first['id'],))
+    stopped=cur.fetchone();assert stopped['stage']==5 and 'Queue continues' in stopped['message']
+    assert queue.tick(token,[event])['jobs'][0]['id']==next_job['id']
+    # Late delivery with review warnings is still reconciled, including edit jobs
+    # that already store their original source ID before dispatch.
+    cur.execute("UPDATE morning_design_jobs SET file_id='id:original' WHERE id=%s",(first['id'],))
+    monkeypatch.setattr(queue,'verify_outputs',lambda _: {first['id']:dict(stage=5,message='Delivered; review needed',source=dict(id='id:original',rev='new',path_display='/Review/Final.psd'))})
+    queue.tick(token,[])
+    cur.execute('SELECT file_rev,file_path FROM morning_design_jobs WHERE id=%s',(first['id'],))
+    assert cur.fetchone()['file_rev']=='new'
+
+
+def test_fresh_activity_keeps_slot_and_finished_response_has_grace(store):
+    cur,token=store;publish(cur,count=2)
+    first=queue.tick(token,[])['jobs'][0]
+    queue.tick(token,[dict(id=first['id'],state='submitted')])
+    assert queue.tick(token,[dict(id=first['id'],state='submitted',activity='one',finished=False,generating=True)])['jobs'][0]['id']==first['id']
+    cur.execute("UPDATE app_settings SET value=jsonb_set(value,'{changed_at}',to_jsonb(extract(epoch from now())-1900)) WHERE key=%s",('design_queue_progress:'+first['id'],))
+    assert queue.tick(token,[dict(id=first['id'],state='submitted',activity='two',finished=True,generating=False)])['jobs'][0]['id']==first['id']
+
+
 def test_review_edit_apply_is_idempotent_and_keeps_prompt_unchanged(store,monkeypatch):
     from unittest.mock import AsyncMock
     from types import SimpleNamespace
