@@ -30,16 +30,19 @@ def select(refs, result, *, client, saved=None):
 
     explicit = saved or result.get('posting_settings') or {}
     product_sets = sorted(refs.get('product_sets') or [], key=lambda row: str(row.get('id','')))
-    selected_set = str(explicit.get('product_set_id') or '')
-    ranked = rank_relevant_meta_options(product_sets, product_title=result['product_name'],
-        sport=result['category'], show_all=True)['all_options']
-    sport_terms, title_terms = extract_relevance_terms(result['product_name'], result['category'])
-    identity_terms = set(title_terms)-sport_terms
-    ranked.sort(key=lambda row: -len(identity_terms & set(tokens(row.get('name')))))
-    if selected_set:
-        ranked = [row for row in ranked if str(row['id']) == selected_set]
-        if not ranked:
-            raise ValueError('The selected product set is no longer in the configured catalog.')
+    from sports_categories import normalize_sport_category
+    sport = normalize_sport_category(result['category'])
+    # Collection labels, not athlete/team relevance, determine the catalogue.
+    # Prefer the canonical wall-art title, accepting exact taxonomy aliases.
+    ranked = [row for row in product_sets
+              if sport and normalize_sport_category(row.get('name')) == sport]
+    canonical_name = ' '.join(tokens(sport + ' Wall Art'))
+    ranked.sort(key=lambda row: (
+        ' '.join(tokens(row.get('name'))) != canonical_name,
+        not ' '.join(tokens(row.get('name'))).endswith('wall art'),
+    ))
+    if not ranked:
+        raise CatalogPending(f'Meta has not yet confirmed the {sport or result["category"]} Wall Art collection.')
     chosen = None
     for row in ranked:
         try:
@@ -56,7 +59,7 @@ def select(refs, result, *, client, saved=None):
             chosen = row
             break
     if not chosen:
-        raise CatalogPending('Meta has not yet confirmed this product in an eligible product set.')
+        raise CatalogPending(f'Meta has not yet confirmed this product in the {sport} Wall Art collection.')
     country = posting.COUNTRY_META_CODES[canonical_posting_country(result['country'])]
     audiences = posting._audience_options(refs)
     saved_geo = {str(row['id']): (row.get('targeting') or {}).get('geo_locations') or {}

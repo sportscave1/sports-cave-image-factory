@@ -59,6 +59,9 @@ def test_quick_add_uses_ads_defaults_and_deduplicates_retry(queued_store,monkeyp
     assert first['id']==second['id']
     assert len(ads.dashboard()['jobs'])==1
     assert ads.dashboard()['jobs'][0]['country']=='Canada'
+    third=quick.enqueue(USER,{**body,'request_id':str(uuid4())})
+    assert third['id']!=first['id']
+    assert len(ads.dashboard()['jobs'])==2
     with pytest.raises(ValueError):quick.enqueue(USER,{**body,'type':'Carousel'})
     with pytest.raises(ValueError):quick.enqueue(USER,{**body,'country':'UK'})
 

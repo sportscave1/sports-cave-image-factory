@@ -1345,7 +1345,13 @@
     };
     adProduct.addEventListener('focus',showProducts,listenerOptions);
     adProduct.addEventListener('click',showProducts,listenerOptions);
-    adProduct.addEventListener('blur',closeProducts,listenerOptions);
+    adProduct.addEventListener('blur',event=>{
+      // Keep the button stationary between pointer-down and click.
+      if(!root.querySelector('#sc-ad-form').contains(event.relatedTarget))closeProducts();
+    },listenerOptions);
+    root.querySelector('#sc-ad-form').addEventListener('click',event=>{
+      if(event.target!==adProduct&&!adList.contains(event.target))closeProducts();
+    },listenerOptions);
     adProduct.addEventListener('keydown',event=>{
       if(event.key==='Escape'&&!adList.hidden){event.preventDefault();event.stopPropagation();closeProducts();return;}
       if(event.key==='ArrowDown'||event.key==='ArrowUp'){
@@ -1376,17 +1382,20 @@
     for(const name of ['sport','country','type'])root.querySelector('#sc-ad-'+name).addEventListener('change',()=>{adRequest='';},listenerOptions);
     root.querySelector('#sc-ad-form').addEventListener('submit',async event=>{
       event.preventDefault();const scope=state.config.uploadScope;
-      const matches=adProducts.filter(p=>p.id===adSelected&&p.name===adProduct.value);
+      const matches=adProducts.filter(p=>adSelected ? p.id===adSelected&&p.name===adProduct.value : p.name===adProduct.value.trim());
       if(matches.length!==1){adMessage.textContent='Select one product from the list.';return;}
       const button=root.querySelector('#sc-ad-submit');if(button.disabled)return;button.disabled=true;
-      adRequest=adRequest||parentWindow.crypto.randomUUID();
+      adMessage.textContent='Adding to Ads queue…';
+      button.textContent='Adding…';
       try {
+        adRequest=adRequest||parentWindow.crypto.randomUUID();
         const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({product:matches[0].id,country:root.querySelector('#sc-ad-country').value,sport:root.querySelector('#sc-ad-sport').value,type:root.querySelector('#sc-ad-type').value,request_id:adRequest})});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Could not add ad');
         if(scope!==state.config.uploadScope)return;
+        adRequest=''; // A confirmed add completes this request; the next click is a new job.
         adMessage.textContent='Added to Ads queue';await refreshStaffProgress(false);
       }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
-      finally{button.disabled=false;}
+      finally{button.disabled=false;button.textContent='Add to queue';}
     },listenerOptions);
     let queueRevision = 0;
     const pendingQueues = new Set();

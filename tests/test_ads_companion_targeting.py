@@ -22,7 +22,8 @@ def test_membership_and_closest_market_audience():
     assert not contains_product([dict(retailer_id='shopify_US_1234_456')],result)
     assert not contains_product([dict(url='https://evil.example/products/joe-namath')],result)
     client.product_set_members=lambda key, **kwargs:[] if key=='2' else [dict(url=result['product_url'])]
-    assert select(refs,result,client=client)['product_set_id']=='1'
+    with pytest.raises(ValueError,match='NFL Wall Art'):
+        select(refs,result,client=client)
     client.product_set_members=lambda key, **kwargs:[]
     with pytest.raises(ValueError,match='confirmed this product'):select(refs,result,client=client)
 
@@ -35,7 +36,7 @@ def test_prefilled_broad_is_fallback_explicit_broad_is_preserved_and_saved_reval
     selected=select(refs,result,client=client)
     assert selected['audience']['key']=='broad'
     selected['product_set_id']='missing'
-    with pytest.raises(ValueError,match='no longer'):select(refs,result,client=client,saved=selected)
+    assert select(refs,result,client=client,saved=selected)['product_set_id']=='2'
     result['posting_settings']=dict(audience={'key':'saved:12'},audience_explicit=True)
     with pytest.raises(ValueError,match='market'):select(refs,result,client=client)
 
@@ -47,10 +48,10 @@ def test_wrong_country_lookalike_does_not_displace_broad():
     assert select(refs,result,client=client)['audience']['key']=='broad'
 
 
-def test_specific_team_product_set_precedes_generic_league():
+def test_sport_wall_art_precedes_specific_team():
     result,refs,client=fixture()
     refs['product_sets'].append(dict(id='3',name='New York Jets Wall Art'))
-    assert select(refs,result,client=client)['product_set_id']=='3'
+    assert select(refs,result,client=client)['product_set_id']=='2'
 
 
 def test_membership_uses_minimal_read_and_capability_denial_is_actionable(monkeypatch):
@@ -77,3 +78,22 @@ def test_membership_uses_minimal_read_and_capability_denial_is_actionable(monkey
     monkeypatch.setattr(meta,'_paged_get',transient)
     with pytest.raises(meta.MetaAdsApiError):
         select(refs,result,client=actual)
+
+
+@pytest.mark.parametrize('category,name', [('NBA','NBA Wall Art'),('Basketball','NBA Wall Art'),
+    ('Soccer','Football Wall Art'),('NFL','NFL Wall Art'),('Formula 1','Formula One Wall Art'),
+    ('NRL','Rugby League Wall Art'),('NHL','Ice Hockey Wall Art')])
+def test_selected_sport_wins_over_title_and_stale_saved_set(category,name):
+    result,refs,client=fixture()
+    result.update(category=category,product_name='Legends Never Die Jordan vs Bryant')
+    refs['product_sets']=[dict(id='wrong',name='Jordan vs Bryant Wall Art'),dict(id='sport',name=name)]
+    result['posting_settings']={'product_set_id':'wrong'}
+    assert select(refs,result,client=client)['product_set_id']=='sport'
+    assert select(refs,result,client=client,saved={'product_set_id':'wrong'})['product_set_id']=='sport'
+
+
+def test_missing_sport_collection_never_falls_back_to_other_sport():
+    result,refs,client=fixture()
+    result['category']='NBA'
+    with pytest.raises(ValueError,match='NBA Wall Art'):
+        select(refs,result,client=client)

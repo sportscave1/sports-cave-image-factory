@@ -70,6 +70,7 @@ def render():
                     enqueue(current_ads_user(),dict(product=product,sport=sport,country=country,type=kind,request_id=st.session_state['cq-ad-request']))
                     from companion_display import invalidate
                     invalidate()
+                    st.session_state['cq-ad-request']=str(uuid4())
                     st.success('Added to Ads queue.')
                 except (ValueError,PermissionError) as error:st.error(str(error))
 
