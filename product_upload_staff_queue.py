@@ -49,12 +49,13 @@ def list_jobs(actor=None, *, display_only=False):
     with (read_connection(connect) if display_only else connect()) as conn, conn.cursor() as cur:
         if actor is None:
             cur.execute('''SELECT * FROM product_upload_staff_jobs
-                ORDER BY (stage < 6) DESC, updated_at DESC LIMIT 20''')
+                ORDER BY (stage BETWEEN 1 AND 5) DESC, (stage = 0) DESC,
+                    (stage = 6) DESC, updated_at DESC LIMIT 20''')
         else:
             cur.execute('''SELECT j.* FROM product_upload_staff_requests r
                 JOIN product_upload_staff_jobs j ON j.id=r.job_id WHERE r.requester=%s
                 ORDER BY (j.stage BETWEEN 1 AND 5) DESC, (j.stage = 0) DESC,
-                j.updated_at DESC LIMIT 20''', (actor,))
+                (j.stage = 6) DESC, j.updated_at DESC LIMIT 20''', (actor,))
         rows = cur.fetchall()
         # Status remains truthful even when the desktop is disconnected.
         for row in rows:
@@ -74,7 +75,8 @@ def list_jobs(actor=None, *, display_only=False):
             for job in jobs:
                 if job['id'] in ads:
                     job['ad'] = ads[job['id']]
-            jobs.sort(key=lambda job: job['stage'] >= 6 and not (job.get('ad') or {}).get('active'))
+            # Upload order must not change while a completed upload's ad waits
+            # for Meta. The independent Ads panel owns that unfinished work.
         cur.execute('SELECT seen_at FROM product_upload_desktop WHERE singleton')
         desktop = cur.fetchone()
     online = bool(desktop and desktop['seen_at'] and

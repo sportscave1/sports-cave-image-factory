@@ -44,6 +44,21 @@ def test_initial_failure_recovery_remount_and_identity(tmp_path):
             page.clock.fast_forward(4100)
             expect(page.locator('#sc-os-design-title')).to_have_text('Alice design')
             assert status['requests'] == 2
+            # Older completed upload with unfinished ads cannot pin Uploads.
+            payload['jobs']=[dict(id='greek',title='Greek Freak',stage=6,label='Published and PSD mapped',percent=100,
+                updated_at='2026-11-18T05:27:00Z',ad=dict(active=True,label='Waiting for catalogue')),
+                dict(id='new',title='True Blue',stage=6,label='Published and PSD mapped',percent=100,updated_at='2026-11-18T21:16:00Z')]
+            payload['queues']['ads']['jobs']=[dict(id='greek-ad',title='Greek Freak ad',state='running',label='Waiting for catalogue',percent=40)]
+            page.clock.fast_forward(2100)
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('True Blue')
+            expect(page.locator('#sc-os-ads-title')).to_have_text('Greek Freak ad')
+            payload['jobs'].append(dict(id='current',title='Bound in Gold',stage=2,label='Generating mockups',percent=34))
+            page.clock.fast_forward(2100)
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Bound in Gold')
+            payload['jobs'][-1].update(stage=6,label='Published and PSD mapped',percent=100,updated_at='2026-11-19T03:00:00Z')
+            page.clock.fast_forward(2100)
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Bound in Gold')
+            expect(page.locator('#sc-os-ads-title')).to_have_text('Greek Freak ad')
             status['fail'] = True
             # Reinstall exactly as a Streamlit iframe rerun does.
             page.evaluate(script)

@@ -34,6 +34,25 @@ def test_header_display_does_not_reconcile_or_write_stalled_jobs(store):
         assert cur.fetchone()['stage'] == 4
 
 
+def test_upload_order_ignores_pending_ads_and_prefers_latest_completion(store):
+    import design_publish_ad
+    old=submit('staff','old');recent=submit('staff','recent');failed=submit('staff','failed')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=6,updated_at=now()-interval '1 day' WHERE id=%s",(old,))
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=6,updated_at=now()-interval '1 hour' WHERE id=%s",(recent,))
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=7 WHERE id=%s",(failed,))
+        cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',
+            (design_publish_ad.PREFIX+str(old),json.dumps(dict(upload=str(old),stage='generating'))))
+    for actor in (None,'staff'):
+        rows=queue.list_jobs(actor,display_only=True)['jobs']
+        assert [r['id'] for r in rows]==[str(recent),str(old),str(failed)]
+        assert rows[1]['ad']['active']
+    current=submit('staff','current')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=2 WHERE id=%s',(current,))
+    assert queue.list_jobs(display_only=True)['jobs'][0]['id']==str(current)
+
+
 def test_offline_requests_are_durable_private_and_claimed_once(store, monkeypatch):
     first = submit('staff-one')
     assert submit('staff-two') == first
