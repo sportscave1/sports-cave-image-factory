@@ -1,5 +1,7 @@
 # Original Ads prompt restoration — 20 November 2026
 
+Historical release note: superseded by ADS_BASELINE_RELEASE_2026_11_20.md. The active version is now v1.0 Baseline with three footer lines.
+
 Task/owner: codex/ads-footer-reference-typography (this Codex session). Existing user-assigned worktree retained; it has no Studio registry task ID, so no other task record was changed.
 
 Explicit authorization: restore the attached original Ads bundle, change only the footer style, and push to Git/Render. User confirmed two lines rather than the original supporting/FOMO row.

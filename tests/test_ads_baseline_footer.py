@@ -1,4 +1,4 @@
-"""Offline regressions for Lewis footer export and unchanged Companion contracts."""
+"""Offline regressions for Baseline footer export and unchanged Companion contracts."""
 import copy
 import pytest
 import ads_page as ads
@@ -9,49 +9,44 @@ import design_publish_ad as companion
 @pytest.mark.parametrize('country', ['USA','Australia','UK','Canada','New Zealand'])
 @pytest.mark.parametrize('product,sport', [('Legends Never Die - Kobe vs Jordan Wall Art','NBA'),
                                           ('Silver & Soul - Lewis Hamilton Wall Art','Formula One')])
-def test_two_line_export_has_no_conflicting_directions(country,product,sport):
+def test_three_line_export_has_no_conflicting_directions(country,product,sport):
     record=ads.build_ads_result_record(product,sport,country,'Instant Experience',variation_token='footer-test')
     prompt=record['master_prompt']
-    for old in ('SUPPORTING LINE:', 'use each image’s exact resolved supporting sentence',
-                'Render the assigned supporting line directly below the headline',
-                'Use only the exact resolved headline, supporting line and fixed CTA',
-                'FINAL COMPOSITOR DATA', 'y = 815', 'native 1024 × 209', 'Use no underline', '100 unadorned', '100 in antique gold with no underline',
-                'Allow the foreground copy to sit over it', 'x = 512', 'Compare the middle line',
-                'clean Montserrat sans serif', 'medium-weight sans serif', 'headline 42–48 px',
-                '0.04–0.06 em', 'sole typography specification for every image and pack',
-                'three centred lines', 'all three lines remain readable', 'distinct supporting lines in every set'):
-        assert old not in prompt
-    for required in ('approximately 18–20%', 'visual design reference only', 'LEFT of the badge', 'underline ONLY those three digits',
-                     'ITALIC serif headline', 'upright classical SERIF capitals', '0.35–0.45 em',
-                     'REFERENCE-LOCKED TYPOGRAPHY', 'project source/Assets',
-                     'Render no supporting sentence', 'same finished ad', 'never a button',
-                     'do not paste, composite, embed or place that file', 'Generate the complete ad'):
-        assert required in prompt
+    for old in ('Render no supporting sentence', 'render no supporting sentence',
+                'no supporting sentence or FOMO row', 'Exactly two lines',
+                'exactly two footer lines', 'No supporting sentence or third line',
+                'a supporting sentence or third footer line appears', 'FINAL COMPOSITOR DATA',
+                'REFERENCE-LOCKED FOOTER V5'):
+        assert old not in prompt, old
+    for required in ('approximately 18–20%', 'Render exactly three lines',
+                     '42–48 px headline', '26–28 px CTA', 'Montserrat Regular',
+                     'gold shimmer', 'top separator in place'):
+        assert required in prompt, required
     assert prompt.count('\nHEADLINE: ')==3
     assert prompt.count('\nCTA: CLAIM YOUR EDITION')==3
     assert prompt.index('4. Immediately generate Image 3') < prompt.index('4b. Complete the final creative review') < prompt.index('5. Create and attach')
     for row in record['product_metadata']['instant_experience_footer_selections']:
         assert 'HEADLINE: '+row['headline_text'] in prompt
-        assert row['supporting_line'] not in prompt
+        assert 'SUPPORTING LINE: ' + row['supporting_line'] in prompt
     delivered=companion.delivery_prompt(record,'fixture reference','/fixture','fixture-job')
     assert 'SC_AD_READY: fixture-job' in delivered and 'SC_AD_BLOCKED:' in delivered
     assert 'Keep the current CSV format. Do not add image URLs to the CSV.' in delivered
     for name in ('ad_copy.csv',*companion.COVERS.values()):assert '/fixture/'+name in delivered
 
 
-def test_image_call_receives_reference_style_and_exact_two_line_copy():
+def test_image_call_receives_exact_three_line_copy():
     shared = ads.build_instant_experience_shared_template()
     assert COMPACT_FOOTER_RULES in shared
-    assert 'visual design reference only' in shared
+    assert 'Render exactly three lines' in shared
     rows = ads.resolve_standard_instant_experience_visuals(product_name='Legends Never Die', category='NBA', country='USA', variation_token='footer-test')
     for index, row in enumerate(rows, 1):
         brief = ads.build_instant_experience_execution_image_brief(index, row)
         assert 'IMAGE GENERATION PROMPT' in brief
         assert 'HEADLINE: ' + row['headline_text'] in brief
         assert 'CTA: CLAIM YOUR EDITION' in brief
-        assert row['supporting_line'] not in brief
+        assert 'SUPPORTING LINE: ' + row['supporting_line'] in brief
         standalone = ads.build_standard_instant_experience_image_prompt(index, row, product_name='Legends Never Die', category='NBA', country='USA')
-        assert 'SUPPORTING LINE:' not in standalone
+        assert 'SUPPORTING LINE: ' + row['supporting_line'] in standalone
         assert 'COMPOSITOR DATA' not in standalone
         assert COMPACT_FOOTER_RULES in standalone
 
@@ -74,3 +69,27 @@ def test_seasonal_prompt_cannot_restore_third_footer_line(country):
     prompt = ads.build_ads_prompt('Synthetic Collector Edition', 'Cricket', country,
                                  'Instant Experience', product_metadata={'edition_limit': 100})
     assert build_black_friday_prompt(prompt) == prompt
+
+
+def test_baseline_sections_and_live_receipt():
+    import json
+    from pathlib import Path
+    from prompt_library import catalog, digest
+    from prompt_bundle import bundle_prompt
+    original = json.loads(Path('tests/fixtures/ads_v1_baseline_hashes.json').read_text())
+    allowed = {'e4c95a923482686ea19136c3', '3cb795b06730af64f234ddc9',
+               '29739817000c06f922bc9c1b', '3ee6646ef382cd48773bc7ae',
+               'd9d02cb110b7f42fd61b3196'}
+    rows = [p for p in catalog() if p.category == 'Ads']
+    assert {p.key for p in rows} == set(original)
+    for p in rows:
+        if p.key not in allowed:
+            assert digest(p.text) == original[p.key], p.symbol or p.path
+    manifest = json.loads(Path('prompts/releases.json').read_text())
+    for p in [bundle_prompt(rows, 'Ads'), *rows]:
+        assert manifest[p.key]['hash'] == digest(p.text)
+        assert manifest[p.key]['version'] == '1.0'
+        assert manifest[p.key]['label'] == 'Baseline'
+    labels = json.loads(Path('prompts/version_labels.json').read_text())
+    assert labels['44b05012bd22482ab965ad0b01891d3c'] == 'Collector Beta'
+    assert all(v['id'] != '44b05012bd22482ab965ad0b01891d3c' for v in manifest.values())

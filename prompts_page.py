@@ -70,6 +70,8 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             st.error(str(exc))
             return
     versions = history['versions']
+    labels_path = ROOT / 'prompts' / 'version_labels.json'
+    labels = json.loads(labels_path.read_text(encoding='utf-8')) if labels_path.exists() else {}
     manifest_path = ROOT / 'prompts' / 'releases.json'
     deployed = json.loads(manifest_path.read_text(encoding='utf-8')).get(key, {}) if manifest_path.exists() else {}
     left, right = st.columns([2.4, 1], gap='large')
@@ -77,8 +79,8 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
         with st.container(border=True):
             st.subheader('Version history')
             choice = st.radio('Open a version', ['deployed'] + [v['id'] for v in reversed(versions)],
-                format_func=lambda value: 'v' + deployed.get('version', '1.0') + ' · Deployed' if value == 'deployed' else
-                    next('v' + v['version'] + (' · Release' if v.get('commit') else ' · Baseline' if v.get('baseline') else ' · Draft') for v in versions if v['id'] == value), key='prompt-version-' + key, label_visibility='collapsed')
+                format_func=lambda value: 'v' + deployed.get('version', '1.0') + ' · ' + (deployed['label'] + ' · Live' if deployed.get('label') else 'Deployed') if value == 'deployed' else
+                    next('v' + v['version'] + (' · ' + labels[v['id']] if v['id'] in labels else '') + (' · Release' if v.get('commit') else ' · Baseline' if v.get('baseline') else ' · Draft') for v in versions if v['id'] == value), key='prompt-version-' + key, label_visibility='collapsed')
             if st.button('Compare versions', key='prompt-compare-toggle-' + key, use_container_width=True):
                 st.session_state['prompt-show-compare-' + key] = not st.session_state.get('prompt-show-compare-' + key, False)
             st.button('Refresh history', key='prompt-refresh-' + key, on_click=lambda: None)
@@ -89,6 +91,9 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             heading, status = st.columns([4, 1.2], vertical_alignment='center')
             heading.subheader(category + ' - Entire prompt' if is_bundle(prompt) else prompt.title)
             badge = (('Release v' if selected.get('commit') else 'Baseline v' if selected.get('baseline') else 'Draft v') + selected['version']) if selected else ('Deployed v' + deployed.get('version', '1.0'))
+            label = labels.get(selected['id'], '') if selected else deployed.get('label', '')
+            if label:
+                badge += ' · ' + label
             status.html('<span class="prompt-badge">' + html.escape(badge) + '</span>')
             test_panel = st.container()
             preview, edit = st.tabs(['Copy full prompt', 'Edit prompt'])

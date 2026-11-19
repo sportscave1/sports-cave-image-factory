@@ -1,72 +1,202 @@
 {
   "ebffbedac545beb011dc654c": {
-    "version": "1.7",
-    "id": "44b05012bd22482ab965ad0b01891d3c",
-    "hash": "9a37db11443327a6357509ae2016d90fc6792128d814fe53e6794f77c69fb75a",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "1fb814d1386c873feab52636ec96253d53a85287fc7bc87dea0d7ebd343c4701",
     "path": "@category/Ads",
     "symbol": ""
   },
   "e4c95a923482686ea19136c3": {
-    "version": "1.7",
-    "id": "44b05012bd22482ab965ad0b01891d3c",
-    "hash": "13902d633536538f924497ad391bdb05afb8a082c61d489fa4099ad56f61eddc",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "538a5d5da71ed3b3a39c3a05d817aaa5725079681d980826ab452d71837d068f",
     "path": "ads_footer.py",
     "symbol": "COMPACT_FOOTER_RULES"
   },
   "3cb795b06730af64f234ddc9": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "8ac1d7ced8c4c0fcbb47cb2bf247c10062df7c97fcfd032647f31e00fa2e6d16",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "ed9980333607982070aa96a3b699c39b372615f0d6703e627e8304fb77958f92",
     "path": "prompts/google_demand_gen_v1.txt",
     "symbol": ""
   },
   "0df0799f598199ac309d066e": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "f5da7bfd6010aa22743bfd568e0318112575af218c36abe1a7dd257e7ce21328",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "fdb0df973300ca4d4c6ba4402e817acd16ae0444dd206202649ccdef4deb40d2",
     "path": "ads_page.py",
     "symbol": "IE_EXECUTION_CHECKLIST"
   },
   "29739817000c06f922bc9c1b": {
-    "version": "1.7",
-    "id": "44b05012bd22482ab965ad0b01891d3c",
-    "hash": "15576b713bd4a738ca49096e2740e9203b405f29fbf4c03d6e409e67d098c8b2",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "f3f6315a86c2d128bc1c59f593e833111962eb641dab3ba9adbf9ad9d98a0ad1",
     "path": "ads_page.py",
     "symbol": "SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2"
   },
   "3ee6646ef382cd48773bc7ae": {
-    "version": "1.5",
-    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
-    "hash": "3972bf41699646333028f399f5e646f39a09166b39567375832f592b70486257",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "eac8000e892b134a5bf1ba0ad62066ac015f69e8c3bb0597e546be68d097a778",
     "path": "ads_page.py",
     "symbol": "SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1"
   },
   "d9d02cb110b7f42fd61b3196": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "708623222421b90b4aca4ec187d9891b490b3fe20b3935773b261a32b1349491",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "cb4e9b5e5f722674298c55f5512579031e7c751269d37910ab866551ca800c25",
     "path": "ads_page.py",
     "symbol": "INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE"
   },
   "704462a5b422e7982db8880f": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "5ab03e7a37908578a91f48084e3f2926670129224f04e007432850ec3917844e",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "9e873b9e5e17f55b5dab8bf6db596d7720a7e6ea8bca651b7f1930b8f8e6d8b8",
     "path": "ads_generation_review.py",
     "symbol": "RULES"
   },
   "7c37c4b9ddc9337b4253c1cc": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "6ac30c62b85bf54ff53ad6e0d7d33c1108de3612288f84076b1ba28fc422341b",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "4b6f1f526af6b8f36768ca49f56734e21c5bf93965f3a171c35848ebd39cf1a8",
     "path": "ads_page.py",
     "symbol": "IE_FOOTER_TEXT_CLARIFICATION"
   },
   "6137aef6ef1b942197a3aa91": {
-    "version": "1.7",
-    "id": "44b05012bd22482ab965ad0b01891d3c",
-    "hash": "d099e7d9787b02727f09d0bbc5bd54b2e34f182a98262b2ca9ca5eaa3fd82359",
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "ce7f20159233241abae567767d887541b7c26dc3916a7e334e7c76202015abc3",
     "path": "ads_page.py",
     "symbol": "SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1"
+  },
+  "efa0fc0971b49593dded8edd": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "f5c1f383bab59f772337962a2107c4190e430dd551d7b582f649e18c98d2f770",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1"
+  },
+  "cfcfe59a08413380217b1e93": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "144685cdbfc5594315ba6490cb375dfe246c85b51d35591d26d5c34eb43a91d3",
+    "path": "ads_carousel_winner.py",
+    "symbol": "CARD_FIVE"
+  },
+  "339261a70667ec5a840cfd42": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "525fa29b79bb3988ac6758485f9b26cd98b982c6325cd096a8a0d41b3b0a6928",
+    "path": "ads_page.py",
+    "symbol": "CAROUSEL_COPY_CSV_SUPPORT_INSTRUCTION"
+  },
+  "47d29145c267dba08275967d": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "57dbc441bd41a506f0ba60b0014af6798adeb358b5402c01cddcb6a34a8d0585",
+    "path": "ads_ie_legacy_description.py",
+    "symbol": "DESCRIPTION_WORDING_INSTRUCTIONS"
+  },
+  "1ba92c75f1d0ec42bedc1284": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "2611b52d614c9788835918b02f4371d53c0fa3d19a5c57c1f7f356bbc3a994d5",
+    "path": "ads_page.py",
+    "symbol": "FINAL_REVIEW_LANDING_PAGE_BLOCK_TEMPLATE"
+  },
+  "069d02a52be01c5134ce8e97": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "2421ed64bab76fed5469db8d76751197f189afbbb2e299f9ef5809ac35d53ea0",
+    "path": "ads_ie_legacy_description.py",
+    "symbol": "HISTORICAL_STYLES"
+  },
+  "1776e750294d64f257e3c18c": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "080273ce01e91e1146e4128cdf71cf636e9b017c1780b2fee14f354163fcc3b4",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2"
+  },
+  "22cc9062177176f35cf380df": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "4d645a6645ae99df55959a1c008ac3bab6f4812f4a77e9d78a74ea867f0da20c",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2"
+  },
+  "91a51d174a3108ab54cb4f97": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "e0e01cbf427ee4d2c9ce1e67592d7ebf9f403141ee024ae1823f6a45e7be593e",
+    "path": "ads_page.py",
+    "symbol": "IE_CREATIVE_VARIETY_AND_TYPOGRAPHY"
+  },
+  "ac9d844ecf17b89d0fec1518": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "5f3ff0e311a52e4a6949bdd730f39f6d5fb426f09dbf6b47b2351ace7f31936e",
+    "path": "ads_page.py",
+    "symbol": "INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION"
+  },
+  "248efab71e6ee82fc37db2ff": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "b901bca18f4f31117197dff8154c5e0fe2111c977c13db981ef8d4cb27bc2ea3",
+    "path": "ads_copy_optimisation.py",
+    "symbol": "INSTRUCTIONS"
+  },
+  "8c74c7a733cab9f9ae1543d3": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "82baa5aa58714b8d589f8766bc918d68ee7dd2bc004d2cb5cc8d667059946f33",
+    "path": "ads_page.py",
+    "symbol": "RACING_WRITTEN_COPY_INSTRUCTIONS"
+  },
+  "6b90b7332b494163e3f6e616": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "656863ac11da2e98231ad2adc1365fe08e6d5b5c0ad373c7ecac9a322d2994b9",
+    "path": "ads_final_delivery.py",
+    "symbol": "RULES"
+  },
+  "7ca8830571db316b90527e08": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "101ca3ebb9c3a0b5813f0248779876c1e5646dbb570e617da6942e86d006dfed",
+    "path": "prompts/sports_cave_universal_creative_system.txt",
+    "symbol": ""
+  },
+  "1c8d3ccf95140414febcbb52": {
+    "version": "1.0",
+    "id": "ads-baseline-v1-gold-shimmer-20261120",
+    "label": "Baseline",
+    "hash": "06961ed6aa643657627b01bcb25dafdf39a410bea8c7f4a5966404ab786443d2",
+    "path": "ads_carousel_winner.py",
+    "symbol": "WINNER_QUALITY"
   }
 }

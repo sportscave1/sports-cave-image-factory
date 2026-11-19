@@ -226,8 +226,8 @@ def resolved_camera_variation(visual, index, context, variation_token):
     return CAMERA_VARIATIONS[0]
 
 
-SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and fixed CTA. '
-                 'Render exactly two footer lines; no supporting sentence or FOMO row. '
+SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline, assigned supporting line and fixed CTA. '
+                 'Render exactly three footer lines: headline, assigned supporting/FOMO sentence, then CLAIM YOUR EDITION. Never omit the supporting line. '
                  'All Sports Cave editions are owner-confirmed as limited to 100 worldwide; no verification flag or confirmation is required. '
                  'Never replace selected copy with arbitrary wording. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '

@@ -20,7 +20,7 @@ class CompactFooterTests(unittest.TestCase):
                     i, row, product_name='Synthetic Collector Edition', category='Cricket', country='Australia')
                 self.assertIn('HEADLINE: ' + row['headline_text'], prompt)
                 self.assertIn('CTA: CLAIM YOUR EDITION', prompt)
-                self.assertNotIn('SUPPORTING LINE:', prompt)
+                self.assertIn('SUPPORTING LINE: ' + row['supporting_line'], prompt)
                 self.assertIn('Resolved on-image copy:', prompt)
 
     def test_all_new_ads_public_formats_receive_central_policy(self):
@@ -34,7 +34,7 @@ class CompactFooterTests(unittest.TestCase):
         for prompt in (ads.build_ads_prompt('Synthetic Collector Edition', 'Cricket', 'Australia', 'Instant Experience', product_metadata={'edition_limit': 100}),
                        ads.build_ads_prompt('Synthetic Collector Edition', 'Cricket', 'UK', 'Instant Experience', product_metadata={'edition_limit': 100})):
             for old in ('24–28%', '24-28%', '72–76%', 'do not shrink the panel',
-                        'SUPPORTING LINE:', 'FINAL COMPOSITOR DATA',
+                        'Render no supporting sentence', 'FINAL COMPOSITOR DATA',
                         'native 1024 × 209', 'medium-weight sans serif'):
                 self.assertNotIn(old, prompt)
             self.assertIn('18–20%', prompt)

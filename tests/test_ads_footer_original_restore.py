@@ -15,10 +15,12 @@ def test_non_footer_original_sections_are_byte_exact():
         assert hashlib.sha256(current[key].encode()).hexdigest() == expected, key
 
 
-def test_standalone_and_google_share_reference_only_footer_style():
+def test_standalone_and_google_preserve_baseline_footer_with_shimmer():
     google = Path('prompts/google_demand_gen_v1.txt').read_text(encoding='utf-8')
     for prompt in (ads_page.INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE, google):
-        assert COMPACT_FOOTER_RULES in prompt
-        for forbidden in ('Use only these three lines', 'THREE SUPPORTING LINES', '#D4A54C', 'native 1024 × 209', 'FINAL COMPOSITOR DATA'):
-            assert forbidden not in prompt
+        assert 'gold shimmer' in prompt
+        assert 'supporting line' in prompt.lower() or 'Line two:' in prompt
+        assert 'TWO-LINE COLLECTOR FOOTER' not in prompt
+        assert 'Render no supporting sentence' not in prompt
+        assert 'FINAL COMPOSITOR DATA' not in prompt
     assert 'approximately bottom 20–23%' in google.replace('\n', ' ')
