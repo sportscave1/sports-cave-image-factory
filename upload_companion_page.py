@@ -139,6 +139,9 @@ def render_page(user):
                 '<h1>Companion control</h1><p>Designs, product uploads and Meta ads.</p></div>'
                 '<div class="cq-capacity"><span>PARALLEL CAPACITY</span><strong>1 design <i>+</i> 1 upload <i>+</i> 1 ad</strong>'
                 '<small>Independent queues · automatic progression</small></div></div>')
+        with st.expander('This browser · companion version'):
+            from product_upload_gallery import render as render_browser_connection
+            render_browser_connection(key='companion-browser-connection', mode='companion-health')
         designs, uploads, ads = st.tabs(['Design queue', 'Upload queue', 'Ads queue'],
                                         key='companion-queue-tabs', on_change='rerun')
         if designs.open:
