@@ -163,12 +163,26 @@ async function adQueueTick() {
       ? await companionMessage(local.tab,{type:'project:ad-repair-status',job:local.id,repair:local.repair.id,
           chat:local.chat_url},{frameId:0}).catch(()=>null) : null;
     const report = local?.receipt ? await health(local.receipt) : {};
-    const progress = local?.tab && report.state === 'submitted'
+    // A missed send receipt is not a failed generation. Reconcile only the
+    // exact tab created for this job; never resend or adopt an unrelated chat.
+    const observing = ['submitted','uncertain','sending'].includes(report.state);
+    const tab = local?.tab && observing ? await chrome.tabs.get(local.tab).catch(()=>null) : null;
+    const progress = tab && adChat.test(tab.url||'')
       ? await companionMessage(local.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
+    const matched = progress && progress.chat_url === tab?.url && adChat.test(progress.chat_url||'') &&
+      (!local.chat_url || local.chat_url === progress.chat_url);
+    if (matched && (progress.generating || progress.finished) && report.state !== 'submitted') {
+      await save(local.receipt,'submitted');
+      report.state='submitted';report.reason='';
+    }
+    if(matched && local.chat_url!==progress.chat_url)
+      await staffWrite(adStorage,{...local,chat_url:progress.chat_url});
     const response = await fetch(osOrigin + '/api/staff-product-uploads/ad-tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
-      body:JSON.stringify({id:local?.id, state:progress?.blocked ? 'blocked' : report.state,
-                          reason:progress?.reason || report.reason, chat_url:progress?.chat_url,
+      body:JSON.stringify({id:local?.id, state:matched && progress.blocked ? 'blocked' : report.state,
+                          reason:matched && progress.reason || report.reason, chat_url:matched ? progress.chat_url : undefined,
+                          generating:matched ? progress.generating : undefined,
+                          finished:matched ? progress.finished : undefined, activity:matched ? progress.activity : undefined,
                           transfer_detail:local?.transferError,transfer_failed:local?.transferFailed===true,
                           repair_id:local?.repair?.id,repair_seen:repairStatus?.found?local.repair.id:undefined}),
       credentials:'omit', signal:AbortSignal.timeout(25000),

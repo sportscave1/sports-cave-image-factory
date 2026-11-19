@@ -80,7 +80,9 @@ def enqueue(cur, upload, requester, sport, country):
 def public(value):
     if not value:
         return None
-    return dict(label=('Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=value.get('detail', ''),
+    return dict(label=('Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
+                       'ChatGPT is thinking / generating' if value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120 else
+                       'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=value.get('detail', ''),
                 active=value['stage'] not in ('complete', 'failed', 'cancelled'),
                 posting_id=value.get('posting_id'))
 
@@ -366,15 +368,33 @@ def _step(key, value, job, event, age):
         value.pop('prompt', None)
         stage, age = 'generating', 0
         value['stage'] = stage
+        value['last_chat_activity_at'] = time.time()
+        value.pop('handoff_pending', None)
+        value['detail'] = 'ChatGPT accepted the prompt; waiting for the finished covers and copy.'
         write(key, value)
-    if stage in ('opening', 'generating') and not value.get('collect_only') and event.get('state') in ('failed', 'uncertain', 'blocked'):
+    if stage == 'opening' and event.get('state') in ('sending', 'uncertain'):
+        value.update(handoff_pending=True, detail='Checking the existing ChatGPT conversation. The prompt will not be sent again.')
+        # Keep a separate start time so polling cannot extend the handoff timeout.
+        if not value.get('handoff_started_at'):
+            value['handoff_started_at'] = time.time() - age
+        write(key, value)
+    if stage in ('opening', 'generating') and not value.get('collect_only') and event.get('state') in ('failed', 'blocked'):
         raise ValueError(str(event.get('reason') or 'Check the Meta Ads conversation for the blocked step.')[:600])
     if stage == 'opening':
-        if age > 3600:
-            raise ValueError('The desktop did not confirm the ChatGPT handoff.')
+        if time.time() - value.get('handoff_started_at', time.time() - age) > 3600:
+            raise ValueError('The desktop could not confirm the existing ChatGPT conversation. Reconnect the companion; do not resend the prompt.')
         return dict(id=value['upload'], project=PROJECT, receipt=_source_token(value['upload']),
                     prompt=value['prompt'], stage=stage)
     if stage == 'generating':
+        if (CHAT.fullmatch(str(event.get('chat_url') or '')) and event.get('chat_url') == value.get('chat_url')
+                and isinstance(event.get('generating'), bool)):
+            now = time.time()
+            if event['generating'] or event.get('activity') != value.get('chat_activity'):
+                value['last_chat_activity_at'] = now
+            elif not value.get('last_chat_activity_at'):
+                value['last_chat_activity_at'] = now - age
+            value.update(chat_generating=event['generating'], chat_observed_at=now, chat_activity=event.get('activity'))
+            write(key, value)
         if float((value.get('catalog_retry') or {}).get('next_at', 0)) > time.time():
             return {}
         transfer_detail = str(event.get('transfer_detail') or '')[:600]
@@ -414,7 +434,7 @@ def _step(key, value, job, event, age):
             stage, age = 'posting', 0
             value['stage'] = stage
             write(key, value)
-        elif age > 7200:
+        elif time.time() - value.get('last_chat_activity_at', time.time() - age) > 7200:
             raise ValueError('The three covers and ad copy did not arrive in Dropbox. Check the Meta Ads conversation.')
     if stage == 'posting':
         row = JOBS.snapshot(value['posting_id'])

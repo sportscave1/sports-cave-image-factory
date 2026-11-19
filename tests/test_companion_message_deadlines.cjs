@@ -22,7 +22,7 @@ test('hung send remains uncertain after permit and frees queue without permittin
  storage:{local:{set:async value=>Object.assign(records,value),get:async()=>({})}},tabs:{
  create:async()=>({id:7}),sendMessage:async(tab,msg)=>msg.type==='project:ready'?{ready:true}:new Promise(()=>{})}}});
  vm.runInContext(helper+'\n'+worker+"\nglobalThis.operation={sending:true};pending.set('fixture',operation);globalThis.finished=run('fixture','prompt',operation);",c);
- await flush();assert.equal([...timers.values()][0].ms,120000);
+ await flush();assert.equal([...timers.values()][0].ms,180000);
  [...timers.values()][0].f();await c.finished;
  assert.equal(records['upload:fixture'].state,'uncertain');assert.equal(timers.size,0);
  assert.equal(await vm.runInContext("pending.size",c),0);

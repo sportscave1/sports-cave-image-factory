@@ -267,12 +267,12 @@
       const permission = await chrome.runtime.sendMessage({type:'project:permit', id});
       if (cancelled || !permission?.ok) return {sent:false,
         reason:'The companion could not reserve this submission. Check the upload status before retrying.'};
-      const current = await waitFor(ready, sendWait);
+      const current = await waitFor(ready, 10000);
       if (cancelled || !current) return {sent:false,
         reason:'ChatGPT submission stopped after reserving Send: waiting for ' + waitingFor + '.'};
       const {button, asAttachment:sentAsAttachment} = current;
       button.click();
-      const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment,reference), 12000);
+      const accepted = await waitFor(() => submittedPrompt(prompt, sentAsAttachment,reference), 30000);
       if (accepted && prompt.includes('SC_UPLOAD_BLOCKED: REFERENCE')) watchStaffResponse();
       return {sent:Boolean(accepted)};
     } finally {
