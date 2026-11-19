@@ -22,9 +22,12 @@ def job_id(pid):
     return str(uuid5(NAMESPACE_URL, 'sports-cave-refresh:' + product_id(pid)))
 
 
-def catalog(cur):
+def catalog(cur, pid=None):
     cur.execute('''SELECT shopify_product_id, title, handle FROM shopify_products
-        WHERE lower(status) = 'active' ORDER BY lower(title), shopify_product_id LIMIT 10001''')
+        WHERE lower(status) = 'active'
+        AND (%s::text IS NULL OR shopify_product_id IN (%s,%s))
+        ORDER BY lower(title), shopify_product_id LIMIT 10001''',
+        (pid, pid, 'gid://shopify/Product/' + pid if pid else None))
     rows = cur.fetchall()
     if len(rows) > 10000:
         raise ValueError('Catalogue exceeds the supported size.')
@@ -61,7 +64,7 @@ def listing(query='', offset=0, all_designs=False, verify=False):
         manual = set(saved['value'] if saved else [])
         cur.execute("SELECT id,stage,file_id,file_rev,file_path FROM morning_design_jobs WHERE section='refresh'")
         jobs = {str(r['id']): dict(r) for r in cur.fetchall()}
-    rows = [dict(r, stage=(jobs.get(job_id(r['product_id'])) or {}).get('stage')) for r in rows
+    rows = [dict(r, job_id=job_id(r['product_id']), stage=(jobs.get(job_id(r['product_id'])) or {}).get('stage')) for r in rows
             if (all_designs or r['product_id'] in selected or r['product_id'] in manual)
             and query.casefold() in (r['title'] + ' ' + r['product_id']).casefold()]
     page = rows[offset:offset+PAGE_SIZE]
@@ -95,11 +98,23 @@ def change(pid, action):
             if previous['id'] in _deleted_designs([previous], set(), exact_live_identity=True):
                 observed = dict(previous)
     with connect() as conn, conn.cursor() as cur:
-        # Serialize queue clicks with existing companion claims.
-        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
-        row = next((r for r in catalog(cur) if r['product_id'] == pid), None)
+        row = next(iter(catalog(cur, pid)), None)
         if not row:
             raise ValueError('This active design is no longer in the catalogue.')
+    if action == 'enqueue':
+        receipt = str(uuid4()) if observed else job_id(pid)
+        from home_design_refresh import _refresh_prompt
+        from sports_sales_calendar import sydney_date
+        prompt = _refresh_prompt(dict(row, suggestion='Research a complete redesign for this selected existing design.',
+            evidence='Selected from Designs to Refresh. Companion verification is a technical status, not an artwork quality judgement.'),
+            'https://www.sportscaveshop.com/products/' + row['handle'])
+        prompt = 'SPORTS CAVE EXISTING DESIGN REFRESH\n' + prompt + (
+            f'\nInclude morning_design_job_id = "{receipt}" in the final .upload.json handoff. '
+            'Save to Design Studio Review only; do not publish or alter the live product.\n')
+    with connect() as conn, conn.cursor() as cur:
+        if action == 'enqueue':
+            # Only the atomic claim/write needs the shared companion lock.
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
         cur.execute("INSERT INTO app_settings(key,value,updated_at) VALUES (%s,'[]'::jsonb,now()) ON CONFLICT DO NOTHING", (KEY,))
         cur.execute('SELECT value FROM app_settings WHERE key=%s FOR UPDATE', (KEY,))
         manual = set(cur.fetchone()['value'])
@@ -112,15 +127,6 @@ def change(pid, action):
         existing = cur.fetchone()
         if existing and (observed is None or dict(existing) != observed):
             return dict(added=False, stage=existing['stage'])
-        receipt = str(uuid4()) if existing else key
-        from home_design_refresh import _refresh_prompt
-        from sports_sales_calendar import sydney_date
-        prompt = _refresh_prompt(dict(row, suggestion='Research a complete redesign for this selected existing design.',
-            evidence='Selected from Designs to Refresh. Companion verification is a technical status, not an artwork quality judgement.'),
-            'https://www.sportscaveshop.com/products/' + row['handle'])
-        prompt = 'SPORTS CAVE EXISTING DESIGN REFRESH\n' + prompt + (
-            f'\nInclude morning_design_job_id = "{receipt}" in the final .upload.json handoff. '
-            'Save to Design Studio Review only; do not publish or alter the live product.\n')
         if existing:
             prompt += f'\nQueue retry receipt: {receipt}\nQueue output receipt: {receipt}\n'
             cur.execute('''UPDATE morning_design_jobs SET stage=0,prompt=%s,title=%s,edition_date=%s,
@@ -131,6 +137,21 @@ def change(pid, action):
                 VALUES(%s,%s,'refresh',%s,%s) ON CONFLICT(id) DO NOTHING''',
                 (key, sydney_date(), row['title'], prompt))
         return dict(added=True, stage=0)
+
+
+def queue_status(ids=()):
+    ids = [job_id(pid) for pid in ids]
+    if len(ids) > PAGE_SIZE:
+        raise ValueError('Too many designs.')
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
+        cur.execute("SELECT enabled FROM morning_design_control WHERE singleton")
+        control = cur.fetchone()
+        cur.execute("SELECT seen_at > now()-interval '95 seconds' AS online FROM product_upload_desktop WHERE singleton")
+        desktop = cur.fetchone()
+        cur.execute('SELECT id,stage FROM morning_design_jobs WHERE id=ANY(%s::uuid[])', (ids,))
+        jobs = {str(row['id']): row['stage'] for row in cur.fetchall()}
+    return dict(enabled=bool(control and control['enabled']), online=bool(desktop and desktop['online']), jobs=jobs)
 
 
 async def api(request):
@@ -148,6 +169,19 @@ async def api(request):
         params = request.query_params
         if request.method == 'POST':
             result = await run_in_threadpool(change, params.get('id', ''), params.get('action', ''))
+            if params.get('action') == 'enqueue':
+                # The durable transaction is already committed. Optional display failures
+                # must never turn a successful save into a misleading retry error.
+                try:
+                    from product_upload_staff_queue import _HEADER_DISPLAYS
+                    _HEADER_DISPLAYS.invalidate_matching(lambda key: True)
+                    from companion_display import invalidate
+                    invalidate()
+                    result['queue'] = await run_in_threadpool(queue_status)
+                except Exception as error:
+                    logging.getLogger(__name__).warning('home_refresh_queue_status_failed type=%s', type(error).__name__)
+        elif params.get('status') == '1':
+            result = await run_in_threadpool(queue_status, params.getlist('id'))
         else:
             offset = int(params.get('offset', '0'))
             query = params.get('q', '')

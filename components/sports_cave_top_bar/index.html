@@ -1524,6 +1524,10 @@
         }
       }
     };
+    doc.addEventListener('sc-design-edit-queued', () => {
+      lastStaffStatus = '';
+      void refreshStaffProgress(false);
+    }, listenerOptions);
     doc.addEventListener('visibilitychange', () => {
       if (!doc.hidden && state.config.staffUploadProgress) void refreshStaffProgress();
     }, listenerOptions);

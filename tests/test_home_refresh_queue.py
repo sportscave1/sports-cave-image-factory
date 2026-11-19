@@ -94,8 +94,9 @@ def test_popup_lazy_bounded_search_and_queue(tmp_path):
         page.get_by_text('Add a design',exact=True).click()
         page.get_by_label('Search all designs').fill('Design 2')
         expect(page.locator('.sc-refresh-picker-list .sc-refresh-row')).to_have_count(1)
-        page.get_by_role('button',name='Add to list',exact=True).click()
-        expect(page.get_by_role('button',name='Added',exact=True)).to_be_disabled()
+        page.get_by_role('button',name='Queue design',exact=True).click()
+        expect(page.locator('.sc-refresh-picker-list').get_by_role('button',name='Queued',exact=True)).to_be_disabled()
+        assert all('action=enqueue' in request.url for request in calls if request.method == 'POST')
         page.screenshot(path=str(tmp_path/'refresh-mobile.png'))
         page.keyboard.press('Escape')
         expect(page.get_by_role('dialog')).not_to_be_visible()
@@ -134,6 +135,8 @@ def test_popup_recovers_cold_cache_and_retains_rows_on_failure():
         def route(r):
             if r.request.url == 'http://fixture.test/':
                 return r.fulfill(body=html,content_type='text/html')
+            if parse_qs(urlparse(r.request.url).query).get('status') == ['1']:
+                return r.fulfill(json=dict(enabled=True, online=True, jobs={}))
             picker = parse_qs(urlparse(r.request.url).query).get('all') == ['1']
             if not picker:
                 state['calls'] += 1
@@ -289,4 +292,77 @@ def test_popup_reenables_only_the_deleted_finished_design(tmp_path):
         page.get_by_role('button', name='Add to queue', exact=True).click()
         expect(page.get_by_role('button', name='Queued', exact=True)).to_be_disabled()
         assert len(posts) == 1 and 'id=212' in posts[0]
+        browser.close()
+
+
+def test_queue_status_reads_only_requested_jobs_and_reports_pause_and_offline(store, monkeypatch):
+    store.execute('ALTER TABLE product_upload_desktop ADD COLUMN seen_at timestamptz')
+    refresh.change('212', 'enqueue')
+    refresh.change('213', 'enqueue')
+    monkeypatch.setattr(refresh, 'catalog', lambda *args: pytest.fail('Status must not load the catalogue'))
+    status = refresh.queue_status(['212'])
+    assert status == dict(enabled=False, online=False, jobs={refresh.job_id('212'): 0})
+    store.execute('UPDATE morning_design_control SET enabled=true')
+    store.execute('UPDATE product_upload_desktop SET seen_at=now()')
+    assert refresh.queue_status()['enabled'] and refresh.queue_status()['online']
+    with pytest.raises(ValueError): refresh.queue_status(['1'] * 41)
+    with pytest.raises(ValueError): refresh.queue_status(['invalid'])
+
+
+def test_enqueue_acknowledges_committed_save_even_when_optional_status_fails(monkeypatch):
+    import files_upload_api, os_accounts
+    monkeypatch.setattr(files_upload_api, '_request_user', lambda *a, **k: {'id': 'fixture'})
+    monkeypatch.setattr(os_accounts, 'is_reporting_owner', lambda _: True)
+    saved = []
+    monkeypatch.setattr(refresh, 'change', lambda *a: saved.append(a) or dict(added=True, stage=0))
+    monkeypatch.setattr(refresh, 'queue_status', lambda *a: (_ for _ in ()).throw(TimeoutError()))
+    client = TestClient(Starlette(routes=[Route('/queue', refresh.api, methods=['GET', 'POST'])]))
+    result = client.post('/queue?id=212&action=enqueue', headers={'Origin': 'http://testserver'})
+    assert result.status_code == 200 and result.json() == dict(added=True, stage=0)
+    assert saved == [('212', 'enqueue')]
+
+
+def test_popup_wakes_after_commit_reports_paused_queue_and_updates_running_stage():
+    from home_design_refresh import render_html
+    html = '<!doctype html><meta charset="utf-8">' + render_html(None)
+    state = dict(stage=None, enabled=False, fail=False)
+    key = refresh.job_id('212')
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge', headless=True)
+        page = browser.new_page()
+        def route(r):
+            if r.request.url == 'http://fixture.test/':
+                return r.fulfill(body=html, content_type='text/html')
+            if r.request.url.endswith('/queue-control'):
+                state['enabled'] = True
+                return r.fulfill(json={'enabled': True})
+            params = parse_qs(urlparse(r.request.url).query)
+            if r.request.method == 'POST':
+                if state['fail']:
+                    return r.fulfill(status=503, json={'error': 'Temporary save failure'})
+                state['stage'] = 0
+                return r.fulfill(json=dict(added=True, stage=0, queue=dict(enabled=False, online=True)))
+            if params.get('status') == ['1']:
+                return r.fulfill(json=dict(enabled=state['enabled'], online=True,
+                    jobs={key: state['stage']} if state['stage'] is not None else {}))
+            return r.fulfill(json=dict(rows=[dict(product_id='212', job_id=key, title='Fixture design', stage=None)], total=1, next_offset=None))
+        page.route('**/*', route)
+        page.goto('http://fixture.test/')
+        page.evaluate("window.wakes=0;document.addEventListener('sc-design-edit-queued',()=>window.wakes++)")
+        page.get_by_role('button', name='Designs to Refresh').click()
+        expect(page.get_by_role('button', name='Play design queue', exact=True)).to_be_visible()
+        state['fail'] = True
+        page.get_by_role('button', name='Add to queue', exact=True).click()
+        expect(page.locator('[data-status]')).to_contain_text('Temporary save failure')
+        assert page.evaluate('window.wakes') == 0
+        state['fail'] = False
+        page.get_by_role('button', name='Add to queue', exact=True).click()
+        expect(page.get_by_role('button', name='Queued', exact=True)).to_be_disabled()
+        assert page.evaluate('window.wakes') == 1
+        expect(page.locator('[data-queue-status]')).to_contain_text('paused')
+        page.get_by_role('button', name='Play design queue', exact=True).click()
+        expect(page.locator('[data-queue-status]')).to_contain_text('playing')
+        state['stage'] = 2
+        expect(page.get_by_role('button', name='Generating', exact=True)).to_be_disabled(timeout=6000)
+        page.get_by_role('button', name='Close designs to refresh').click()
         browser.close()
