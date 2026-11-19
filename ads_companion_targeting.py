@@ -1,4 +1,4 @@
-"""Deterministic queue targeting using smart candidates and verified membership."""
+"""Deterministic queue targeting by sport, independent of featured-item membership."""
 import re
 from urllib.parse import urlsplit
 
@@ -6,7 +6,10 @@ from ads_target_relevance import rank_relevant_meta_options, tokens, extract_rel
 
 
 class CatalogPending(ValueError):
-    """Membership is not verified yet; retain the generated package for retry."""
+    """Catalogue data is not available yet; retain the generated package for retry."""
+
+
+FORMULA_ONE_PRODUCT_SET = 'FORMULA 1 WALL ART POPULAR'
 
 
 def contains_product(products, result):
@@ -25,7 +28,6 @@ def contains_product(products, result):
 
 def select(refs, result, *, client, saved=None):
     import ads_posting_page as posting
-    from meta_ads_client import MetaAdsApiError
     from posting_import_csv import canonical_posting_country
 
     explicit = saved or result.get('posting_settings') or {}
@@ -41,25 +43,18 @@ def select(refs, result, *, client, saved=None):
         ' '.join(tokens(row.get('name'))) != canonical_name,
         not ' '.join(tokens(row.get('name'))).endswith('wall art'),
     ))
+    required_name = f'{sport or result["category"]} Wall Art'
+    if sport == 'Formula One':
+        required_name = FORMULA_ONE_PRODUCT_SET
+        ranked = [row for row in product_sets
+                  if ' '.join(str(row.get('name') or '').split()).casefold()
+                  == FORMULA_ONE_PRODUCT_SET.casefold()]
     if not ranked:
-        raise CatalogPending(f'Meta has not yet confirmed the {sport or result["category"]} Wall Art collection.')
-    chosen = None
-    for row in ranked:
-        try:
-            products = client.product_set_members(str(row['id']), product=result)
-        except MetaAdsApiError as error:
-            if str(error.error_code) in ('3', '10', '190', '200') and not error.is_transient:
-                raise ValueError(
-                    'Meta denied product-set membership verification '
-                    f'(code {error.error_code}). All imported files are saved. '
-                    'Check the Meta app and catalogue access, then Resume import.'
-                ) from error
-            raise
-        if contains_product(products, result):
-            chosen = row
-            break
-    if not chosen:
-        raise CatalogPending(f'Meta has not yet confirmed this product in the {sport} Wall Art collection.')
+        raise CatalogPending(f'Meta has not yet confirmed the {required_name} collection.')
+    # The cover and CTA promote the featured product; the Collection tiles use
+    # the selected sport/curated set. A new product need not be in that set.
+    # Posting still validates set/catalogue access and verifies every paused ad.
+    chosen = ranked[0]
     country = posting.COUNTRY_META_CODES[canonical_posting_country(result['country'])]
     audiences = posting._audience_options(refs)
     saved_geo = {str(row['id']): (row.get('targeting') or {}).get('geo_locations') or {}
