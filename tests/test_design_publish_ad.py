@@ -240,7 +240,7 @@ def test_companion_shows_selected_ads_queue(monkeypatch):
     assert any('Fixture' in text.value for text in app.markdown)
 
 
-def test_catalog_backoff_does_not_block_other_ads(store, monkeypatch):
+def test_catalog_backoff_keeps_other_ads_queued(store, monkeypatch):
     import os_accounts
     monkeypatch.setattr(ads, 'connect', store)
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda *args: True)
@@ -249,9 +249,9 @@ def test_catalog_backoff_does_not_block_other_ads(store, monkeypatch):
     waiting, ready = str(uuid4()), str(uuid4())
     with store() as conn, conn.cursor() as cur:
         for key, retry in ((waiting, {'next_at':ads.time.time()+900}), (ready, {})):
-            value=dict(upload=key,source='new_ads',stage='generating',requester='staff',catalog_retry=retry)
+            value=dict(upload=key,source='new_ads',stage='generating' if retry else 'waiting',requester='staff',catalog_retry=retry)
             cur.execute('INSERT INTO app_settings(key,value) VALUES (%s,%s::jsonb)', (ads.PREFIX+key,json.dumps(value)))
     processed=[]
     monkeypatch.setattr(ads,'_step',lambda key,value,*args: processed.append(value['upload']) or {})
     ads.tick(token,{})
-    assert processed==[ready]
+    assert processed==[waiting]

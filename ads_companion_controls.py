@@ -41,6 +41,16 @@ def action(user, job, operation):
                 raise ValueError('The original chat has not been confirmed. Reopen it in Edge so the companion can report its saved conversation; do not generate again.')
             else:
                 value.update(stage='waiting',detail='Queued for preparation')
+            # Play may resume a saved checkpoint, but cannot take another ad's slot.
+            cur.execute('''SELECT 1 FROM app_settings a WHERE a.key LIKE %s AND a.key<>%s
+                AND a.value->>'stage' IN ('preparing','opening','generating','posting')
+                AND NOT EXISTS (SELECT 1 FROM app_settings c
+                    WHERE c.key='ads_job_control:' || (a.value->>'upload')
+                      AND c.value->>'action' IN ('cancel','delete')) LIMIT 1''',
+                        (ads.PREFIX+'%', ads.PREFIX+job))
+            if cur.fetchone() and value['stage'] != 'waiting':
+                value.update(resume_stage=value['stage'], stage='waiting',
+                             detail='Queued to resume after the active ad finishes or stops')
             cur.execute('UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s',(json.dumps(value),ads.PREFIX+job))
             cur.execute('DELETE FROM app_settings WHERE key=%s',(PREFIX+job,))
             cur.execute("INSERT INTO app_settings(key,value) VALUES(%s,'true') ON CONFLICT(key) DO UPDATE SET value='true',updated_at=now()",(ads.CONTROL_KEY,))

@@ -476,7 +476,6 @@ def tick(token, event):
             WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
               AND NOT EXISTS (SELECT 1 FROM app_settings c WHERE c.key='ads_job_control:' || (a.value->>'upload')
                               AND c.value->>'action' IN ('cancel','delete'))
-              AND COALESCE((a.value->'catalog_retry'->>'next_at')::double precision, 0) <= EXTRACT(EPOCH FROM now())
               AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
                OR (a.value->>'stage'='waiting' AND
                    ((j.stage=6 OR a.value->>'source'='new_ads') AND %s)))
@@ -497,14 +496,29 @@ def tick(token, event):
                        FROM app_settings WHERE key=%s""", (job['key'],))
         current = cur.fetchone()
         key, value, age = job['key'], current['value'], float(current['age'])
+        # Repair overlapping checkpoints from older schedulers without losing
+        # their saved chats/files. The selected job owns the slot until terminal.
+        cur.execute('''UPDATE app_settings a SET value=jsonb_set(
+                jsonb_set(a.value, '{resume_stage}', a.value->'stage'),
+                '{stage}', '"waiting"'::jsonb)
+            WHERE a.key LIKE %s AND a.key<>%s
+              AND a.value->>'stage' IN ('preparing','opening','generating','posting')
+              AND NOT EXISTS (SELECT 1 FROM app_settings c
+                  WHERE c.key='ads_job_control:' || (a.value->>'upload')
+                    AND c.value->>'action' IN ('cancel','delete'))''', (PREFIX+'%', key))
+        cur.execute('''SELECT 1 FROM app_settings WHERE key=%s
+            AND value->>'stage'='waiting' AND value ? 'resume_stage' ''', (PREFIX+reported,))
+        deferred_report = reported != value['upload'] and cur.fetchone() is not None
         if value['stage'] == 'waiting' and job['stage'] == 6:
-            value['stage'] = 'preparing'
+            value['stage'] = value.pop('resume_stage', 'preparing')
             age = 0
             cur.execute('UPDATE app_settings SET value=%s::jsonb, updated_at=now() WHERE key=%s',
                         (json.dumps(value), key))
     try:
         from ads_companion_controls import stopped
         if stopped(value['upload']): return {}
+        if deferred_report:
+            return {'stop': {'id': reported}}
         if value['stage'] in ('complete', 'failed'):
             return {}
         requester = DEFAULT_STORE.get_user(value['requester'])
