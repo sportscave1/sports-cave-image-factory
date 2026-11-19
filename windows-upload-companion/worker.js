@@ -161,6 +161,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (message?.type === 'os:health') action = health(message.receipt);
     if (message?.type === 'os:start') action = start({...message, senderTab:sender.tab.id}).then(result => ({...result, version:chrome.runtime.getManifest().version}));
     if (message?.type === 'os:pair') action = pairStaffQueue(message.token);
+    if (message?.type === 'os:wake') action = staffRead(staffDeviceKey).then(async token => {
+      if (!token) return {paired:false};
+      await ensureStaffAlarm();
+      void staffQueueTick();
+      return {paired:true};
+    });
   }
   if (!action) return;
   action.then(reply, () => reply({error:true}));

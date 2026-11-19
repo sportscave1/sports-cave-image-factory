@@ -100,7 +100,7 @@ def test_bulk_queue_requires_upload_access(ui, monkeypatch):
 def test_publish_actions_are_in_separate_columns_on_the_same_card_row(ui):
     app, *_ = ui
     columns = app.get('column')
-    assert any([button.label for button in column.button] == ['Publish now'] for column in columns)
+    assert any([button.label for button in column.button] == ['Add to queue'] for column in columns)
     assert any([button.label for button in column.button] == ['Publish + ad'] for column in columns)
 
 
@@ -121,3 +121,33 @@ def test_upload_access_without_delete_permission_allows_bulk_queue(ui, monkeypat
     app.checkbox(key=gallery._selection_key(entries[0])).check().run()
     assert not app.exception and not app.button(key='design-review-enqueue').disabled
     assert not any(button.key == 'design-review-trash' for button in app.button)
+
+
+def test_card_click_shows_durable_feedback_without_navigation(ui):
+    app, entries, _, enqueue, _, _ = ui
+    app.button(key=gallery.review_key(entries[0])+'-approved').click().run()
+    assert not app.exception
+    assert enqueue.call_count == 1
+    assert any('Added to upload queue' in item.value for item in app.success)
+
+
+def test_card_queue_error_is_visible_beside_design(ui):
+    app, entries, _, enqueue, _, _ = ui
+    enqueue.side_effect = RuntimeError('unavailable')
+    app.button(key=gallery.review_key(entries[0])+'-approved').click().run()
+    assert not app.exception
+    assert any('Upload could not start' in item.value for item in app.error)
+
+
+def test_card_missing_sport_finishes_pending_enqueue_on_selection(ui):
+    app, entries, details, enqueue, _, _ = ui
+    details[0].pop('sport')
+    app.run()
+    app.button(key=gallery.review_key(entries[0])+'-approved').click().run()
+    enqueue.assert_not_called()
+    assert any('Choose a sport' in item.value for item in app.info)
+    app.selectbox(key=gallery.review_key(entries[0])+'-sport').select('NBA').run()
+    assert not app.exception and enqueue.call_count == 1
+    assert enqueue.call_args.args[3] == 'NBA'
+    app.run()
+    assert enqueue.call_count == 1

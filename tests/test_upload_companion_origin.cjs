@@ -13,7 +13,7 @@ async function main() {
     storage: {local: {get: async key => ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
     alarms:{get:async()=>alarm,create:async name=>{alarm={name};},onAlarm:{addListener(){}}},
   };
-  const context = vm.createContext({chrome, URL, AbortSignal, crypto:require('node:crypto').webcrypto, atob, Uint8Array, fetch:(...args)=>fetchQueue(...args)});
+  const context = vm.createContext({chrome, URL, AbortSignal, setTimeout, setInterval, clearInterval, crypto:require('node:crypto').webcrypto, atob, Uint8Array, fetch:(...args)=>fetchQueue(...args)});
   context.importScripts = file => vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
   const raw=Buffer.from('original reference bytes');
@@ -110,7 +110,8 @@ async function main() {
   assert.equal(tabs.length,0);
   assert.ok(alarm);
   connected = true;
-  await context.staffQueueTick();
+  assert.equal((await invoke({type:'os:wake'},bridge)).paired,true);
+  await new Promise(resolve => setImmediate(resolve));
   await context.staffQueueTick();
   assert.equal(tabs.length,1);
   assert.equal(tabs[0].active,false);
@@ -132,7 +133,8 @@ async function main() {
   assert.equal(await context.rememberStaffReceipt(retryJob,'d'.repeat(64),tabId+2),true);
   console.log('Upload Companion accepts the live Streamlit iframe URL and rejects other origins, paths and top-level frames.');
 }
-main().catch(error => {
+const watchdog = setTimeout(() => { console.error('Companion test did not finish'); process.exit(1); }, 10000);
+main().finally(() => clearTimeout(watchdog)).catch(error => {
   console.error(error);
   process.exitCode = 1;
 });

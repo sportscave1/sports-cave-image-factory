@@ -318,6 +318,19 @@
     signature=next;epoch++;controller.abort();clearAllFeedback();controller=new AbortController();root.replaceChildren();
     if(args.mode==='actions' || args.mode==='handoff')actions(args);
     else if(args.mode==='companion-health')companionHealth();
+    else if(args.mode==='queue-wake'){
+      if(window.frameElement)window.frameElement.id='sc-upload-queue-wake';
+      const status=document.createElement('div');status.id='status';status.role='status';root.append(status);
+      status.textContent='Upload saved. Notifying the paired desktop…';
+      const version=epoch;
+      void companionRequest('wake',{},2000).then(result=>{
+        if(version!==epoch)return;
+        status.textContent=result?.paired
+          ? 'Desktop notified. Starts when the upload queue is playing and its current upload finishes.'
+          : 'Upload saved. The paired desktop will pick it up on its next check. If it stays waiting, check Upload Companion is connected and the upload queue is playing.';
+        resize();
+      });
+    }
     else{const container=document.createElement('div');container.className=args.mode==='gallery'?'gallery':'single-preview';container.setAttribute('aria-label',args.mode==='gallery'?'Generated mockup previews':'Lifestyle mockup preview');
       for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);
     }

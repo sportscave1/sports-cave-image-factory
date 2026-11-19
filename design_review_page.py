@@ -287,6 +287,7 @@ def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
     return source, details, reason, editing
 
 
+@st.fragment
 def _card(app, user, source, details, reason, key, row, *, editing=False, eager=False,
           show_replacement=False, selectable=False):
     from product_upload_api import Dropbox
@@ -335,7 +336,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         if published and row['data'].get('product_url'):
             publish.link_button('Open listing', row['data']['product_url'], key=key+'-shopify')
         else:
-            clicked = publish.button('Publish now', key=key+'-approved', type='primary',
+            clicked = publish.button('Add to queue', key=key+'-approved', type='primary',
                                      disabled=published or editing or staged, help=f'Publish {title}')
             from os_accounts import can_access_page
             if all(can_access_page(user, page) for page in ('Ads', 'Posting', 'Files')):
@@ -350,6 +351,10 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             from sports_categories import CANONICAL_SPORT_CATEGORIES
             chosen_sport = sport_picker.selectbox('Sport for ' + title, CANONICAL_SPORT_CATEGORIES,
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
+            if not chosen_sport:
+                st.info('Choose a sport below to finish adding this design to the upload queue.')
+            elif not st.session_state.get(ad_mode):
+                clicked = True
         ad_country = None
         if st.session_state.get(ad_mode) and not clicked and not (published or editing or staged):
             from design_publish_ad import COUNTRIES, primary_country
@@ -365,6 +370,9 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                                        disabled=not chosen_sport)
         if (clicked or (ad_clicked and ad_country)) and (not needs_sport or chosen_sport):
             from product_upload_staff_queue import enqueue
+            # Consume the pending click even if the queue is unavailable. A later
+            # unrelated rerun must not silently retry a failed enqueue.
+            st.session_state.pop(key+'-needs-sport', None)
             try:
                 if clicked:
                     job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
@@ -378,11 +386,20 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:
                 logging.getLogger(__name__).exception('Smart Upload could not start')
-                action = 'Publish now' if clicked else 'Publish + ad'
+                action = 'Add to queue' if clicked else 'Publish + ad'
                 notice = dict(id=uuid.uuid4().hex, kind='error',
                               text=f'Upload could not start. Your PSD is retained. Try {action} again.')
             st.session_state['_product_upload_notice'] = notice
-            st.rerun()
+            st.session_state[key+'-queue-notice'] = notice
+            if notice['kind'] == 'success':
+                st.session_state.pop(key+'-needs-sport', None)
+        notice = st.session_state.get(key+'-queue-notice')
+        if notice:
+            getattr(st, notice['kind'])(notice['text'])
+            if notice['kind'] == 'success':
+                from product_upload_gallery import render as render_upload_component
+                render_upload_component(key=key+'-queue-wake', mode='queue-wake',
+                                        handoff={'id': notice['id']})
         if show_replacement and editing and not resumable and not staged:
             _staged_replacement(user, source, key)
             _keep_original(user, source, key)

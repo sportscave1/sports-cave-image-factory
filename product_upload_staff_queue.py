@@ -34,8 +34,13 @@ def enqueue(user, source, title, sport, *, ad_country=None):
         cur.execute('''INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport)
             VALUES (%s,%s,%s,%s,%s)
             ON CONFLICT(source_id,source_rev) DO UPDATE SET source_id=EXCLUDED.source_id
-            RETURNING id''', (uuid4(), source['id'], source['rev'], title, sport))
-        key = cur.fetchone()['id']
+            RETURNING id,stage''', (uuid4(), source['id'], source['rev'], title, sport))
+        job = cur.fetchone()
+        if job['stage'] == 7:
+            raise ValueError('This design already has an upload needing attention. Open Uploads and choose Restart or Cancel after reviewing its error.')
+        if job['stage'] == 6:
+            raise ValueError('This design has already been published and PSD mapped. Open Uploads to view the completed upload.')
+        key = job['id']
         cur.execute('''INSERT INTO product_upload_staff_requests(requester,job_id)
             VALUES (%s,%s) ON CONFLICT DO NOTHING''', (user['id'], key))
         if ad_country is not None:

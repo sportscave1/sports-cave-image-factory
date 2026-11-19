@@ -179,8 +179,9 @@ def test_manual_reset_preserves_upload_and_rejects_old_events(store, monkeypatch
     queue.advance(key, 'desktop', 7, 'Generation failed', allowed=[1])
     stopped = queue.list_jobs('staff')['jobs'][0]
     assert stopped['restartable']
-    # Polling and re-enqueue do not reset a failed job.
-    assert submit('staff') == key
+    # Re-enqueue explains the failure; only explicit Restart resets it.
+    with pytest.raises(ValueError, match='needing attention'):
+        submit('staff')
     assert queue.tick(token, {}) == {}
     with pytest.raises(PermissionError):
         queue.restart(key, {'id': 'unrelated'}, stopped['updated_at'])
@@ -350,3 +351,15 @@ def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
         assert ready in jobs.jobs
     finally:
         jobs.pool.shutdown(wait=False)
+
+
+@pytest.mark.parametrize('stage, message', [(7, 'needing attention'), (6, 'already been published')])
+def test_enqueue_does_not_report_terminal_job_as_new_work(store, stage, message):
+    key = submit('staff')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=%s WHERE id=%s', (stage, key))
+    with pytest.raises(ValueError, match=message):
+        submit('staff')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s', (key,))
+        assert cur.fetchone()['stage'] == stage
