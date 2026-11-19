@@ -193,7 +193,7 @@ followed by the exact incomplete checkpoint. Once delivery is verified, report c
 
 {result['master_prompt']}
 
-Before the final response, verify all four downloadable attachments are present above.
+Before the final response, inspect every actual cover against its assigned HEADLINE, SUPPORTING LINE and CTA: all three lines must be visible, with the top separator replaced in place by the specified metallic gold shimmer. Correct missing footer elements through the supplied final creative review, keeping the rest unchanged. Then verify all four downloadable attachments are present above.
 """
 
 

@@ -1,0 +1,38 @@
+SPORTS CAVE — PREMIUM COLLECTOR FOOTER TYPOGRAPHY
+STYLE
+The footer should resemble the typography of a vintage collector catalogue: elegant, understated and carefully typeset. Keep lettering clean and crisp. Vintage character comes from the letterforms—not distressed textures, artificial ageing or decorative flourishes.
+
+HEADLINE
+Use a classic Baskerville-style editorial serif in Regular weight: graceful curves, gently bracketed serifs, balanced proportions and clear contrast between thicker stems and finer strokes. Avoid excessively thin hairlines that disappear on mobile.
+
+Use warm ivory (#EEE6D5). Preserve the approved headline’s exact wording and title case. Keep it centred on one line, with natural letter spacing. Never use bold, heavy, blocky, slab-serif, condensed or oversized promotional lettering.
+
+At 1024 × 1024, target 42–48 px. Maintain a consistent visual size across all three ads; do not enlarge shorter headlines to fill the panel or stretch, squeeze or wrap longer ones.
+
+GOLD 100
+Render all three digits of 100 in subdued antique gold (#C7A15A), using the same serif, size and weight as the headline. Place one fine matching underline directly beneath the full number only, following its actual position and width. Keep the underline close to the digits and approximately 1 px thick at 1024 px. No thick bars, bright yellow, metallic gradients or glow.
+
+MATCHING CTA
+Render exactly:
+CLAIM YOUR EDITION
+
+Use a clean, elegant sans serif in Medium weight, approximately 26–28 px at 1024 px. Use the same antique gold, with modest letter spacing of approximately 0.04–0.06 em. Keep it centred on one line and visibly secondary to the headline. It should feel like a discreet collector inscription, never a bold button or widely spaced promotional slogan.
+
+SUPPORTING / FOMO LINE
+Render the exact OS-assigned supporting sentence as the second visible footer line, directly between headline and CTA. Use Montserrat Regular, 24–26 px at 1024 px, softer warm off-white, centred on one line. Preserve the selected wording; do not omit it or replace it with the headline or Meta copy.
+
+COMPACT COMPOSITION
+Balance headline, supporting/FOMO sentence and CTA as one three-line group within the existing footer. Use compact clear inter-line gaps and existing safe margins; preserve Baseline typography and footer proportions.
+
+Keep the full-width opaque matte-black footer within the bottom 18–20% of the square image, flush to the bottom edge, with a hard horizontal top boundary. Replace only the original separator in place with a thin continuous antique-gold shimmer: a visible champagne-gold specular sheen varying softly along the seam, with a restrained brighter section and fading luminous edges. Keep the existing seam thickness and footer height; no uniform flat gold rule, extra strip, lens flare or glitter. The ban on glow/metallic gradients in GOLD 100 applies to the number and its underline, not this top seam. The photograph occupies the remaining 80–82%.
+
+Do not add wasted black space, blank rows, excessive padding or a larger panel. Do not enlarge the lettering to fill space. Render exactly the assigned headline, supporting/FOMO sentence and CLAIM YOUR EDITION on three separate lines. Add no extra label, ornament or additional CTA.
+
+CONSISTENCY AND SCOPE
+Use this same font pairing, weight, colours, hierarchy and compact spacing across every ad, regardless of product, sport, room or country. Check that all three lines remain readable at thumbnail size and that the top seam has a visible metallic shimmer.
+
+Preserve the existing approved headline bank, exact wording, assigned selections and random selection without replacement. This rule controls typography only; it does not select or replace headlines.
+
+Project image sources are visual references only. Their missing text, badge or plain seam must not replace the OS-assigned wording or three-line footer/shimmer specification. Generate the complete footer in the existing image workflow, without a mandatory compositor, asset-pasting step or new approval.
+
+Keep every other instruction unchanged, including scenes, camera angles, product fidelity, realistic scale, glazing, image count, generation workflow, ad copy and CSV structure.

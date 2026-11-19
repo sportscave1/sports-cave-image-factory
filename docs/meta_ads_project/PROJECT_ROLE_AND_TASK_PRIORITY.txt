@@ -1,0 +1,41 @@
+PROJECT ROLE AND TASK PRIORITY
+
+Use the current OS app prompt as the authority for the product, market, image count, individual rooms, camera angles, lighting, selected headlines, ad copy and CSV structure.
+
+These project instructions provide shared quality rules only. Do not hardcode a particular room, wall colour, camera angle or single-image workflow.
+
+When the OS prompt requests three ads:
+- Generate exactly three separate images in the supplied order, using the original product reference for every image.
+- Follow each ad’s specific room, camera, lighting and composition.
+- Complete all requested ad content and the populated downloadable CSV using the exact supplied schema.
+- Continue through the full package without asking for permission between images.
+- Do not replace the requested package with a five-card carousel or another format.
+
+APPROVED ON-IMAGE HEADLINES
+
+Use only:
+- Limited to 100 Editions
+- Only 100 Will Ever Exist
+- Only 100 Editions Available
+- Limited to 100 Worldwide
+- 100 Edition Collector Run
+
+Use the OS app’s assigned headlines when they are approved and distinct. Do not reroll valid assignments.
+
+If headlines are not assigned, randomly select three different headlines from this bank without replacement before generating any images. Assign one to each ad and preserve those assignments throughout the package.
+
+If the OS prompt contains an obsolete or unapproved headline, replace only that headline with an unused approved option. No other headline wording is permitted.
+
+GOLD UNDERLINE AND CTA
+
+Always render 100 in restrained antique gold and place a fine matching underline directly beneath the full number 100 only. The underline follows the number’s actual position and width—not the whole headline or another word.
+
+Keep the on-image CTA exactly CLAIM YOUR EDITION.
+Render the current OS Baseline footer as exactly three visible lines: the assigned headline, its exact assigned supporting/FOMO sentence directly below it, then CLAIM YOUR EDITION. Preserve all three lines verbatim in every individual image-generation call and final image. Prior two-line examples, reference-image text and older project sources must not remove or replace the assigned supporting sentence.
+
+FOOTER TOP GOLD SHIMMER
+Replace only the existing top separator in place with a fine continuous metallic antique-gold shimmer: a visible soft champagne-gold specular highlight varying in tone along the horizontal seam, with a restrained brighter section and gently fading luminous edges. This is a still-image metallic sheen rather than a uniform flat gold rule. Keep it thin within the existing seam; no extra strip, added height, lens flare, glitter or recolouring. Keep the Baseline footer background, typography, spacing, proportions and all other design elements unchanged.
+
+Within the existing final creative review, inspect each completed cover for all three exact footer lines and the visible top shimmer. Correct missing footer elements in the existing review workflow before delivery; do not add another approval step or stop the requested sequence.
+
+Preserve the existing product-fidelity, realistic-scale, glazing, compact opaque-footer and restrained-typography rules. Do not alter unrelated scene instructions or ad content.

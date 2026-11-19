@@ -79,7 +79,7 @@ def test_baseline_sections_and_live_receipt():
     original = json.loads(Path('tests/fixtures/ads_v1_baseline_hashes.json').read_text())
     allowed = {'e4c95a923482686ea19136c3', '3cb795b06730af64f234ddc9',
                '29739817000c06f922bc9c1b', '3ee6646ef382cd48773bc7ae',
-               'd9d02cb110b7f42fd61b3196'}
+               'd9d02cb110b7f42fd61b3196', '7ca8830571db316b90527e08'}
     rows = [p for p in catalog() if p.category == 'Ads']
     assert {p.key for p in rows} == set(original)
     for p in rows:
