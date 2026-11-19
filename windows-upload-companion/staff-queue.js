@@ -98,7 +98,8 @@ async function staffQueueTick() {
     const local = await staffRead(staffJobKey);
     const report = local?.receipt ? await health(local.receipt) : {};
     let progress;
-    if (local?.chatTab && report.state === 'submitted') {
+    const observing = ['submitted', 'uncertain'].includes(report.state);
+    if (local?.chatTab && observing) {
       const tab = await chrome.tabs.get(local.chatTab).catch(() => null);
       progress = tab ? await companionMessage(local.chatTab, {type:'project:progress'}, {frameId:0}).catch(() => null) :
         null; // Missing browser contact is not a confirmed workflow failure.
@@ -109,8 +110,16 @@ async function staffQueueTick() {
         await staffWrite(staffJobKey, {...local, idleSince:null});
       }
     }
-    const event = progress?.blocked && !progress.generating && report.state === 'submitted'
-      ? {id:local.id, state:'blocked', reason:progress.reason}
+    // Send can succeed while its receipt times out (notably pasted-text files).
+    // Keep observing that exact owned chat; never resend an uncertain prompt.
+    const failure = progress?.blocked ? progress.reason : local?.blocked;
+    const observedResponse = progress?.finished || progress?.generating;
+    if (report.state === 'uncertain' && observedResponse && !failure) {
+      await save(local.receipt, 'submitted');
+      report.state = 'submitted';
+    }
+    const event = failure && !progress?.generating && observing
+      ? {id:local.id, state:'blocked', reason:failure}
       : {id:local?.id, state:report.state, reason:report.reason};
     const response = await fetch(osOrigin + '/api/staff-product-uploads/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},

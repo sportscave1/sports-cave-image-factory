@@ -547,6 +547,14 @@ def tick(token, event):
         advance(key, actor, 7, str(event.get('reason') or 'ChatGPT stopped without a verified upload result.'), allowed=[4, 5])
         return {'stop': {'id': str(key)}}
     timeout = timedelta(minutes=STALL_MINUTES)
+    if (str(key) == event.get('id') and current['stage'] == 4
+            and event.get('state') == 'uncertain'
+            and current['updated_at'] < datetime.now(timezone.utc) - timeout):
+        advance(key, actor, 7,
+                'ChatGPT handoff remains unconfirmed after 30 minutes. Queue slot released; '
+                'saved files and the existing conversation are retained. Check that conversation '
+                'before explicitly restarting; no duplicate prompt was sent.', allowed=[4])
+        return {'stop': {'id': str(key)}}
     if current['stage'] < 4 and current['updated_at'] < datetime.now(timezone.utc) - timeout:
         detail = f"{current['message'] or LABELS[stage]} · timed out. Review Product Uploads and the ChatGPT conversation."
         advance(key, actor, 7, detail, storefront=current['storefront'],

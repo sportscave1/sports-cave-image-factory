@@ -372,6 +372,39 @@ def test_verification_failure_is_visible_and_does_not_extend_timeout(store, monk
     assert queue.list_jobs('staff')['jobs'][0]['stage'] == 6
 
 
+def test_uncertain_handoff_releases_slot_without_republishing_or_losing_source(store):
+    first = submit('staff', 'blocked')
+    second = submit('staff', 'next')
+    token = queue.pair({'id': 'desktop'})
+    assert queue.tick(token, {})['job']['id'] == str(first)
+    queue.advance(first, 'desktop', 4)
+    event = dict(id=str(first), state='uncertain')
+    queue.tick(token, event)
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (first,))
+    assert queue.tick(token, event) == {'stop': {'id': str(first)}}
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT * FROM product_upload_staff_jobs WHERE id=%s', (first,))
+        row = cur.fetchone()
+        assert row['stage'] == 7
+        assert 'Queue slot released' in row['message']
+        assert row['source_id'] == 'id:original' and row['source_rev'] == 'blocked'
+    assert queue.tick(token, {})['job']['id'] == str(second)
+    assert queue.tick(token, event)['job']['id'] == str(second)  # Late old events cannot stop next job.
+
+
+def test_completed_blocker_after_uncertain_send_releases_upload_slot(store):
+    first = submit('staff', 'blocked')
+    second = submit('staff', 'next')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    queue.advance(first, 'desktop', 4)
+    result = queue.tick(token, dict(id=str(first), state='blocked',
+                                  reason='ChatGPT reported an upload failure: MODERATION'))
+    assert result == {'stop': {'id': str(first)}}
+    assert queue.tick(token, {})['job']['id'] == str(second)
+
+
 def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
     from product_upload_jobs import Jobs
     jobs=Jobs()
