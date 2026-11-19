@@ -82,6 +82,14 @@ test('invalid project or changed job correlation cannot open or submit a chat',a
   assert.equal(f.opened.length,0);
 });
 
+test('queued edit submits its unchanged prompt once without a new-design receipt',async()=>{
+  const f=fixture(),j={...job(1),kind:'edit',prompt:'**USER-REQUESTED DESIGN CHANGES**\nFix spacing\n\nEXACT EXISTING EDIT PROMPT'};
+  f.respond({jobs:[j]});await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent[0].prompt,j.prompt);
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,1);
+});
+
 
 test('a second queued design starts only when the server advances after completion or failure',async()=>{
   const f=fixture();

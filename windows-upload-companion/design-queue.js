@@ -22,7 +22,8 @@ async function rememberDesignTab(id, tab) {
 async function startDesign(job) {
   if (!queueId.test(job.id) || !suppliedReceipt.test(job.receipt) || job.project !== designProject ||
       typeof job.prompt !== 'string' || job.prompt.length > 1048576 ||
-      !job.prompt.includes('morning_design_job_id = "' + job.id + '"')) return;
+      !(job.kind==='edit' ? job.prompt.startsWith('**USER-REQUESTED DESIGN CHANGES**\n') :
+        job.prompt.includes('morning_design_job_id = "' + job.id + '"'))) return;
   if (pending.has(job.receipt)) return;
   const previous = (await chrome.storage.local.get(keyFor(job.receipt)))[keyFor(job.receipt)];
   // Even an interrupted opening needs inspection, not a second automatic chat.

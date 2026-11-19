@@ -123,6 +123,8 @@ def _waiting_refresh_prompt(job):
 def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
+    if job.get('section') == 'edit':
+        return prompt  # The selected-revision Edit prompt is already complete.
     if prompt.startswith('SPORTS CAVE EXISTING DESIGN REFRESH\n'):
         return _waiting_refresh_prompt(job)
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
@@ -315,7 +317,8 @@ def verify_outputs(jobs):
     from psd_directory import REVIEW_METADATA_FOLDER, REVIEW_FOLDER
     if not jobs:
         return {}
-    wanted = {_output_key(job): str(job['id']) for job in jobs}
+    wanted = {_output_key(job): str(job['id']) for job in jobs if job.get('section') != 'edit'}
+    edits = {job['file_id']: job for job in jobs if job.get('section') == 'edit'}
     created = [job['created_at'] for job in jobs if isinstance(job.get('created_at'), datetime)]
     cutoff = min(created) - timedelta(minutes=5) if created else None
     provider, results, candidates = Dropbox(), {}, []
@@ -345,9 +348,15 @@ def verify_outputs(jobs):
         try:
             value, actual = _read_sidecar(provider, metadata)
             key = value.get('morning_design_job_id')
-            if not isinstance(key, str) or key not in wanted:
+            edit = edits.get(value.get('dropbox_file_id'))
+            if edit:
+                if value.get('dropbox_revision') == edit['file_rev']:
+                    continue
+                key = str(edit['id'])
+            elif not isinstance(key, str) or key not in wanted:
                 continue
-            key = wanted[key]
+            else:
+                key = wanted[key]
             source = provider.metadata_if_present(value.get('dropbox_file_id', ''))
             if not source or not final_psd(source) or source.get('size', 0) <= 0:
                 continue
@@ -439,7 +448,7 @@ def tick(token, events):
         enabled = cur.fetchone()['enabled']
         cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
         if enabled and cur.fetchone()['n'] == 0:
-            cur.execute('''SELECT id,title,prompt FROM morning_design_jobs
+            cur.execute('''SELECT id,title,prompt,section FROM morning_design_jobs
                 WHERE stage=0 ORDER BY edition_date,created_at,id LIMIT 1 FOR UPDATE''')
             waiting = cur.fetchone()
             if waiting:
@@ -454,7 +463,7 @@ def tick(token, events):
         cur.execute('SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 ORDER BY created_at,id')
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL
-    return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], project=PROJECT_URL,
+    return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], kind=r['section'], project=PROJECT_URL,
         prompt=r['prompt'], receipt=_receipt(r)) for r in jobs])
 
 

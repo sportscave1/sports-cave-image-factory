@@ -44,6 +44,58 @@ def publish(cur, day='2026-11-17', count=5):
     return edition
 
 
+def test_review_edit_apply_is_idempotent_and_keeps_prompt_unchanged(store,monkeypatch):
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import product_upload_api as api
+    import design_review_metadata as metadata
+    from home_morning_brief_actions import _prompt
+    cur,token=store
+    record=dict(id='id:edit',rev='original',name='Selected.psd',path_display='/Review/Selected.psd')
+    monkeypatch.setattr(api,'_gallery_review_user',AsyncMock(return_value={'id':'reviewer'}))
+    monkeypatch.setattr(api,'Dropbox',lambda:SimpleNamespace())
+    monkeypatch.setattr(api,'_review_metadata',lambda *args:record)
+    monkeypatch.setattr(metadata,'read_handoff',lambda *args:dict(design_name='Selected',product_context='Original story'))
+    app=Starlette(routes=[Route('/api/design-review/edit-queue',api.review_edit_enqueue,methods=['POST'])])
+    with TestClient(app) as client:
+        kwargs=dict(params=dict(id=record['id'],rev=record['rev']),json=dict(comments='Fix the spacing'),headers={'Origin':'http://testserver'})
+        first=client.post('/api/design-review/edit-queue',**kwargs)
+        assert first.status_code==200,first.text
+        assert client.post('/api/design-review/edit-queue',**kwargs).json()==first.json()
+        kwargs['json']=dict(comments='Conflicting request')
+        assert client.post('/api/design-review/edit-queue',**kwargs).status_code>=400
+    result=queue.tick(token,[])['jobs'][0]
+    assert result['kind']=='edit'
+    expected='**USER-REQUESTED DESIGN CHANGES**\nFix the spacing\n\n'+_prompt('Selected','Original story',edit=dict(source=record,metadata=dict(design_name='Selected',product_context='Original story')))
+    assert result['prompt']==expected
+    cur.execute("SELECT count(*) AS n FROM morning_design_jobs WHERE section='edit'")
+    assert cur.fetchone()['n']==1
+
+
+def test_edit_completion_requires_changed_canonical_revision_and_matching_sidecar(monkeypatch):
+    from uuid import uuid4
+    import product_upload_services,design_review_page,design_review_metadata
+    from psd_directory import REVIEW_FOLDER,REVIEW_METADATA_FOLDER
+    jid=str(uuid4())
+    job=dict(id=jid,section='edit',file_id='id:canonical',file_rev='old',prompt='unchanged')
+    source=dict(id='id:canonical',rev='old',name='Selected.psd',path_display=REVIEW_FOLDER+'/Selected.psd',size=100,**{'.tag':'file'})
+    sidecar=dict(id='id:json',rev='j1',name='Selected.upload.json',path_display=REVIEW_METADATA_FOLDER+'/Selected.upload.json')
+    value=dict(dropbox_file_id=source['id'],dropbox_revision='old',dropbox_path=source['path_display'])
+    provider=type('Provider',(),{'metadata_if_present':lambda self,key:source})()
+    monkeypatch.setattr(product_upload_services,'Dropbox',lambda:provider)
+    monkeypatch.setattr(design_review_page,'_folder_entries',lambda *args:[sidecar])
+    monkeypatch.setattr(design_review_metadata,'_read_sidecar',lambda *args:(value,sidecar))
+    monkeypatch.setattr(design_review_metadata,'_handoff_details',lambda *args:dict(review_status='ready_for_review'))
+    assert VERIFY_OUTPUTS([job])=={}
+    value['dropbox_revision']='new'
+    assert VERIFY_OUTPUTS([job])=={}  # JSON alone cannot complete the edit.
+    source['rev']='new'
+    assert VERIFY_OUTPUTS([job])[jid]['stage']==4
+
+
 def test_header_counts_waiting_jobs_and_reads_both_control_states(store, monkeypatch):
     import design_publish_ad
     monkeypatch.setattr(design_publish_ad, 'connect', uploads.connect)

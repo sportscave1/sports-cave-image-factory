@@ -8,3 +8,6 @@ document.addEventListener('click',event=>{
     void chrome.runtime.sendMessage({type:'os:wake-designs'}).catch(()=>{});
   },ms);
 },true);
+document.addEventListener('sc-design-edit-queued',()=>{
+  void chrome.runtime.sendMessage({type:'os:wake-designs'}).catch(()=>{});
+});
