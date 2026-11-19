@@ -4,6 +4,7 @@ const designProject = 'https://chatgpt.com/g/g-p-6a1e449948e881919c1e345006d6365
 const designStorage = 'morningDesignJobs';
 const designAlarm = 'sports-cave-morning-designs';
 let designTickRunning = false;
+let designTickRequested = false;
 let designStateQueue = Promise.resolve();
 
 function updateDesignJobs(change) {
@@ -64,9 +65,20 @@ async function retireDesign(job) {
   return true;
 }
 
+async function wakeDesignFromTab(sender) {
+  if (sender.frameId !== 0 || !sender.tab ||
+      !/^https:\/\/chatgpt\.com\/g\/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?\/c\/[a-f0-9-]{36}$/.test(sender.url || '')) return {accepted:false};
+  const jobs = await staffRead(designStorage) || {};
+  if (!Object.values(jobs).some(job => job.tab === sender.tab.id && (!job.chatUrl || job.chatUrl === sender.url))) return {accepted:false};
+  designTickRequested = true;
+  await designQueueTick();
+  return {accepted:true};
+}
+
 async function designQueueTick() {
   if (designTickRunning) return;
   designTickRunning = true;
+  designTickRequested = false;
   try {
     const token = await staffRead(staffDeviceKey);
     if (!token) return;
@@ -110,6 +122,7 @@ async function designQueueTick() {
     // Durable server claims and the local send journal survive network outages.
   } finally {
     designTickRunning = false;
+    if (designTickRequested) void designQueueTick();
   }
 }
 

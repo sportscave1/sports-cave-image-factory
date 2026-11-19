@@ -160,6 +160,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     action = permit(message, sender);
   } else if (message?.type === 'project:backup-draft') {
     action = backupDraft(message, sender);
+  } else if (message?.type === 'project:design-progress') {
+    action = wakeDesignFromTab(sender);
   } else if (message?.type === 'project:blocked' && sender.frameId === 0) {
     action = recordChatBlock(sender, message.code);
   } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {

@@ -195,3 +195,22 @@ test('does not start another design until the previous owned response actually s
   await f.run('designQueueTick()');assert.equal(f.actions.filter(a=>a==='reload').length,1);
   f.allowStop(true);await f.run('designQueueTick()');await f.run('queue');assert.equal(f.sent.length,2);
 });
+
+test('only the owned design tab can wake immediate blocker reporting and advance once',async()=>{
+  const f=fixture(),first=job(1),second=job(2);
+  f.respond({jobs:[first]});await f.run('designQueueTick()');await f.run('queue');
+  const chat=first.project.replace('/project','/c/00000000-0000-0000-0000-000000000099');
+  f.tabs.get(1).url=chat;
+  f.setProgress({generating:false,finished:true,blocked:true,reason:'Image service rejected generation; replacement PSD pending.',chat_url:chat,activity:'blocked'});
+  f.respond({jobs:[second]});
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:0,tab:{id:99},url:${JSON.stringify(chat)}})`)).accepted,false);
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:1,tab:{id:1},url:${JSON.stringify(chat)}})`)).accepted,false);
+  assert.equal(f.sent.length,1);
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:0,tab:{id:1},url:${JSON.stringify(chat)}})`)).accepted,true);
+  await f.run('queue');
+  assert.equal(f.events().events[0].state,'blocked');
+  assert.equal(f.sent.length,2);
+  assert.ok(f.tabs.has(1));
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:0,tab:{id:1},url:${JSON.stringify(chat)}})`)).accepted,false);
+  assert.equal(f.sent.length,2);
+});
