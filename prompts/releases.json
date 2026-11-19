@@ -1,15 +1,15 @@
 {
   "ebffbedac545beb011dc654c": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "db867066354f480ec856bb14e4aef96b716dca7b901839c99622db2a563420fb",
+    "version": "1.7",
+    "id": "44b05012bd22482ab965ad0b01891d3c",
+    "hash": "9a37db11443327a6357509ae2016d90fc6792128d814fe53e6794f77c69fb75a",
     "path": "@category/Ads",
     "symbol": ""
   },
   "e4c95a923482686ea19136c3": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "84f32cd083a75e0add4737f2f2be66fe4ed2d6f3194aa2b52c2c438e3b2f53e6",
+    "version": "1.7",
+    "id": "44b05012bd22482ab965ad0b01891d3c",
+    "hash": "13902d633536538f924497ad391bdb05afb8a082c61d489fa4099ad56f61eddc",
     "path": "ads_footer.py",
     "symbol": "COMPACT_FOOTER_RULES"
   },
@@ -28,9 +28,9 @@
     "symbol": "IE_EXECUTION_CHECKLIST"
   },
   "29739817000c06f922bc9c1b": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "24084690838182ea03c60c08f9952ee6bd0faff10038e5eec0819948f929d8d5",
+    "version": "1.7",
+    "id": "44b05012bd22482ab965ad0b01891d3c",
+    "hash": "15576b713bd4a738ca49096e2740e9203b405f29fbf4c03d6e409e67d098c8b2",
     "path": "ads_page.py",
     "symbol": "SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2"
   },
@@ -63,9 +63,9 @@
     "symbol": "IE_FOOTER_TEXT_CLARIFICATION"
   },
   "6137aef6ef1b942197a3aa91": {
-    "version": "1.6",
-    "id": "1f78a471bd2c4fb3b6e5da97b63b11d3",
-    "hash": "d00efb41e86dd9cdf436c9392cff28c03d0de83fd5365fe4ed4a09f9ac7ae98e",
+    "version": "1.7",
+    "id": "44b05012bd22482ab965ad0b01891d3c",
+    "hash": "d099e7d9787b02727f09d0bbc5bd54b2e34f182a98262b2ca9ca5eaa3fd82359",
     "path": "ads_page.py",
     "symbol": "SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1"
   }

@@ -14,9 +14,13 @@ def test_two_line_export_has_no_conflicting_directions(country,product,sport):
     prompt=record['master_prompt']
     for old in ('SUPPORTING LINE:', 'Use no underline', '100 unadorned', '100 in antique gold with no underline',
                 'Allow the foreground copy to sit over it', 'x = 512', 'Compare the middle line',
+                'clean Montserrat sans serif', 'medium-weight sans serif', 'headline 42–48 px',
+                '0.04–0.06 em', 'sole typography specification for every image and pack',
                 'three centred lines', 'all three lines remain readable', 'distinct supporting lines in every set'):
         assert old not in prompt
     for required in ('native 1024 × 209', 'y = 815', 'LEFT of the badge', 'underline ONLY those three digits',
+                     'ITALIC serif headline', 'upright classical SERIF capitals', '0.35–0.45 em',
+                     'REFERENCE-LOCKED TYPOGRAPHY', 'project source/Assets',
                      'Render no supporting sentence', 'SAME finished composite', 'never a button',
                      'Exclude FINAL COMPOSITOR DATA', 'Do not send the assigned headline, CTA'):
         assert required in prompt
@@ -59,3 +63,11 @@ def test_saved_assignments_and_completed_results_are_not_rerolled():
     saved['master_prompt']='Previously submitted immutable prompt'
     saved['generated_ad_output']='Already generated approved output'
     assert ads.ensure_current_ads_result_prompt(saved) is saved
+
+
+@pytest.mark.parametrize('country', ['Australia', 'USA', 'UK', 'Canada', 'New Zealand'])
+def test_seasonal_prompt_cannot_restore_third_footer_line(country):
+    from ads_black_friday import build_black_friday_prompt
+    prompt = ads.build_ads_prompt('Synthetic Collector Edition', 'Cricket', country,
+                                 'Instant Experience', product_metadata={'edition_limit': 100})
+    assert build_black_friday_prompt(prompt) == prompt
