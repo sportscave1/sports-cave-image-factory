@@ -12,7 +12,10 @@ import design_publish_ad as companion
 def test_two_line_export_has_no_conflicting_directions(country,product,sport):
     record=ads.build_ads_result_record(product,sport,country,'Instant Experience',variation_token='footer-test')
     prompt=record['master_prompt']
-    for old in ('SUPPORTING LINE:', 'FINAL COMPOSITOR DATA', 'y = 815', 'native 1024 × 209', 'Use no underline', '100 unadorned', '100 in antique gold with no underline',
+    for old in ('SUPPORTING LINE:', 'use each image’s exact resolved supporting sentence',
+                'Render the assigned supporting line directly below the headline',
+                'Use only the exact resolved headline, supporting line and fixed CTA',
+                'FINAL COMPOSITOR DATA', 'y = 815', 'native 1024 × 209', 'Use no underline', '100 unadorned', '100 in antique gold with no underline',
                 'Allow the foreground copy to sit over it', 'x = 512', 'Compare the middle line',
                 'clean Montserrat sans serif', 'medium-weight sans serif', 'headline 42–48 px',
                 '0.04–0.06 em', 'sole typography specification for every image and pack',

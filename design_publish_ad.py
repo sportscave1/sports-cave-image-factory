@@ -80,9 +80,10 @@ def enqueue(cur, upload, requester, sport, country):
 def public(value):
     if not value:
         return None
+    generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
     return dict(label=('Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
-                       'ChatGPT is thinking / generating' if value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120 else
-                       'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=value.get('detail', ''),
+                       'ChatGPT is thinking / generating' if generating else
+                       'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=('ChatGPT is still generating; waiting for finished attachments' if generating else value.get('detail', '')),
                 active=value['stage'] not in ('complete', 'failed', 'cancelled'),
                 posting_id=value.get('posting_id'))
 

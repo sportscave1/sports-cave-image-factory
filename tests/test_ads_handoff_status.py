@@ -63,3 +63,14 @@ def test_stale_uncertain_does_not_fail_confirmed_generation(checkpoint):
 def test_thinking_label_expires_when_browser_observation_stops(checkpoint):
     checkpoint.update(stage='generating', chat_generating=True, chat_observed_at=9000)
     assert 'thinking' not in ads.public(checkpoint)['label']
+
+
+def test_live_generation_hides_stale_transfer_warning_without_erasing_it(checkpoint):
+    checkpoint.update(stage='generating', chat_generating=True, chat_observed_at=10000,
+                      detail='Original queued prompt is not loaded. Press Play to resume this saved chat.')
+    assert ads.public(checkpoint)['detail'] == 'ChatGPT is still generating; waiting for finished attachments'
+    assert 'Press Play' in checkpoint['detail']
+    checkpoint['chat_generating'] = False
+    assert 'Press Play' in ads.public(checkpoint)['detail']
+    checkpoint.update(stage='failed', detail='Image provider rejected the hallway cover')
+    assert ads.public(checkpoint)['detail'] == 'Image provider rejected the hallway cover'
