@@ -1,4 +1,24 @@
-# Two concurrent design jobs
+# Design queue capacity: one at a time
+
+The owner reverted admission to **one active design** on 19 November 2026.
+The server enforces this under the shared paired-desktop claim lock even when
+an already installed companion advertises capacity 2. New Designs, refreshes
+and edits share that single limit. The next design starts only after the active
+one completes or releases its slot through the existing failure/timeout handling.
+
+Two jobs admitted before this rollback may finish and report their progress;
+no additional job starts while either remains active. Preserve their saved chats,
+send journals and output receipts rather than cancelling or replaying them.
+The retained slot column/index supports those existing records and does not
+authorize two new admissions. No database migration or installed-extension
+update is required for the server limit. Companion 1.7.1 also requests only one
+slot and will not open two new chats from an older two-job response.
+
+Validation covers competing capacity-2 clients receiving the same single claim,
+automatic progression after completion, draining existing two-job records,
+late receipts, restart safety and no duplicate sends.
+
+## Historical two-slot implementation (superseded)
 
 The design companion advertises capacity 2. The server claims only free slots
 under its existing paired-desktop lock; a partial unique index and a 1–2 slot

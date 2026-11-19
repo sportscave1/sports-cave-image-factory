@@ -44,43 +44,44 @@ def publish(cur, day='2026-11-17', count=5):
     return edition
 
 
-def test_two_slots_fill_once_and_replace_only_the_completed_job(store, monkeypatch):
+def test_single_design_limit_even_with_concurrent_two_slot_clients(store, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     cur, token = store
     publish(cur)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(lambda _: queue.tick(token, [], capacity=2)['jobs'], range(2)))
-    first = responses[0]
-    ids = {job['id'] for job in first}
-    assert len(ids) == 2 and ids == {job['id'] for job in responses[1]}
-    assert {job['receipt'] for job in first} == {job['receipt'] for job in responses[1]}
-    queue.tick(token, [dict(id=job['id'], state='submitted') for job in first], capacity=2)
-    # The database independently rejects a third active job, including bypasses.
-    with pytest.raises(Exception, match='morning_design_active_slot'):
-        with queue.connect() as conn, conn.cursor() as check:
-            check.execute('UPDATE morning_design_jobs SET stage=1,slot=1 WHERE id=(SELECT id FROM morning_design_jobs WHERE stage=0 LIMIT 1)')
+        responses = list(pool.map(lambda _: queue.tick(token, [], capacity=2), range(2)))
+    first = responses[0]['jobs'][0]
+    assert all(result['capacity'] == 1 and len(result['jobs']) == 1 for result in responses)
+    assert responses[1]['jobs'][0]['receipt'] == first['receipt']
+    queue.tick(token, [dict(id=first['id'], state='submitted')], capacity=2)
+    assert queue.tick(token, [], capacity=2)['jobs'][0]['id'] == first['id']
     cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
-    assert cur.fetchone()['n'] == 2
-    completed, remaining = first
-    queue.settings(False)
-    monkeypatch.setattr(queue, 'verify_outputs', lambda _: {completed['id']:dict(stage=4, message='',
-        source=dict(id='id:dual-final', rev='r1', path_display='/Review/Dual.psd'))})
-    assert [job['id'] for job in queue.tick(token, [], capacity=2)['jobs']] == [remaining['id']]
-    queue.settings(True)
+    assert cur.fetchone()['n'] == 1
+    monkeypatch.setattr(queue, 'verify_outputs', lambda _: {first['id']:dict(stage=4, message='',
+        source=dict(id='id:final', rev='r1', path_display='/Review/Final.psd'))})
     following = queue.tick(token, [], capacity=2)['jobs']
-    assert len(following) == 2 and completed['id'] not in {job['id'] for job in following}
-    assert next(job for job in following if job['id'] == remaining['id'])['receipt'] == remaining['receipt']
+    assert len(following) == 1 and following[0]['id'] != first['id']
 
 
-def test_two_slots_stalled_job_releases_without_replaying_neighbour(store):
+def test_existing_two_designs_drain_without_any_additional_start(store, monkeypatch):
     cur, token = store
-    publish(cur, count=3)
-    first, other = queue.tick(token, [], capacity=2)['jobs']
-    queue.tick(token, [dict(id=job['id'], state='submitted') for job in (first, other)], capacity=2)
-    cur.execute("UPDATE morning_design_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (first['id'],))
-    jobs = queue.tick(token, [dict(id=first['id'], state='submitted',activity='unchanged')], capacity=2)['jobs']
-    assert len(jobs) == 2 and first['id'] not in {job['id'] for job in jobs}
-    assert next(job for job in jobs if job['id'] == other['id'])['receipt'] == other['receipt']
+    publish(cur, count=4)
+    first = queue.tick(token, [], capacity=2)['jobs'][0]
+    cur.execute("UPDATE morning_design_jobs SET stage=2 WHERE id=%s", (first['id'],))
+    cur.execute("""UPDATE morning_design_jobs SET stage=2,slot=2
+        WHERE id=(SELECT id FROM morning_design_jobs WHERE stage=0 ORDER BY created_at,id LIMIT 1)
+        RETURNING id""")
+    other = str(cur.fetchone()['id'])
+    assert len(queue.tick(token, [], capacity=2)['jobs']) == 2
+    monkeypatch.setattr(queue, 'verify_outputs', lambda _: {first['id']:dict(stage=4, message='',
+        source=dict(id='id:final', rev='r1', path_display='/Review/Final.psd'))})
+    remaining = queue.tick(token, [dict(id=first['id'],state='submitted'),
+                                   dict(id=other,state='submitted')], capacity=1)['jobs']
+    assert len(remaining) == 1 and remaining[0]['id'] == other
+    assert queue.tick(token, [], capacity=2)['jobs'][0]['id'] == other
+    cur.execute('UPDATE morning_design_jobs SET stage=5 WHERE id=%s', (other,))
+    following = queue.tick(token, [], capacity=2)['jobs']
+    assert len(following) == 1 and following[0]['id'] not in (first['id'], other)
     with pytest.raises(ValueError):
         queue.tick(token, [], capacity=3)
 

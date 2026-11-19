@@ -395,11 +395,12 @@ def verify_outputs(jobs):
 
 
 def tick(token, events, capacity=1):
-    # Older installed companions retain their single-slot protocol until updated.
+    # Accept older two-slot clients so existing work can report and finish.
+    # Admission is always one design, regardless of the advertised capacity.
     if type(capacity) is not int or capacity not in (1, 2):
         raise ValueError('Choose one or two design slots.')
-    if not isinstance(events, list) or len(events) > capacity or any(not isinstance(e, dict) for e in events):
-        raise ValueError('Send at most one report per design slot.')
+    if not isinstance(events, list) or len(events) > 2 or any(not isinstance(e, dict) for e in events):
+        raise ValueError('Send at most two existing design reports.')
     with connect() as conn, conn.cursor() as cur:
         # Same singleton lock as Product Uploads serializes all desktop claims.
         cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
@@ -458,8 +459,8 @@ def tick(token, events, capacity=1):
         enabled = cur.fetchone()['enabled']
         cur.execute('SELECT slot FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
         occupied = {row['slot'] for row in cur.fetchall()}
-        for slot in range(1, capacity + 1) if enabled else ():
-            if len(occupied) >= capacity:
+        for slot in (1,) if enabled else ():
+            if occupied:
                 break
             if slot in occupied:
                 continue
@@ -480,7 +481,7 @@ def tick(token, events, capacity=1):
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL
     return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], kind=r['section'], project=PROJECT_URL,
-        prompt=r['prompt'], receipt=_receipt(r)) for r in jobs[:capacity]])
+        prompt=r['prompt'], receipt=_receipt(r)) for r in jobs], capacity=1)
 
 
 async def tick_route(request):

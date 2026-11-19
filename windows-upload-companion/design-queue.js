@@ -58,7 +58,7 @@ async function designQueueTick() {
     }
     const response = await fetch(osOrigin + '/api/morning-designs/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
-      body:JSON.stringify({events, capacity:2}), credentials:'omit', signal:AbortSignal.timeout(25000),
+      body:JSON.stringify({events, capacity:1}), credentials:'omit', signal:AbortSignal.timeout(25000),
     });
     if (!response.ok) return;
     const result = await response.json();
@@ -66,7 +66,12 @@ async function designQueueTick() {
     const activeIds = new Set(result.jobs.map(job => job.id));
     // Reload after the network wait so a concurrent submission's tab is retained.
     await updateDesignJobs(current => Object.fromEntries(Object.entries(current).filter(([id]) => activeIds.has(id))));
-    for (const job of result.jobs) if (job.stage === 1) await startDesign(job);
+    // Preserve reports for jobs admitted before the rollback, but never start
+    // a second design while another is running or open two new chats at once.
+    if (!result.jobs.some(job => job.stage === 2 || job.stage === 3)) {
+      const opening = result.jobs.find(job => job.stage === 1);
+      if (opening) await startDesign(opening);
+    }
   } catch {
     // Durable server claims and the local send journal survive network outages.
   } finally {
