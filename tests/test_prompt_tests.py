@@ -32,6 +32,19 @@ class RunnerTests(unittest.TestCase):
             run('draft', 'Ads', {'title': 'Product'}, post=Mock(return_value=response))
         self.assertNotIn('private detail', str(raised.exception))
 
+    def test_unavailable_default_model_uses_one_accessible_fallback(self):
+        rejected = Mock(ok=False, status_code=403)
+        rejected.json.return_value = {'error': {'code': 'model_not_found'}}
+        success = Mock(ok=True)
+        success.json.return_value = {'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Trial'}]}]}
+        models = Mock(ok=True)
+        models.json.return_value = {'data': [{'id': 'gpt-4.1-mini'}]}
+        post = Mock(side_effect=[rejected, success])
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'synthetic', 'OPENAI_PROMPT_TEST_MODEL': ''}):
+            result = run('draft', 'Ads', {'title': 'Product'}, post=post, get=Mock(return_value=models))
+        self.assertEqual(result['model'], 'gpt-4.1-mini')
+        self.assertEqual(post.call_count, 2)
+
     def test_timeout_never_retries(self):
         import requests
         post = Mock(side_effect=requests.Timeout())

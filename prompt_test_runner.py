@@ -27,7 +27,7 @@ def fingerprint(text, workflow, item):
     return hashlib.sha256(json.dumps([text, workflow, item], sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
-def run(text, workflow, item, image=None, *, post=None):
+def run(text, workflow, item, image=None, *, post=None, get=None):
     if workflow not in OUTPUTS or not text.strip():
         raise ValueError('Choose a workflow and enter draft instructions.')
     if len(text.encode('utf-8')) > 1500000:
@@ -55,6 +55,23 @@ def run(text, workflow, item, image=None, *, post=None):
         response = (post or requests.post)('https://api.openai.com/v1/responses',
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
             json=payload, timeout=(10, 90))
+        # A rejected model has not generated output. Resolve one available model;
+        # never retry quota, timeout, or partially completed generation requests.
+        if not response.ok and getattr(response, 'status_code', None) in (400, 403, 404) and not os.getenv('OPENAI_PROMPT_TEST_MODEL'):
+            try:
+                rejected = response.json().get('error', {}).get('code') == 'model_not_found'
+                if rejected:
+                    available = (get or requests.get)('https://api.openai.com/v1/models',
+                        headers={'Authorization': 'Bearer ' + key}, timeout=(10, 15))
+                    ids = {entry.get('id') for entry in available.json().get('data', [])} if available.ok else set()
+                    fallback = next((name for name in ('gpt-4.1', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4o-mini') if name in ids and name != model), None)
+                    if fallback:
+                        model = payload['model'] = fallback
+                        response = (post or requests.post)('https://api.openai.com/v1/responses',
+                            headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
+                            json=payload, timeout=(10, 90))
+            except (ValueError, AttributeError, TypeError):
+                pass
         if not response.ok:
             status = getattr(response, 'status_code', None)
             try:
