@@ -1575,10 +1575,12 @@
         const label = job => job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
         const adLabel = job => "Ad · " + job.ad.label;
-        const job = jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || jobs[0];
+        const newestCompleted = jobs.filter(item=>item.stage===6)
+          .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))[0];
+        const job = jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
         bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
-        const currentLabel = (job.ad && !Array.isArray(queues.ads?.jobs) ? label(job) + " · " + adLabel(job) : label(job))
+        const currentLabel = label(job)
           + (queues.upload?.waiting ? ` · ${queues.upload.waiting} waiting` : '');
         uploadSummary.title = job.title + " · " + currentLabel;
         root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
