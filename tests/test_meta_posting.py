@@ -453,7 +453,7 @@ class FakePostingClient:
 
     def configured_adset(self, adset_id):
         self.calls.append("read_configured_adset")
-        return {"id": adset_id, "configured_status": "PAUSED"}
+        return {"id": adset_id, "configured_status": "PAUSED", "ad_set_goal": {"type": 0}}
 
     def ad(self, ad_id):
         self.calls.append("read_ad")
@@ -1085,7 +1085,7 @@ class PostingPayloadTests(unittest.TestCase):
         self.assertEqual(payload["optimization_goal"], "OFFSITE_CONVERSIONS")
         self.assertEqual(payload["promoted_object"]["custom_event_type"], "PURCHASE")
         self.assertEqual(payload["promoted_object"]["product_set_id"], "set-1")
-        self.assertNotIn("ad_set_goal", payload)
+        self.assertEqual(payload["ad_set_goal"], {"type": 0})
         self.assertNotIn("existing_customer_budget_percentage", payload)
         self.assertEqual(
             payload["targeting"], build_targeting(country="AUS")
@@ -1131,6 +1131,25 @@ class PostingPayloadTests(unittest.TestCase):
             CUSTOMER_LIFECYCLE_ACQUIRE_NEW_CUSTOMERS,
         )
         self.assertNotIn("type", acquisition["verification_source"])
+
+    def test_explicit_broad_readback_and_exclusions(self):
+        for goal_type in (0, "0", "BROAD"):
+            with self.subTest(goal_type=goal_type):
+                result = customer_lifecycle_verification(
+                    {"id": "adset-1", "ad_set_goal": {"type": goal_type}},
+                    require_explicit_goal=True,
+                )
+                self.assertEqual(result["strategy"], CUSTOMER_LIFECYCLE_ALL_AUDIENCES)
+                self.assertIn("explicit BROAD", result["verification_source"])
+        for goal in ({"type": 1}, {"type": 2}, {"type": False},
+                     {"type": 0, "existing_customers_exclusions": ["audience-1"]},
+                     {"type": 0, "engaged_audiences_exclusions": ["audience-2"]}):
+            with self.subTest(goal=goal):
+                self.assertFalse(adset_uses_all_audiences({"ad_set_goal": goal}))
+        self.assertEqual(customer_lifecycle_verification(
+            {"id": "adset-1"}, acquisition_fields_requested=True,
+            require_explicit_goal=True,
+        )["strategy"], CUSTOMER_LIFECYCLE_UNKNOWN)
 
     def test_unverified_acquire_new_customers_never_builds_partial_payload(self):
         with self.assertRaisesRegex(
@@ -1618,6 +1637,7 @@ class MetaPostingClientTests(unittest.TestCase):
         )
         self.assertEqual(post.call_args_list[0].kwargs["data"]["status"], "PAUSED")
         self.assertIn('"advantage_audience": 1', post.call_args_list[1].kwargs["data"]["targeting"])
+        self.assertEqual(json.loads(post.call_args_list[1].kwargs["data"]["ad_set_goal"]), {"type": 0})
         self.assertEqual(post.call_args_list[2].kwargs["data"]["published"], "false")
         self.assertNotIn("access_token", post.call_args_list[0].kwargs)
         self.assertNotIn("access_token", post.call_args_list[1].kwargs)
@@ -2402,6 +2422,7 @@ class PostingServiceTests(unittest.TestCase):
         )
         created_adset = {
             **source_adset,
+            "ad_set_goal": {"type": 0},
             "id": "adset-1",
             "name": expected_name,
             "status": "PAUSED",
@@ -2571,6 +2592,20 @@ class PostingServiceTests(unittest.TestCase):
                 row["meta_ad_id"] for row in second["ad_results"]
             )
         )
+
+    def test_new_adset_missing_explicit_goal_blocks_before_route_writes(self):
+        for goal in (None, {}):
+            with self.subTest(goal=goal):
+                client = FakePostingClient()
+                store = FakePostingStore()
+                client.configured_adset = mock.Mock(return_value={
+                    "id": "adset-1", "configured_status": "PAUSED", "ad_set_goal": goal,
+                })
+                with self.assertRaisesRegex(PostingAmbiguousError, "Get conversions from all audiences"):
+                    MetaPostingService(client=client, store=store).create_paused_campaign(request_for())
+                self.assertEqual(store.record["verified_lifecycle_strategy"], CUSTOMER_LIFECYCLE_UNKNOWN)
+                self.assertNotIn("ad_image", client.calls)
+                self.assertNotIn("template_copy", client.calls)
 
     def test_new_adset_acquisition_configuration_blocks_before_route_writes(self):
         client = FakePostingClient()
@@ -2871,7 +2906,7 @@ class PostingServiceTests(unittest.TestCase):
                 self.assertEqual(
                     targeting["targeting_automation"], {"advantage_audience": 1}
                 )
-                self.assertNotIn("ad_set_goal", client.adset_payload)
+                self.assertEqual(client.adset_payload["ad_set_goal"], {"type": 0})
                 self.assertNotIn(
                     "existing_customer_budget_percentage", client.adset_payload
                 )

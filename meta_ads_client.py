@@ -1465,7 +1465,7 @@ class MetaPostingClient:
     def create_adset(self, payload):
         result = _post(
             f"{self.ad_account_id}/adsets",
-            data=self._graph_data(payload, json_fields=("promoted_object", "targeting")),
+            data=self._graph_data(payload, json_fields=("promoted_object", "targeting", "ad_set_goal")),
             config=self.config,
         )
         adset_id = str(result.get("id") or "")

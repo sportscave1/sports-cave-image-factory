@@ -27,6 +27,7 @@ from meta_posting_service import (
     CarouselCard,
     MetaPostingService,
     PostingError,
+    PostingAmbiguousError,
     PostingRequest,
     PostingValidationError,
     _request_fingerprint,
@@ -253,7 +254,7 @@ class FakeCarouselClient(FakePostingClient):
             "destination_type": "WEBSITE",
             "promoted_object": promoted,
             "targeting": {"geo_locations": {"countries": ["AU"]}},
-            "ad_set_goal": None,
+            "ad_set_goal": None if existing else {"type": 0},
             "existing_customer_budget_percentage": None,
             "is_dynamic_creative": False,
         }
@@ -523,6 +524,7 @@ class CarouselContractTests(unittest.TestCase):
         self.assertFalse(adset["is_dynamic_creative"])
         self.assertNotIn("product_set_id", adset["promoted_object"])
         self.assertEqual(adset["status"], "PAUSED")
+        self.assertEqual(adset["ad_set_goal"], {"type": 0})
 
 
 class CarouselMetaClientTests(unittest.TestCase):
@@ -779,6 +781,22 @@ class CarouselCsvAndUiTests(unittest.TestCase):
 
 
 class CarouselServiceTests(unittest.TestCase):
+    def test_new_carousel_missing_or_acquisition_goal_blocks_before_ads(self):
+        for goal in (None, {}, {"type": 1}, {"type": 2}):
+            with self.subTest(goal=goal):
+                client = FakeCarouselClient()
+                read_adset = client.configured_adset
+                client.configured_adset = lambda adset_id: {
+                    **read_adset(adset_id), "ad_set_goal": goal,
+                }
+                with self.assertRaisesRegex(PostingAmbiguousError, "Get conversions from all audiences"):
+                    MetaPostingService(
+                        client=client, store=FakePostingStore(),
+                        carousel_validator=AcceptingCarouselValidator(),
+                    ).create_paused_campaign(carousel_request())
+                for write in ("ad_image", "carousel_creative", "carousel_ad"):
+                    self.assertNotIn(write, client.calls)
+
     def test_four_card_refresh_creates_and_verifies_exact_count_with_mocked_meta(self):
         client = FakeCarouselClient()
         original = carousel_request()
