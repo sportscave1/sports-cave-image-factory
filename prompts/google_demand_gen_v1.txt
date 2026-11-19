@@ -651,6 +651,15 @@ SPORTS CAVE FOOTER
 
 Use the approved Sports Cave premium scarcity footer on all nine images.
 
+Footer asset and Collector Series plaque
+Use sports-cave-ad-footer-example.jpg from the Assets folder as the approved footer artwork. In ChatGPT, use the project source with that exact filename and attach the actual image as a separate reference alongside the product image for each applicable black-footer cover. Where the Companion can composite the footer, place the asset directly and typeset the copy over it.
+Keep the footer full-width, opaque and flush to the bottom, with the fixed footer geometry below. Preserve the satin folds and the single muted charcoal Collector Series plaque with its scalloped rim. Apply the seam shimmer specified below. Match the plaque’s relative size and right-side position in the asset. Preserve its SC monogram, stars, laurel and ring lettering. The footer asset already contains the plaque. Keep the original product reference separate from this footer treatment.
+Sports Cave antique-gold shimmer at the photo–footer seam
+For a 1024 × 1024 square, the photo occupies the top 815 px and the footer occupies the bottom 209 px, starting at y = 815 from the top. This is the fixed geometry for all square black-footer ads. Scale this split proportionally for other square resolutions. For non-square layouts keep the existing format-specific split. Use exactly one uninterrupted full-width, thin antique-gold line at the existing seam, flush with the topmost edge of the black footer where it directly touches the photo. Place the shimmer on the first row of the footer, within the original border thickness and inside the 209 px. The shimmer is included in the footer height. Reserve zero extra vertical space for this treatment: no inset, gap, extra strip, second line, or movement of the seam or copy.
+Use the supplied Sports Cave gold streak as the finish reference: soft dark-gold tails and a narrow, restrained brighter gold glint tapering horizontally into the antique-gold base. Confine all shimmer to the line itself, with no vertical glow. In a still, show a frozen glint. Where animation is already supported, the glint may travel along that same fixed line. Keep the line continuous and free of any logo, monogram, diamond, icon or lettering.
+Keep 100 gold wherever the approved headline calls for it. Use no underline or ornament below 100 or elsewhere beneath the headline. The scalloped Collector Series plaque belongs in its existing right-hand position within the footer. If compositing, recolour or replace only the baked-in border pixels at the seam. For direct compositing at 1024 × 1024, use sports-cave-ad-footer-example.jpg at its native 1024 × 209 size, anchored to y = 815. Check the final dimensions and seam position before export.
+Add exactly the three existing lines in order: the ad’s assigned headline, its exact FOMO supporting sentence, and CLAIM YOUR EDITION in plain antique-gold lettering. Preserve the existing typography, gold 100 treatment and wording. Centre each of the headline, FOMO line and CTA on the full canvas midpoint, x = 512 at 1024 px wide. The plaque is a background detail. Allow the foreground copy to sit over it if needed, with clean contrast and the same centre axis for all three lines. Use compact, balanced spacing and check readability at mobile size. If the exact image asset is unavailable, flag it so the trial is not reported as an asset match.
+
 Footer:
 
 fully opaque
@@ -671,7 +680,7 @@ Premium gold:
 Muted secondary:
 #A6A19A
 
-Add one thin restrained gold separator across the top boundary.
+Apply one Sports Cave antique-gold divider across the top boundary as specified in the footer rules.
 
 Never use:
 

@@ -1,0 +1,58 @@
+{
+  "ebffbedac545beb011dc654c": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "05f6ffdd2af1ed970803ba383a66f47a40dd2dc82864c42ace73545acdd7a64f",
+    "path": "@category/Ads",
+    "symbol": ""
+  },
+  "e4c95a923482686ea19136c3": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "400687bf5cb0c88b5de2e4510d57f6a939fdb806633db00728e554c7def80049",
+    "path": "ads_footer.py",
+    "symbol": "COMPACT_FOOTER_RULES"
+  },
+  "3cb795b06730af64f234ddc9": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "8ac1d7ced8c4c0fcbb47cb2bf247c10062df7c97fcfd032647f31e00fa2e6d16",
+    "path": "prompts/google_demand_gen_v1.txt",
+    "symbol": ""
+  },
+  "0df0799f598199ac309d066e": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "8a9473f7b1d98acfe9df43f5897077f539d72ee6fb2a5340c76f3b8cd1981b0c",
+    "path": "ads_page.py",
+    "symbol": "IE_EXECUTION_CHECKLIST"
+  },
+  "29739817000c06f922bc9c1b": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "18f1d3eee8ddc6c0eeefbc4fe4d02f136ffc621c27609662efa004237d92622c",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2"
+  },
+  "3ee6646ef382cd48773bc7ae": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "3972bf41699646333028f399f5e646f39a09166b39567375832f592b70486257",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1"
+  },
+  "d9d02cb110b7f42fd61b3196": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "f556fa1772182cf583c8d7ef64c2dbcca1b52a2ec838eb6e2820df9ec8971ea8",
+    "path": "ads_page.py",
+    "symbol": "INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE"
+  },
+  "704462a5b422e7982db8880f": {
+    "version": "1.5",
+    "id": "a04e2c0211b64a79a3d8b9d958b9316c",
+    "hash": "477cba4c9dd13f135b3bc25fe888d2c6e9b69b6c94978665352a1ae4c01b9c86",
+    "path": "ads_generation_review.py",
+    "symbol": "RULES"
+  }
+}

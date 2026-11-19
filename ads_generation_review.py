@@ -1,50 +1,7 @@
 """Internal creative review for New Ads, before the existing final delivery."""
 
 VERSION = "SPORTS CAVE COMPLETE AD REVIEW V1"
-RULES = f"""{VERSION}
-
-Creative quality and variety
-Build on the existing winner frameworks with fresh, product-specific fan insight.
-Within each assigned route, develop a distinct emotional angle and complementary
-headline and description, rather than repeating the same three generic ads with
-names swapped. Use the supplied variation and recent-history context to explore
-different permitted settings, light, materials and visual details. Make the ads
-recognisably different from one another while preserving each route's required
-scene, camera, layout, footer, typography, product fidelity and protected copy.
-Vary flexible wording and scene details, not the locked frameworks or facts.
-
-Final creative review — after images and copy, before export
-Once every image, Primary Text, headline, description and CTA is complete, inspect
-the actual generated images alongside their matching copy and review the entire
-ad package internally before producing the final CSV and download links.
-Ask for every ad and then across the set:
-- Would a fan of this sport, player or team recognise and relate to this idea?
-- Does the language, spelling and tone suit the selected country and sport?
-- Are the terms familiar and natural to knowledgeable fans, without forced slang?
-- Does anything sound or look like AI: generic phrasing, artificial rooms, implausible
-  glass or shadows, distorted artwork, awkward typography or repeated compositions?
-- Is the emotion specific and believable, and is the ad compelling enough to click?
-- Does it look like a premium collector edition with a clear, readable product hero?
-- If I clicked through to this product, would the ad give me a credible reason to
-  buy, with copy and imagery that faithfully represent the actual edition?
-- Do the image, on-image wording, written headline, description and CTA work together?
-- Does each ad offer a distinct reason to care, rather than paraphrasing its neighbours?
-
-Improve weak copy and regenerate any image that needs improvement, then inspect
-the revised ad and its relationship to the rest of the set. Retain strong elements;
-use purposeful corrections rather than repeated rewrites chasing a perfect score.
-Keep fan emotion grounded in supplied verified facts and approved edition policies.
-Preserve required copy frameworks, hooks, CTAs, field limits, route order and image
-count. If flexible on-image wording changes, update its image and matching copy
-together so the final package is consistent. Complete this review autonomously as
-part of generation, without a new approval step or a separate review report.
-
-After review, export the final approved copy to the existing CSV schema and provide
-the existing final download links using the reviewed images. Keep filenames, route
-mapping, completion markers and the Companion handoff exactly as already specified.
-Image improvements happen during review; the final link-delivery step simply links
-those completed files using the existing delivery instructions.
-"""
+RULES = f"{VERSION}\n\nCreative quality and variety\nBuild on the existing winner frameworks with fresh, product-specific fan insight.\nWithin each assigned route, develop a distinct emotional angle and complementary\nheadline and description, rather than repeating the same three generic ads with\nnames swapped. Use the supplied variation and recent-history context to explore\ndifferent permitted settings, light, materials and visual details. Make the ads\nrecognisably different from one another while preserving each route's required\nscene, camera, layout, footer, typography, product fidelity and protected copy.\nVary flexible wording and scene details, not the locked frameworks or facts.\n\nFinal creative review — after images and copy, before export\nBefore export, inspect each actual rendered black footer at full size and mobile preview size (256 px wide for square covers). Compare the middle line word for word with that ad’s assigned FOMO sentence. If missing, changed, clipped, wrapped or unreadable, correct the affected footer and inspect the cover again. Check that the headline reads first, all three lines remain readable, and the single muted lower-right medal clears the text. Report any unresolved defect.\nOnce every image, Primary Text, headline, description and CTA is complete, inspect\nthe actual generated images alongside their matching copy and review the entire\nad package internally before producing the final CSV and download links.\nAsk for every ad and then across the set:\n- Would a fan of this sport, player or team recognise and relate to this idea?\n- Does the language, spelling and tone suit the selected country and sport?\n- Are the terms familiar and natural to knowledgeable fans, without forced slang?\n- Does anything sound or look like AI: generic phrasing, artificial rooms, implausible\n  glass or shadows, distorted artwork, awkward typography or repeated compositions?\n- Is the emotion specific and believable, and is the ad compelling enough to click?\n- Does it look like a premium collector edition with a clear, readable product hero?\n- If I clicked through to this product, would the ad give me a credible reason to\n  buy, with copy and imagery that faithfully represent the actual edition?\n- Do the image, on-image wording, written headline, description and CTA work together?\n- Does each ad offer a distinct reason to care, rather than paraphrasing its neighbours?\n\nImprove weak copy and regenerate any image that needs improvement, then inspect\nthe revised ad and its relationship to the rest of the set. Retain strong elements;\nuse purposeful corrections rather than repeated rewrites chasing a perfect score.\nKeep fan emotion grounded in supplied verified facts and approved edition policies.\nPreserve required copy frameworks, hooks, CTAs, field limits, route order and image\ncount. If flexible on-image wording changes, update its image and matching copy\ntogether so the final package is consistent. Complete this review autonomously as\npart of generation, without a new approval step or a separate review report.\n\nAfter review, export the final approved copy to the existing CSV schema and provide\nthe existing final download links using the reviewed images. Keep filenames, route\nmapping, completion markers and the Companion handoff exactly as already specified.\nImage improvements happen during review; the final link-delivery step simply links\nthose completed files using the existing delivery instructions.\n"
 
 
 def apply_generation_review(prompt):

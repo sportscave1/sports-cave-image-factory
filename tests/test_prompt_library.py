@@ -105,6 +105,42 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.store.calls[-1], ('PATCH', 'git/refs/heads/main', {'sha': 'b'*40, 'force': False}))
         self.assertEqual(self.store.saved['versions'][0]['commit'], 'b'*40)
 
+    def test_activation_does_not_require_render_monitoring_auth(self):
+        self.store.render_token = ''
+        original = self.store.request
+        def request(method, path, body=None, **kwargs):
+            if kwargs.get('render'):
+                raise AssertionError('Render credentials must not gate Git publication')
+            return original(method, path, body, **kwargs)
+        self.store.request = request
+        self.store.activate(self.prompt, 'id', self.history, 'cas')
+        self.assertEqual(self.store.calls[-1][0], 'PATCH')
+
+    def test_failed_render_monitoring_reports_git_publication_not_false_live(self):
+        original = self.store.request
+        def request(method, path, body=None, **kwargs):
+            if kwargs.get('render'):
+                raise ReleaseError('Render status connection rejected authentication (HTTP 401)')
+            return original(method, path, body, **kwargs)
+        self.store.request = request
+        item = {**self.history['versions'][0], 'commit': 'b'*40}
+        self.assertIn('Published to GitHub', self.store.status(self.prompt, item))
+
+    def test_running_source_proves_live_without_render_key(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        item = {**self.history['versions'][0], 'commit': 'b'*40}
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'prompts').mkdir()
+            (root/'prompts/releases.json').write_text(json.dumps({self.prompt.key: {'id': 'id', 'hash': digest('Changed')}}))
+            with patch('prompt_releases.ROOT', root), patch('prompt_releases.catalog', return_value=[Prompt('ads_page.py','PROMPT','Ads','Changed')]):
+                self.assertEqual(self.store.status(self.prompt, item), 'Live')
+            with patch('prompt_releases.ROOT', root), patch('prompt_releases.catalog', return_value=[self.prompt]):
+                self.assertNotEqual(self.store.status(self.prompt, item), 'Live')
+
     def test_concurrent_draft_edit_prevents_publication(self):
         self.store.conflict = True
         with self.assertRaises(ReleaseError):

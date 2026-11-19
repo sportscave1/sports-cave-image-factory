@@ -148,7 +148,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                     st.rerun()
                 except (ReleaseError, ValueError) as exc:
                     st.error(str(exc))
-            can_activate = bool(valid and selected and store.token and store.render_token and text == initial
+            can_activate = bool(valid and selected and store.token and text == initial
                                 and not selected.get('commit') and not selected.get('baseline'))
             if activate_action.button('Activate version', type='primary', key='prompt-activate-' + key,
                                    use_container_width=True, disabled=not can_activate):
@@ -165,7 +165,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             if not store.token:
                 st.caption('Draft saving is unavailable. Your administrator can check the server connection; downloads still work.')
             elif not store.render_token:
-                st.caption('Activation is unavailable until the server deployment connection is configured.')
+                st.caption('GitHub publishing is available. Detailed deployment monitoring is not configured; reload after rollout to verify the live version.')
             if selected:
                 st.caption(f'Saved {selected["created_at"][:19].replace("T", " ")} UTC · {selected.get("author", "")}')
                 if selected.get('note'):

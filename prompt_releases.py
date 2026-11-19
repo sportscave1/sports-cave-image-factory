@@ -11,7 +11,7 @@ import uuid
 
 import requests
 
-from prompt_library import Prompt, catalog, digest, replace_source, validate_text
+from prompt_library import ROOT, Prompt, catalog, digest, replace_source, validate_text
 from prompt_bundle import changes, is_bundle
 
 REPO = 'sportscave1/sports-cave-image-factory'
@@ -44,7 +44,10 @@ class GitStore:
             return None
         if not response.ok:
             # Never surface provider bodies, URLs with credentials, or request headers.
-            raise ReleaseError(f'Provider returned HTTP {response.status_code}. Refresh before retrying; concurrent edits are preserved.')
+            provider = 'Render status connection' if render else 'GitHub connection'
+            if response.status_code in (401, 403):
+                raise ReleaseError(f'{provider} rejected authentication (HTTP {response.status_code}). Check its server credential and permissions; saved drafts are preserved.')
+            raise ReleaseError(f'{provider} returned HTTP {response.status_code}. Refresh before retrying; concurrent edits are preserved.')
         return response.json()
 
     def head(self, branch='main', missing=False):
@@ -102,12 +105,8 @@ class GitStore:
             raise ReleaseError('Save the original as a new draft before publishing it.')
         if item.get('commit'):
             raise ReleaseError('This version already has a release attempt. Refresh its status before creating another draft.')
-        service = self.request('GET', 'services/' + SERVICE, render=True)
-        if (service.get('id') != SERVICE or service.get('name') != 'sports-cave-os'
-                or service.get('branch') != 'main' or service.get('autoDeploy') != 'yes'
-                or service.get('autoDeployTrigger') != 'commit'
-                or service.get('repo', '').removesuffix('.git') != 'https://github.com/' + REPO):
-            raise ReleaseError('The existing Render service does not match the approved release configuration.')
+        # Publication uses GitHub only. The canonical Render service watches main;
+        # its optional monitoring credential must not block an authorized Git push.
         parent = self.head()
         sections = item.get('sections') if is_bundle(prompt) else None
         if is_bundle(prompt) and not sections:
@@ -148,7 +147,24 @@ class GitStore:
         if not commit:
             return 'Draft'
         # A later deployment can include this prompt unchanged. Inspect its immutable manifest.
-        rows = self.request('GET', f'services/{SERVICE}/deploys?limit=20', render=True)
+        # A running deployment can prove its own prompt version without Render API access.
+        try:
+            local = json.loads((ROOT / MANIFEST).read_text(encoding='utf-8'))
+            current = {p.key: digest(p.text) for p in catalog()}
+            active = local.get(prompt.key, {})
+            entries = item.get('sections') or [{'key': prompt.key, 'text': item['text']}]
+            if (active.get('id') == item['id'] and active.get('hash') == digest(item['text'])
+                    and all(current.get(e['key']) == digest(e['text']) for e in entries)):
+                return 'Live'
+        except (OSError, ValueError):
+            pass
+        try:
+            rows = self.request('GET', f'services/{SERVICE}/deploys?limit=20', render=True) if self.render_token else []
+        except ReleaseError:
+            compare = self.request('GET', 'compare/' + commit + '...main')
+            if compare.get('status') in {'ahead', 'identical'}:
+                return 'Published to GitHub - deployment status unavailable; reload after rollout'
+            return 'Not published - Git changed; save a new draft'
         exact = None
         for row in rows:
             deploy = row.get('deploy', row)
