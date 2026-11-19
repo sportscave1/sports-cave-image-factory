@@ -56,9 +56,20 @@ def test_explicit_render_retry_only_after_safe_cleanup_and_is_bounded(env):
 
 
 def test_export_binding_requires_full_current_manifest_and_does_not_complete_shopify(env,tmp_path):
-    from tests.test_mockup_eight_image_manifest import MockupEightImageManifestTests
+    import image_factory as factory
     store,sql,provider=env;row=saved(env);key=str(row['id'])
-    result=MockupEightImageManifestTests().make_result(tmp_path,8,include_jpg=True)
+    # Build only synthetic assets: the old helper imported app.py and ran its
+    # login form, contaminating later isolated Streamlit tests.
+    assets=[]
+    for index,spec in enumerate(factory.PRODUCT_IMAGE_SLOT_SPECS):
+        webp=tmp_path/f'fixture-{index}.webp';webp.write_bytes(b'synthetic-webp')
+        jpg=tmp_path/f'fixture-{index}.jpg';jpg.write_bytes(b'synthetic-jpg')
+        assets.append(factory.build_asset_record(key=spec['asset_key'],label=spec['display_label'],
+            webp_path=webp,jpg_path=jpg,asset_group='lifestyle' if spec.get('prompt_filename') else 'generated',
+            zip_group=spec['zip_group'],prompt_filename=spec.get('prompt_filename'),
+            export_to_shopify=True,export_to_socials=True))
+    result=dict(product_name='Fixture',sport_category='Cricket',
+        product_image_manifest=factory.build_product_image_manifest(assets,product_slug='fixture',sport_slug='cricket'))
     result.update(_product_upload_intake=key,_product_upload_source_hash=row['data']['source']['content_hash'])
     bind_export(store.connect,ADMIN['id'],result,'ZIP')
     current=store.read(key,ADMIN['id'])
@@ -123,7 +134,9 @@ def test_web_render_rejects_wrong_source_and_incomplete_native_cleanup(tmp_path)
     with pytest.raises(ValueError,match='cleanup'):render(path,tmp_path/'b',identity,dispatch=dispatch)
 
 
-def test_shopify_draft_live_completion_and_export_gate(env):
+def test_shopify_draft_live_completion_and_export_gate(env, monkeypatch):
+    # This mockup/export test has synthetic verified history; never call Shopify.
+    monkeypatch.setattr('shopify_product_onboarding.verify_new_product', lambda product, config=None: product)
     store,sql,provider=env;row=saved(env);key=str(row['id'])
     with store.locked(key,ADMIN['id']) as (r,cur):r['data']['mockups_exported']=False
     with pytest.raises(ValueError,match='mockup package'):service(env).resolve(key,ADMIN,'New Art')

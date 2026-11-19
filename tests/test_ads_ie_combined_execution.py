@@ -43,6 +43,9 @@ class CombinedExecutionTests(unittest.TestCase):
         priority = ads.build_ads_execution_priority()
         self.assertTrue(template.startswith(priority))
         prompt = self.record()["master_prompt"]
+        from ads_generation_review import REVIEW_UPDATES
+        for old, new in REVIEW_UPDATES:
+            priority = priority.replace(old, new)
         self.assertEqual(prompt.count(priority), 1)
         self.assertNotIn("COPY-ONLY OR PROMPT-ONLY REQUESTS", prompt)
         for campaign in ("Carousel", "Instant Experience", "Single Image / Video"):

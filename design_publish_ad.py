@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlencode
 from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
@@ -79,7 +80,7 @@ def enqueue(cur, upload, requester, sport, country):
 def public(value):
     if not value:
         return None
-    return dict(label=LABELS[value['stage']], detail=value.get('detail', ''),
+    return dict(label=('Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=value.get('detail', ''),
                 active=value['stage'] not in ('complete', 'failed', 'cancelled'),
                 posting_id=value.get('posting_id'))
 
@@ -101,7 +102,8 @@ def settings(enabled=None):
 
 
 def dashboard():
-    with connect() as conn, conn.cursor() as cur:
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
         enabled = _enabled(cur)
         cur.execute("""SELECT updated_at > now()-interval '95 seconds' AS online
                        FROM app_settings WHERE key=%s""", (HEARTBEAT_KEY,))
@@ -314,6 +316,13 @@ def _post_request(value):
             raise ValueError('Dropbox returned an ad file outside this job’s exact delivery folder.')
     if len({meta['content_hash'] for meta in files[1:]}) != 3:
         raise ValueError('The three ad routes need distinct covers.')
+    refs = ads_direct_post.references(posting.AD_TYPE, state={})
+    from ads_companion_targeting import select
+    targeting = select(refs, result, client=posting.MetaPostingClient(), saved=value.get('targeting'))
+    set_id, audience = targeting['product_set_id'], targeting['audience']
+    if value.get('targeting') != targeting:
+        value['targeting'] = targeting
+        write(PREFIX+value['upload'], value)
     copy = ads_page.parse_instant_experience_copy_csv(_download(dbx, files[0], 2 * 1024**2), result)
     creatives = []
     for (route, name), meta in zip(COVERS.items(), files[1:]):
@@ -323,13 +332,6 @@ def _post_request(value):
         if not record['valid'] or record['source_format'] != 'JPEG':
             raise ValueError(f'{name} must be a valid full-resolution JPEG.')
         creatives.append(dict(copy[route][0], image=record))
-    refs = ads_direct_post.references(posting.AD_TYPE, state={})
-    from ads_companion_targeting import select
-    targeting = select(refs, result, client=posting.MetaPostingClient(), saved=value.get('targeting'))
-    set_id, audience = targeting['product_set_id'], targeting['audience']
-    if value.get('targeting') != targeting:
-        value['targeting'] = targeting
-        write(PREFIX+value['upload'], value)
     catalog_id = str(refs['catalog_resolution']['id'])
     if not posting._posting_form_ready(product_title=result['product_name'], product_url=result['product_url'],
             country=result['country'], sport=result['category'], creatives=creatives, catalog_id=catalog_id,
@@ -373,17 +375,42 @@ def _step(key, value, job, event, age):
         return dict(id=value['upload'], project=PROJECT, receipt=_source_token(value['upload']),
                     prompt=value['prompt'], stage=stage)
     if stage == 'generating':
+        if float((value.get('catalog_retry') or {}).get('next_at', 0)) > time.time():
+            return {}
         transfer_detail = str(event.get('transfer_detail') or '')[:600]
+        from ads_attachment_repair import advance as advance_repair
+        repair_send = advance_repair(value, event)
+        if value.get('attachment_repair'):
+            write(key, value)
+            if value['attachment_repair']['state'] in ('ready', 'sending'):
+                from ads_companion_transfer import delivery
+                return dict(delivery(value), repair_send=repair_send)
         if transfer_detail and transfer_detail != value.get('detail'):
             value['detail'] = transfer_detail
             write(key, value)
-        request = _post_request(value)
+        from ads_companion_targeting import CatalogPending
+        try:
+            request = _post_request(value)
+        except CatalogPending as error:
+            now = time.time()
+            retry = value.setdefault('catalog_retry', {'started_at': now, 'attempts': 0})
+            if now - retry['started_at'] >= 86400:
+                raise ValueError('Meta catalogue membership is still unverified after 24 hours. '
+                                 'All four files are saved. Check the Shopify Meta sync and product-set rules, then Resume import.') from error
+            retry['attempts'] += 1
+            delay = min(900, 60 * 2 ** min(retry['attempts'] - 1, 4))
+            retry.update(next_at=now + delay, reason=str(error))
+            value.update(collect_only=True, detail=f'All ad files are saved. Waiting for Meta catalogue membership; checking again in {delay // 60} min. No regeneration needed.')
+            write(key, value)
+            return {}
         if request:
             if stopped(value['upload']): return {}
             try:
                 value['posting_id'] = JOBS.submit(request)
             except PostingBusyError:
                 return dict(id=value['upload'], stage=stage)
+            value.pop('catalog_retry', None)
+            value['detail'] = 'Files verified - creating ads paused for review'
             stage, age = 'posting', 0
             value['stage'] = stage
             write(key, value)
@@ -429,9 +456,10 @@ def tick(token, event):
             WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
               AND NOT EXISTS (SELECT 1 FROM app_settings c WHERE c.key='ads_job_control:' || (a.value->>'upload')
                               AND c.value->>'action' IN ('cancel','delete'))
+              AND COALESCE((a.value->'catalog_retry'->>'next_at')::double precision, 0) <= EXTRACT(EPOCH FROM now())
               AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
                OR (a.value->>'stage'='waiting' AND
-                   (j.stage=7 OR ((j.stage=6 OR a.value->>'source'='new_ads') AND %s))))
+                   ((j.stage=6 OR a.value->>'source'='new_ads') AND %s)))
             ORDER BY (a.value->>'stage'='waiting') ASC, a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled))
         job = cur.fetchone()
         if not job:

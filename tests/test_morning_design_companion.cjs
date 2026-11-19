@@ -28,7 +28,7 @@ function fixture(records = new Map()) {
       },
     },
   };
-  const context=vm.createContext({chrome,URL,AbortSignal,setTimeout,setInterval,clearInterval,
+  const context=vm.createContext({chrome,URL,AbortSignal,setTimeout,clearTimeout,setInterval,clearInterval,
     fetch:async (_url,options)=>{events=JSON.parse(options.body);return {ok:true,json:async()=>result};}});
   context.importScripts=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
@@ -80,6 +80,14 @@ test('invalid project or changed job correlation cannot open or submit a chat',a
   f.respond({jobs:[{...j,prompt:'Uncorrelated prompt'}]});
   await f.run('designQueueTick()');
   assert.equal(f.opened.length,0);
+});
+
+test('queued edit submits its unchanged prompt once without a new-design receipt',async()=>{
+  const f=fixture(),j={...job(1),kind:'edit',prompt:'**USER-REQUESTED DESIGN CHANGES**\nFix spacing\n\nEXACT EXISTING EDIT PROMPT'};
+  f.respond({jobs:[j]});await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent[0].prompt,j.prompt);
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,1);
 });
 
 

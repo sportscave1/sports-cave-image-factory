@@ -8,13 +8,16 @@ from urllib.parse import urlencode
 
 from design_new_composition import (
     COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
-    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS,
+    PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, CREATIVE_REVIEW,
 )
 from design_collector_assets import NEW_BADGE_LAYOUT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
-from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
+from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE, REFRESH_TITLE_GUIDANCE
 from design_collector_background import NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND
-from design_motorsport import MOTORSPORT_ARTWORK, MOTORSPORT_JSON
+from design_motorsport import (
+    MOTORSPORT_ARTWORK, MOTORSPORT_JSON, MOTORSPORT_PLACEMENT,
+    MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK,
+)
 from design_subject_authenticity import (
     CREATE_DESIGN_AUTHENTICITY_CHECK,
 )
@@ -35,11 +38,15 @@ TEMPLATE = Path(__file__).parent / "components" / "morning_brief_actions.html"
 META_AD_HEADING = re.compile(r"^(?:recommended|suggested)\b.*\bmeta\b.*\bad\b", re.I)
 META_AD_COPY = re.compile(r"^(?:headline|primary text|description|cta|call to action)\s*:", re.I)
 
-_CREATE_DESIGN_BORDER_RULES = """**Border and print safety for generation and the final layout**
+_CREATE_DESIGN_BORDER_RULES = """**Story-led collector border and print safety**
 
-Generation 1 includes the finished decorative border. Show it in the scaled layout and repeat its geometry in the generation request: one continuous fine antique-gold rule on all four sides, with short inner corner returns derived from the sporting story. The outermost detail sits 3% of the shorter canvas dimension inside every edge: 60 px on the 2835 × 2004 master. Scale that inset proportionally for the generation resolution. A plain rectangle alone is insufficient; avoid heavy ornament.
+Choose the border with the composition before generation. Use the established Sports Cave vocabulary of fine metallic pinlines, layered keylines, precise spacing and restrained collector accents; choose the construction that belongs to this sport, era, title and photographic treatment. A clean single hairline can suit a minimal contemporary piece; finely spaced twin keylines can suit a heritage collectible; a restrained stepped or chamfered perimeter can echo track or court geometry; small matched plaque-inspired accents can suit an archival tribute. These are options, not elements to combine or a rotation to follow. A plain refined border is valid when strongest. Corner ornaments are optional, never the default. Vary structure when the story supports it, rather than repeating one rectangle with small changes to its corner marks. Keep the border secondary to the athlete and gold title, with restrained antique gold or a compatible muted metallic finish. Avoid bulky frames, heavy filigree, bright yellow gradients and broadcast graphics. This direction replaces mandatory corner returns, compulsory decoration and universal single-rule restrictions in older new-design guidance; honour explicit user locks and established series templates.
 
-Carry venue tones, texture and selected abstract marks through the rule to every canvas edge; keep visible artwork in all four outer margins. Keep faces, lettering and plaque inside the border. Framing clearance is separate from printer-required bleed. Inspect every side and corner on generation 1; repair only broken or misplaced rules on a separate PSD layer, preserving the artwork beneath.
+Show the chosen border in the scaled layout and carry its exact geometry into generation 1: line count, stroke weight, spacing, corner construction and any small accent. Use one coherent perimeter system, with an uninterrupted outer keyline on all four sides. Construct one corner and mirror or rotate that same geometry for the other three: equal offsets, stroke weights, radii or chamfer lengths, and accent dimensions. Decide whether accents join the keyline or remain detached with a measured gap, and use that relationship consistently at every corner. No accidental overlaps, stray spurs, doubled strokes, mismatched brackets or missing joins. Material grain may age the finish subtly without eroding its geometry. Record the chosen construction and its story connection briefly in REVIEW NOTES within the existing layout review; no extra approval or generation is required.
+
+The outermost border detail sits 3% of the shorter canvas dimension inside every edge: 60 px on the 2835 × 2004 master. Scale that inset proportionally for the generation resolution. Carry venue tones, texture and selected abstract marks through the border to every canvas edge; keep visible artwork in all four outer margins. Keep faces, hands, fingertips, defining equipment, lettering and plaque visibly clear inside the innermost border detail, including accents. Check at 250 px before generation and after source restoration. For grazing or crossing, move or proportionally scale the whole source photograph minimally, preserving dominance, pose and hand-to-equipment contact; never crop, distort or fade defining details. Preserve successful title and abstraction. Framing clearance is separate from printer-required bleed.
+
+Inspect all four sides and corners at 100% and 250 px in generation 1 and the assembled PSD. Check the selected line count, equal inset, straightness, stroke weight, keyline spacing and matched corner joins against the layout. Within the existing finishing pass, correct only defective border geometry on separate editable shape/path layers, reusing and mirroring the same corner construction. Remove or locally mask faulty generated border strokes so the repair leaves one clean system, preserving the underlying artwork and safe clearance. Retain a successful generated border; do not add another frame over it or regenerate the artwork for a border defect.
 
 """
 
@@ -68,19 +75,62 @@ def _story_without_meta_ad(text):
     return "\n".join(lines).strip()
 
 
-def _prompt(title, story, *, edit=None, primary_market=""):
+def _prompt(title, story, *, edit=None, primary_market="", refresh_product_id=None,
+            preserve_refresh_edition=False):
     context = _story_without_meta_ad(story)
     if edit is not None:
         from design_review_prompt import build_edit_prompt
         return build_edit_prompt(title, context, edit["source"], edit["metadata"])
 
+    handoff_fields = 'upload_intent (new_product), existing_shopify_product_id (null)'
+    handoff_identity = 'A shared athlete or similar title alone does not make this a refresh.'
+    if refresh_product_id is not None:
+        target = str(refresh_product_id).removeprefix('gid://shopify/Product/')
+        if not re.fullmatch(r'[1-9][0-9]*', target):
+            raise ValueError('A refresh needs an exact existing Shopify product ID.')
+        target = 'gid://shopify/Product/' + target
+        handoff_fields = ('upload_intent (existing_product_refresh), '
+                          f'existing_shopify_product_id ("{target}"), design_origin (designs_to_refresh)')
+        handoff_identity = (
+            f'This is new artwork for the existing product {target}. Keep that exact target even when '
+            'the title, photographs or collector concept change. Never label this handoff new_product '
+            'or substitute another target. Read back the intent, origin and exact product ID with the '
+            'PSD binding. Publishing from Review must update only this existing product, preserving its '
+            'ID, handle/URL, variants, sales and edition history, counters and inventory. If the target '
+            'cannot be verified, retain the Review artwork as needs_attention; never create another product.'
+        )
+    story_guidance = 'Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.'
+    title_guidance = NEW_DESIGN_TITLE_GUIDANCE
+    typography = _CREATE_DESIGN_TYPOGRAPHY
+    save_naming = REVIEW_SAVE_NAMING
+    edition_check = ''
+    if preserve_refresh_edition:
+        story_guidance = 'Use the existing edition story as the research brief. Verify its subject, event or career angle, era and emotional meaning from the current artwork and listing. Find stronger authentic sources for that same story; do not replace it with a different moment or a new title concept. Preserve verified story-defining context, including an existing quotation, date, score or statistic where it identifies the original edition.'
+        title_guidance = REFRESH_TITLE_GUIDANCE
+        typography = typography.replace(
+            'Revise a conventional headline merely filling an empty corner within this layout review.',
+            'Refine a conventional headline placement within this layout review while preserving the exact existing wording.',
+        )
+        save_naming = """**Review filename and existing website product title**
+
+Keep the existing full website product title verbatim for JSON design_title and the PSD stem. Preserve the existing printed headline and any quotation exactly on the artwork; distinguish them from the full listing title. Use the normal safe filename handling and an unused collision suffix where required, with a matching JSON basename. A filename suffix does not rename the edition. Do not recompose, shorten or optimise the existing title to fit a new-product naming rule. Verify filename, JSON, Dropbox ID, revision and path together.
+
+"""
+        edition_check = 'Within this existing inspection, compare the headline and any quotation character by character with the original edition, and verify the same story, moment, era and emotional meaning in the new photographs and setting. Correct wording drift locally while preserving the upgraded treatment; record unresolved source or factual uncertainty under the existing needs_attention rules and continue Review delivery.\n\n'
+        handoff_identity = (
+            handoff_identity.replace('even when the title, photographs or collector concept change',
+                                     'while its photographs, composition and collector finish are upgraded')
+            + ' Keep design_title equal to the existing full product title and design_story faithful to the '
+            'same edition narrative, moment and quotation; describe the preserved story rather than inventing '
+            'a new concept from the new images. Verify these fields against the existing listing and artwork.'
+        )
     market_note = (f' Include primary_market = "{primary_market}" in the design JSON for downstream ad targeting.'
                    if primary_market in {'AUS', 'USA', 'UK', 'CA', 'CAN', 'NZ'} else '')
     return f"""Sports Cave event: {title}
 
 **Start the authorised new-design job**
 
-Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow the current brief, job instructions and shared creative standards. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references/artwork and continue without pausing for approval.
+Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow the current brief, job instructions and shared creative standards. For this new-design job, the integration rules below supersede older cutout-only compositing and mandatory whole-subject replacement instructions; photographic identity and factual accuracy remain mandatory. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references/artwork and continue without pausing for approval.
 
 {context}
 
@@ -88,9 +138,9 @@ Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow
 
 Use authorised read-only Shopify reports for comparable bestsellers and a lower-selling print where supported. If unavailable, use verified storefront bestsellers or approved references in the closest comparable sport or collector collection. Treat unranked products as style references only. Record evidence or gaps in REVIEW NOTES; draw original cues without attributing sales to design.
 
-Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
+{story_guidance}
 
-{NEW_DESIGN_TITLE_GUIDANCE}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, the named subject must dominate at thumbnail size; reject obstructed or competing subjects. Search original galleries once if needed. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
+{title_guidance}Use web image search to show 4–8 candidates where available. Verify original pages, story, identity, kit, pose and print-scale detail. For individual tributes, compare the available candidates for clear facial likeness, expressive pose, clean silhouette and print detail; choose the strongest collector hero, not merely a relevant photo. Prefer a readable face over one hidden by limbs, equipment or an upward angle unless that pose defines the verified story. Test its crop at 250 px: the named subject and defining detail must dominate without a tiny face. Choose a cleaner verified source or crop when a phone, foreground head or unrelated player obscures the moment; retain raised hands and defining equipment inside the safe border. Open the full-resolution original, not a search thumbnail, screenshot, pre-cutout or compressed repost. Compare the best available originals at the intended placed size for facial detail, focus, motion blur, compression, exposure and usable crop. Reject pixelated, muddy, over-sharpened or blown-out faces and sources that require invented detail to look sharp. Prefer a stronger verified frame or a smaller placement over enlarging a weak image; upscaling does not establish detail or quality. Search original galleries once if needed. If no usable source is available within the existing allowance, record the quality limitation and keep the result provisional. Keep uncertain facts and likenesses provisional. The user handles photo licensing separately.
 
 {MOTORSPORT_ARTWORK}
 
@@ -98,40 +148,40 @@ Choose a story supporters would still want to display in five years. Use timeles
 
 **2. Prepare the complete composition before generation**
 
-{COMPLETE_COMPOSITION}{_CREATE_DESIGN_BORDER_RULES}{_CREATE_DESIGN_TYPOGRAPHY}
+{COMPLETE_COMPOSITION}{MOTORSPORT_PLACEMENT}{_CREATE_DESIGN_BORDER_RULES}{typography}
 
 {NEW_BADGE_LAYOUT}
 
-{_CREATE_DESIGN_COLLECTOR_BACKGROUND}**Creative review before generation.** Use the original photos as the authority. Inspect actual title lettering, visible abstraction, hero integration and the secondary-image test together at 250 px; compare facial sizes at print size. Where a verified venue view is available, check its identifying feature; otherwise avoid actual-venue claims. Honour explicit locks. Resolve weak choices within this review, record and lock the layout, then proceed automatically to the single generation. Without master access, review the reserved footprint provisionally; defer original-layer checks until access returns.
+{_CREATE_DESIGN_COLLECTOR_BACKGROUND}{CREATIVE_REVIEW}
 
 **3. Generate the collector treatment once**
 
-Use the badge-hidden reviewed layout as the composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references, original photographs and venue references. Carry the exact sources, final athlete depiction count, supporting role, photograph-derived abstract feature and dark tonal hierarchy into the request. Preserve source face, expression, natural skin texture, anatomy, hand-to-equipment relationships, uniform lettering and contact. No glossy skin smoothing or invented figures. Request complete flat artwork with finished title lettering, venue and collector treatment. Copy the locked title verbatim and repeat the border geometry above, including all four sides, corner returns and calculated inset. Exclude plaque, number, placeholder outlines and seals; generate a continuous natural surface in their reserved area. Keep the output without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
+{MOTORSPORT_INTEGRATION}Use the badge-hidden reviewed layout as the composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references, original photographs and venue references. Carry the exact sources, final athlete depiction count, supporting role and selected tonal hierarchy into the request. Keep the verified action/emotion pairing: never two emotional shots, and every darts design must retain its genuine throwing-action photograph. Do not turn a reaction photograph into invented sporting action. For hockey and NBA, specify the predominantly dark abstract foundation with broad quiet areas, fine brushed antique-gold contours or inlays, sparse verified team-colour marks and the selected venue feature retained subtly in place; use the chosen story-appropriate treatment for other sports. Preserve source face, expression, natural skin texture, anatomy, hand-to-equipment relationships, uniform lettering and contact. No glossy skin smoothing or invented figures. Generate the complete flat collector artwork, including a naturally integrated photographic subject, finished title lettering, venue and collector treatment. The reviewed cutout layout is a positioning and scale plan, not the final rendering style. Use the full-resolution originals as identity and detail references. Resolve hair and fabric edges, source-background spill, local light direction, exposure, colour temperature, grain, sharpness, depth, contact shadows and plausible environmental overlap as one coherent scene during this generation. Preserve every facial feature, gaze, expression, age and natural skin detail; retain the real pose, anatomy, kit and equipment. Do not reinterpret identity, beautify faces, invent missing anatomy or hide weak detail under blur or effects. Avoid a sticker-like outline, bright fringe, hard rectangular crop, arbitrary waist fade or a differently lit pasted-on figure. Keep successful natural photographic transitions rather than forcing every subject into an isolated silhouette. Copy the locked title verbatim and repeat the selected border geometry above, including all four sides, line count, stroke weight, spacing, matched corner construction, optional accents and calculated inset. Use the reviewed border choice rather than default corner brackets. Exclude plaque, number, placeholder outlines and seals; generate a continuous natural surface in their reserved area. Keep the output without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
 
-Inspect generation 1 beside the photographs for identity, natural texture and the selected depiction count before accepting its visual direction. Record discrepancies for local source restoration, without another generation or approval pause. Generation 1 becomes the visual master for finishing. On a master copy, keep its untouched original in hidden **ORIGINAL EDITABLE ARTWORK** and a visible working copy beneath **FINAL POLISHED ARTWORK** correction layers. Preserve successful lettering, abstraction, reflections, venue, lighting and border. Never reconstruct working surroundings from stretched samples, generic shapes or broad photographic strips.
+Inspect generation 1 beside the photographs for identity, natural texture and the selected depiction count before accepting its visual direction. Record discrepancies for local source restoration, without another generation or approval pause. Generation 1 becomes the visual master for finishing. On a master copy, keep its untouched original in hidden **ORIGINAL EDITABLE ARTWORK** and a visible working copy beneath **FINAL POLISHED ARTWORK** correction layers. Preserve successful lettering, abstraction, venue, lighting, controlled reflections and border, including the reviewed dark abstract hierarchy for hockey and NBA. Never reconstruct working surroundings from stretched samples, generic shapes or broad photographic strips.
 
-Place the original plaque pair at the recorded layout transform. Limit other PSD work to a named defect or required photographic source restoration. Any generated people or sporting objects are placement guides only: restore verified sources on separate editable masked layers, preserve natural hair and fabric edges and internal gaps; remove halos, background fringes and exposed generated outlines locally. Match source placement to scene perspective, scale, light direction, exposure, colour temperature, grain and sharpness using non-destructive adjustments. Preserve genuine contact details; anchor grounded subjects with contact shadows and airborne subjects with plausible separation and cast shadows. Let restrained environmental light and occlusion connect subject and setting without blurring the silhouette, repainting skin or fading anatomy. Inspect at 100% and 250 px for a pasted-on appearance and correct locally within this finishing pass. Keep the abstract treatment adjustable through masks. A visual criticism never triggers another generation.
+Place the original plaque pair at the recorded layout transform. Limit other PSD work to a named defect or required photographic source restoration. Retain successfully integrated generated subjects when side-by-side comparison verifies faithful identity, expression, anatomy and sporting details. Do not automatically paste whole source cutouts over them. Restore only a named visible discrepancy from the verified original on separate editable masked layers, using the smallest coherent region that corrects it; expand only when necessary for facial fidelity or anatomical continuity. Preserve natural hair and fabric edges and internal gaps; remove halos, background fringes and double outlines locally. Match source placement to scene perspective, scale, light direction, exposure, colour temperature, grain and sharpness using non-destructive adjustments. Preserve genuine contact details; anchor grounded subjects with contact shadows and airborne subjects with plausible separation and cast shadows. Let restrained environmental light and occlusion connect subject and setting without blurring the silhouette, repainting skin or fading anatomy. Inspect at 100% and 250 px for a pasted-on appearance and correct locally within this finishing pass. Keep the abstract treatment adjustable through masks. A visual criticism never triggers another generation.
 
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependencies; finish independent work. Verify an uncertain write’s exact path, identity and contents before retrying.
 
 **4. Inspect and finish the assembled PSD**
 
-{CREATE_DESIGN_AUTHENTICITY_CHECK}{REVIEW_RELATIONSHIPS}
+{CREATE_DESIGN_AUTHENTICITY_CHECK}{MOTORSPORT_FINISH_CHECK}{edition_check}{REVIEW_RELATIONSHIPS}
 **5. Save and verify one final Review PSD**
 
 Retain the assembled layer structure, visible generation foundation, verified master settings and working layers. Document defects or limitations in hidden **REVIEW NOTES**.
 
-{REVIEW_SAVE_NAMING}
+{save_naming}
 
 If master access was deferred, first test both plaque placements as specified above. Verify the chosen position against the final composite: both original layers visible once, number editable and aligned inside the plaque, text legible, and safe clearance from hero, title and border. Adjust only a specific placement defect with matching transforms. Save just the final **`[Product Title].psd`** directly in {REVIEW_FOLDER}/ in create-only mode. Use an unused version suffix if occupied. Confirm its Dropbox ID, path, revision and byte size. Reopen that saved revision and inspect the actual rendered artwork, master dimensions, colour profile, hidden original, safe border and both collector layers. Use Photoshop or a capable PSD parser plus a rendered preview to verify the original editable SC_EDITION_NUMBER name, text data, transform, position and alignment inside SC_EDITION_PLAQUE. If a required file check is pending, preserve available work and report the specific missing verification.
 
-In that inspection, compare sources at 100% for authenticity and generation 1 beside the final render at equal 250 px widths: hero, abstraction, venue, reflections, lettering, border and plaque. Restore surroundings from generation 1 where finishing flattened texture, introduced seams or weakened composition; retain source/text corrections. Record unresolved loss as needs_attention.
+In that inspection, compare sources at 100% for authenticity and generation 1 beside the final render at equal 250 px widths: hero, abstraction, venue, reflections, lettering, border and plaque. Restore surroundings from generation 1 where finishing flattened texture, introduced seams or weakened composition, retaining the reviewed dark abstract hierarchy and subdued venue for hockey and NBA, including the quiet dark areas, integrated gold detail and restrained team-colour balance; retain source/text corrections and verified border-geometry repairs. Retain verified motorsport integration repairs as well; never reinstate a corrected cutout seam, halo or floating tyre placement from generation 1. Do not restore malformed generated corners over a corrected border. Record unresolved loss as needs_attention.
 
 **6. Write the Smart Upload JSON and deliver**
 
 {MOTORSPORT_JSON}
 
-After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), upload_intent (new_product), existing_shopify_product_id (null), dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. A shared athlete or similar title alone does not make this a refresh. Follow any automatic queue receipt instructions.{market_note}
+After verifying the PSD, create the matching UTF-8 **[Final PSD stem].upload.json** in {REVIEW_METADATA_FOLDER}/, in create-only mode. Create the subfolder if needed. Read the JSON back and verify it points to that exact saved PSD. Include design_title, design_story, sport, league, teams and athletes (arrays), intended_collections (confirmed Shopify IDs or handles), {handoff_fields}, dropbox_file_id, dropbox_revision, dropbox_path and review_status. Use null or empty arrays for unknown fields and describe missing evidence in review_notes. Use ready_for_review only when the visual, PSD and metadata checks pass. Use needs_attention for unresolved quality or metadata. {handoff_identity} Follow any automatic queue receipt instructions.{market_note}
 
 Display the reopened saved PSD render as **Final artwork · rendered from the saved PSD**. If saving or inspection remains pending, label the available result provisional instead. Lead with any unresolved visual failure, then report verified PSD and JSON paths and pending checks. File validity does not establish visual quality. Completion requires one full generation, verified final Review PSD, matching JSON and final display. Preserve completed work if a later step is blocked. Shopify publication is a separate action."""
 
@@ -150,10 +200,8 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         market_label = f'<small class="sc-brief-secondary">Secondary: {escape(", ".join(markets[1:]))}</small>'
     elif not legend and markets:
         label += f' ({", ".join(markets)})'
-    enabled = bool(design_key) and design_status in ('Needs attention', 'Deleted · ready to redo')
+    enabled = bool(design_key)
     reason = ('Add this design to the Design Companion queue' if enabled else
-              'Already in the Design Companion queue' if design_status in ('Pending', 'Opening ChatGPT', 'Generating') else
-              'This design has already been made or uploaded' if design_status else
               'Queue status unavailable. Refresh Home.')
     actions = (
         f'<button type="button" data-design-key="{escape(design_key or "", quote=True)}" '
@@ -185,6 +233,9 @@ def article_html(item, *, heading=None, allow_ads=False, legend=False, design_st
         f'{escape(link["label"])}</a>' for link in item["links"]
     )
     paragraphs = []
+    for field, caption in (("opportunity_status", "Recommendation"), ("sales_rationale", "Sales potential")):
+        if item.get(field):
+            paragraphs.append(f'<p><strong>{caption}:</strong> {escape(item[field])}</p>')
     for line in item["recommendation"].splitlines():
         if not line.strip():
             continue
@@ -268,11 +319,16 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
         return design_statuses.get(identity(edition['date'], section, item), 'Needs attention')
     def key(section, item):
         return identity(edition['date'], section, item)
-    rows = "".join(
-        article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads, design_status=status("recommendations", item), design_key=key("recommendations", item))
-        for rank, item in enumerate((edition or {}).get("recommendations", ()), 1)
-    )
-    full_brief = (edition or {}).get("full_brief")
+    saved = edition or {}
+    summary = saved.get("summary")
+    if not summary:
+        # Earlier editions remain readable immediately, before the next scheduled run.
+        text = saved.get("full_brief", "")
+        summary = next((p.strip() for p in text.split('\n\n') if len(p.strip()) > 100 and not p.lstrip().startswith(('#', '{'))), '')
+        summary = summary[:1800] or ' '.join(item['title'] for item in saved.get('recommendations', ()))
+    rows = f'<p class="sc-daily-summary">{escape(summary)}</p>' if summary else ''
+    full_brief = saved.get("full_brief") or '\n\n'.join(
+        f'{item["title"]}\n{item["recommendation"]}' for item in saved.get('recommendations', ()))
     legends = _ranked_legends((edition or {}).get("legends", ()))
     if full_brief:
         if legends:
@@ -281,6 +337,12 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
                     f'{link["label"]}: {link["url"]}' for link in item['links'])
                 for label, item in legends
             )
+        for section, caption in (("rivalries", "Rivalries Brief"), ("design_recommendations", "Design recommendations")):
+            if saved.get(section) and caption.casefold() not in full_brief.casefold():
+                full_brief += '\n\n' + caption + '\n\n' + '\n\n'.join(
+                    f'{rank}. {item["title"]}\n{item["recommendation"]}\n'
+                    + '\n'.join(f'{link["label"]}: {link["url"]}' for link in item['links'])
+                    for rank, item in enumerate(saved[section], 1))
         rows += (
             '<button type="button" class="sc-full-brief" aria-haspopup="dialog">Read the full Morning Brief</button>'
             '<dialog class="sc-cal-dialog sc-sports-full" aria-label="Full Sports Morning Brief">'
@@ -289,11 +351,13 @@ def brief_html(edition, *, editions, today, allow_ads=False, design_statuses=Non
         )
     tables = "".join(_market_table(editions, market, today) for market in MARKETS)
     stories = f'<section class="sc-sports-stories" aria-label="Sports opportunities">{rows}</section>' if rows else ""
-    legend_rows = "".join(article_html(item, heading=f'{label} {item["title"]}', allow_ads=allow_ads, legend=True, design_status=status("legends", item), design_key=key("legends", item))
-                          for label, item in legends)
+    picks = saved.get("design_recommendations", ())
+    legend_rows = "".join(article_html(item, heading=f'{rank}. {item["title"]}', allow_ads=allow_ads,
+                          design_status=status("design_recommendations", item), design_key=key("design_recommendations", item))
+                          for rank, item in enumerate(picks[:4], 1))
     if not legend_rows:
-        legend_rows = '<p class="sc-legends-empty">No Legends Brief entries for this edition.</p>'
-    legend_section = ('<section class="sc-sports-stories sc-legends" aria-label="Legends Brief">'
-                      f'<h3>Legends Brief</h3>{legend_rows}</section>')
+        legend_rows = '<p class="sc-legends-empty">Fresh design recommendations are pending for this edition.</p>'
+    legend_section = ('<section class="sc-sports-stories sc-legends" aria-label="Design recommendations">'
+                      f'<h3>Design recommendations</h3>{legend_rows}</section>')
     return (_template().replace("<!-- CALENDARS -->", tables)
             .replace("<!-- LEGENDS -->", legend_section).replace("<!-- RECOMMENDATIONS -->", stories))

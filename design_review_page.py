@@ -144,7 +144,7 @@ def _staged_replacement(user, source, key):
     with st.expander('Apply staged replacement'):
         st.caption('Use this when ChatGPT can stage the edit in Dropbox but cannot apply a revision-checked update.')
         stem = str(PurePosixPath(source['path_display']).with_suffix('')) + ' - EDIT-' + source['rev']
-        trial = st.text_input('Trial PSD path', value=stem + ' - TRIAL.psd', key=key+'-trial')
+        trial = st.text_input('Trial PSD path (optional, legacy edits only)', value='', key=key+'-trial')
         staged = st.text_input('Staged final PSD path', value=stem + ' - STAGING.psd', key=key+'-staged')
         title = st.text_input('New design title (optional)', key=key+'-new-title', max_chars=400)
         review_notes = st.text_area('Unresolved review notes (optional)', key=key+'-review-notes',

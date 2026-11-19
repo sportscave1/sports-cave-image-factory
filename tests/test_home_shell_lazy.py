@@ -31,13 +31,18 @@ class HomeShellLazyTests(unittest.TestCase):
         from contextlib import nullcontext
         namespace={'time':SimpleNamespace(perf_counter=lambda:0),'current_os_user':lambda:{'role':'admin'},
           'account_local_now':lambda user:datetime.now(),'sports_sales_calendar':SimpleNamespace(sydney_date=lambda now:now.date()),
-          'sports_cave_dashboard':SimpleNamespace(load_calendar_events=lambda:[]),
+          'sports_cave_dashboard':SimpleNamespace(load_calendar_events=lambda:[],build_home_weekly_work_snapshot=Mock()),
           'st':SimpleNamespace(container=lambda **kwargs:nullcontext()),'home_daily_planner':SimpleNamespace(render_status=Mock()),
           'render_active_upcoming_events':Mock(),'render_home_weekly_work':Mock(),'safe_startup_print':Mock()}
         exec(compile(ast.Module(body=[node],type_ignores=[]),'app.py','exec'),namespace)
-        namespace[node.name]()
+        import home_fast
+        with patch.object(home_fast, 'render_briefs') as briefs, patch.object(home_fast, 'render_weekly') as weekly:
+            namespace[node.name]()
+            briefs.assert_called_once()
+            weekly.assert_called_once()
+            namespace['sports_cave_dashboard'].build_home_weekly_work_snapshot.assert_not_called()
         namespace['home_daily_planner'].render_status.assert_called_once()
-        namespace['render_home_weekly_work'].assert_called_once()
+        namespace['render_home_weekly_work'].assert_not_called()
         sidebar=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='render_sidebar')
         self.assertNotIn('files_window_launcher',ast.get_source_segment(source,sidebar))
         self.assertNotIn('files-window-launcher-slot',source)

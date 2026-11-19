@@ -14,7 +14,7 @@ function fixture({finished=false,blocked=false}={}) {
       sendMessage:async(tab,message)=>{messages.push({tab,...message});return message.type==='project:cancel'?{stopped:true}:
         {finished,blocked,reason:blocked?'ChatGPT error: Network error':'',activity:'stable',chat_url:chat};},
       remove:async tab=>removed.push(tab),reload:async()=>{}}};
-  const ctx=vm.createContext({chrome,URL,AbortSignal,Date,setTimeout,fetch:async(_,options)=>{
+  const ctx=vm.createContext({chrome,URL,AbortSignal,Date,setTimeout,clearTimeout,fetch:async(_,options)=>{
     events=JSON.parse(options.body);return {ok:true,json:async()=>reply};}});
   ctx.importScripts=file=>vm.runInContext(fs.readFileSync('windows-upload-companion/'+file,'utf8'),ctx);
   ctx.importScripts('worker.js');
@@ -27,12 +27,12 @@ test('server cancellation stops only the owned ChatGPT response and upload tab, 
   assert.equal(f.records.get('upload:'+f.receipt).state,'cancelled');
   assert.equal(f.records.get('staffQueueJob'),null);
 });
-test('completed but unverified conversation becomes actionable instead of waiting silently',async()=>{
+test('completed but unverified conversation remains available for verification',async()=>{
   const f=fixture({finished:true});f.respond({job:{id:f.id,stage:5}});
   await f.run('staffQueueTick()');
   f.records.get('staffQueueJob').idleSince=Date.now()-4*60*1000;
   await f.run('staffQueueTick()');
-  assert.equal(f.events().state,'blocked');assert.match(f.events().reason,/remain unverified/);
+  assert.equal(f.events().state,'submitted');
 });
 test('live ChatGPT errors propagate to the server',async()=>{
   const f=fixture({blocked:true});f.respond({});await f.run('staffQueueTick()');

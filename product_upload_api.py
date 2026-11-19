@@ -495,6 +495,51 @@ async def review_edit_prompt(request):
         return failure(error)
 
 
+async def review_edit_enqueue(request):
+    """Queue the existing edit prompt without altering its creative instructions."""
+    try:
+        user = await _gallery_review_user(request)
+        from files_upload_api import _same_origin
+        if not request.headers.get('origin') or not _same_origin(request):
+            raise PermissionError('Request origin rejected.')
+        body = await request.json()
+        comments = body.get('comments', '')
+        if not isinstance(comments, str) or len(comments) > 20000:
+            raise ValueError('Edit instructions exceed the supported size.')
+        def enqueue_edit():
+            from pathlib import PurePosixPath
+            from uuid import uuid5, NAMESPACE_URL
+            import hashlib
+            from design_review_metadata import legacy_metadata, read_handoff
+            from home_morning_brief_actions import _prompt
+            from morning_design_queue import connect
+            provider = Dropbox()
+            source = _review_metadata(request, provider)
+            try:
+                details = read_handoff(provider, source) or legacy_metadata(source)
+            except ValueError as error:
+                details = dict(legacy_metadata(source), review_notes=str(error))
+            title = details.get('design_name') or PurePosixPath(source['name']).stem
+            prompt = '**USER-REQUESTED DESIGN CHANGES**\n' + (comments.strip() or 'No additional changes specified.') + '\n\n' + _prompt(
+                title, details.get('product_context') or 'Preserve the story in the original artwork.',
+                edit=dict(source=source, metadata=details))
+            key = str(uuid5(NAMESPACE_URL, 'sports-cave-review-edit:' + source['id'] + ':' + source['rev'] + ':' + hashlib.sha256(prompt.encode()).hexdigest()))
+            from sports_sales_calendar import sydney_date
+            with connect() as conn, conn.cursor() as cur:
+                cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+                cur.execute('SELECT id FROM morning_design_jobs WHERE section=%s AND file_id=%s AND stage BETWEEN 0 AND 3', ('edit', source['id']))
+                active = cur.fetchone()
+                if active and str(active['id']) != key:
+                    raise ValueError('This artwork already has a queued edit. Wait for that edit before applying another.')
+                cur.execute('''INSERT INTO morning_design_jobs(id,edition_date,section,title,prompt,file_id,file_rev)
+                    VALUES(%s,%s,'edit',%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING''',
+                    (key,sydney_date(),title,prompt,source['id'],source['rev']))
+            return dict(queued=True,id=key)
+        return JSONResponse(await run_in_threadpool(enqueue_edit), headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
 async def review_source(request):
     """Download the selected, immutable Review PSD through the signed-in Files session."""
     from starlette.responses import StreamingResponse
@@ -536,6 +581,7 @@ ROUTES = (*RENDER_ROUTES, *STAFF_QUEUE_ROUTES, *MORNING_DESIGN_ROUTES, ('/produc
           ('/api/design-review/source', review_source, ('GET',)),
           ('/api/design-review/thumbnail', review_thumbnail, ('GET',)),
           ('/api/design-review/edit-prompt', review_edit_prompt, ('GET',)),
+          ('/api/design-review/edit-queue', review_edit_enqueue, ('POST',)),
           ('/api/product-uploads/source-preview', source_preview, ('GET',)),
           ('/api/product-uploads/mapping-status', mapping_status, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),

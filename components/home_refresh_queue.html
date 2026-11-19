@@ -1,0 +1,91 @@
+<style>
+.sc-refresh-open{width:100%;text-align:left;border:1px solid #dedbd2;border-radius:16px;padding:.7rem 1rem;background:var(--background-color,#fff);color:inherit;font:inherit;font-weight:650;cursor:pointer}
+#sc-refresh-dialog{box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-height:80dvh;border:1px solid #dedbd2;border-radius:14px;padding:1rem;background:var(--background-color,#fff);color:var(--text-color,#222);font:14px system-ui}
+#sc-refresh-dialog::backdrop{background:#0006}
+#sc-refresh-dialog header,.sc-refresh-row{display:flex;align-items:center;justify-content:space-between;gap:.7rem}
+#sc-refresh-dialog h3{font-size:1rem;margin:0}
+#sc-refresh-dialog button,#sc-refresh-dialog input{font:inherit;color:inherit;border:1px solid #dedbd2;border-radius:6px;padding:.35rem .5rem;background:transparent}
+#sc-refresh-dialog button{cursor:pointer;white-space:nowrap}
+#sc-refresh-dialog button:disabled{opacity:.55;cursor:default}
+#sc-refresh-dialog input{box-sizing:border-box;width:100%;margin:.65rem 0}
+#sc-refresh-dialog .sc-refresh-list{max-height:48dvh;overflow:auto;overscroll-behavior:contain}
+#sc-refresh-dialog .sc-refresh-picker-list{max-height:24dvh;overflow:auto}
+.sc-refresh-row{padding:.45rem 0;border-bottom:1px solid #dedbd255;font-size:.8rem}
+.sc-refresh-row span{overflow-wrap:anywhere}
+#sc-refresh-dialog p{font-size:.75rem;opacity:.8;margin:.5rem 0}
+#sc-refresh-dialog details{margin:.6rem 0}
+</style>
+<div class="sc-design-refresh"><button type="button" class="sc-refresh-open" aria-haspopup="dialog">▸ Designs to Refresh</button></div>
+<template id="sc-refresh-template"><dialog id="sc-refresh-dialog" aria-label="Designs to Refresh">
+<header><h3>Designs to Refresh</h3><button type="button" data-close aria-label="Close designs to refresh">Close</button></header>
+<details><summary>Add a design</summary><input data-picker-search type="search" placeholder="Search all designs" aria-label="Search all designs" maxlength="160"><div class="sc-refresh-picker-list"></div><button type="button" data-picker-more hidden>More designs</button><p data-picker-status role="status"></p><button type="button" data-picker-retry hidden>Retry catalogue</button></details>
+<input data-search type="search" placeholder="Search refresh list" aria-label="Search refresh list" maxlength="160">
+<p data-count></p><div class="sc-refresh-list"></div><button type="button" data-more hidden>More designs</button>
+<p data-list-status role="status"></p><button type="button" data-retry hidden>Retry refresh list</button><p data-status role="status"></p>
+</dialog></template>
+<script>{
+const template=document.getElementById('sc-refresh-template');
+let dialog=document.getElementById('sc-refresh-dialog');
+if(!dialog){
+ document.body.append(template.content.cloneNode(true));dialog=document.getElementById('sc-refresh-dialog');
+ const status=dialog.querySelector('[data-status]');
+ const states=[{list:dialog.querySelector('.sc-refresh-list'),search:dialog.querySelector('[data-search]'),more:dialog.querySelector('[data-more]'),status:dialog.querySelector('[data-list-status]'),retry:dialog.querySelector('[data-retry]')},
+ {list:dialog.querySelector('.sc-refresh-picker-list'),search:dialog.querySelector('[data-picker-search]'),more:dialog.querySelector('[data-picker-more]'),status:dialog.querySelector('[data-picker-status]'),retry:dialog.querySelector('[data-picker-retry]')}];
+ const labels=['Queued','Opening ChatGPT','Generating','Checking delivery','Ready for review','Needs attention'];
+ async function api(params,method='GET'){
+   const response=await fetch('/ops/design-refresh/queue?'+new URLSearchParams(params),{method,credentials:'same-origin',signal:AbortSignal.timeout(15000)});
+   const data=await response.json();if(!response.ok)throw Error(data.error||'Unable to load designs.');return data;
+ }
+ async function load(which,more=false){
+  const state=states[which],version=state.version=(state.version||0)+1;
+  const note=state.status,retry=state.retry;
+  state.more.disabled=true;retry.hidden=true;
+  note.textContent=state.list.children.length?'Updating designs; showing previous results…':'Loading designs…';
+  try{
+   const params={all:which,q:state.search.value,offset:more?state.next:0,verify:!which&&!more?'1':'0'};
+   let data;
+   for(let attempt=0;attempt < 21;attempt++){
+    data=await api(params);delete params.verify;
+    if(version!==state.version||!dialog.open)return;
+    if(data.state!=='loading')break;
+    note.textContent=data.message||(state.list.children.length?'Checking verification; showing previous results…':'Checking companion verification…');
+    if(attempt===20)throw Error('Design verification is still loading. Retry shortly.');
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    if(version!==state.version||!dialog.open)return;
+   }
+   if(!more){state.list.replaceChildren();state.list.scrollTop=0;}
+   for(const row of data.rows){
+    const line=document.createElement('div');line.className='sc-refresh-row';
+    const title=document.createElement('span');title.textContent=row.title;
+    const button=document.createElement('button');button.type='button';
+    button.textContent=which?'Add to list':row.stage==null||row.can_requeue?'Add to queue':labels[row.stage];
+    button.disabled=!which&&row.stage!=null&&!row.can_requeue;
+    button.addEventListener('click',async()=>{
+     button.disabled=true;
+     try{const result=await api({id:row.product_id,action:which?'add':'enqueue'},'POST');
+       button.textContent=which?'Added':labels[result.stage];
+       status.textContent=which?'Design added to refresh list.':result.added?'Design saved in the existing design queue.':'This design is already queued or its artwork has not been confirmed deleted.';
+       if(which)await load(0);
+     }catch(error){status.textContent=error.message;button.disabled=false;}
+    });
+    line.append(title,button);state.list.append(line);
+   }
+   state.next=data.next_offset;state.more.hidden=state.next==null;
+   if(!which){dialog.querySelector('[data-count]').textContent=data.total+' designs · saved refresh list';}
+   note.textContent=data.freshness?.state==='stale'?'Showing last checked companion status. Reopen to refresh.':data.total?'':'No matching designs.';
+  }catch(error){if(version===state.version){note.textContent=error.message+(state.list.children.length?' Previous results are still shown.':'');retry.hidden=false;retry.onclick=()=>load(which,more);}}
+  finally{if(version===state.version)state.more.disabled=false;}
+ }
+ states.forEach((state,i)=>{let timer;state.search.addEventListener('input',()=>{state.version=(state.version||0)+1;clearTimeout(timer);timer=setTimeout(()=>load(i),250);});state.more.addEventListener('click',()=>load(i,true));});
+ dialog.querySelector('details').addEventListener('toggle',event=>{if(event.target.open)load(1);});
+ dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+ dialog.addEventListener('click',event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX < r.left||event.clientX>r.right||event.clientY < r.top||event.clientY>r.bottom)dialog.close();}});
+ dialog.refresh=()=>load(0);
+ // Home replaces its HTML on periodic refresh; delegate to the persistent document.
+ document.addEventListener('click',event=>{
+  if(!event.target.closest('.sc-refresh-open'))return;
+  dialog.showModal();dialog.refresh();
+ });
+}
+template?.remove();
+}</script>

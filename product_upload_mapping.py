@@ -144,6 +144,17 @@ class Mapping:
         op = operation(row)
         meta = self.provider.metadata_if_present(op['source']['id'])
         if not meta or any(meta.get(k) != op['source'].get(k) for k in ('id', 'rev', 'content_hash', 'path_display')):
+            # A move changes revision/path, not identity or bytes. A verified
+            # Companion package may already have been moved by the operator.
+            from product_upload_dropbox import ROOTS, within
+            source = op['source']
+            saved = row['data'].get('staff_mapping') or {}
+            if (meta and saved.get('verified') and saved.get('source') == row['data'].get('source')
+                    and source.get('content_hash') and source.get('size')
+                    and within(source.get('path_display', ''), ROOTS['review'])
+                    and meta.get('path_display') == ROOTS['live'] + '/' + source['path_display'].rsplit('/', 1)[-1]
+                    and all(meta.get(k) == source.get(k) for k in ('id', 'content_hash', 'size'))):
+                return meta
             raise ValueError('The captured PSD changed or is inaccessible. Restore that revision or start a new upload; no replacement was made.')
         return meta
 
@@ -385,7 +396,7 @@ class Mapping:
             product = self._identity(key, captured, product_id, confirm_product); pid = product['shopify_product_id']
             if product_id and product_id != pid:
                 raise ValueError('A supplied product ID conflicts with the exact upload correlation.')
-            original = operation(captured)['source']
+            original = self.source(captured) if staff_job else operation(captured)['source']
             existing=self._mapping_conflicts(pid, original)
             reuse=bool(existing and existing.get('verified') and existing['file_path']==original['path_display'])
             if reuse:

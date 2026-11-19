@@ -16,9 +16,9 @@ function fixture({denied = false, failed = false} = {}) {
   }
   const card = element('card');
   const action = element('a');action.dataset={designReviewPrompt:'/prompt/selected'};action.href='https://designs.example/project';action.closest=()=>card;
-  const document = {head:element('head'),body:element('body'),createElement:element,addEventListener:(k,f)=>events[k]=f,execCommand:()=>false};
-  const ctx = {document, Blob, ClipboardItem:class {constructor(data) {this.data=data;}},navigator:{clipboard:{write:async items=>{const text=await (await items[0].data['text/plain']).text();if(denied)throw Error('denied');writes.push(text);}}},
-    fetch:async url=>{requests.push(url);return {ok:!failed,json:async()=>failed?{error:'Fetch failed'}:{prompt:'ORIGINAL PROMPT\nKeep all existing instructions.'}};},
+  const document = {head:element('head'),body:element('body'),createElement:element,addEventListener:(k,f)=>events[k]=f,execCommand:()=>false,dispatchEvent:()=>{}};
+  const ctx = {document, Blob,URL,location:{origin:'https://os.test'},CustomEvent:class {}, ClipboardItem:class {constructor(data) {this.data=data;}},navigator:{clipboard:{write:async items=>{const text=await (await items[0].data['text/plain']).text();if(denied)throw Error('denied');writes.push(text);}}},
+    fetch:async (url,options)=>{requests.push({url,options});return {ok:!failed,json:async()=>failed?{error:'Fetch failed'}:{queued:true,id:'saved-job'}};},
     open:()=>{const tab={location:{replace(url){tab.url=url;}},close(){this.closed=true;}};tabs.push(tab);return tab;}};
   ctx.window=ctx;vm.runInNewContext(code,ctx);
   return {elements,writes,requests,tabs,action,click:()=>events.click({target:{closest:()=>action},preventDefault(){}}),latest:tag=>elements.filter(e=>e.tag===tag).at(-1)};
@@ -28,16 +28,14 @@ function fixture({denied = false, failed = false} = {}) {
   f.elements.find(e=>e.textContent==='Cancel').events.click();assert(f.latest('dialog').removed);assert.equal(f.requests.length,0);
   f.click();f.latest('textarea').value='  Improve the headline <b>without HTML</b>  ';
   const submit=f.latest('form').events.submit;submit({preventDefault(){}});submit({preventDefault(){}});await settle();
-  assert.equal(f.requests.length,1);assert.equal(f.tabs.length,1);assert.equal(f.tabs[0].url,f.action.href);
-  assert.equal(f.writes[0], '**USER-REQUESTED DESIGN CHANGES**\nImprove the headline <b>without HTML</b>\n\n'
-    + 'ORIGINAL PROMPT\nKeep all existing instructions.');
+  assert.equal(f.requests.length,1);assert.equal(f.tabs.length,0);
+  assert.equal(f.requests[0].url,'/api/design-review/edit-queue');
+  assert.equal(f.requests[0].options.method,'POST');
+  assert.deepEqual(JSON.parse(f.requests[0].options.body),{comments:'Improve the headline <b>without HTML</b>'});
+  assert.equal(f.writes.length,0);
   assert.equal(f.action.getAttribute('aria-busy'),undefined);
-  f.click();assert.equal(f.latest('textarea').value,'');f.latest('form').events.submit({preventDefault(){}});await settle();assert(f.writes[1].includes('No additional changes specified.'));
-  for(const options of [{denied:true},{failed:true}]) {
-    const g=fixture(options);g.click();g.latest('textarea').value='Fix spacing';g.latest('form').events.submit({preventDefault(){}});await settle();
-    assert(g.tabs[0].closed);assert.equal(g.action.getAttribute('aria-busy'),undefined);
-    if(options.denied){assert(g.latest('textarea').readOnly);assert(g.latest('textarea').value.includes('Fix spacing'));}
-    else assert(g.elements.some(e=>e.textContent==='Fetch failed'));
-  }
-  console.log('PASS: immediate popup, cancel, Apply, duplicate submission, comments first, unchanged server prompt, blank comments, clipboard fallback and fetch failure.');
+  const g=fixture({failed:true});g.click();g.latest('textarea').value='Fix spacing';g.latest('form').events.submit({preventDefault(){}});await settle();
+  assert.equal(g.tabs.length,0);assert.equal(g.action.getAttribute('aria-busy'),undefined);
+  assert(g.elements.some(e=>e.textContent==='Fetch failed'));
+  console.log('PASS: immediate popup, cancel, queued Apply, duplicate submission, original instructions, no manual clipboard handoff and recoverable error.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

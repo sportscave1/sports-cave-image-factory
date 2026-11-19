@@ -49,9 +49,13 @@ def build(selected, filename='', *, source=None, metadata=None, app_module=None,
         'SMART UPLOAD — CHOOSE THE ACTION FROM THE ARTWORK AND VERIFIED CATALOGUE\n'
         + manual_instruction
         + 'Check the operation tag and exact design version first. Reuse an already recorded result and resume partial work on the same product. '
-        'Verify the design story against the catalogue before changing Shopify. A different moment, title or collector concept is a new product even when the athlete is the same. '
-        'Only replace artwork when this is an improved version of the same design and the supplied exact Shopify product ID identifies its original. '
-        'Similarity alone never authorises replacement. If an existing match is plausible but the identity or improvement is uncertain, report Needs attention and leave Shopify untouched.\n'
+        + ('This artwork is explicitly commissioned as an existing-product refresh. A new title, photograph or collector concept does not change its linked product. '
+           'Verify the supplied exact Shopify product ID and update only that listing; never create a new product for this item. '
+           'If the target is unavailable or uncertain, leave Shopify untouched and report Needs attention.\n'
+           if selected == 'UPDATE' else
+           'Verify the design story against the catalogue before changing Shopify. A different moment, title or collector concept is a new product even when the athlete is the same. '
+           'Only replace artwork when this is an improved version of the same design and the supplied exact Shopify product ID identifies its original. '
+           'Similarity alone never authorises replacement. If an existing match is plausible but the identity or improvement is uncertain, report Needs attention and leave Shopify untouched.\n')
     )
     if selected == 'UPDATE':
         policy += ('Use the Update Existing instructions below for the exact linked product only. Preserve its ID, URL, options, variants, '

@@ -6614,6 +6614,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                 "shopify_product_id": "gid://shopify/Product/777",
                 "edition_total": 100,
                 "next_edition_number": 96,
+                "sold_count": 51,
             },
             {"id": "run-1", "edition_total": 100, "next_edition_number": 96},
             reason="Manual correction",
@@ -6626,7 +6627,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(cursor.run_update_params[0], 52)
         self.assertEqual(cursor.product_update_params[0], 52)
 
-    def test_manual_override_recalculate_never_exceeds_edition_total(self):
+    def test_manual_override_recalculate_uses_sold_out_sentinel(self):
         class FakeCursor:
             def execute(self, sql, params=()):
                 if "SELECT COALESCE(MAX(edition_number)" in sql:
@@ -6654,16 +6655,17 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                 "shopify_product_id": "gid://shopify/Product/777",
                 "edition_total": 100,
                 "next_edition_number": 100,
+                "sold_count": 100,
             },
             {"id": "run-1", "edition_total": 100, "next_edition_number": 100},
             reason="Manual correction",
         )
 
-        self.assertEqual(result["next_edition_number"], 100)
+        self.assertEqual(result["next_edition_number"], 101)
         self.assertEqual(result["max_assigned"], 100)
         self.assertEqual(result["remaining_count"], 0)
         self.assertTrue(result["sold_out"])
-        self.assertEqual(cursor.product_update_params[0], 100)
+        self.assertEqual(cursor.product_update_params[0], 101)
 
     def test_update_edition_products_batch_does_not_run_schema_check_on_save(self):
         class FakeCursor:

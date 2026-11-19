@@ -36,8 +36,9 @@ def test_reset_rearms_mapping_version_without_losing_moved_psd(monkeypatch):
     assert task['state'] == 'Mapped' and task['moved'] == source
 
 
-@pytest.mark.parametrize('lost_move_response', [False, True])
-def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response):
+@pytest.mark.parametrize('refresh', [False, True])
+@pytest.mark.parametrize('lost_move_response', [False, True, 'already_moved'])
+def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monkeypatch, lost_move_response, refresh):
     service, intake_id, original, listing = setup(env, arrived=False)
     store, sql, provider = env
     sql.execute((Path(__file__).resolve().parents[1] /
@@ -72,10 +73,22 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
     with store.locked(intake_id, ADMIN['id']) as (row, cur):
         # ChatGPT saves the three lifestyle files outside the regular Save All UI.
         row['data']['mockups_exported'] = False
+        if refresh:
+            row['mode'] = 'UPDATE'
+            row['data'].update(smart_upload=True, metadata={
+                'upload_intent': 'existing_product_refresh', 'shopify_product_id': PID,
+                'design_origin': 'designs_to_refresh',
+            })
     row = store.read(intake_id, ADMIN['id'])
     handoff = prepare(result, row, receipt, 'Exact saved scenes.', staff_job=str(job_id))
     prompt = handoff['prompt']
     saved = handoff['staff_mapping']
+    if refresh:
+        assert saved['mode'] == 'UPDATE' and saved['target'] == PID
+        assert 'Update only the exact linked existing Shopify product' in prompt
+        assert 'Use ACTIVE from the first Shopify create call' not in prompt
+        assert 'A different moment, title or collector concept is a new product' not in prompt
+        assert PID in prompt
     assert saved['ready_tag'] in prompt
     assert 'Original PSD identity:' not in prompt and 'Use Add / Attach PSD' not in prompt
     assert 'Upload Companion owns this step' in prompt
@@ -112,7 +125,11 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
         path = f'{folder}/WEBP/{name}'
         provider.files.setdefault(path, dict(id='id:' + name, rev='new', content_hash='a' * 64,
                                              size=90, path_display=path, name=name))
-    if lost_move_response:
+    if lost_move_response == 'already_moved':
+        from product_upload_dropbox import ROOTS
+        provider.api.move_path(provider.token, original['id'], ROOTS['live'] + '/' + original['name'],
+                               root_path=provider.context['root_path'])
+    if lost_move_response is True:
         original_move = provider.api.move_path.side_effect
 
         def lose_response(*args, **kwargs):
@@ -143,3 +160,17 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
     assert service.status(intake_id, ADMIN)['state'] == 'Mapped'
     assert queue.tick(token, {}) == {}
     assert provider.api.move_path.call_count == 1
+
+
+def test_refresh_mapping_rejects_any_other_shopify_listing():
+    from unittest.mock import Mock
+    from product_upload_staff_mapping import published_product
+    row = {'id': str(uuid4())}
+    saved = {'target': PID, 'ready_tag': 'ready-fixture', 'files': []}
+    other = {'shopify_product_id': 'gid://shopify/Product/999999',
+             'tags': [tag(row['id']), saved['ready_tag']]}
+    shopify = Mock()
+    shopify.fetch_catalog_page.return_value = {'products': [other], 'has_next_page': False}
+    shopify.shopify_gid.side_effect = lambda kind, value: value
+    with pytest.raises(ValueError, match='other than the saved refresh target'):
+        published_product(row, saved, shopify)

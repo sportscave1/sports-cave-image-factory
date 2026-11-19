@@ -1,0 +1,7 @@
+<!doctype html><html><body><script>
+const send=(type,rest={})=>parent.postMessage({isStreamlitMessage:true,type,...rest},'*');
+const publish=()=>send('streamlit:setComponentValue',{value:!document.hidden});
+addEventListener('message',e=>{if(e.source===parent&&e.data.type==='streamlit:render'){send('streamlit:setFrameHeight',{height:0});}});
+document.addEventListener('visibilitychange',publish);
+send('streamlit:componentReady',{apiVersion:1});publish();
+</script></body></html>

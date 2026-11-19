@@ -182,7 +182,7 @@
   }
   async function preserveRestoredDraft(id, node, form, freshUpload) {
     if (!node.innerText.trim()) return true;
-    if (design || !freshUpload || existingTurn() || attachments(form).length) return false;
+    if ((!design && !freshUpload) || existingTurn() || attachments(form).length) return false;
     const text=node.innerText;
     const saved=await chrome.runtime.sendMessage({type:'project:backup-draft',id,text});
     if (!saved?.ok || !inProject() || input()!==node || node.innerText!==text ||
@@ -287,7 +287,7 @@
     const generating = Boolean(document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"], button[aria-label="Stop"]'));
     const clean = text.replace(/[*`]/g, '');
     const marker = !generating && clean.match(ad ? /(?:^|\n)\s*SC_AD_BLOCKED:\s*([^\n]+)/ : design ? /(?:^|\n)\s*SC_DESIGN_BLOCKED:\s*([^\n]+)/ : /(?:^|\n)\s*SC_UPLOAD_BLOCKED:\s*([A-Z_]+)/);
-    const alert = [...document.querySelectorAll('[role="alert"]')].find(node =>
+    const alert = !generating && [...document.querySelectorAll('[role="alert"]')].find(node =>
       node.getClientRects?.().length && /something went wrong|network error|failed to|unable to|error generating|conversation not found|try again/i.test(node.innerText || ''));
     // A completed response can report a tool rejection without emitting our
     // status marker. Preserve that concrete blocker instead of an idle timeout.

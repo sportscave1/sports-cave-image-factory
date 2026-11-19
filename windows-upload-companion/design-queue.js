@@ -21,8 +21,13 @@ async function rememberDesignTab(id, tab) {
 
 async function startDesign(job) {
   if (!queueId.test(job.id) || !suppliedReceipt.test(job.receipt) || job.project !== designProject ||
-      typeof job.prompt !== 'string' || job.prompt.length > 1048576 ||
-      !job.prompt.includes('morning_design_job_id = "' + job.id + '"')) return;
+      typeof job.prompt !== 'string' || job.prompt.length > 1048576) return;
+  const output=job.prompt.match(/\nQueue output receipt: ([a-f0-9-]{36})\n/);
+  const retry=job.prompt.match(/\nQueue retry receipt: ([a-f0-9-]{36})\n/);
+  const outputId=output ? output[1] : job.id;
+  if(job.kind==='edit' ? !job.prompt.startsWith('**USER-REQUESTED DESIGN CHANGES**\n') :
+    (output && (!queueId.test(outputId) || retry?.[1]!==outputId)) ||
+      !job.prompt.includes('morning_design_job_id = "'+outputId+'"'))return;
   if (pending.has(job.receipt)) return;
   const previous = (await chrome.storage.local.get(keyFor(job.receipt)))[keyFor(job.receipt)];
   // Even an interrupted opening needs inspection, not a second automatic chat.
@@ -46,7 +51,7 @@ async function designQueueTick() {
     for (const job of Object.values(jobs).slice(0, 1)) {
       const report = await health(job.receipt);
       const tab = job.tab ? await chrome.tabs.get(job.tab).catch(() => null) : null;
-      const progress = tab && report.state === 'submitted' ? await chrome.tabs.sendMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
+      const progress = tab && report.state === 'submitted' ? await companionMessage(job.tab, {type:'project:progress'}, {frameId:0}).catch(() => null) : null;
       events.push({id:job.id, state:progress?.blocked ? 'blocked' : report.state, reason:progress?.reason || report.reason, chat_url:progress?.chat_url || tab?.url || ''});
     }
     const response = await fetch(osOrigin + '/api/morning-designs/tick', {

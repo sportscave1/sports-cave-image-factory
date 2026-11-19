@@ -40,7 +40,7 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert 'Refine their scale, alignment, line spacing and separation' not in prompt
 
 
-def test_new_creative_rules_do_not_leak_into_edits():
+def test_edit_inherits_shared_creative_rules():
     prompt = _prompt('Collector', 'Verified story', edit={
         'source': {'id': 'id:Original', 'rev': 'abcdef123', 'path_display': '/Review/Collector.psd'},
         'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
@@ -48,8 +48,8 @@ def test_new_creative_rules_do_not_leak_into_edits():
     for guidance in (COMPLEMENTARY_IMAGES, COMPLETE_COMPOSITION, COLLECTOR_TYPOGRAPHY,
                      PURPOSEFUL_ABSTRACT, REVIEW_RELATIONSHIPS, NEW_BADGE_LAYOUT,
                      MOTORSPORT_ARTWORK):
-        assert guidance not in prompt
-    assert 'Preserve the existing badge position and size unless the user requests a change' in prompt
+        assert prompt.count(guidance) == 1
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in prompt
 
 
 def test_new_design_replaces_generation_conflicts_without_blocking_review():
@@ -58,12 +58,14 @@ def test_new_design_replaces_generation_conflicts_without_blocking_review():
                      'Generate the full artwork with subject',
                      'Use the strongest verified pairing by default',
                      'Test the selected supporting photograph in disconnected areas',
-                     'A simple, elegant border is equally suitable'):
+                     'A simple, elegant border is equally suitable',
+                     'Any generated people or sporting objects are placement guides only',
+                     'Completely cover generated renditions'):
         assert obsolete not in prompt
     for requirement in ('separate editable masked layers',
-                        'Any generated people or sporting objects are placement guides only',
+                        'Do not automatically paste whole source cutouts over them.',
                         'Reject assumed feelings, invented relationships with a city',
-                        'A plain rectangle alone is insufficient',
+                        'Corner ornaments are optional, never the default.',
                         'Continue authorised review saves and delivery',
                         'continue without pausing for approval'):
         assert requirement in prompt
@@ -103,7 +105,7 @@ def test_generation_foundation_lettering_border_and_badge_views():
     assert '3% of the shorter canvas dimension' in layout
     assert '60 px on the 2835 × 2004 master' in layout
     assert 'Scale that inset proportionally for the generation resolution' in layout
-    assert 'repeat the border geometry above, including all four sides' in generation
+    assert 'repeat the selected border geometry above, including all four sides' in generation
     assert 'Exclude plaque, number, placeholder outlines and seals' in generation
     assert 'visible working copy' in generation
     assert 'stretched samples, generic shapes or broad photographic strips' in generation
@@ -129,3 +131,59 @@ def test_fan_titles_and_visible_layout_decisions_reach_first_generation():
     assert 'without blurring the silhouette, repainting skin or fading anatomy' in rest
     assert 'one creative image-generation call' in rest
     assert 'never triggers another generation' in rest
+
+
+def test_dark_arena_direction_survives_prompt_assembly_and_finishing():
+    prompt = _prompt('Collector', 'Verified hockey or NBA story')
+    research, rest = prompt.split('**2.', 1)
+    layout, rest = rest.split('**3.', 1)
+    generation, rest = rest.split('**4.', 1)
+    finishing, saving = rest.split('**5.', 1)
+    assert 'For hockey and NBA, retain the chosen venue feature and placement' in research
+    assert prompt.count('**HOCKEY AND NBA — DARK ABSTRACT COLLECTOR DIRECTION**') == 1
+    assert 'greater visual presence than the subdued arena layer' in layout
+    assert 'selected venue feature retained subtly in place' in generation
+    assert 'predominantly dark abstract setting, sparse team-colour marks' in finishing
+    assert 'retaining the reviewed dark abstract hierarchy and subdued venue' in saving
+    assert 'For sports other than hockey and NBA' in layout
+    assert 'fine brushed antique-gold edges or inlays' in layout
+    assert 'fine brushed antique-gold contours or inlays' in generation
+    assert 'fine antique-gold detail defines the abstract forms' in finishing
+    assert 'integrated gold detail and restrained team-colour balance' in saving
+    assert 'one creative image-generation call' in generation
+    assert 'never generate again for visual criticism' in finishing
+    assert 'Do not restore malformed generated corners over a corrected border' in saving
+    assert 'short inner corner returns derived from the sporting story' not in prompt
+
+
+def test_action_emotion_pairing_and_required_darts_action_reach_all_shared_flows():
+    from home_design_refresh import _refresh_prompt
+    import morning_design_queue as queue
+    variants = [
+        _prompt('The Giant Killer', 'Verified darts tribute with an emotional hero.'),
+        _refresh_prompt(dict(title='Current darts design', product_id='123'), 'https://example.test/products/darts'),
+        _prompt('The Giant Killer', 'Verified darts tribute', edit={
+            'source': {'id':'id:art', 'rev':'r1', 'path_display':'/Review/Darts.psd'},
+            'metadata': {'upload_intent':'new_product'}}),
+    ]
+    for prompt in variants:
+        research, rest = prompt.split('**2.', 1)
+        layout, rest = rest.split('**3.', 1)
+        generation, rest = rest.split('**4.', 1)
+        finishing = rest.split('**5.', 1)[0]
+        assert prompt.count(COMPLEMENTARY_IMAGES) == 1
+        assert 'Darts always requires a verified throwing-action photograph' in research
+        assert 'If only one suitable source is available, use a verified throwing shot as the hero' in research
+        assert 'every darts layout shows genuine throwing action' in layout
+        assert 'every darts design must retain its genuine throwing-action photograph' in generation
+        assert 'Do not turn a reaction photograph into invented sporting action' in generation
+        assert 'never two emotional shots; when a secondary is used with an emotional hero, it must show action' in finishing
+        assert 'one creative image-generation call' in generation
+        assert 'never generate again for visual criticism' in finishing
+    key = queue.identity('2026-11-19', 'recommendations', {'title':'Darts tribute'})
+    current = queue._job_prompt(key, 'Darts tribute', 'Keep the verified sporting story.')
+    saved = dict(id=key, title='Darts tribute', prompt=current.replace(COMPLEMENTARY_IMAGES, 'Old optional imagery guidance.'))
+    upgraded = queue._waiting_prompt(saved)
+    assert COMPLEMENTARY_IMAGES in upgraded and 'Keep the verified sporting story.' in upgraded
+    assert queue._receipt(dict(saved, prompt=upgraded)) == queue._receipt(saved)
+    assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded

@@ -13,12 +13,47 @@ LABELS = ('Pending', 'Opening ChatGPT', 'Generating', 'Uploaded · checking revi
 CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a1e449948e881919c1e345006d63654(?:-[a-z0-9-]+)?/c/[a-f0-9-]{36}')
 LOG = logging.getLogger(__name__)
 
+# Dropbox scans can outlive the desktop's HTTP deadline. One bounded background
+# scan returns on a later poll; the existing prompt snapshot check rejects stale
+# results after an explicit retry. Never queue an unbounded backlog of scans.
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+_verification_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='design-receipts')
+_verification_lock = Lock()
+_verification_future = None
+_verification_prompts = {}
+
+
+def poll_outputs(jobs):
+    global _verification_future, _verification_prompts
+    with _verification_lock:
+        results = {}
+        if _verification_future is not None and _verification_future.done():
+            try:
+                scanned = _verification_future.result()
+                current = {str(job['id']): job['prompt'] for job in jobs}
+                results = {key: result for key, result in scanned.items()
+                           if current.get(str(key)) == _verification_prompts.get(str(key))}
+            except Exception:
+                LOG.warning('Design receipt scan failed; retrying on a later poll', exc_info=True)
+            _verification_future = None
+        if _verification_future is None and jobs:
+            _verification_prompts = {str(job['id']): job['prompt'] for job in jobs}
+            _verification_future = _verification_pool.submit(verify_outputs, jobs)
+        return results
+
 
 def _receipt(job):
     # Keep existing send journals valid; explicit retries get a fresh journal.
     retry = re.search(r'\nQueue retry receipt: ([a-f0-9-]{36})\n', job['prompt'])
     suffix = ':' + retry[1] if retry else ''
     return hashlib.sha256(('design:' + str(job['id']) + suffix).encode()).hexdigest()
+
+
+def _output_key(job):
+    # Manual repeats must not accept artwork delivered for a previous attempt.
+    receipt = re.search(r'\nQueue output receipt: ([a-f0-9-]{36})\n', job.get('prompt', ''))
+    return receipt[1] if receipt else str(job['id'])
 
 
 def identity(day, section, item):
@@ -37,7 +72,8 @@ def discover(cur):
     existing = {str(row['id']) for row in cur.fetchall()}
     for row in editions:
         edition = row['value']
-        for section in ('recommendations', 'legends'):
+        from home_sports_morning_brief import design_sections
+        for section in design_sections(edition):
             for item in edition.get(section, []):
                 key = identity(edition['date'], section, item)
                 if key in existing:
@@ -57,23 +93,60 @@ def _job_prompt(key, title, recommendation, *, primary_market=""):
         'required workflow checkpoint, if one remains. Omit the marker for visual concerns alone.\n')
 
 
+def _waiting_refresh_prompt(job):
+    """Refresh unclaimed jobs from the shared renderer without changing queue receipts."""
+    from home_design_refresh import _refresh_prompt
+
+    prompt = job['prompt']
+    target = re.search(r'^Shopify product ID: (.+)$', prompt, re.M)
+    if not target:
+        raise ValueError('The queued refresh is missing its exact Shopify product ID.')
+    _, found, tail = prompt.rpartition('\nInclude morning_design_job_id = "')
+    if not found:
+        raise ValueError('The queued refresh is missing its Review receipt.')
+    tail = '\nInclude morning_design_job_id = "' + tail
+    # Rebuild the brief as well as the stages: old snapshots explicitly allowed
+    # a replacement title/story, which would contradict today's edition lock.
+    page = re.search(r'^Product page(?: and current artwork reference)?: (.+)$', prompt, re.M)
+    suggestion = re.search(r'^Research hypothesis from the Home recommendation: (.*?)\nDecision context:', prompt, re.M | re.S)
+    evidence = re.search(r'^Decision context: (.+)$', prompt, re.M)
+    if not page:
+        raise ValueError('The queued refresh is missing its existing product reference.')
+    rendered = _refresh_prompt(dict(
+        title=job['title'], product_id=target[1].strip(),
+        suggestion=suggestion[1].strip() if suggestion else 'Upgrade the imagery and collector finish for this existing edition.',
+        evidence=evidence[1].strip() if evidence else 'Selected from Designs to Refresh.',
+    ), page[1].strip())
+    return 'SPORTS CAVE EXISTING DESIGN REFRESH\n' + rendered + tail
+
+
 def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
+    if job.get('section') == 'edit':
+        return prompt  # The selected-revision Edit prompt is already complete.
+    if prompt.startswith('SPORTS CAVE EXISTING DESIGN REFRESH\n'):
+        return _waiting_refresh_prompt(job)
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
         from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE
-        from design_new_composition import PURPOSEFUL_ABSTRACT
+        from design_new_composition import PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES
         from home_morning_brief_actions import REVIEW_SAVE_NAMING
-        from design_motorsport import MOTORSPORT_JSON
-        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, REVIEW_SAVE_NAMING, MOTORSPORT_JSON)):
+        from design_motorsport import (
+            MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
+            MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK,
+        )
+        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES, REVIEW_SAVE_NAMING,
+                                          MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
+                                          MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK)):
             return prompt
         _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
         _, _, body = body.partition('\n\n')  # Existing workflow introduction.
         brief, found, _ = body.partition('\n\n**1. Research the story, sources and master**')
         if found:
-            upgraded = _job_prompt(str(job['id']), job['title'], brief)
+            upgraded = _job_prompt(_output_key(job), job['title'], brief)
             retry = re.search(r'\nQueue retry receipt: [a-f0-9-]{36}\n', prompt)
-            return upgraded + (retry[0] if retry else '')
+            output = re.search(r'\nQueue output receipt: [a-f0-9-]{36}\n', prompt)
+            return upgraded + (retry[0] if retry else '') + (output[0] if output else '')
         return prompt  # Preserve unfamiliar snapshots rather than guessing at their brief.
     # Both legacy versions put the selected brief between these fixed sections.
     for boundary in (
@@ -83,7 +156,7 @@ def _waiting_prompt(job):
         _, found, body = prompt.partition(boundary + '\n\n')
         brief, end, _ = body.partition('\n\n**CHOOSE THE COLLECTOR TITLE AND DESIGN DIRECTION**')
         if found and end:
-            return _job_prompt(str(job['id']), job['title'], brief)
+            return _job_prompt(_output_key(job), job['title'], brief)
     raise ValueError('The original design brief could not be recovered from the waiting prompt.')
 
 
@@ -173,7 +246,7 @@ def _release_delivered(cur):
         WHERE stage=3 AND file_id<>'' AND file_rev<>'' AND file_path<>'' """)
 
 
-def _deleted_designs(jobs, published):
+def _deleted_designs(jobs, published, *, exact_live_identity=False):
     """Only confirmed absence permits redo; IDs survive Dropbox moves/renames."""
     from product_upload_services import Dropbox
     from psd_directory import ROOT
@@ -186,10 +259,14 @@ def _deleted_designs(jobs, published):
         provider = Dropbox()
         for job in candidates:
             paths = [job['file_id'], job['file_path']]
+            if any(provider.metadata_if_present(path) is not None for path in dict.fromkeys(paths) if path):
+                continue
             if job['file_path']:
-                paths.append(ROOT + '/' + PurePosixPath(job['file_path']).name)
-            if all(provider.metadata_if_present(path) is None for path in dict.fromkeys(paths) if path):
-                missing.add(job['id'])
+                live = provider.metadata_if_present(ROOT + '/' + PurePosixPath(job['file_path']).name)
+                # An older live product PSD is not the deleted refresh output.
+                if live and (not exact_live_identity or not job['file_id'] or live.get('id') == job['file_id']):
+                    continue
+            missing.add(job['id'])
     except Exception as error:
         LOG.warning('design_deletion_check_unavailable type=%s', type(error).__name__)
         return set()
@@ -207,17 +284,23 @@ def _posted_designs(cur, jobs, published):
     return published | {job['id'] for job in saved if job['file_id'] in posted}
 
 
-def list_jobs(day=None):
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
-        _release_delivered(cur)
+def list_jobs(day=None, *, display_only=False):
+    from companion_read_connection import read_connection
+    with (read_connection(connect) if display_only else connect()) as conn, conn.cursor() as cur:
+        if not display_only:
+            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+            _release_delivered(cur)
         cur.execute('''SELECT * FROM morning_design_jobs WHERE (%s::date IS NULL OR edition_date=%s::date)
             ORDER BY (stage BETWEEN 0 AND 3) DESC,edition_date,created_at,id LIMIT 100''', (day, day))
         jobs = cur.fetchall()
         published = _published_designs(cur, jobs)
         posted = _posted_designs(cur, jobs, published)
     # Network checks must not hold the desktop claim lock.
-    deleted = _deleted_designs(jobs, posted)
+    if display_only:
+        from design_deletion_status import deleted as cached_deleted
+        deleted = cached_deleted(jobs, posted)
+    else:
+        deleted = _deleted_designs(jobs, posted)
     return [dict(id=str(r['id']), title=r['title'],
                      label=('Completed · uploaded' if r['id'] in published
                             else 'Deleted · ready to redo' if r['id'] in deleted
@@ -234,7 +317,8 @@ def verify_outputs(jobs):
     from psd_directory import REVIEW_METADATA_FOLDER, REVIEW_FOLDER
     if not jobs:
         return {}
-    wanted = {str(job['id']) for job in jobs}
+    wanted = {_output_key(job): str(job['id']) for job in jobs if job.get('section') != 'edit'}
+    edits = {job['file_id']: job for job in jobs if job.get('section') == 'edit'}
     created = [job['created_at'] for job in jobs if isinstance(job.get('created_at'), datetime)]
     cutoff = min(created) - timedelta(minutes=5) if created else None
     provider, results, candidates = Dropbox(), {}, []
@@ -264,8 +348,15 @@ def verify_outputs(jobs):
         try:
             value, actual = _read_sidecar(provider, metadata)
             key = value.get('morning_design_job_id')
-            if not isinstance(key, str) or key not in wanted:
+            edit = edits.get(value.get('dropbox_file_id'))
+            if edit:
+                if value.get('dropbox_revision') == edit['file_rev']:
+                    continue
+                key = str(edit['id'])
+            elif not isinstance(key, str) or key not in wanted:
                 continue
+            else:
+                key = wanted[key]
             source = provider.metadata_if_present(value.get('dropbox_file_id', ''))
             if not source or not final_psd(source) or source.get('size', 0) <= 0:
                 continue
@@ -313,7 +404,7 @@ def tick(token, events):
         active = cur.fetchall()
     # Provider calls are deliberately outside the claim transaction.
     try:
-        verified = verify_outputs(active)
+        verified = poll_outputs(active)
     except Exception:
         verified = {}  # Connectivity failure is not proof of completion or failure.
     with connect() as conn, conn.cursor() as cur:
@@ -321,7 +412,12 @@ def tick(token, events):
             WHERE singleton AND token_hash=%s FOR UPDATE''', (digest(token),))
         if not cur.fetchone():
             raise PermissionError('The desktop pairing changed.')
+        snapshots = {str(job['id']): job['prompt'] for job in active}
         for key, result in verified.items():
+            cur.execute('SELECT prompt FROM morning_design_jobs WHERE id=%s', (key,))
+            current = cur.fetchone()
+            if not current or current['prompt'] != snapshots.get(str(key)):
+                continue  # An explicit repeat superseded this provider lookup.
             source = result['source']
             cur.execute('''UPDATE morning_design_jobs SET stage=%s,file_id=%s,file_rev=%s,file_path=%s,
                 message=%s,updated_at=CASE WHEN stage<>%s THEN now() ELSE updated_at END
@@ -352,7 +448,7 @@ def tick(token, events):
         enabled = cur.fetchone()['enabled']
         cur.execute('SELECT count(*) AS n FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3')
         if enabled and cur.fetchone()['n'] == 0:
-            cur.execute('''SELECT id,title,prompt FROM morning_design_jobs
+            cur.execute('''SELECT id,title,prompt,section FROM morning_design_jobs
                 WHERE stage=0 ORDER BY edition_date,created_at,id LIMIT 1 FOR UPDATE''')
             waiting = cur.fetchone()
             if waiting:
@@ -367,7 +463,7 @@ def tick(token, events):
         cur.execute('SELECT * FROM morning_design_jobs WHERE stage BETWEEN 1 AND 3 ORDER BY created_at,id')
         jobs = cur.fetchall()
     from home_morning_brief_actions import PROJECT_URL
-    return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], project=PROJECT_URL,
+    return dict(enabled=enabled, jobs=[dict(id=str(r['id']), stage=r['stage'], kind=r['section'], project=PROJECT_URL,
         prompt=r['prompt'], receipt=_receipt(r)) for r in jobs])
 
 
@@ -392,13 +488,13 @@ ROUTES = (('/api/morning-designs/tick', tick_route, ('POST',)),)
 
 
 def current_suggestions():
-    from home_sports_morning_brief import SETTING_KEY
+    from home_sports_morning_brief import SETTING_KEY, design_sections
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (SETTING_KEY,))
         row = cur.fetchone()
     edition = row['value'] if row else {}
     return [dict(id=identity(edition['date'], section, item), date=edition['date'], section=section, item=item)
-            for section in ('recommendations', 'legends') for item in edition.get(section, [])]
+            for section in design_sections(edition) for item in edition.get(section, [])]
 
 
 def enqueue_selected(key):
@@ -411,15 +507,14 @@ def enqueue_selected(key):
         cur.execute('SELECT * FROM morning_design_jobs WHERE id=%s FOR UPDATE', (key,))
         job = cur.fetchone()
         if job:
-            posted = _posted_designs(cur, [job], _published_designs(cur, [job]))
-            deleted = job['id'] in _deleted_designs([job], posted)
-            if job['id'] in posted or (not deleted and (job['stage'] != 5 or job['file_id'] or job['file_path'])):
-                return False
-            # Catch a late delivery before explicitly restarting failed work.
-            if verify_outputs([job]):
-                raise ValueError('This design has already been uploaded. Wait for its status to refresh.')
-            prompt = _job_prompt(key, suggestion['item']['title'], suggestion['item']['recommendation'])
-            prompt += f'\nQueue retry receipt: {uuid4()}\n'
+            if job['stage'] in (0, 1, 2):
+                return False  # Already queued/running; do not interrupt an active attempt.
+            receipt = str(uuid4())
+            from home_brief_calendar import display_markets
+            markets = display_markets(suggestion['item'])
+            prompt = _job_prompt(receipt, suggestion['item']['title'], suggestion['item']['recommendation'],
+                                 primary_market=markets[0] if markets else '')
+            prompt += f'\nQueue retry receipt: {receipt}\nQueue output receipt: {receipt}\n'
             cur.execute('''UPDATE morning_design_jobs SET stage=0,prompt=%s,message='',
                 chat_url='',file_id='',file_rev='',file_path='',updated_at=now() WHERE id=%s''', (prompt, key))
             return True

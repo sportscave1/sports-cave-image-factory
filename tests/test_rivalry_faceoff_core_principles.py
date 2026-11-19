@@ -135,7 +135,9 @@ class RivalryFaceOffCorePrinciplesTests(unittest.TestCase):
             ASSETS,
         )
 
-        self.assertIn("deep-black or charcoal foundation", prompt)
+        self.assertIn("Use a story-led rivalry palette", prompt)
+        self.assertIn("deep black or charcoal is an option", prompt)
+        self.assertNotIn("Use a deep-black or charcoal foundation", prompt)
         self.assertIn("Do not reuse one smoke, split-colour, subject-placement or lighting template", prompt)
         self.assertIn("landscape 4:3, framed-first and photographically realistic", prompt)
         self.assertIn("one thin refined symmetrical gold border fully inside the canvas", prompt)

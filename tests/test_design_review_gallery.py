@@ -201,9 +201,9 @@ def test_edit_endpoint_returns_full_prompt_for_exact_dropbox_source(monkeypatch)
     assert 'https://www.dropbox.com/home' in prompt and '?preview=Design%20%26%20Story.psd' in prompt
     assert record['path_display'] in prompt and record['id'] in prompt
     assert '"rev": "exact"' in prompt
-    assert '**4. Return the winner to Review**' in prompt
-    assert 'user-requested design changes as the primary brief' in prompt
-    assert 'Search online for the exact photograph' in prompt
+    assert '**Complete the selected Review edit and clean up Dropbox**' in prompt
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in prompt
+    assert 'Use web image search' in prompt
     assert stale.status_code == 409
 
 

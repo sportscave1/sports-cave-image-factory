@@ -22,7 +22,7 @@ def test_combined_job_preserves_upload_and_posts_once_after_four_files(store, mo
 
     monkeypatch.setattr(ads, 'connect', store)
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda user, page: True)
-    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: {'id': key})
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key, **kwargs: {'id': key})
     actor = {'id': 'staff'}
     source = {'id': 'id:fixture-psd', 'rev': 'original'}
     upload = uploads.enqueue(actor, source, 'A Collector Design', 'Baseball', ad_country='USA')
@@ -35,6 +35,13 @@ def test_combined_job_preserves_upload_and_posts_once_after_four_files(store, mo
         ads.tick('x' * 43, {})
     assert ads.tick(token, {}) == {}
     assert uploads.list_jobs('staff')['jobs'][0]['ad']['active']
+    # An upload dependency failure must not fail or consume the waiting ad.
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=7 WHERE id=%s', (upload,))
+    assert ads.tick(token, {}) == {}
+    assert uploads.list_jobs('staff')['jobs'][0]['ad']['active']
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=0 WHERE id=%s', (upload,))
     assert not uploads.list_jobs('stranger')['jobs']
 
     uploads.desktop_tick(token)
@@ -134,7 +141,7 @@ def test_post_request_imports_originals_in_route_order(country, code, monkeypatc
     value = dict(result=result, folder=folder, handle='fixture-product', upload=upload)
     monkeypatch.setattr(ads, 'write', lambda *_: None)
     monkeypatch.setattr(ads_posting_page, 'MetaPostingClient', lambda: SimpleNamespace(
-        product_set_members=lambda key: [{'url':result['product_url']}] if key=='21' else []))
+        product_set_members=lambda key, **kwargs: [{'url':result['product_url']}] if key=='21' else []))
     request = ads._post_request(value)
     assert request.country == code
     assert request.product_set_id == '21'
@@ -166,7 +173,7 @@ def test_ads_companion_heartbeat_pause_and_blocked_job_history(store, monkeypatc
 
     monkeypatch.setattr(ads, 'connect', store)
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda user, page: True)
-    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: {'id': key})
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key, **kwargs: {'id': key})
     token = uploads.pair({'id': 'desktop'})
     actor = {'id': 'staff'}
     first, second = [
@@ -203,7 +210,10 @@ def test_ads_companion_heartbeat_pause_and_blocked_job_history(store, monkeypatc
     assert ads.tick(token, {})['job']['id'] == str(second)
 
 
-def test_developer_companion_shows_ads_queue(monkeypatch):
+def test_companion_shows_selected_ads_queue(monkeypatch):
+    # AppTest has no browser visibility; the real component is covered in Edge.
+    monkeypatch.setattr('upload_companion_page.visible', lambda: True)
+    monkeypatch.setattr('upload_companion_page.read_display', lambda name, loader: loader())
     import ads_companion_quick_add
     monkeypatch.setattr(ads_companion_quick_add,'catalog',lambda:dict(products=[]))
     from streamlit.testing.v1 import AppTest
@@ -222,5 +232,26 @@ def test_developer_companion_shows_ads_queue(monkeypatch):
     ).run()
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ['Design queue', 'Upload queue', 'Ads queue']
+    assert not app.button  # Hidden queues no longer execute.
+    app.session_state['companion-queue-tabs'] = 'Ads queue'
+    app.run()
+    assert not app.exception
     assert [(button.label, button.disabled) for button in app.button] == [('Play', False), ('Pause', True)]
     assert any('Fixture' in text.value for text in app.markdown)
+
+
+def test_catalog_backoff_does_not_block_other_ads(store, monkeypatch):
+    import os_accounts
+    monkeypatch.setattr(ads, 'connect', store)
+    monkeypatch.setattr(os_accounts, 'can_access_page', lambda *args: True)
+    monkeypatch.setattr(os_accounts.DEFAULT_STORE, 'get_user', lambda key: {'id': key})
+    token = uploads.pair({'id':'desktop'})
+    waiting, ready = str(uuid4()), str(uuid4())
+    with store() as conn, conn.cursor() as cur:
+        for key, retry in ((waiting, {'next_at':ads.time.time()+900}), (ready, {})):
+            value=dict(upload=key,source='new_ads',stage='generating',requester='staff',catalog_retry=retry)
+            cur.execute('INSERT INTO app_settings(key,value) VALUES (%s,%s::jsonb)', (ads.PREFIX+key,json.dumps(value)))
+    processed=[]
+    monkeypatch.setattr(ads,'_step',lambda key,value,*args: processed.append(value['upload']) or {})
+    ads.tick(token,{})
+    assert processed==[ready]

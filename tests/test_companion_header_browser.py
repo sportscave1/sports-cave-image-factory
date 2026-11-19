@@ -32,7 +32,7 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
                 request = route.request
                 if request.url == 'http://fixture.test/':
                     route.fulfill(body=html,content_type='text/html')
-                elif request.url.endswith('/status'):
+                elif request.url.split('?')[0].endswith('/status'):
                     route.fulfill(json=payload)
                 elif request.url.endswith('/queue-control'):
                     data=request.post_data_json

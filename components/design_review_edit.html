@@ -4,16 +4,6 @@
   if (document[listenerKey]) return;
   document[listenerKey] = true;
 
-  const copyText = (text) => {
-    const field = document.createElement('textarea');
-    field.value = text;
-    field.style.cssText = 'position:fixed;left:-9999px';
-    document.body.append(field);
-    field.select();
-    try { return document.execCommand('copy'); }
-    finally { field.remove(); }
-  };
-
   const applyEdit = async (action, comments) => {
     if (action.getAttribute('aria-busy') === 'true') return;
     action.setAttribute('aria-busy', 'true');
@@ -21,62 +11,22 @@
     card?.querySelector('.sc-review-edit-feedback')?.remove();
     const feedback = document.createElement('div');
     feedback.className = 'sc-review-edit-feedback';
-    const status = document.createElement('div');
-    status.role = 'status';
-    status.textContent = 'Getting the edit prompt…';
-    feedback.append(status);
+    feedback.role = 'status';
+    feedback.textContent = 'Adding edit to companion…';
     card?.append(feedback);
-
-    const payload = fetch(action.dataset.designReviewPrompt, {credentials: 'same-origin'})
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok || !data.prompt) throw new Error(data.error || 'Could not load the edit prompt.');
-        return '**USER-REQUESTED DESIGN CHANGES**\n'
-          + (comments || 'No additional changes specified.')
-          + '\n\n' + data.prompt;
-      });
-    // Start clipboard access during the click. The prompt is fetched only for this design.
-    const copied = window.ClipboardItem && navigator.clipboard?.write
-      ? navigator.clipboard.write([new ClipboardItem({
-          'text/plain': payload.then((text) => new Blob([text], {type: 'text/plain'})),
-        })]).then(() => true, () => false)
-      : Promise.resolve(false);
-    const projectTab = window.open('about:blank', '_blank');
-    if (projectTab) projectTab.opener = null;
-
     try {
-      const prompt = await payload;
-      let success = await copied;
-      if (!success) {
-        projectTab?.close();
-        navigator.clipboard?.writeText && (success = await navigator.clipboard.writeText(prompt).then(() => true, () => false));
-        if (!success) {
-          try { success = copyText(prompt); } catch {}
-        }
-      } else if (projectTab && !projectTab.closed) {
-        projectTab.location.replace(action.href);
-        feedback.remove();
-        return;
-      }
-      status.textContent = success ? 'Prompt copied. Open Sports Cave Designs and paste it.'
-        : 'Copy this prompt, then open Sports Cave Designs and paste it.';
-      if (!success) {
-        const field = document.createElement('textarea');
-        field.value = prompt;
-        field.readOnly = true;
-        field.setAttribute('aria-label', 'Edit prompt');
-        feedback.append(field);
-        field.select();
-      }
-      const open = document.createElement('a');
-      open.href = action.href;
-      open.target = '_blank';
-      open.rel = 'noopener noreferrer';
-      open.textContent = 'Open Sports Cave Designs';
-      feedback.append(open);
+      const url = new URL(action.dataset.designReviewPrompt, location.origin);
+      url.pathname = '/api/design-review/edit-queue';
+      const response = await fetch(url.pathname + url.search, {
+        method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({comments})
+      });
+      const data = await response.json();
+      if (!response.ok || !data.queued) throw new Error(data.error || 'Could not queue the edit.');
+      feedback.textContent = 'Edit queued. Companion will open, paste and submit it automatically.';
+      document.dispatchEvent(new CustomEvent('sc-design-edit-queued'));
     } catch (error) {
-      projectTab?.close();
-      status.textContent = error.message || 'Could not load the edit prompt. Try Edit again.';
+      feedback.textContent = error.message || 'Could not queue the edit. Try Apply again.';
     } finally {
       action.removeAttribute('aria-busy');
     }

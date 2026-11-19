@@ -405,7 +405,7 @@ def _paged_get(path, params=None, config=None, max_pages=25, access_token=None):
         if not next_url or page_count >= max_pages:
             break
         payload = _get_next_page(next_url)
-    return {"rows": rows, "page_count": page_count}
+    return {"rows": rows, "page_count": page_count, "has_more": bool(next_url)}
 
 
 def test_meta_connection(config=None):
@@ -1833,13 +1833,28 @@ class MetaPostingClient:
             or ()
         )
 
-    def product_set_members(self, product_set_id):
-        """Read only the identifiers needed to verify catalogue membership."""
-        return tuple(_paged_get(
-            f"{str(product_set_id or '').strip()}/products",
-            params={"fields": "id,retailer_id,url", "limit": 100},
-            config=self.config,
-        ).get("rows") or ())
+    def product_set_members(self, product_set_id, *, product=None):
+        """Narrow reads to this product, then let the caller verify exact identity."""
+        params = {"fields": "id,retailer_id,url", "limit": 100}
+        if product:
+            from urllib.parse import urlsplit
+            pid = str(product.get('product_id') or '').rsplit('/', 1)[-1]
+            handle = urlsplit(product.get('product_url') or '').path.rstrip('/').rsplit('/', 1)[-1]
+            filters = []
+            if pid.isdigit():
+                # Shopify's current Meta feed uses variant IDs as retailer_id.
+                # The product ID belongs to retailer_product_group_id instead.
+                params['filter'] = json.dumps({'retailer_product_group_id': {'eq': pid}})
+            if handle:
+                filters.append({'url': {'i_contains': '/products/' + handle}})
+            if filters and 'filter' not in params:
+                params['filter'] = json.dumps({'or': filters})
+        result = _paged_get(f"{str(product_set_id or '').strip()}/products",
+                            params=params, config=self.config)
+        if result.get('has_more'):
+            from ads_companion_targeting import CatalogPending
+            raise CatalogPending('Meta membership lookup is incomplete; the saved files will be retried.')
+        return tuple(result.get('rows') or ())
 
     def product_set_health(self, product_set_id):
         """Read Product Set metadata and products without mutating the catalogue."""
