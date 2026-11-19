@@ -53,12 +53,13 @@ def render_page(user):
 def _category(st, store, prompts, category, user, save_action, activate_action):
     search_col, select_col = st.columns([1, 2.4])
     search = search_col.text_input('Find a prompt', placeholder=f'Search {category.lower()} prompts…', key='prompt-search-' + category, label_visibility='collapsed')
-    rows = [p for p in prompts if p.category == category and search.casefold() in (p.title + ' ' + p.text).casefold()]
-    if not rows:
-        st.caption('No matching prompts. Try another search.')
+    category_rows = [p for p in prompts if p.category == category]
+    rows = [p for p in category_rows if search.casefold() in (p.title + ' ' + p.text).casefold()]
+    key = select_col.selectbox('Prompt library', ['entire'] + [p.key for p in rows],
+                       format_func=lambda k: 'Entire prompt · all sections' if k == 'entire' else next(p.title for p in rows if p.key == k), key='prompt-select-' + category, label_visibility='collapsed')
+    if key == 'entire':
+        _entire_category(st, category_rows, category)
         return
-    key = select_col.selectbox('Prompt library', [p.key for p in rows],
-                       format_func=lambda k: next(p.title for p in rows if p.key == k), key='prompt-select-' + category, label_visibility='collapsed')
     prompt = next(p for p in rows if p.key == key)
     history, history_sha = {'versions': []}, None
     if store.token:
@@ -144,6 +145,19 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             with st.expander('Source & template details'):
                 st.code(prompt.path + (':' + prompt.symbol if prompt.symbol else ''), language=None)
                 st.caption('Editing template text cannot change Python interpolation expressions. Activation rejects stale prompt content and concurrent Git changes.')
+
+
+def _entire_category(st, prompts, category):
+    st.subheader(category + ' · Entire prompt')
+    st.caption('All deployed templates and instruction sections in this category. Product-specific values are filled in when a prompt runs. Select an individual section above to edit or view its versions.')
+    combined = '\n\n'.join(p.title + '\n' + ('─' * len(p.title)) + '\n' + p.text for p in prompts)
+    with st.expander('Entire prompt · all sections', expanded=True):
+        st.html('<div class="prompt-preview">' + html.escape(combined) + '</div>')
+        st.download_button('Download entire prompt', combined, file_name=category.lower() + '-entire-prompt.txt', key='prompt-entire-download-' + category)
+    st.subheader('Individual sections')
+    for prompt in prompts:
+        with st.expander(prompt.title):
+            st.html('<div class="prompt-preview">' + html.escape(prompt.text) + '</div>')
 
 
 def _deployment(st, store, prompt, selected):

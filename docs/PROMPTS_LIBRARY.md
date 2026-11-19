@@ -22,3 +22,7 @@ python scripts/validate_render_topology.py
 Tests use synthetic credentials and mocked providers. AppTest mounts only the prompts page with stub account authorization, without starting the application or touching production data. All 94 catalogued templates were syntax-round-tripped without executing their application modules.
 
 Account regression check: 80 tests ran with six failures; the same six failures reproduced with the unchanged f6cbb674 app source (legacy account UI, owner-only access assertion, Home UI and Files/upload fixtures). No new account failures identified.
+
+## Entire category view
+
+Each category defaults to Entire prompt · all sections in the prompt selector. An expanded, untruncated full-text dropdown contains every deployed template in that category, with a text download. Individual section dropdowns follow it; select a section in the top selector to use the existing versioned editor. Search filters individual selector choices, never the complete view. The complete view is read-only deployed source, not an executable assembled product prompt or unsaved draft. Runtime placeholders remain visible.

@@ -5,6 +5,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 from streamlit.testing.v1 import AppTest
+from prompt_library import catalog
 
 
 class PageTests(unittest.TestCase):
@@ -18,6 +19,9 @@ class PageTests(unittest.TestCase):
             self.assertFalse(page.exception)
             self.assertEqual([t.label for t in page.tabs][:1], ['Design'])
             self.assertTrue({'Design', 'Upload', 'Ads'}.issubset({t.label for t in page.tabs}))
+            if not page.text_area:
+                picker = next(s for s in page.selectbox if s.label == 'Prompt library')
+                picker.set_value(next(p.key for p in catalog() if p.category == page.session_state['prompt-category'])).run()
             self.assertEqual(len(page.text_area), 1)
             self.assertTrue(all(b.disabled for b in page.button if b.label in ('Save draft', 'Activate version')))
             page.text_area[0].set_value('Unsaved editor text').run()
@@ -25,12 +29,8 @@ class PageTests(unittest.TestCase):
             self.assertEqual(page.text_area[0].value, 'Unsaved editor text')
             self.assertNotIn('Release connection', [e.label for e in page.expander])
             self.assertFalse(any('token' in t.label.lower() or 'api key' in t.label.lower() for t in page.text_input))
-            page.session_state['prompt-category'] = 'Upload'
-            page.run()
-            self.assertFalse(page.exception)
-            self.assertEqual(len(page.text_area), 1)
-            page.session_state['prompt-category'] = 'Design'
-            page.run()
+            next(s for s in page.selectbox if s.label == 'Prompt library').set_value('entire').run()
+            next(s for s in page.selectbox if s.label == 'Prompt library').set_value(next(p.key for p in catalog() if p.category == 'Design')).run()
             self.assertEqual(page.text_area[0].value, 'Unsaved editor text')
 
     def test_header_actions_save_and_activate_selected_version(self):
@@ -44,6 +44,7 @@ class PageTests(unittest.TestCase):
         store.history.return_value = (history, 'history-sha')
         with patch.dict(sys.modules, {'os_accounts': accounts}), patch('prompts_page.GitStore', return_value=store):
             page = AppTest.from_string("from prompts_page import render_page\nrender_page({'id':'test-owner'})", default_timeout=30).run()
+            next(s for s in page.selectbox if s.label == 'Prompt library').set_value(next(p.key for p in catalog() if p.category == 'Design')).run()
             page.text_area[0].set_value('Edited instructions').run()
             next(b for b in page.button if b.label == 'Save draft').click().run()
             self.assertFalse(page.exception)
@@ -58,6 +59,22 @@ class PageTests(unittest.TestCase):
             next(b for b in page.button if b.label == 'Publish this saved version').click().run()
             self.assertFalse(page.exception)
             self.assertEqual(store.activate.call_args.args[1:], ('draft-test', history, 'history-sha'))
+
+    def test_entire_view_includes_every_section_in_each_category(self):
+        accounts = types.ModuleType('os_accounts')
+        accounts.is_admin = lambda user: True
+        accounts.account_is_active = lambda user: True
+        with patch.dict(sys.modules, {'os_accounts': accounts}), patch.dict(os.environ, {'PROMPTS_GITHUB_TOKEN': '', 'RENDER_API_KEY': ''}):
+            for category in ('Design', 'Upload', 'Ads'):
+                source = "import streamlit as st\nfrom prompts_page import _category\nfrom prompt_library import catalog\nfrom unittest.mock import Mock\n_category(st, Mock(token=''), catalog(), " + repr(category) + ", {}, st.empty(), st.empty())"
+                page = AppTest.from_string(source, default_timeout=30).run()
+                self.assertFalse(page.exception)
+                rows = [p for p in catalog() if p.category == category]
+                self.assertEqual([e.label for e in page.expander], ['Entire prompt · all sections'] + [p.title for p in rows])
+                self.assertEqual(len(page.text_area), 0)
+                self.assertFalse(any(b.label == 'Activate version' for b in page.button))
+                page.text_input[0].set_value('no matches xyz').run()
+                self.assertEqual(len(page.expander), len(rows) + 1)
 
     def test_unauthorised_user_cannot_open_editor(self):
         accounts = types.ModuleType('os_accounts')
