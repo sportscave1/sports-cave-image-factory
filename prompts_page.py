@@ -89,6 +89,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             heading.subheader(category + ' - Entire prompt' if is_bundle(prompt) else prompt.title)
             badge = (('Release v' if selected.get('commit') else 'Baseline v' if selected.get('baseline') else 'Draft v') + selected['version']) if selected else ('Deployed v' + deployed.get('version', '1.0'))
             status.html('<span class="prompt-badge">' + html.escape(badge) + '</span>')
+            test_panel = st.container()
             edit, preview = st.tabs(['Edit prompt', 'Full prompt preview'])
             with edit:
                 buffer_key = f'{key}-{choice}'
@@ -135,6 +136,9 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                 before = prompt.text if compare_id == 'deployed' else next(v['text'] for v in versions if v['id'] == compare_id)
                 delta = '\n'.join(difflib.unified_diff(before.splitlines(), text.splitlines(), fromfile='Comparison', tofile='Editor', lineterm=''))
                 st.code(delta or 'No changes.', language='diff', wrap_lines=True)
+            from prompt_test_panel import render as render_test
+            with test_panel:
+                render_test(st, prompt, text, user, valid)
             note = st.text_input('Version note', placeholder='What changed, and why?', key='prompt-note-' + key)
             if save_action.button('Save draft', key='prompt-save-' + key, use_container_width=True, disabled=not store.token or not valid):
                 try:
