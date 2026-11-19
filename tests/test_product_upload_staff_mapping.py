@@ -111,12 +111,12 @@ def test_publish_now_hands_off_exact_revision_and_queues_auto_editions(env, monk
                          for i in range(8)]
     assert tag(intake_id) in listing['tags']
     monkeypatch.setattr(shopify_sync, 'fetch_catalog_page', lambda **kw: {'products': [listing]})
-    queue.tick(token, {'id': str(job_id), 'state': 'submitted'})
-    assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == 5
+    queue.tick(token, {'id': str(job_id), 'state': 'uncertain'})
+    assert queue.list_jobs('staff-fixture')['jobs'][0]['stage'] == 4
     assert not provider.api.move_path.called
 
     listing['tags'].append(saved['ready_tag'])
-    queue.tick(token, {})
+    queue.tick(token, {'id': str(job_id), 'state': 'uncertain'})
     progress = queue.list_jobs('staff-fixture')['jobs'][0]
     assert progress['stage'] == 5 and progress['percent'] == 96
     assert 'waiting for Edition Ops' in progress['detail']

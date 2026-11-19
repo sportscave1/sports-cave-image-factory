@@ -521,6 +521,16 @@ def tick(token, event):
         if stage == 4 and state == 'submitted':
             advance(key, actor, 5, allowed=[4])
             stage = 5
+        elif stage == 4 and state == 'uncertain':
+            # Browser acknowledgement can be lost while ChatGPT publishes. A
+            # package-specific ready tag is positive evidence, never a resend.
+            from product_upload_staff_mapping import publication_ready
+            try:
+                if publication_ready(connect, job):
+                    advance(key, actor, 5, allowed=[4])
+                    stage = 5
+            except Exception:
+                LOG.warning('Could not reconcile the unconfirmed upload receipt', exc_info=True)
     if stage == 5:
         try:
             verify(job)

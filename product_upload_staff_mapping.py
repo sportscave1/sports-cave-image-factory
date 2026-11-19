@@ -89,6 +89,23 @@ def published_product(row, saved, shopify):
     return product
 
 
+def publication_ready(connect, job):
+    """Recover a lost browser receipt only from this exact published package."""
+    import shopify_sync
+    if not job.get('intake_id'):
+        return False
+    row = Intakes(connect).read(str(job['intake_id']), job['worker_actor'])
+    if not row:
+        return False
+    saved = row['data'].get('staff_mapping') or {}
+    if (saved.get('job') != str(job['id']) or saved.get('source') != row['data'].get('source')
+            or saved.get('source', {}).get('id') != job['source_id']
+            or saved.get('source', {}).get('rev') != job['source_rev']
+            or saved.get('mode') != row['mode'] or not saved.get('ready_tag')):
+        return False
+    return bool(published_product(row, saved, shopify_sync))
+
+
 def verify_webps(provider, saved):
     """Match the exact reserved gallery and keep the five core files pinned."""
     ids = set()

@@ -405,6 +405,27 @@ def test_completed_blocker_after_uncertain_send_releases_upload_slot(store):
     assert queue.tick(token, {})['job']['id'] == str(second)
 
 
+def test_uncertain_receipt_recovers_only_from_verified_published_package(store, monkeypatch):
+    import product_upload_staff_mapping as mapping
+    first = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    queue.advance(first, 'desktop', 4)
+    ready = []
+    monkeypatch.setattr(mapping, 'publication_ready', lambda connect, job: bool(ready))
+    verified = []
+    monkeypatch.setattr(queue, 'verify', lambda job: verified.append(job['id']))
+    event = dict(id=str(first), state='uncertain')
+    assert queue.tick(token, event)['job']['stage'] == 4
+    assert not verified
+    ready.append(True)
+    assert queue.tick(token, event)['job']['stage'] == 5
+    assert verified == [first]
+    monkeypatch.setattr(queue, 'verify', lambda job: queue.advance(job['id'], 'desktop', 6, allowed=[5]))
+    assert queue.tick(token, event) == {}
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 6
+
+
 def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
     from product_upload_jobs import Jobs
     jobs=Jobs()
