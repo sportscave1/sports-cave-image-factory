@@ -43,8 +43,25 @@ def strip_rules(prompt):
     return re.sub(re.escape(START) + r".*?" + re.escape(END), "", str(prompt), flags=re.S).strip()
 
 
+def publication_metadata(metadata):
+    """A preserved refresh title is evidence, not an explicit title-edit request.
+
+    Earlier Review handoffs copied design_title into customer_facing_title. Keep
+    those saved intakes usable without renaming their existing Shopify edition.
+    A different explicitly proposed title still goes through the normal gate.
+    """
+    result = dict(metadata or {})
+    inherited = result.get('design_name')
+    if (result.get('upload_intent') == 'existing_product_refresh'
+            and result.get('design_origin') == 'designs_to_refresh'
+            and inherited and result.get('customer_facing_title') == inherited):
+        result.pop('customer_facing_title')
+        result.setdefault('existing_product_title', inherited)
+    return result
+
+
 def apply_rules(prompt, metadata=None, *, preview=False):
-    candidate = str((metadata or {}).get("customer_facing_title") or "")
+    candidate = str(publication_metadata(metadata).get("customer_facing_title") or "")
     if not preview and not title_state(candidate)["valid"]:
         raise ValueError("Product title exceeds 60 characters. Rewrite it before creating or publishing.")
     if candidate and not preview and not naming_valid(candidate):

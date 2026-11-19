@@ -1470,8 +1470,10 @@
         if (button.hidden) continue;
         const name = queue === "design" ? "Design" : queue === "ads" ? "Ads" : "Upload";
         const action = control.enabled ? "Pause" : "Play";
-        const label = `${action} ${queue} queue (${control.waiting} waiting)`;
-        button.innerHTML = icon(action.toLowerCase()) + `<span>${name} (${Number(control.waiting)})</span>`;
+        const count = control.waiting;
+        const knownCount = typeof count === 'number' && Number.isFinite(count) && count >= 0;
+        const label = `${action} ${queue} queue` + (knownCount ? ` (${count} waiting)` : '');
+        button.innerHTML = icon(action.toLowerCase()) + `<span>${name}` + (knownCount ? ` (${count})` : '') + `</span>`;
         button.title = label;
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-busy", String(pendingQueues.has(queue)));

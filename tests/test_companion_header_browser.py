@@ -169,10 +169,14 @@ def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_re
             expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Previous upload')
             before = len(requests)
             payload['jobs'] = [old,new]  # Do not rely on API ordering to focus the request.
+            # Exact receipt reads can precede the background queue-count snapshot.
+            payload['queues']['upload'].pop('waiting')
             notice = dict(id='new',job_id='new',interaction_id='click-1',title='Requested artwork',open_upload=True,kind='success',text='Request saved')
             page.evaluate('(cfg)=>window.SportsCaveTopBar.install(cfg)',dict(config,uploadNotice=notice))
             expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Requested artwork')
             expect(page.locator('#sc-os-staff-upload-stage')).to_contain_text('Waiting for desktop companion')
+            expect(page.get_by_role('button',name='Pause upload queue',exact=True)).to_be_visible()
+            expect(page.locator('#sc-os-companion-status')).not_to_contain_text('NaN')
             assert page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
             assert len(requests) > before and any('job_id=new' in url for url in requests)
             # Repeat a deliberate click: reopen status, never submit another upload.

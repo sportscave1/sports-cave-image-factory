@@ -468,6 +468,7 @@ def test_requested_status_route_bypasses_warming_history_without_leaking_request
         assert response.status_code == 200, response.text
         assert response.json()['display_state'] == 'ready'
         assert response.json()['jobs'][0]['id'] == str(key)
+        assert response.json()['queues']['upload']['waiting'] is None
         active['id'] = 'other'
         assert client.get('/api/staff-product-uploads/status',params=query).status_code == 403
     with store() as conn, conn.cursor() as cur:

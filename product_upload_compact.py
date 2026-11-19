@@ -14,6 +14,7 @@ EDITION_SYNC_RULES = """Edition Ops owns all sports_cave edition metafields. Upl
 FIELDS = (
     'product_name', 'design_name', 'sport_category', 'sport', 'subjects', 'athletes',
     'team', 'event', 'product_context', 'research', 'customer_facing_title',
+    'existing_product_title', 'design_origin', 'upload_intent',
     'confirmed_limit', 'edition_limit', 'edition_total', 'limited_edition',
     'worldwide', 'selected_collections', 'verified_collection_facts', 'existing_tags',
     'tags', 'shopify_product_id', 'shopify_product_gid', 'product_gid', 'product_id',
@@ -198,7 +199,8 @@ def sport_requirements(metadata):
 def build(selected, filename, source, metadata, additions=None, *, automatic=False, companion_mapping=False):
     from product_upload_intake import MODES
     from product_upload_source import prompt_section
-    m = dict(metadata or {})
+    from product_title_rules import publication_metadata
+    m = publication_metadata(metadata) if selected == 'UPDATE' else dict(metadata or {})
     if m.get('customer_facing_title'):
         from product_title_rules import apply_rules
         apply_rules('', m)  # Shared explicit-title validation before prompt handoff.

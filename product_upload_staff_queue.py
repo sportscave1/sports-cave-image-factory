@@ -427,7 +427,11 @@ async def status_route(request):
                 result['online'] = receipt['online']
                 result['display_state'] = 'ready'
                 queues = result.setdefault('queues', {})
-                queues['upload'] = dict(queues.get('upload') or {}, enabled=receipt['enabled'], display=True)
+                upload = dict(queues.get('upload') or {}, enabled=receipt['enabled'], display=True)
+                # A direct receipt can arrive before the cached queue counts.
+                # Omit unknown counts rather than manufacturing a zero.
+                upload.setdefault('waiting', None)
+                queues['upload'] = upload
             return JSONResponse(result, headers=HEADERS)
         result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
