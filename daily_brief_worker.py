@@ -30,6 +30,8 @@ LATEST_KEYS = {"sports": sports.SETTING_KEY, "meta": meta.SETTING_KEY,
 
 
 def contract_upgrade(kind, previous, incoming):
+    if kind == 'meta' and incoming.get('ad_format_version') == 3 and previous.get('ad_format_version', 0) < 3:
+        return True
     field = {"sports": "design_recommendations", "meta": "ad_recommendations"}.get(kind)
     return bool(field and field in incoming and field not in previous)
 
@@ -96,7 +98,7 @@ def enqueue(kind, edition, claims):
             sports.validate_fresh_designs(validated, cur)
     if kind == "meta" and "ad_recommendations" in validated:
         from home_brief_opportunities import validate_ad_products
-        validate_ad_products(validated['ad_recommendations'], today)
+        validate_ad_products(validated['ad_recommendations'], today, require_all=validated.get('ad_format_version') == 3)
     if kind == "sports" and not validated.get("full_brief"):
         raise ValueError("Include the complete Sports Morning Brief.")
     if kind == "meta" and not validated.get("summary"):
@@ -142,7 +144,7 @@ def status(kind):
                        job.get("error_stage", "publication"),
               "retryable": not verified and job.get("status") in ("scheduled", "running", "retrying")}
     if verified:
-        result['format_version'] = 2 if (kind == 'sports' and 'design_recommendations' in published
+        result['format_version'] = 3 if kind == 'meta' and published.get('ad_format_version') == 3 else 2 if (kind == 'sports' and 'design_recommendations' in published
                                          or kind == 'meta' and 'ad_recommendations' in published) else 1
         result["publication_sha256"] = digest(published)
         result["matches_submission"] = (published == BRIEFS[kind][0](

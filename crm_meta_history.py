@@ -32,6 +32,45 @@ CACHE_TTL = 120
 CACHE_LIMIT = 8
 _cache = {}
 _lock = Lock()
+_inventory_cache = {}
+
+
+def ad_inventory(config):
+    """Read current ad objects, including ads with no delivery in the report window."""
+    key = live.scope(config)
+    with _lock:
+        cached = _inventory_cache.get(key)
+        if cached and cached[0] > monotonic():
+            return cached[1]
+    from home_brief_calendar import shop_product_handle
+
+    def handles(value):
+        if isinstance(value, str):
+            handle = shop_product_handle(value) if value.startswith('https://') else ''
+            return {handle} if handle else set()
+        if isinstance(value, dict):
+            return set().union(*(handles(child) for child in value.values())) if value else set()
+        if isinstance(value, list):
+            return set().union(*(handles(child) for child in value)) if value else set()
+        return set()
+
+    try:
+        reader = live.Reader(config, max_pages=30, seconds=25)
+        rows = reader.pages(config['ad_account_id'] + '/ads', {'fields': live.AD_FIELDS})
+        ads = [dict(ad_id=row['id'], name=row.get('name', ''), status=row.get('effective_status') or row.get('status'),
+                    product_handles=sorted(handles(row.get('creative', {})))) for row in rows]
+        result = dict(status='complete', captured_at=datetime.now(timezone.utc).isoformat(), ads=ads,
+                      unmapped_ads=sum(not row['product_handles'] for row in ads),
+                      basis='Current non-deleted ad inventory, including paused and zero-delivery ads. '
+                            'Product handles are exact creative destination matches. Unmapped, dynamic catalogue or '
+                            'Instant Experience destinations remain unknown; no historical absence claim is established.')
+    except (meta.MetaAdsApiError, TimeoutError, OSError, ValueError, KeyError):
+        result = dict(status='unavailable', ads=[], basis='Current ad inventory could not be completely verified. Do not infer absence from performance rows.')
+    with _lock:
+        _inventory_cache[key] = monotonic() + CACHE_TTL, result
+        while len(_inventory_cache) > CACHE_LIMIT:
+            del _inventory_cache[next(iter(_inventory_cache))]
+    return result
 
 
 def _date(value):
@@ -230,7 +269,7 @@ def meta_ad_history(since, until, after, refresh):
     if len(remaining) > PAGE_SIZE:
         day, ad_id = page[-1][0]
         next_cursor = f"{day.isoformat()}/{ad_id}"
-    return {
+    result = {
         "since": since.isoformat(), "until": until.isoformat(), "currency": account["currency"],
         "timezone": account["timezone_name"], "captured_at": captured,
         "action_report_time": "impression", "attribution": "Per-ad-set settings.",
@@ -240,3 +279,6 @@ def meta_ad_history(since, until, after, refresh):
         "basis": "Live paid Meta Insights by ad and account date. Missing fields are unknown. "
                  "Reach and frequency are per ad and date. Today's results may change.",
     }
+    if refresh and after is None:
+        result['ad_inventory'] = ad_inventory(config)
+    return result

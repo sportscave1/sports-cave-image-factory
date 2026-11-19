@@ -30,7 +30,7 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
     title = "Designs to Refresh" if refresh_brief else "Meta Morning Brief" if meta_brief else "Morning Brief"
     limit = refresh.MAX_PAYLOAD if refresh_brief else meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
     instructions = (
-        f"Include date, report_date, roas, orders and actions. Add a short qualitative summary and up to {meta.MAX_RECOMMENDATIONS} distinct recommendations for Home. Optional insights cover Shopify, GA4, SEO and sports."
+        "Include date, report_date, roas, orders, actions, summary, recommendations: [], ad_format_version: 3 and ad_recommendations for every Live sport. Include a main and secondary trial product with ad-coverage evidence, or explicit catalogue/review gaps. Optional insights cover Shopify, GA4, SEO and sports."
         if meta_brief else
         "Use the Sydney edition date and recommendations with title, recommendation, links, sport, "
         "markets, and confirmed start_date and end_date when available. Include the complete Sports Updates as full_brief. "

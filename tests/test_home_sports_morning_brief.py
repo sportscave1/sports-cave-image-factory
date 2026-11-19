@@ -421,7 +421,7 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     meta.render(st, get_user.return_value, TODAY)
     markup = st.html.call_args.args[0]
     assert "The Final Lap leads recent performance." in markup
-    assert 'Calendar-led live product recommendations are pending.' in markup
+    assert 'No verified product' in markup
     assert "Test &lt;creative&gt;" not in markup
     assert '<dialog class="sc-meta-full"' not in markup
     assert "Shopify · catalogue and storefront" in markup

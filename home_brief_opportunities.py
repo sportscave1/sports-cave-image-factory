@@ -29,11 +29,22 @@ def opportunity_context(today):
         design_policy="Top four fresh designs overall; AUS and USA priority; exclude preceding seven days. No country quotas.")
 
 
-def validate_ad_products(items, today):
+def validate_ad_products(items, today, *, require_all=False):
     """Reject invented/off-season products and mismatched storefront collections."""
     events = live_events(today)
+    if require_all and {item['sport'] for item in items} != {event.sport for event in events}:
+        raise ValueError('Cover every Live Home calendar sport, including explicit catalogue or evidence gaps.')
+    products = []
+    for item in items:
+        if not any(e.sport == item['sport'] and (item['market'] in e.markets or 'ALL' in e.markets)
+                   and e.title == item['event_title'] for e in events):
+            raise ValueError('Ad recommendations must match a Live Home calendar event and market.')
+        if 'unavailable_reason' not in item:
+            products.append(item)
+            if item.get('secondary_product'):
+                products.append(item['secondary_product'])
     with connect() as conn, conn.cursor() as cur:
-        for item in items:
+        for item in products:
             if not any(e.sport == item['sport'] and (item['market'] in e.markets or 'ALL' in e.markets)
                        and e.title == item['event_title'] for e in events):
                 raise ValueError("Ad recommendations must match a Live Home calendar event and market.")
