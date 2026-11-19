@@ -234,7 +234,7 @@ Validate every:
 Headline
 Description
 search term
-supporting line
+on-image footer wording
 image prompt
 audience signal
 
@@ -651,46 +651,30 @@ SPORTS CAVE FOOTER
 
 Use the approved Sports Cave premium scarcity footer on all nine images.
 
-Footer asset and Collector Series plaque
-Use sports-cave-ad-footer-example.jpg from the Assets folder as the approved footer artwork. In ChatGPT, use the project source with that exact filename and attach the actual image as a separate reference alongside the product image for each applicable black-footer cover. Where the Companion can composite the footer, place the asset directly and typeset the copy over it.
-Keep the footer full-width, opaque and flush to the bottom, with the fixed footer geometry below. Preserve the satin folds and the single muted charcoal Collector Series plaque with its scalloped rim. Apply the seam shimmer specified below. Match the plaque’s relative size and right-side position in the asset. Preserve its SC monogram, stars, laurel and ring lettering. The footer asset already contains the plaque. Keep the original product reference separate from this footer treatment.
-Sports Cave antique-gold shimmer at the photo–footer seam
-For a 1024 × 1024 square, the photo occupies the top 815 px and the footer occupies the bottom 209 px, starting at y = 815 from the top. This is the fixed geometry for all square black-footer ads. Scale this split proportionally for other square resolutions. For non-square layouts keep the existing format-specific split. Use exactly one uninterrupted full-width, thin antique-gold line at the existing seam, flush with the topmost edge of the black footer where it directly touches the photo. Place the shimmer on the first row of the footer, within the original border thickness and inside the 209 px. The shimmer is included in the footer height. Reserve zero extra vertical space for this treatment: no inset, gap, extra strip, second line, or movement of the seam or copy.
-Use the supplied Sports Cave gold streak as the finish reference: soft dark-gold tails and a narrow, restrained brighter gold glint tapering horizontally into the antique-gold base. Confine all shimmer to the line itself, with no vertical glow. In a still, show a frozen glint. Where animation is already supported, the glint may travel along that same fixed line. Keep the line continuous and free of any logo, monogram, diamond, icon or lettering.
-Keep 100 gold wherever the approved headline calls for it. Use no underline or ornament below 100 or elsewhere beneath the headline. The scalloped Collector Series plaque belongs in its existing right-hand position within the footer. If compositing, recolour or replace only the baked-in border pixels at the seam. For direct compositing at 1024 × 1024, use sports-cave-ad-footer-example.jpg at its native 1024 × 209 size, anchored to y = 815. Check the final dimensions and seam position before export.
-Add exactly the three existing lines in order: the ad’s assigned headline, its exact FOMO supporting sentence, and CLAIM YOUR EDITION in plain antique-gold lettering. Preserve the existing typography, gold 100 treatment and wording. Centre each of the headline, FOMO line and CTA on the full canvas midpoint, x = 512 at 1024 px wide. The plaque is a background detail. Allow the foreground copy to sit over it if needed, with clean contrast and the same centre axis for all three lines. Use compact, balanced spacing and check readability at mobile size. If the exact image asset is unavailable, flag it so the trial is not reported as an asset match.
+SPORTS CAVE TWO-LINE COLLECTOR FOOTER V5
+Apply to every existing Sports Cave black-footer layout; do not add a footer to layouts that have none.
+One two-line system for all three covers: the assigned headline, then CLAIM YOUR EDITION.
+Render no supporting sentence or FOMO line on the image. Legacy supporting-line metadata is retained only for saved-record compatibility, never rendered or required by review.
 
-Footer:
+REFERENCE-LED FOOTER — GENERATE AS PART OF THE FINISHED AD
+Inspect sports-cave-ad-footer-example.jpg in the project's source/Assets (Dropbox: Sportscave Team Folder/03_ASSETS). It is a visual design reference only: do not paste, composite, embed or place that file into the output. Generate the complete ad, including its footer and the assigned two text lines, in the original image-generation workflow. Do not require a separate compositor, font installation or asset-insertion step.
+Recreate the reference's opaque satin-black background with soft, restrained diagonal fabric folds and natural charcoal highlights, and its single subdued dark Collector Series seal at the right. The backdrop remains opaque; no photograph shows through. No plain flat-black substitute, room-driven recolouring, marble, glitter or conspicuous texture. If the source cannot be viewed, use this description and continue; do not claim to have inspected it.
+Keep the original layout: on a square, upper photograph approximately 80–82% and footer approximately 18–20%, full width and flush to the bottom with a crisp straight boundary. Retain each non-square format's original footer proportions. Keep the complete framed product visible above it.
+Replace the existing thin top divider IN PLACE with one fine continuous antique-gold shimmer across the top of the footer: a restrained luminous metallic highlight, not an extra strip, gap, second line, central flare or vertical glow. Do not enlarge the footer or change the room to accommodate it.
+Centre both lines on the SAME axis in the clear text area LEFT of the badge, not the full-canvas midpoint. Keep at least 64 px left inset at 1024 px and at least 24 px clearance from the badge. All glyphs and the underline remain inside the footer. Never overlap the badge or put promotional text on the wall.
 
-fully opaque
-full width
-flush to bottom edge
-straight hard top boundary
-premium near-black
+REFERENCE-LOCKED TYPOGRAPHY — SINGLE AUTHORITY
+Use the approved footer example in the project source/Assets (sports-cave-ad-footer-example.jpg) as the visual authority for the satin-black colour, warm champagne/ivory headline, richer antique-gold number and CTA, badge and top seam shimmer. Inspect that source as a design reference before generation; do not recolour the footer to match the room or impose a different hexadecimal palette. The supplied Lewis footer screenshot guides the lettering, not its example headline selection. Preserve the current approved headline rotation and each assigned headline verbatim.
+Line 1: a large, elegant high-contrast ITALIC serif headline, regular weight, with fine hairlines, graceful bracketed serifs and natural slanted letterforms; no upright roman, sans serif, heavy bold, slab or condensed type. Match the reference's warm luminous champagne lettering with restrained tonal warmth, never a flat white block or bright yellow glow. At 1024 px, start around 56–62 px and measure the assigned wording within the clear text area; use the largest natural size that fits comfortably without wrapping, squeezing, stretching or rewriting. Keep normal optical kerning and preserve supplied casing. Do not copy the screenshot's headline in place of the selected variation.
+Line 2: exactly CLAIM YOUR EDITION, upright classical SERIF capitals, regular to medium weight, visibly smaller than the headline (about 22–25 px at 1024), in the source's antique gold. Use generous, even optical tracking around 0.35–0.45 em, with clear word spaces; target roughly two-thirds of the headline width as in the reference, adjusting tracking modestly for the assigned headline. Render normal words with font tracking, never insert extra literal spaces or change the CTA text. No Montserrat or other sans-serif CTA, no italic CTA, no bold button-like lettering.
+Centre both lines on their shared axis left of the badge. Keep one calm, compact vertical interval: about 16–22 px between the lowest headline/underline edge and the top of the CTA glyphs at 1024. Balance the complete two-line group vertically inside the existing footer with generous top/bottom breathing room; no third row or leftover supporting-line space. Proportions follow the source and actual glyph bounds, not cumulative resizing of previous outputs.
+Colour the verified number 100 antique gold and underline ONLY those three digits with one fine, level gold hairline, optically centred on their measured glyph bounds, approximately 4–8 px wider overall, 3–5 px below, 1–2 px thick at 1024. Use refined subtly tapered ends and a restrained source-matched gold highlight; no thick bar, heavy shadow, neon glow, second underline or decorative dash. If the headline has no 100, add no underline. This number underline is separate from the unchanged continuous gold shimmer at the top of the footer.
+Inspect actual glyph bounds before export and refine size/kerning within this hierarchy to fit; use font measurement only if available, never as a prerequisite for generation. Preserve the selected wording and readable serif character; report only an unresolved genuine fit/tool limitation, not a routine typography adjustment. These source-led rules are the sole footer font, colour, spacing and underline specification for every ad and market; room palettes, legacy typography defaults and seasonal copy must not restyle it or reintroduce a supporting sentence.
+The CTA is plain gold lettering, never a button, box, capsule, border, glow or second badge. No third line, no empty row reserved for FOMO, no added promotional text elsewhere in the photo.
 
-Foundation:
-#0B0B0D
-
-Warm white:
-#F5F2EA
-
-Premium gold:
-#D4A54C
-
-Muted secondary:
-#A6A19A
-
-Apply one Sports Cave antique-gold divider across the top boundary as specified in the footer rules.
-
-Never use:
-
-transparent overlay
-gradient fade
-vignette
-curved panel
-floating text
-glowing box
-cheap sale styling
+FINAL FOOTER INSPECTION
+Use the original generation, review and delivery workflow. Check the actual finished ad at full size and 256 × 256: exact assigned headline and CTA inside the footer, 100-only underline, no badge overlap, no supporting sentence, no wall copy or CTA button, and complete unchanged product. Preview and download must refer to the same finished ad. Follow the existing creative review for corrections; no additional approval, compositor or asset-copy gate.
+Preserve headline assignments, scene variations, written Meta copy, CSV schema, filenames, route order and Companion completion/handoff. This is a rendering contract, not a change to queue or posting execution.
 
 
 ==================================================
@@ -712,43 +696,7 @@ maximum six words
 large
 readable at small Google preview size
 
-When a verified number appears, the number may use #D4A54C.
-
-
-==================================================
-THREE SUPPORTING LINES
-==================================================
-
-Create exactly THREE supporting lines:
-
-one for Right Angle
-one for Straight On
-one for Left Angle
-
-The same concept uses the same support line in all three of its aspect ratios.
-
-Right Angle:
-scarcity / ownership
-
-Straight On:
-serious collector identity
-
-Left Angle:
-fan identity / belonging
-
-Each support line:
-
-one line
-maximum 12 words
-maximum 70 characters
-
-Never invent:
-
-retirement
-no reprint
-remaining stock
-last chance
-almost gone
+Use the reference-led number colour and fine underline described in the shared footer rules.
 
 
 ==================================================

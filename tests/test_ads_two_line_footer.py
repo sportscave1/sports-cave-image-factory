@@ -12,21 +12,21 @@ import design_publish_ad as companion
 def test_two_line_export_has_no_conflicting_directions(country,product,sport):
     record=ads.build_ads_result_record(product,sport,country,'Instant Experience',variation_token='footer-test')
     prompt=record['master_prompt']
-    for old in ('SUPPORTING LINE:', 'Use no underline', '100 unadorned', '100 in antique gold with no underline',
+    for old in ('SUPPORTING LINE:', 'FINAL COMPOSITOR DATA', 'y = 815', 'native 1024 × 209', 'Use no underline', '100 unadorned', '100 in antique gold with no underline',
                 'Allow the foreground copy to sit over it', 'x = 512', 'Compare the middle line',
                 'clean Montserrat sans serif', 'medium-weight sans serif', 'headline 42–48 px',
                 '0.04–0.06 em', 'sole typography specification for every image and pack',
                 'three centred lines', 'all three lines remain readable', 'distinct supporting lines in every set'):
         assert old not in prompt
-    for required in ('native 1024 × 209', 'y = 815', 'LEFT of the badge', 'underline ONLY those three digits',
+    for required in ('approximately 18–20%', 'visual design reference only', 'LEFT of the badge', 'underline ONLY those three digits',
                      'ITALIC serif headline', 'upright classical SERIF capitals', '0.35–0.45 em',
                      'REFERENCE-LOCKED TYPOGRAPHY', 'project source/Assets',
-                     'Render no supporting sentence', 'SAME finished composite', 'never a button',
-                     'Exclude FINAL COMPOSITOR DATA', 'Do not send the assigned headline, CTA'):
+                     'Render no supporting sentence', 'same finished ad', 'never a button',
+                     'do not paste, composite, embed or place that file', 'Generate the complete ad'):
         assert required in prompt
     assert prompt.count('\nHEADLINE: ')==3
     assert prompt.count('\nCTA: CLAIM YOUR EDITION')==3
-    assert prompt.index('4. Immediately generate Image 3') < prompt.index('4a. Composite') < prompt.index('4b. Complete the final creative review') < prompt.index('5. Create and attach')
+    assert prompt.index('4. Immediately generate Image 3') < prompt.index('4b. Complete the final creative review') < prompt.index('5. Create and attach')
     for row in record['product_metadata']['instant_experience_footer_selections']:
         assert 'HEADLINE: '+row['headline_text'] in prompt
         assert row['supporting_line'] not in prompt
@@ -36,20 +36,20 @@ def test_two_line_export_has_no_conflicting_directions(country,product,sport):
     for name in ('ad_copy.csv',*companion.COVERS.values()):assert '/fixture/'+name in delivered
 
 
-def test_room_tool_input_excludes_copy_and_footer_asset():
-    shared=ads.build_instant_experience_shared_template()
-    for forbidden in ('HEADLINE:', 'CTA:', 'CLAIM YOUR EDITION', 'sports-cave-ad-footer-example.jpg', 'SUPPORTING LINE'):
-        assert forbidden not in shared
-    rows=ads.resolve_standard_instant_experience_visuals(product_name='Legends Never Die',category='NBA',country='USA',variation_token='footer-test')
-    for index,row in enumerate(rows,1):
-        brief=ads.build_instant_experience_execution_image_brief(index,row)
-        room,compositor=brief.split('END ROOM IMAGE SPECIFICATION')
-        assert row['headline_text'] not in room
+def test_image_call_receives_reference_style_and_exact_two_line_copy():
+    shared = ads.build_instant_experience_shared_template()
+    assert COMPACT_FOOTER_RULES in shared
+    assert 'visual design reference only' in shared
+    rows = ads.resolve_standard_instant_experience_visuals(product_name='Legends Never Die', category='NBA', country='USA', variation_token='footer-test')
+    for index, row in enumerate(rows, 1):
+        brief = ads.build_instant_experience_execution_image_brief(index, row)
+        assert 'IMAGE GENERATION PROMPT' in brief
+        assert 'HEADLINE: ' + row['headline_text'] in brief
+        assert 'CTA: CLAIM YOUR EDITION' in brief
         assert row['supporting_line'] not in brief
-        assert 'HEADLINE: '+row['headline_text'] in compositor
-        standalone=ads.build_standard_instant_experience_image_prompt(index,row,product_name='Legends Never Die',category='NBA',country='USA')
+        standalone = ads.build_standard_instant_experience_image_prompt(index, row, product_name='Legends Never Die', category='NBA', country='USA')
         assert 'SUPPORTING LINE:' not in standalone
-        assert 'END ROOM IMAGE SPECIFICATION' in standalone
+        assert 'COMPOSITOR DATA' not in standalone
         assert COMPACT_FOOTER_RULES in standalone
 
 
