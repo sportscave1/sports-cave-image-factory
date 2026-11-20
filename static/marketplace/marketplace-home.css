@@ -15,3 +15,5 @@
 /* Keep controls readable and prevent input zoom on mobile Safari. */
 .opening-copy p,.buying p{font-size:1rem}.footer nav,.footer nav>strong{font-size:.875rem}.empty-category>span{font-size:.875rem}
 @media(max-width:480px){.hero-description{font-size:1rem}.hero-search input[type=search],.hero-search input[type=search]::placeholder{font-size:1rem}.hero-shortcuts a,.collection-tab,.sports-strip a,.browse-menu summary{font-size:.875rem}.sell-link span::after{font-size:.875rem}.marketplace-facts span{font-size:.75rem;max-width:110px}.footer-brand p{font-size:.75rem}}
+
+@media(max-width:480px){.header-search input[type=search],.header-search input[type=search]::placeholder{font-size:1rem}}

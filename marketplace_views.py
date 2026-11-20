@@ -60,7 +60,7 @@ def shell(content, *, title, description, path=BASE_PATH, schema=None, nonce='',
 <meta property="og:description" content="{h(description)}"><meta property="og:url" content="{h(canonical)}">
 <meta property="og:image" content="{PUBLIC_ORIGIN}{BASE_PATH}/assets/collector-room-1600.webp"><meta property="og:image:width" content="1600"><meta property="og:image:height" content="800"><meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.png"><link rel="preconnect" href="https://www.sportscaveshop.com" crossorigin>{preload}
-<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace.css?v=2"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-home.css?v=2">
+<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace.css?v=2"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-home.css?v=3">
 <script type="application/ld+json" nonce="{h(nonce)}">{jsonld(schema)}</script>
 <script src="{BASE_PATH}/assets/marketplace.js?v=2" defer></script></head>
 <body class="{'is-home' if is_home else 'inner-page'}"><a class="skip" href="#main">Skip to content</a>
