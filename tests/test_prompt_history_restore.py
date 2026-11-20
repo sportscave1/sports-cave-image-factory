@@ -17,10 +17,10 @@ def test_large_history_uses_exact_blob_and_preserves_original_baseline():
     assert sha == 'immutable-blob'
     assert store.request.call_args.args == ('GET', 'git/blobs/immutable-blob')
     versions = json.loads(text)['versions']
-    assert len(versions) == 16
+    assert len(versions) == 17
     assert digest(versions[0]['text']) == '941229c51de869378dfacaeaf85b64fc7e3a916fa5bfff5840c96d9490077663'
     assert versions[0]['baseline'] is True
-    assert versions[-1]['id'] == 'ads-baseline-2-0-two-line-20261120'
+    assert versions[-1]['id'] == 'ads-baseline-2-0-two-reserves-20261120'
 
 
 def test_small_file_keeps_existing_single_request():
