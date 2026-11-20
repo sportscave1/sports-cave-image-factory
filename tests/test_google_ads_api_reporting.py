@@ -120,6 +120,17 @@ def test_generic_bad_request_diagnostic_redacts_credentials(auth):
     assert "owner@example.test" not in str(error.value)
 
 
+def test_stream_wrapped_query_error_preserves_field_diagnostic(auth):
+    post = Mock(return_value=SimpleNamespace(status_code=400, json=lambda: [{"error": {
+        "message": "Invalid argument", "details": [{"errors": [{
+            "errorCode": {"queryError": "UNRECOGNIZED_FIELD"},
+            "message": "Unrecognized field: campaign.synthetic_field"}]}]}}]))
+    with pytest.raises(ads.AdsReportingError) as error:
+        ads.fetch(START, END, store=store(), post=post, now=NOW)
+    assert "UNRECOGNIZED_FIELD" in str(error.value)
+    assert "campaign.synthetic_field" in str(error.value)
+
+
 def test_oauth_ads_scope_is_explicit_and_seo_keeps_readonly_default():
     config = {"client_id": "synthetic", "redirect_uri": "https://example.com/callback"}
     regular = parse_qs(urlparse(google_seo.build_authorization_url("state", config)).query)["scope"][0]

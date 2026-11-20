@@ -55,7 +55,10 @@ def _read(query, token, post):
         codes = set()
         provider_message = ""
         try:
-            error_payload = response.json().get("error", {})
+            error_body = response.json()
+            if isinstance(error_body, list):
+                error_body = next((part for part in error_body if isinstance(part, dict) and "error" in part), {})
+            error_payload = error_body.get("error", {})
             if isinstance(error_payload, dict):
                 provider_message = str(error_payload.get("message") or "")
             for detail in error_payload.get("details", []):
@@ -63,6 +66,8 @@ def _read(query, token, post):
                 if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", reason):
                     codes.add(reason)
                 for error in detail.get("errors", []):
+                    if error.get("message"):
+                        provider_message += " " + str(error["message"])
                     codes.update(str(v) for v in error.get("errorCode", {}).values()
                                  if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", str(v)))
         except (ValueError, TypeError, AttributeError):
