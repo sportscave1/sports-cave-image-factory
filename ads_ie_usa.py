@@ -167,7 +167,7 @@ def adapt_prompt(prompt):
     prompt = prompt.replace(GLAZING_REQUIREMENT, GLAZING).replace(SCENE_VISIBILITY_RULES.strip(), COMPOSITION+' '+WALL_RULES)
     prompt = prompt.replace(ROOM_STYLE, WALL_RULES)
     prompt = re.sub(r'PACK COMPOSITION:.*?(?=\n\n)', COMPOSITION+' '+WALL_RULES, prompt, flags=re.S)
-    prompt = re.sub(r'MANDATORY CREATIVE VARIETY AND TYPOGRAPHY:.*?(?=\n)', COMPOSITION+' Preserve the existing restrained typography; resolve choices before exactly one image per ad.', prompt)
+    prompt = re.sub(r'MANDATORY CREATIVE VARIETY AND TYPOGRAPHY:.*?(?=\n)', COMPOSITION+' Preserve the existing restrained typography; resolve choices before the initial image for each ad, then use the existing final creative review before export.', prompt)
     replacements = {
         'Generate Image 1 (RIGHT angle)': 'Generate Image 1 (collector hallway; use its resolved camera)',
         'generate Image 3 (LEFT angle)': 'generate Image 3 (man cave; use its resolved camera)',

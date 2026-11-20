@@ -13,10 +13,11 @@
     if(!Array.isArray(m.names) || !m.names.length || m.names.some(n=>!files.includes(n)))return '';
     return 'Sports Cave automatic ad job '+m.job+'\nSC_AD_REPAIR: '+m.repair+'\n'+
       'Repair the broken attachment downloads in this same chat. Restore ONLY these missing files: '+m.names.join(', ')+'. '+
-      'Reuse the original approved files where possible; otherwise recreate them from the original brief, preserving artwork, copy, CSV schema, targeting and 1024x1024 JPEG dimensions. '+
-      'If the original bytes exist, export fresh attachments instead of repeating failed attachment references. Include a table with the exact filename in its first column and its working original Library link as a fallback. '+
+      'Recover the existing original bytes from this job’s completed exports or their associated Library files. This is download recovery only: do not generate, recreate, redraw, restyle or replace an image, rewrite copy, change the three-line footer or use a reserve room. Preserve the approved design, copy, CSV schema, targeting and 1024x1024 JPEG dimensions. '+
+      'Attach the recovered original files instead of repeating failed attachment references. Include a table with the exact filename in its first column and its working original Library link as a fallback. '+
       'Verify each file exists and is readable, then attach working downloadable originals. Do not change or republish products, create ads, start another job or replace files already imported. The companion will continue the existing job. '+
-      'End with SC_AD_READY: '+m.job;
+      'Emit SC_AD_READY: '+m.job+' only when all four required files exist and the requested originals are readable and downloadable. '+
+      'If an original cannot be recovered, preserve available files and end with SC_AD_BLOCKED: followed by its exact filename and reason; do not claim success.';
   }
   const users=()=>[...document.querySelectorAll('[data-message-author-role="user"],h4[data-conversation-role="user"]')]
     .map(n=>(n.matches('h4')?n.nextElementSibling:n)?.textContent||'');

@@ -49,3 +49,16 @@ def test_new_ads_final_actions_no_longer_render_separate_review():
         ads._render_ads_final_actions(result, {}, source_matches=True)
         old_review.assert_not_called()
         handoff.assert_called_once_with(ads, result, {}, source_matches=True)
+
+
+def test_initial_generation_and_review_are_separate_from_download_recovery():
+    for country in ('USA', 'Australia', 'UK', 'Canada', 'New Zealand'):
+        result=ads.build_ads_result_record('Synthetic Collector Edition', 'NBA', country,
+            'Instant Experience', variation_token='review-phase', product_metadata={'edition_limit':100})
+        prompt=result['master_prompt']
+        assert 'before exactly one image per ad' not in prompt
+        assert 'before generating exactly one image per ad' not in prompt
+        assert 'initial image for each ad' in prompt
+        assert 'Deliver exactly three final covers' in prompt
+        assert 'downloaded/display error requires recovery of the existing bytes' in prompt
+        assert 'moderation_blocked result or unexplained rejection never authorizes' in prompt

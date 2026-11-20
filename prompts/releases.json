@@ -1,15 +1,15 @@
 {
   "ebffbedac545beb011dc654c": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
-    "hash": "7d066a1652bc8272b871527ebb32cc692c59efd3e6a154f0b543ca1982d86d0e",
+    "hash": "f531d9d56155050e76d65f6f8bf37ee4a20d0f0454d6d880991d71fab02bf72a",
     "path": "@category/Ads",
     "symbol": ""
   },
   "e4c95a923482686ea19136c3": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "ef2ac927c94d43efa7e153b006f93cef31c676dae70592e92acc7634bfd4504e",
     "path": "ads_footer.py",
@@ -17,7 +17,7 @@
   },
   "3cb795b06730af64f234ddc9": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "3a873476cba5d38f13dfb17882b0c0e9e4c38b47454eec7a18d3c4c944859be7",
     "path": "prompts/google_demand_gen_v1.txt",
@@ -25,7 +25,7 @@
   },
   "0df0799f598199ac309d066e": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "fdb0df973300ca4d4c6ba4402e817acd16ae0444dd206202649ccdef4deb40d2",
     "path": "ads_page.py",
@@ -33,7 +33,7 @@
   },
   "29739817000c06f922bc9c1b": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "256afe47ceea6148e736e4dfe5e6e01fcd5db34a06e678d90075005394575d1d",
     "path": "ads_page.py",
@@ -41,7 +41,7 @@
   },
   "3ee6646ef382cd48773bc7ae": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "91f220bec98c55a560609fe8b3287ed4bd0e85155e5797ab5c54b9b3f228f08e",
     "path": "ads_page.py",
@@ -49,7 +49,7 @@
   },
   "d9d02cb110b7f42fd61b3196": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "19fb8208465839bbb761b9ac6d7a9e165675873beb7aff5b33d7ac94b7573e18",
     "path": "ads_page.py",
@@ -57,7 +57,7 @@
   },
   "704462a5b422e7982db8880f": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "423e9cb8881beef5d362e0b870a206d73f3da0cf0f02297fd28f6af3b3a4fac2",
     "path": "ads_generation_review.py",
@@ -65,7 +65,7 @@
   },
   "7c37c4b9ddc9337b4253c1cc": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "ee2924ee8eec8cd4c3ae8e23778a904ae1bf88ae07a28df0584401805ed3b9a0",
     "path": "ads_page.py",
@@ -73,7 +73,7 @@
   },
   "6137aef6ef1b942197a3aa91": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "15b704ac98bd844864d045c15a0e5152906f76c8cd0887f90c03f92b1b43bc47",
     "path": "ads_page.py",
@@ -81,7 +81,7 @@
   },
   "efa0fc0971b49593dded8edd": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "f5c1f383bab59f772337962a2107c4190e430dd551d7b582f649e18c98d2f770",
     "path": "ads_page.py",
@@ -89,7 +89,7 @@
   },
   "cfcfe59a08413380217b1e93": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "144685cdbfc5594315ba6490cb375dfe246c85b51d35591d26d5c34eb43a91d3",
     "path": "ads_carousel_winner.py",
@@ -97,7 +97,7 @@
   },
   "339261a70667ec5a840cfd42": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "525fa29b79bb3988ac6758485f9b26cd98b982c6325cd096a8a0d41b3b0a6928",
     "path": "ads_page.py",
@@ -105,7 +105,7 @@
   },
   "47d29145c267dba08275967d": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "57dbc441bd41a506f0ba60b0014af6798adeb358b5402c01cddcb6a34a8d0585",
     "path": "ads_ie_legacy_description.py",
@@ -113,7 +113,7 @@
   },
   "1ba92c75f1d0ec42bedc1284": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "2611b52d614c9788835918b02f4371d53c0fa3d19a5c57c1f7f356bbc3a994d5",
     "path": "ads_page.py",
@@ -121,7 +121,7 @@
   },
   "069d02a52be01c5134ce8e97": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "2421ed64bab76fed5469db8d76751197f189afbbb2e299f9ef5809ac35d53ea0",
     "path": "ads_ie_legacy_description.py",
@@ -129,7 +129,7 @@
   },
   "1776e750294d64f257e3c18c": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "080273ce01e91e1146e4128cdf71cf636e9b017c1780b2fee14f354163fcc3b4",
     "path": "ads_page.py",
@@ -137,7 +137,7 @@
   },
   "22cc9062177176f35cf380df": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "4d645a6645ae99df55959a1c008ac3bab6f4812f4a77e9d78a74ea867f0da20c",
     "path": "ads_page.py",
@@ -145,15 +145,15 @@
   },
   "91a51d174a3108ab54cb4f97": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
-    "hash": "d08a5cbc58eb1884a31974c93101a618929d63487c7c3518ebf57d69c65c38b7",
+    "hash": "610a6749ad7d093574d25e3e282875566ddcbffc2c7f2c2fd44ea36ca3891ec6",
     "path": "ads_page.py",
     "symbol": "IE_CREATIVE_VARIETY_AND_TYPOGRAPHY"
   },
   "ac9d844ecf17b89d0fec1518": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "5f3ff0e311a52e4a6949bdd730f39f6d5fb426f09dbf6b47b2351ace7f31936e",
     "path": "ads_page.py",
@@ -161,7 +161,7 @@
   },
   "248efab71e6ee82fc37db2ff": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "b901bca18f4f31117197dff8154c5e0fe2111c977c13db981ef8d4cb27bc2ea3",
     "path": "ads_copy_optimisation.py",
@@ -169,7 +169,7 @@
   },
   "8c74c7a733cab9f9ae1543d3": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "82baa5aa58714b8d589f8766bc918d68ee7dd2bc004d2cb5cc8d667059946f33",
     "path": "ads_page.py",
@@ -177,7 +177,7 @@
   },
   "6b90b7332b494163e3f6e616": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "656863ac11da2e98231ad2adc1365fe08e6d5b5c0ad373c7ecac9a322d2994b9",
     "path": "ads_final_delivery.py",
@@ -185,7 +185,7 @@
   },
   "7ca8830571db316b90527e08": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "a00a9464b882355f117ab37bf81c10ef9b502f035ca66ab353812965d1b70a12",
     "path": "prompts/sports_cave_universal_creative_system.txt",
@@ -193,7 +193,7 @@
   },
   "1c8d3ccf95140414febcbb52": {
     "version": "1.0",
-    "id": "ads-baseline-v1-collector-hallways-20261120",
+    "id": "ads-baseline-v1-recovery-clarity-20261120",
     "label": "Baseline",
     "hash": "06961ed6aa643657627b01bcb25dafdf39a410bea8c7f4a5966404ab786443d2",
     "path": "ads_carousel_winner.py",

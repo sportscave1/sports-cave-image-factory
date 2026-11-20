@@ -118,14 +118,17 @@
       resize();
     };
     const states={ready:'Connected · ready',opening:'Opening the ChatGPT project',sending:'Sending the prompt',
-      submitted:'Submitted · ChatGPT accepted the prompt',failed:'Stopped before submission',uncertain:'Submission could not be verified'};
+      submitted:'Submitted · ChatGPT accepted the prompt',failed:'Stopped before submission',uncertain:'Submission could not be verified',
+      cancelled:'Companion responding · previous job stopped',blocked:'Companion responding · previous job needs attention'};
     const signal=controller.signal;
     async function refresh(){
       const report=await companionRequest('health');
       if(signal.aborted)return;
       pair.hidden=!(report?.version && (Number(report.version.split('.')[0])>1 ||
         Number(report.version.split('.')[1])>=1));
-      const label=states[report?.state] || 'Upload Companion is not connected in this Edge profile.';
+      const label=states[report?.state] || (report?.version
+        ? 'Companion responding · saved job status'
+        : 'Upload Companion is not connected in this Edge profile.');
       const time=report?.time ? ' · '+new Date(report.time).toLocaleString() : '';
       status.textContent=label+(report?.version ? ' · '+report.version : '')+time+(report?.reason ? ' · '+report.reason : '');
       resize();
