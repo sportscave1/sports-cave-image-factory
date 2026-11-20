@@ -387,7 +387,7 @@ def exchange_authorization_code(code, config, *, request_post=requests.post):
     return _response_json(response, stage="token_exchange")
 
 
-def refresh_access_token(refresh_token, config, *, request_post=requests.post):
+def refresh_access_token(refresh_token, config, *, request_post=requests.post, scopes=None):
     response = _request_with_retries(
         lambda: request_post(
             GOOGLE_TOKEN_ENDPOINT,
@@ -396,6 +396,7 @@ def refresh_access_token(refresh_token, config, *, request_post=requests.post):
                 "client_id": config["client_id"],
                 "client_secret": config["client_secret"],
                 "grant_type": "refresh_token",
+                **({"scope": " ".join(scopes)} if scopes else {}),
             },
             timeout=GOOGLE_HTTP_TIMEOUT_SECONDS,
         ),
@@ -1404,16 +1405,20 @@ def complete_authorization(
     }
 
 
-def _access_token_for_connection(store, config, *, request_post=requests.post):
+def _access_token_for_connection(store, config, *, request_post=requests.post, scopes=None):
     connection = store.get_connection_secret()
+    if scopes is not None and (not scopes or not set(scopes) <= set(connection.get("granted_scopes") or [])):
+        raise GoogleSEOError("Requested Google access has not been granted.",
+                             code="required_scopes_missing", stage="token_refresh")
     encrypted = str(connection.get("encrypted_refresh_token") or "")
     refresh_token = decrypt_refresh_token(encrypted, config["encryption_key"])
-    return refresh_access_token(refresh_token, config, request_post=request_post), connection
+    kwargs = {"scopes": scopes} if scopes is not None else {}
+    return refresh_access_token(refresh_token, config, request_post=request_post, **kwargs), connection
 
 
-def access_token_for_connection(store, config, *, request_post=requests.post):
+def access_token_for_connection(store, config, *, request_post=requests.post, scopes=None):
     """Return a short-lived access token without exposing the stored refresh token."""
-    return _access_token_for_connection(store, config, request_post=request_post)
+    return _access_token_for_connection(store, config, request_post=request_post, scopes=scopes)
 
 
 def refresh_properties(

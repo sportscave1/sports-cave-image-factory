@@ -95,7 +95,8 @@ def fetch(start, end, *, store=None, post=requests.post, now=None):
     state = connection_status(store)
     if state["status"] != "authorised":
         return state
-    token, connection = google_seo.access_token_for_connection(store, google_seo.load_config())
+    token, connection = google_seo.access_token_for_connection(
+        store, google_seo.load_config(), scopes=(google_seo.GOOGLE_ADS_SCOPE,))
     if google_seo.GOOGLE_ADS_SCOPE not in connection.get("granted_scopes", []):
         return {"status": "authorization_required", "note": "Reconnect Google Ads reporting."}
     settings = _read(

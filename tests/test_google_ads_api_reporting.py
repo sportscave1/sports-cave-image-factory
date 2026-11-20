@@ -34,7 +34,7 @@ def settings(**overrides):
 def auth(monkeypatch):
     monkeypatch.setattr(google_seo, "load_config", lambda: {})
     monkeypatch.setattr(google_seo, "access_token_for_connection",
-                        lambda *args: ("synthetic-token", {"granted_scopes": [google_seo.GOOGLE_ADS_SCOPE]}))
+                        lambda *args, **kwargs: ("synthetic-token", {"granted_scopes": [google_seo.GOOGLE_ADS_SCOPE]}))
     monkeypatch.delenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID", raising=False)
 
 
@@ -209,3 +209,18 @@ def test_page_loads_fresh_api_report_and_does_not_replace_history(monkeypatch):
     assert not test.exception
     assert test.metric[0].value == "A$20.00"
     assert test.metric[4].value == "—"  # Historical unknown stays unknown.
+
+
+def test_ads_token_is_narrowed_to_previously_granted_ads_scope():
+    post = Mock(return_value=SimpleNamespace(status_code=200, json=lambda: {"access_token": "synthetic"}))
+    google_seo.refresh_access_token("synthetic-refresh", {"client_id": "synthetic", "client_secret": "synthetic"},
+                                   request_post=post, scopes=(google_seo.GOOGLE_ADS_SCOPE,))
+    assert post.call_args.kwargs["data"]["scope"] == google_seo.GOOGLE_ADS_SCOPE
+
+
+def test_scope_narrowing_cannot_expand_granted_access():
+    connection = SimpleNamespace(get_connection_secret=lambda: {"granted_scopes": list(google_seo.GOOGLE_SCOPES)})
+    post = Mock()
+    with pytest.raises(google_seo.GoogleSEOError, match="not been granted"):
+        google_seo.access_token_for_connection(connection, {}, request_post=post, scopes=(google_seo.GOOGLE_ADS_SCOPE,))
+    post.assert_not_called()
