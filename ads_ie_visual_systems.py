@@ -254,9 +254,9 @@ def resolve_visual_system(visual, index, context, variation_token):
         creative_variation_token=variation_token or "standard", room_type=copy_room,
         fan_archetype=fan_style(context)[0], supporting_line=support, fomo_line=support,
         product_width=("79-86%", "84-87%", "77-84%")[index],
-        overlay_position="fixed opaque full-width black/gold footer across bottom 18–20%",
+        overlay_position="fixed opaque full-width black/gold footer across bottom 15.625%",
         product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
-        composition="1024 x 1024 square; upper 80–82% lifestyle room; bottom 18–20% opaque collector footer",
+        composition="1024 x 1024 square; upper 84.375% lifestyle room; bottom 15.625% opaque collector footer",
     )
 
 

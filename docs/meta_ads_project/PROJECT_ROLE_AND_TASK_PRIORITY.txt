@@ -26,27 +26,18 @@ If headlines are not assigned, randomly select three different headlines from th
 
 If the OS prompt contains an obsolete or unapproved headline, replace only that headline with an unused approved option. No other headline wording is permitted.
 
-GOLD UNDERLINE AND CTA
-
-Apply restrained antique gold to the digits already present in the assigned headline. Underline those existing headline digits in place, following their actual position and width. Keep the digits on the headline baseline; never repeat or extract the number into a separate text row.
-
-Keep the on-image CTA exactly CLAIM YOUR EDITION.
-Render the current OS Baseline footer as exactly three visible lines: the assigned headline, its exact assigned supporting/FOMO sentence directly below it, then CLAIM YOUR EDITION. Preserve all three lines verbatim in every individual image-generation call and final image. Prior two-line examples, reference-image text and older project sources must not remove or replace the assigned supporting sentence.
-
-FOOTER TOP GOLD SHIMMER
-Replace only the existing top separator in place with a fine continuous metallic antique-gold shimmer: a visible soft champagne-gold specular highlight varying in tone along the horizontal seam, with a restrained brighter section and gently fading luminous edges. This is a still-image metallic sheen rather than a uniform flat gold rule. Keep it thin within the existing seam; no extra strip, added height, lens flare, glitter or recolouring. Keep the Baseline footer background, typography, spacing, proportions and all other design elements unchanged.
-
-Within the existing final creative review, inspect each completed cover for all three exact footer lines and the visible top shimmer. Correct missing footer elements in the existing review workflow before delivery; do not add another approval step or stop the requested sequence.
-
-Preserve the existing product-fidelity, realistic-scale, glazing, compact opaque-footer and restrained-typography rules. Do not alter unrelated scene instructions or ad content.
-
-
-EXACT FOOTER TEXT AND LINE COUNT
-Use exactly three visible text baselines: line 1 = the assigned HEADLINE; line 2 = the assigned SUPPORTING LINE; line 3 = the assigned CTA. Each field occupies one centred line. These three fields are the complete footer text, not examples to embellish.
-Apply gold colour and the fine underline only to digits already inside the assigned headline. Keep those digits on the headline baseline; never extract, repeat or retype the number as a separate caption, quantity label, badge or scarcity row. An underline is a non-text stroke and does not create another text baseline. The top shimmer is also a non-text seam.
-Do not append an additional scarcity phrase, stock label, product subtitle, slogan or microcopy. Preserve text printed inside the original framed edition; it is not footer copy and must not be erased or copied into the footer.
-During final creative review and JPEG export, read the actual footer from top to bottom and count visible text baselines. Compare each line verbatim with its assigned field. Any extra text, missing field or wrapped field requires correction in that existing review before delivery. Correct only the footer while retaining the approved room and complete framed edition. Inspect the exported JPEG again at full size and mobile size. Emit the completion marker only after that exported image has exactly these three lines; report an unresolved defect honestly instead of claiming verification.
-
+PREMIUM COMPACT FOOTER — SINGLE GEOMETRY AND TYPE PROFILE
+At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this same geometry for every ad, route, product and country. Never choose a height from a range or grow the footer to accommodate text.
+For another output width, multiply the entire footer geometry, type sizes, tracking in pixels and padding by canvas width / 1024. Scale by width, not canvas height. A 1200 px-wide output therefore has a 187.5 px footer; a 960 px-wide output has a 150 px footer. Keep existing layouts without a black footer; do not add a footer to them.
+Render exactly three lines: assigned HEADLINE, assigned SUPPORTING LINE, then CLAIM YOUR EDITION. Preserve their exact wording, casing and punctuation. Apply this shared typography profile rather than copying type size, spacing or footer height from an earlier generated image.
+Title type: 50 px Baskerville-style editorial serif, Medium weight (500), warm ivory #F3EBDD. Use natural kerning plus 0.03 em letter spacing. The title is the dominant footer element, with refined open letterforms and stronger optical presence; never heavy, bold, blocky, condensed or stretched. Use the same title size and tracking for every approved headline, including short ones. Tracking is a font setting, not extra typed spaces. Keep gold digits and their fine underline inside the headline line; never create a quantity caption.
+Supporting type: 22 px Montserrat Regular, muted warm off-white #C5C0B5, natural kerning with no additional tracking. Render the exact assigned supporting/FOMO sentence. Keep this subordinate to the title and on one line.
+CTA type: 23 px Montserrat Medium (500), antique gold #C7A15A, 0.10 em letter spacing. Render exactly CLAIM YOUR EDITION on one line, as a discreet collector inscription rather than a button.
+At 1024 px width, use 64 px horizontal text margins. The footer has 16 px top padding, a 58 px headline line box, a 6 px clear gap, a 28 px supporting line box, an 8 px clear gap, a 28 px CTA line box and 16 px bottom padding. These sum to 160 px. Centre the glyphs optically in their line boxes. The headline underline stays within its line box. Keep the visible ink separated; no touching lines, empty spacer rows or large black tail. These are the footer's vertical safe areas; general canvas-safe rules must not add extra bottom padding or increase its height.
+Use one thin continuous restrained gold shimmer replacing the existing top separator in place, inside the same 160 px footer. The top seam has a visible champagne-gold specular sheen varying softly along its length, with a restrained brighter section and gently fading luminous edges; never a uniform flat gold rule. Keep it within the existing thin separator footprint, without an extra strip, lens flare or glitter. The black panel stays fully opaque, with no fade, gradient, transparency or floating text overlay.
+Check the longest assigned headline and supporting sentence at the shared size, tracking and horizontal margins before generation; never wrap, squeeze, truncate, rewrite or drop a field. Keep title prominence and clear line separation at mobile preview size. Resolve a genuine fit defect in the existing creative review, preserving exact copy and this footer height; do not inflate the panel or compound font reductions from a previous generation.
+The framed edition remains the dominant visual. Preserve all artwork, frame, room, brand-colour, realism, generation, CSV and Companion workflow instructions. Footer typography applies only to the graphic footer; never restyle text printed inside the original framed edition. Project image sources are visual references only; their proportions or missing text cannot override this shared footer profile.
+In the existing final creative review, count exactly three visible text baselines and inspect their exact wording, optical hierarchy, spacing and metallic seam. Correct any extra or missing footer text, crowded type, wasted padding or flat separator through that existing review before delivery. No new approval, mandatory compositor, extra image, or handoff step.
 
 RESERVE ROOMS — TECHNICAL FAILURES ONLY
 Applies only to a three-cover Instant Experience task, never Carousel or Single Image.

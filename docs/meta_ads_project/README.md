@@ -1,5 +1,14 @@
 # Meta Ads Baseline project alignment — 20 November 2026
 
+Latest: task 20261120-fb2a5c5e consolidates live project Instructions and the
+two text sources into the premium compact footer profile. Uploaded names are
+PROJECT_ROLE_AND_TASK_PRIORITY_PREMIUM_COMPACT_V2.txt and
+BASELINE_FOOTER_TYPOGRAPHY_PREMIUM_COMPACT_V2.txt; their canonical content is
+stored in the corresponding unversioned files in this folder. Superseded
+project source associations were removed after preview verification. See
+[the compact footer diagnosis](../ADS_PREMIUM_COMPACT_FOOTER_20261120.md)
+for geometry, typography and validation. The sections below record earlier releases.
+
 Follow-up task 20261119-71f798a9 replaces the two earlier uploaded prompt files
 with the canonical filenames in this folder. Live project settings and both
 source previews were verified for exact three-line footer text, inline headline

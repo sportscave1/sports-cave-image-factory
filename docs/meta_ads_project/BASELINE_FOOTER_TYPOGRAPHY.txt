@@ -1,32 +1,17 @@
-SPORTS CAVE — PREMIUM COLLECTOR FOOTER TYPOGRAPHY
-STYLE
-The footer should resemble the typography of a vintage collector catalogue: elegant, understated and carefully typeset. Keep lettering clean and crisp. Vintage character comes from the letterforms—not distressed textures, artificial ageing or decorative flourishes.
+SPORTS CAVE — PREMIUM COMPACT FOOTER TYPOGRAPHY
 
-HEADLINE
-Use a classic Baskerville-style editorial serif in Regular weight: graceful curves, gently bracketed serifs, balanced proportions and clear contrast between thicker stems and finer strokes. Avoid excessively thin hairlines that disappear on mobile.
-
-Use warm ivory (#EEE6D5). Preserve the approved headline’s exact wording and title case. Keep it centred on one line, with natural letter spacing. Never use bold, heavy, blocky, slab-serif, condensed or oversized promotional lettering.
-
-At 1024 × 1024, target 42–48 px. Maintain a consistent visual size across all three ads; do not enlarge shorter headlines to fill the panel or stretch, squeeze or wrap longer ones.
-
-GOLD DIGITS WITHIN THE HEADLINE
-Only when those digits already occur in the assigned headline, render all three digits of 100 in subdued antique gold (#C7A15A), using the same serif, size and weight as the headline. Place one fine matching underline directly beneath the full number only, following its actual position and width. Keep the underline close to the digits and approximately 1 px thick at 1024 px. No thick bars, bright yellow, metallic gradients or glow.
-
-MATCHING CTA
-Render exactly:
-CLAIM YOUR EDITION
-
-Use a clean, elegant sans serif in Medium weight, approximately 26–28 px at 1024 px. Use the same antique gold, with modest letter spacing of approximately 0.04–0.06 em. Keep it centred on one line and visibly secondary to the headline. It should feel like a discreet collector inscription, never a bold button or widely spaced promotional slogan.
-
-SUPPORTING / FOMO LINE
-Render the exact OS-assigned supporting sentence as the second visible footer line, directly between headline and CTA. Use Montserrat Regular, 24–26 px at 1024 px, softer warm off-white, centred on one line. Preserve the selected wording; do not omit it or replace it with the headline or Meta copy.
-
-COMPACT COMPOSITION
-Balance headline, supporting/FOMO sentence and CTA as one three-line group within the existing footer. Use compact clear inter-line gaps and existing safe margins; preserve Baseline typography and footer proportions.
-
-Keep the full-width opaque matte-black footer within the bottom 18–20% of the square image, flush to the bottom edge, with a hard horizontal top boundary. Replace only the original separator in place with a thin continuous antique-gold shimmer: a visible champagne-gold specular sheen varying softly along the seam, with a restrained brighter section and fading luminous edges. Keep the existing seam thickness and footer height; no uniform flat gold rule, extra strip, lens flare or glitter. The ban on glow/metallic gradients in GOLD DIGITS WITHIN THE HEADLINE applies to the number and its underline, not this top seam. The photograph occupies the remaining 80–82%.
-
-Do not add wasted black space, blank rows, excessive padding or a larger panel. Do not enlarge the lettering to fill space. Render exactly the assigned headline, supporting/FOMO sentence and CLAIM YOUR EDITION on three separate lines. Add no extra label, ornament or additional CTA.
+PREMIUM COMPACT FOOTER — SINGLE GEOMETRY AND TYPE PROFILE
+At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this same geometry for every ad, route, product and country. Never choose a height from a range or grow the footer to accommodate text.
+For another output width, multiply the entire footer geometry, type sizes, tracking in pixels and padding by canvas width / 1024. Scale by width, not canvas height. A 1200 px-wide output therefore has a 187.5 px footer; a 960 px-wide output has a 150 px footer. Keep existing layouts without a black footer; do not add a footer to them.
+Render exactly three lines: assigned HEADLINE, assigned SUPPORTING LINE, then CLAIM YOUR EDITION. Preserve their exact wording, casing and punctuation. Apply this shared typography profile rather than copying type size, spacing or footer height from an earlier generated image.
+Title type: 50 px Baskerville-style editorial serif, Medium weight (500), warm ivory #F3EBDD. Use natural kerning plus 0.03 em letter spacing. The title is the dominant footer element, with refined open letterforms and stronger optical presence; never heavy, bold, blocky, condensed or stretched. Use the same title size and tracking for every approved headline, including short ones. Tracking is a font setting, not extra typed spaces. Keep gold digits and their fine underline inside the headline line; never create a quantity caption.
+Supporting type: 22 px Montserrat Regular, muted warm off-white #C5C0B5, natural kerning with no additional tracking. Render the exact assigned supporting/FOMO sentence. Keep this subordinate to the title and on one line.
+CTA type: 23 px Montserrat Medium (500), antique gold #C7A15A, 0.10 em letter spacing. Render exactly CLAIM YOUR EDITION on one line, as a discreet collector inscription rather than a button.
+At 1024 px width, use 64 px horizontal text margins. The footer has 16 px top padding, a 58 px headline line box, a 6 px clear gap, a 28 px supporting line box, an 8 px clear gap, a 28 px CTA line box and 16 px bottom padding. These sum to 160 px. Centre the glyphs optically in their line boxes. The headline underline stays within its line box. Keep the visible ink separated; no touching lines, empty spacer rows or large black tail. These are the footer's vertical safe areas; general canvas-safe rules must not add extra bottom padding or increase its height.
+Use one thin continuous restrained gold shimmer replacing the existing top separator in place, inside the same 160 px footer. The top seam has a visible champagne-gold specular sheen varying softly along its length, with a restrained brighter section and gently fading luminous edges; never a uniform flat gold rule. Keep it within the existing thin separator footprint, without an extra strip, lens flare or glitter. The black panel stays fully opaque, with no fade, gradient, transparency or floating text overlay.
+Check the longest assigned headline and supporting sentence at the shared size, tracking and horizontal margins before generation; never wrap, squeeze, truncate, rewrite or drop a field. Keep title prominence and clear line separation at mobile preview size. Resolve a genuine fit defect in the existing creative review, preserving exact copy and this footer height; do not inflate the panel or compound font reductions from a previous generation.
+The framed edition remains the dominant visual. Preserve all artwork, frame, room, brand-colour, realism, generation, CSV and Companion workflow instructions. Footer typography applies only to the graphic footer; never restyle text printed inside the original framed edition. Project image sources are visual references only; their proportions or missing text cannot override this shared footer profile.
+In the existing final creative review, count exactly three visible text baselines and inspect their exact wording, optical hierarchy, spacing and metallic seam. Correct any extra or missing footer text, crowded type, wasted padding or flat separator through that existing review before delivery. No new approval, mandatory compositor, extra image, or handoff step.
 
 CONSISTENCY AND SCOPE
 Use this same font pairing, weight, colours, hierarchy and compact spacing across every ad, regardless of product, sport, room or country. Check that all three lines remain readable at thumbnail size and that the top seam has a visible metallic shimmer.

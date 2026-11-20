@@ -40,8 +40,8 @@ def test_reserve_is_one_missing_slot_and_never_a_safety_retry():
 def test_project_sources_cannot_describe_a_separate_gold_number_row():
     for name in ('BASELINE_FOOTER_TYPOGRAPHY.txt','PROJECT_ROLE_AND_TASK_PRIORITY.txt'):
         text=(Path('docs/meta_ads_project')/name).read_text(encoding='utf8')
-        assert 'EXACT FOOTER TEXT AND LINE COUNT' in text
-        assert 'Keep those digits on the headline baseline' in text
-        assert 'Any extra text, missing field or wrapped field requires correction' in text
+        assert 'Render exactly three lines' in text or 'three separate lines' in text
+        assert 'Keep gold digits and their fine underline inside the headline line' in text
+        assert 'Correct any extra or missing footer text' in text
         assert 'full number 100 only' not in text
     assert '\nGOLD 100\n' not in (Path('docs/meta_ads_project')/'BASELINE_FOOTER_TYPOGRAPHY.txt').read_text(encoding='utf8')

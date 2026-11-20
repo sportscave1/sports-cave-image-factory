@@ -30,4 +30,5 @@ def test_standalone_and_google_preserve_baseline_footer_with_shimmer():
         assert 'TWO-LINE COLLECTOR FOOTER' not in prompt
         assert 'Render no supporting sentence' not in prompt
         assert 'FINAL COMPOSITOR DATA' not in prompt
-    assert 'approximately bottom 20–23%' in google.replace('\n', ' ')
+    assert 'exactly 150 px at 960 px canvas width' in google
+    assert 'exactly 187.5 px at 1200 px canvas width' in google
