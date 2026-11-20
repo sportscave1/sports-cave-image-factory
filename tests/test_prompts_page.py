@@ -33,6 +33,20 @@ class PageTests(unittest.TestCase):
             next(s for s in page.selectbox if s.label == 'Prompt library').set_value(next(p.key for p in catalog() if p.category == 'Design')).run()
             self.assertEqual(page.text_area[0].value, 'Unsaved editor text')
 
+    def test_named_ads_releases_remain_readable_without_history_credentials(self):
+        source = "import streamlit as st\nfrom prompts_page import _category\nfrom prompt_library import catalog\nfrom unittest.mock import Mock\n_category(st, Mock(token='', render_token=''), catalog(), 'Ads', {}, st.empty(), st.empty())"
+        page = AppTest.from_string(source, default_timeout=30).run()
+        self.assertFalse(page.exception)
+        picker = next(r for r in page.radio if r.label == 'Open a version')
+        self.assertIn('v2.1 · Baseline 2.1 Beta · Live', picker.options)
+        self.assertIn('v2.0 · Baseline 2.0 · Release', picker.options)
+        picker.set_value('ads-baseline-v1-recovery-clarity-20261120').run()
+        self.assertFalse(page.exception)
+        self.assertFalse(page.error)
+        self.assertIn('PREMIUM COMPACT FOOTER', page.text_area[0].value)
+        self.assertNotIn('AD 2 ONLY — SINGLE-LINE GUNMETAL BADGE FOOTER', page.text_area[0].value)
+        self.assertTrue(next(b for b in page.button if b.label == 'Activate version').disabled)
+
     def test_header_actions_save_and_activate_selected_version(self):
         accounts = types.ModuleType('os_accounts')
         accounts.is_admin = lambda user: True

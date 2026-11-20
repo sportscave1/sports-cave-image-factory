@@ -4,7 +4,7 @@ import html
 import json
 import os
 
-from prompt_library import ROOT, catalog
+from prompt_library import ROOT, Prompt, catalog
 from prompt_bundle import bundle_prompt, combine, is_bundle, split
 from prompt_releases import GitStore, ReleaseError
 from prompt_clipboard import render_copy
@@ -69,6 +69,10 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
         except ReleaseError as exc:
             st.error(str(exc))
             return
+    if not history['versions']:
+        snapshot = ROOT / 'prompts' / 'release_history' / (prompt.key + '.json')
+        if snapshot.is_file():
+            history = json.loads(snapshot.read_text(encoding='utf-8'))
     versions = history['versions']
     labels_path = ROOT / 'prompts' / 'version_labels.json'
     labels = json.loads(labels_path.read_text(encoding='utf-8')) if labels_path.exists() else {}
@@ -86,6 +90,9 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             st.button('Refresh history', key='prompt-refresh-' + key, on_click=lambda: None)
     selected = next((v for v in versions if v['id'] == choice), None)
     initial = selected['text'] if selected else prompt.text
+    bundle_rows = ([Prompt(row['path'], row.get('symbol', ''), category, row['text'])
+                    for row in selected['sections']]
+                   if is_bundle(prompt) and selected and selected.get('sections') else category_rows)
     with left:
         with st.container(border=True):
             heading, status = st.columns([4, 1.2], vertical_alignment='center')
@@ -128,7 +135,7 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
             valid = True
             if is_bundle(prompt):
                 try:
-                    split(category_rows, text)
+                    split(bundle_rows, text)
                 except ValueError as exc:
                     valid = False
                     st.error(str(exc))
@@ -176,11 +183,14 @@ def _category(st, store, prompts, category, user, save_action, activate_action):
                 if selected.get('note'):
                     st.caption(selected['note'])
                 if selected.get('commit'):
-                    _deployment(st, store, prompt, selected)
+                    if store.token and store.render_token:
+                        _deployment(st, store, prompt, selected)
+                    else:
+                        st.caption('Saved Git revision ' + selected['commit'][:12])
             if is_bundle(prompt) and valid:
                 st.subheader('Individual sections')
-                values = split(category_rows, text)
-                for section in category_rows:
+                values = split(bundle_rows, text)
+                for section in bundle_rows:
                     with st.expander(section.title):
                         st.html('<div class="prompt-preview">' + html.escape(values[section.key]) + '</div>')
             with st.expander('Source & template details'):
