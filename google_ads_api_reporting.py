@@ -123,7 +123,7 @@ def fetch(start, end, *, store=None, post=requests.post, now=None):
     window = f"campaign.id = {CAMPAIGN_ID} AND segments.date BETWEEN '{start.isoformat()}' AND '{end.isoformat()}'"
     delivery = _read("SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions "
                      "FROM campaign WHERE " + window + " ORDER BY segments.date", token, post)
-    purchases = _read("SELECT segments.date, metrics.conversions, metrics.conversions_value "
+    purchases = _read("SELECT segments.date, segments.conversion_action_category, metrics.conversions, metrics.conversions_value "
                      "FROM campaign WHERE " + window + " AND segments.conversion_action_category = 'PURCHASE' "
                      "ORDER BY segments.date", token, post)
     daily = {}
