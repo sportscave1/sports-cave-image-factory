@@ -32,20 +32,31 @@ def enqueue(user, source, title, sport, *, ad_country=None, start=False):
     if not final_psd(source) or not source.get('id') or not source.get('rev'):
         raise ValueError('Choose a current PSD from Design Studio Review.')
     resume = start and can_control_queues(user)
+    replaced = False
     with connect() as conn, conn.cursor() as cur:
-        if resume:
-            # Same lock as Pause and desktop claims: Publish now commits its
-            # durable request and explicit resume as one operation.
-            cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        # Serialize explicit replacement with desktop claims and queue controls.
+        cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
+        cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
+                    ('staff-upload:' + source['id'] + ':' + source['rev'],))
         cur.execute('''INSERT INTO product_upload_staff_jobs(id,source_id,source_rev,title,sport)
             VALUES (%s,%s,%s,%s,%s)
-            ON CONFLICT(source_id,source_rev) DO UPDATE SET source_id=EXCLUDED.source_id
-            RETURNING id,stage''', (uuid4(), source['id'], source['rev'], title, sport))
+            ON CONFLICT(source_id,source_rev) DO NOTHING RETURNING *''',
+                    (uuid4(), source['id'], source['rev'], title, sport))
         job = cur.fetchone()
-        if job['stage'] == 7:
-            raise ValueError('This design already has an upload needing attention. Open Uploads and choose Restart or Cancel after reviewing its error.')
-        if job['stage'] == 6:
-            raise ValueError('This design has already been published and PSD mapped. Open Uploads to view the completed upload.')
+        if not job:
+            cur.execute('SELECT * FROM product_upload_staff_jobs WHERE source_id=%s AND source_rev=%s',
+                        (source['id'], source['rev']))
+            job = cur.fetchone()
+            intake = None
+            # Intake -> job is also the mapping worker's lock order.
+            if job['stage'] != 0 and job['intake_id']:
+                cur.execute('SELECT data FROM product_upload_intakes WHERE id=%s FOR UPDATE', (job['intake_id'],))
+                intake = cur.fetchone()
+            cur.execute('SELECT * FROM product_upload_staff_jobs WHERE id=%s FOR UPDATE', (job['id'],))
+            job = cur.fetchone()
+            if job['stage'] != 0:
+                job = _reset_attempt(cur, job, intake)
+                replaced = True
         key = job['id']
         if resume and job['stage'] < 6:
             cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,'true'::jsonb,now())
@@ -54,6 +65,12 @@ def enqueue(user, source, title, sport, *, ad_country=None, start=False):
             VALUES (%s,%s) ON CONFLICT DO NOTHING''', (user['id'], key))
         if ad_country is not None:
             ad.enqueue(cur, key, user['id'], sport, ad_country)
+    if replaced and job['intake_id']:
+        from product_upload_jobs import JOBS
+        JOBS.begin_staff_attempt(str(job['intake_id']), job['worker_actor'],
+                                 str(job['dispatch_id']), full=True)
+    LOG.info('staff_upload_queued job=%s dispatch=%s replaced=%s',
+             job['id'], job.get('dispatch_id') or job['id'], replaced)
     # A committed request must not leave the header showing a cached completion.
     _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
     return key
@@ -111,17 +128,18 @@ def public(row):
         label = 'Cancelled'
     elif stalled:
         label = 'Waiting for verified progress · check conversation' if stage == 5 else 'Taking longer · check companion'
-    return dict(id=str(row['id']), title=row['title'], stage=stage, label=label,
+    return dict(id=str(row['id']), dispatch_id=str(row.get('dispatch_id') or row['id']), title=row['title'], stage=stage, label=label,
                 percent=percent, detail=row['message'], storefront=row['storefront'],
                 updated_at=row['updated_at'].isoformat(), restartable=stage == 7,
                 cancellable=stage != 6 and not cancelled, cancelled=cancelled, stalled=stalled)
 
 
-def cancel(key, user, expected):
+def cancel(key, user, expected, attempt=None, *, _deleting=False):
     key = UUID(str(key))
     if not isinstance(expected, str) or not expected:
         raise ValueError('Refresh the upload status before cancelling.')
-    administrator = can_control_queues(user)
+    from os_accounts import can_delete_files
+    administrator = can_control_queues(user) or (_deleting and can_delete_files(user))
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT actor_id FROM product_upload_desktop WHERE singleton FOR UPDATE')
         cur.execute('SELECT intake_id FROM product_upload_staff_jobs WHERE id=%s', (key,))
@@ -141,7 +159,9 @@ def cancel(key, user, expected):
             raise PermissionError('This upload is unavailable to this account.')
         if job['stage'] == 7 and job['message'].startswith(CANCELLED):
             return public(job)
-        if job['stage'] == 6 or job['updated_at'] != datetime.fromisoformat(expected):
+        changed = (str(job.get('dispatch_id') or job['id']) != attempt if attempt
+                   else job['updated_at'] != datetime.fromisoformat(expected))
+        if job['stage'] == 6 or changed:
             raise ValueError('This upload changed or already completed. Refresh its status.')
         if intake:
             data = dict(intake['data'])
@@ -153,8 +173,26 @@ def cancel(key, user, expected):
         result = public(cur.fetchone())
     if job['intake_id']:
         from product_upload_jobs import JOBS
-        JOBS.cancel(str(job['intake_id']), job['worker_actor'])
+        JOBS.cancel(str(job['intake_id']), job['worker_actor'],
+                    attempt=str(job.get('dispatch_id') or job['id']))
+    LOG.info('staff_upload_cancelled job=%s dispatch=%s previous_stage=%s',
+             job['id'], job.get('dispatch_id') or job['id'], job['stage'])
+    _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
     return result
+
+
+def cancel_for_deletion(source, user):
+    """A recoverable Review deletion also stops pending uploads of this file."""
+    from os_accounts import can_delete_files
+    if not can_delete_files(user):
+        raise PermissionError('Your account does not have permission to delete Dropbox files.')
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute('SELECT * FROM product_upload_staff_jobs WHERE source_id=%s AND stage<>6',
+                    (source['id'],))
+        jobs = cur.fetchall()
+    for job in jobs:
+        cancel(job['id'], user, job['updated_at'].isoformat(),
+               str(job.get('dispatch_id') or job['id']), _deleting=True)
 
 
 def delivery(row):
@@ -202,37 +240,44 @@ def restart(key, user, expected):
                 cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,message=%s,updated_at=now()
                     WHERE id=%s RETURNING *''', (MAPPING_RESUME, key))
                 return public(cur.fetchone())
-        attempt = uuid4()
-        if intake:
-            data = dict(intake['data'])
-            data.pop('staff_upload_cancelled', None)
-            history = list(data.get('staff_upload_restarts') or [])
-            history.append(dict(previous_dispatch=str(job.get('dispatch_id') or job['id']),
-                                reason=job['message'], at=datetime.now(timezone.utc).isoformat(),
-                                retired_outputs=dict(mockup_saves=data.get('mockup_saves'),
-                                    output=(data.get('upload_operation') or {}).get('output'))))
-            data['staff_upload_restarts'] = history[-20:]
-            data['staff_upload_attempt'] = str(attempt)
-            data['staff_full_restart'] = str(attempt)
-            from product_upload_source import invalidate
-            invalidate({'data': data})
-            data.pop('mockup_saves', None)
-            data.pop('server_artwork', None)
-            data.update(state='Uploaded', reason='')
-            data['design_review'] = dict(decision='approved', at=datetime.now(timezone.utc).isoformat())
-            task = (data.get('upload_operation') or {}).get('sync_map') or {}
-            if task.get('staff_job') == str(job.get('dispatch_id') or job['id']):
-                task['staff_job'] = str(attempt)
-                task.pop('lease', None)
-                task.pop('lease_until', None)
-            # Keep source, product identity and completed PSD mapping; the previous
-            # output package is audit history only, never a new handoff source.
-            data.pop('staff_mapping', None)
-            cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb,updated_at=now() WHERE id=%s',
-                        (json.dumps(data), job['intake_id']))
-        cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,dispatch_id=%s,
-            message='Restart requested · regenerating mockups',updated_at=now() WHERE id=%s RETURNING *''', (attempt, key))
-        return public(cur.fetchone())
+        result = public(_reset_attempt(cur, job, intake))
+    _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
+    return result
+
+
+def _reset_attempt(cur, job, intake):
+    """Retire the delivery token; retain product identity and audit receipts."""
+    attempt = uuid4()
+    if intake:
+        data = dict(intake['data'])
+        data.pop('staff_upload_cancelled', None)
+        history = list(data.get('staff_upload_restarts') or [])
+        history.append(dict(previous_dispatch=str(job.get('dispatch_id') or job['id']),
+                            reason=job['message'], at=datetime.now(timezone.utc).isoformat(),
+                            retired_outputs=dict(mockup_saves=data.get('mockup_saves'),
+                                output=(data.get('upload_operation') or {}).get('output'))))
+        data['staff_upload_restarts'] = history[-20:]
+        data['staff_upload_attempt'] = str(attempt)
+        data['staff_full_restart'] = str(attempt)
+        from product_upload_source import invalidate
+        invalidate({'data': data})
+        data.pop('mockup_saves', None)
+        data.pop('server_artwork', None)
+        data.update(state='Uploaded', reason='')
+        data['design_review'] = dict(decision='approved', at=datetime.now(timezone.utc).isoformat())
+        task = (data.get('upload_operation') or {}).get('sync_map') or {}
+        if task.get('staff_job') == str(job.get('dispatch_id') or job['id']):
+            task['staff_job'] = str(attempt)
+            task.pop('lease', None)
+            task.pop('lease_until', None)
+        # Keep source, product identity and completed PSD mapping; the previous
+        # output package is audit history only, never a new handoff source.
+        data.pop('staff_mapping', None)
+        cur.execute('UPDATE product_upload_intakes SET data=%s::jsonb,updated_at=now() WHERE id=%s',
+                    (json.dumps(data), job['intake_id']))
+    cur.execute('''UPDATE product_upload_staff_jobs SET stage=0,dispatch_id=%s,
+        message='Restart requested · regenerating mockups',storefront='',created_at=now(),updated_at=now() WHERE id=%s RETURNING *''', (attempt, job['id']))
+    return cur.fetchone()
 
 
 def digest(token):
@@ -508,7 +553,8 @@ async def restart_route(request):
         if not isinstance(body, dict):
             raise ValueError('Choose a failed upload to restart.')
         action = cancel if request.url.path.endswith('/cancel') else restart
-        result = await run_in_threadpool(action, body.get('id'), user, body.get('updated_at'))
+        args = (body.get('id'), user, body.get('updated_at'))
+        result = await run_in_threadpool(action, *args, **({'attempt': body.get('dispatch_id')} if action is cancel else {}))
         return JSONResponse({'job': result}, headers=HEADERS)
     except Exception as error:
         return failure(error)
@@ -539,7 +585,7 @@ def tick(token, event):
             cur.execute('''SELECT stage FROM product_upload_staff_jobs
                 WHERE COALESCE(dispatch_id,id)=%s''', (reported,))
             previous = cur.fetchone()
-        if previous and previous['stage'] == 7:
+        if not previous or previous['stage'] == 7:
             stop = {'stop': {'id': str(reported)}}
     if not job:
         return stop

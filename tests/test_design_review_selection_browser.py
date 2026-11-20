@@ -56,7 +56,7 @@ def test_card_pencil_and_publish_buttons_share_one_row():
                 assert boxes[0]['x'] < boxes[1]['x'] < boxes[2]['x'] < boxes[3]['x']
                 assert boxes[-1]['x']+boxes[-1]['width'] <= width
                 page.get_by_role('checkbox').uncheck()
-                assert not page.get_by_role('button', name='Delete').is_visible()
+                assert page.get_by_role('button', name='Delete').is_visible()
                 assert page.locator('h3').is_visible()
                 assert page.get_by_role('button', name='Add to queue').is_visible()
                 assert page.locator('h3').evaluate('(el)=>getComputedStyle(el).textOverflow') == 'ellipsis'

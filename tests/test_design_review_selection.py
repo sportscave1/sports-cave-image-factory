@@ -160,7 +160,7 @@ def test_selected_card_delete_opens_existing_confirmation_for_only_that_card(ui,
     monkeypatch.setattr('files_upload_api.invalidate_directory_cache', Mock())
     monkeypatch.setattr('files_upload_api.invalidate_thumbnail_cache', Mock())
     key = gallery.review_key(entries[0]) + '-delete'
-    assert app.button(key=key).disabled
+    assert not app.button(key=key).disabled
     app.checkbox(key=gallery._selection_key(entries[0])).check().run()
     app.checkbox(key=gallery._selection_key(entries[1])).check().run()
     app.button(key=key).click().run()

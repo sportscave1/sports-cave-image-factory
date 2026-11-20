@@ -21,12 +21,15 @@ def _remove(provider, item):
             raise
 
 
-def delete_design(provider, source):
+def delete_design(provider, source, *, user=None):
     """Remove a selected PSD and only the JSON bound to that exact selection."""
     if (not approved(source) or not source.get('rev') or is_working_file(source['name'])
             or str(PurePosixPath(source['path_display']).parent).casefold() != REVIEW.casefold()):
         raise ValueError('Select a design directly inside Dropbox Review.')
-    if not _same_file(provider.metadata_if_present(source['path_display']), source):
+    current = provider.metadata_if_present(source['path_display'])
+    if current is None:
+        current = provider.metadata_if_present(source['id'])
+    if current is not None and not _same_file(current, source):
         raise ValueError('The PSD changed in Dropbox. Select its current revision to delete it.')
 
     sidecars, warnings = [], []
@@ -46,7 +49,11 @@ def delete_design(provider, source):
         except Exception:
             warnings.append(f'Kept unverified upload JSON at {path}.')
 
-    _remove(provider, source)
+    if user is not None:
+        from product_upload_staff_queue import cancel_for_deletion
+        cancel_for_deletion(source, user)
+    if current is not None:
+        _remove(provider, source)
     for item in sidecars:
         path = item['path_display']
         try:

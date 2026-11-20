@@ -392,3 +392,33 @@ else:
     assert store.copied(key, ADMIN['id'], 'SMART')['data']['copied']
 
     submit.assert_called_once()
+
+
+def test_repeated_delete_is_recoverable_and_stops_queue_before_dropbox(monkeypatch):
+    from design_review_delete import delete_design
+    import product_upload_staff_queue as queue
+    psd = source('art', 'Final.psd')
+    files = {psd['path_display']: psd}
+    events = []
+    def remove(_, path, **kwargs):
+        events.append('delete')
+        files.pop(path)
+    monkeypatch.setattr(queue, 'cancel_for_deletion', lambda record, user: events.append('cancel'))
+    provider = SimpleNamespace(token='fixture', metadata_if_present=files.get,
+                               api=SimpleNamespace(delete_path_recoverable=remove))
+    assert delete_design(provider, psd, user={'id':'fixture'}) == []
+    assert events == ['cancel', 'delete']
+    assert delete_design(provider, psd, user={'id':'fixture'}) == []
+    assert events == ['cancel', 'delete', 'cancel']
+
+
+def test_delete_does_not_treat_a_moved_psd_as_already_deleted():
+    from design_review_delete import delete_design
+    psd = source('art', 'Final.psd')
+    moved = dict(psd, path_display='/Elsewhere/Final.psd')
+    remove = Mock()
+    provider = SimpleNamespace(metadata_if_present=lambda key: moved if key == psd['id'] else None,
+                               api=SimpleNamespace(delete_path_recoverable=remove))
+    with pytest.raises(ValueError, match='changed in Dropbox'):
+        delete_design(provider, psd)
+    remove.assert_not_called()

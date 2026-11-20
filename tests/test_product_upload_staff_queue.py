@@ -208,9 +208,6 @@ def test_manual_reset_preserves_upload_and_rejects_old_events(store, monkeypatch
     queue.advance(key, 'desktop', 7, 'Generation failed', allowed=[1])
     stopped = queue.list_jobs('staff')['jobs'][0]
     assert stopped['restartable']
-    # Re-enqueue explains the failure; only explicit Restart resets it.
-    with pytest.raises(ValueError, match='needing attention'):
-        submit('staff')
     assert queue.tick(token, {}) == {}
     with pytest.raises(PermissionError):
         queue.restart(key, {'id': 'unrelated'}, stopped['updated_at'])
@@ -442,16 +439,39 @@ def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
         jobs.pool.shutdown(wait=False)
 
 
-@pytest.mark.parametrize('stage, message', [(7, 'needing attention'), (6, 'already been published')])
-def test_enqueue_does_not_report_terminal_job_as_new_work(store, stage, message):
+@pytest.mark.parametrize('stage', range(8))
+def test_add_to_queue_replaces_attempt_and_rejects_old_reports(store, stage, monkeypatch):
     key = submit('staff')
+    token = queue.pair({'id': 'desktop'})
     with store() as conn, conn.cursor() as cur:
-        cur.execute('UPDATE product_upload_staff_jobs SET stage=%s WHERE id=%s', (stage, key))
-    with pytest.raises(ValueError, match=message):
-        submit('staff')
-    with store() as conn, conn.cursor() as cur:
-        cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s', (key,))
-        assert cur.fetchone()['stage'] == stage
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=%s,worker_actor=%s WHERE id=%s', (stage, 'desktop', key))
+    queue.settings(False)
+    assert submit('staff') == key
+    row = queue.list_jobs('staff')['jobs'][0]
+    assert row['stage'] == 0
+    assert row['dispatch_id'] != str(key) if stage else row['dispatch_id'] == str(key)
+    assert queue.settings()['enabled'] is False
+    # Repeated clicks while waiting retain one delivery and queue position.
+    assert submit('staff') == key
+    assert queue.list_jobs('staff')['jobs'][0]['dispatch_id'] == row['dispatch_id']
+    if stage:
+        result = queue.tick(token, {'id': str(key), 'state': 'submitted'})
+        assert result == {'stop': {'id': str(key)}}
+        queue.advance(key, 'desktop', 7, 'Late old failure')
+        assert queue.list_jobs('staff')['jobs'][0]['stage'] == 0
+
+
+def test_cancel_uses_attempt_identity_despite_progress_and_rejects_retired_click(store):
+    key = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    before = queue.list_jobs('staff')['jobs'][0]
+    queue.advance(key, 'desktop', 2, 'New progress')
+    assert queue.cancel(key, {'id':'staff'}, before['updated_at'], before['dispatch_id'])['cancelled']
+    assert submit('staff') == key
+    with pytest.raises(ValueError):
+        queue.cancel(key, {'id':'staff'}, before['updated_at'], before['dispatch_id'])
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 0
 
 
 def test_lightweight_desktop_heartbeat(store):
@@ -473,7 +493,8 @@ def test_publish_now_resumes_paused_uploads_and_claims_exact_request_once(store,
     assert queue.settings() == {'enabled': True}
     assert queue.tick(token, {})['job']['id'] == str(key)
     assert queue.enqueue({'id':'admin'}, {'id':'id:publish','rev':'R1'}, 'Publish now', 'NBA', start=True) == key
-    assert queue.tick(token, {})['job']['id'] == str(key)
+    assert queue.tick(token, {})['job']['id'] != str(key)
+    assert queue.worker_job(str(key), 'desktop') is None
     with store() as conn, conn.cursor() as cur:
         cur.execute('SELECT count(*) AS n FROM product_upload_staff_jobs')
         assert cur.fetchone()['n'] == 1
@@ -541,3 +562,82 @@ def test_requested_status_route_bypasses_warming_history_without_leaking_request
     with store() as conn, conn.cursor() as cur:
         cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s',(key,))
         assert cur.fetchone()['stage'] == 0  # Status reads never start or publish work.
+
+
+def test_review_delete_stops_all_pending_revisions_but_keeps_completed_uploads(store, monkeypatch):
+    monkeypatch.setattr('os_accounts.can_delete_files', lambda user: user['id'] == 'deleter')
+    old, latest, done = (submit('owner', revision) for revision in ('old', 'latest', 'done'))
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=6 WHERE id=%s', (done,))
+    with pytest.raises(PermissionError):
+        queue.cancel_for_deletion({'id': 'id:original'}, {'id': 'unrelated'})
+    queue.cancel_for_deletion({'id': 'id:original'}, {'id': 'deleter'})
+    rows = {job['id']: job for job in queue.list_jobs('owner')['jobs']}
+    assert rows[str(old)]['cancelled'] and rows[str(latest)]['cancelled']
+    assert rows[str(done)]['stage'] == 6
+    assert queue.tick(token, {}) == {}
+
+
+def test_late_worker_failure_does_not_revive_cancelled_work():
+    from threading import Event
+    from product_upload_jobs import Jobs
+    jobs = Jobs()
+    started, release = Event(), Event()
+    def work(progress):
+        started.set()
+        assert release.wait(5)
+        raise ValueError('Old provider request failed after cancellation')
+    try:
+        jobs.begin_staff_attempt('intake', 'desktop', 'old')
+        jobs.submit('intake', 'desktop', 'prepare', {}, work)
+        assert started.wait(5)
+        jobs.cancel('intake', 'desktop', attempt='old')
+        release.set()
+        jobs.jobs[('desktop','intake','prepare')]['future'].result(timeout=5)
+        assert jobs.snapshot('intake', 'desktop', 'prepare')['state'] == 'Cancelled'
+        jobs.begin_staff_attempt('intake', 'desktop', 'new', full=True)
+        jobs.submit('intake', 'desktop', 'prepare', {}, lambda progress: 'ready')
+        jobs.cancel('intake', 'desktop', attempt='old')
+        jobs.jobs[('desktop','intake','prepare')]['future'].result(timeout=5)
+        assert jobs.snapshot('intake', 'desktop', 'prepare')['state'] == 'Ready'
+    finally:
+        release.set()
+        jobs.pool.shutdown(wait=True)
+
+
+def test_requeue_resets_cancelled_intake_and_only_retires_local_work_after_commit(store, monkeypatch):
+    import product_upload_jobs
+    import design_publish_ad
+    key = submit('staff')
+    token = queue.pair({'id':'desktop'})
+    queue.tick(token, {})
+    intake = uuid4()
+    data = dict(source={'id':'id:original','rev':'A'}, staff_upload_cancelled=str(key),
+                product_gid='gid://shopify/Product/42', mockup_saves={'old':True})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('CREATE TABLE product_upload_intakes(id uuid PRIMARY KEY,data jsonb,updated_at timestamptz DEFAULT now())')
+        cur.execute('INSERT INTO product_upload_intakes(id,data) VALUES(%s,%s::jsonb)', (intake,json.dumps(data)))
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=7,intake_id=%s WHERE id=%s', (intake,key))
+    retired=[]
+    monkeypatch.setattr(product_upload_jobs.JOBS,'begin_staff_attempt',lambda *args,**kwargs:retired.append((args,kwargs)))
+    monkeypatch.setattr(design_publish_ad,'check_request',lambda *args:('NBA','AUS'))
+    def fail(*args):
+        raise ValueError('Synthetic ad queue unavailable')
+    monkeypatch.setattr(design_publish_ad,'enqueue',fail)
+    with pytest.raises(ValueError):
+        queue.enqueue({'id':'staff'},{'id':'id:original','rev':'A'},'Design','NBA',ad_country='AUS')
+    assert retired == []
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 7
+    assert submit('staff') == key
+    job=queue.list_jobs('staff')['jobs'][0]
+    assert retired == [((str(intake),'desktop',job['dispatch_id']),{'full':True})]
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT data FROM product_upload_intakes WHERE id=%s',(intake,))
+        saved=cur.fetchone()['data']
+    assert not saved.get('staff_upload_cancelled')
+    assert saved['product_gid'] == data['product_gid']
+    assert saved['staff_full_restart'] == job['dispatch_id']
+    assert 'mockup_saves' not in saved
+    assert saved['staff_upload_restarts'][0]['retired_outputs']['mockup_saves'] == {'old':True}

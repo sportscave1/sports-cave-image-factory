@@ -59,7 +59,6 @@
   overflow:hidden;
   text-overflow:ellipsis;
 }
-.st-key-design-review-grid [class*="st-key-design-review-card-"] [data-testid="stHorizontalBlock"]:has([data-testid="stCheckbox"] input:not(:checked)) > [data-testid="stColumn"]:has([class*="st-key-design-review-delete-"]) {display:none}
 .sc-review-status {font-size:.76rem;opacity:.78;margin-top:.15rem}
 .sc-review-create, .st-key-design-review-grid a.sc-review-edit {
   display:inline-flex;

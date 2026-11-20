@@ -208,7 +208,7 @@ def _confirm_delete(user, selected):
     from os_accounts import can_delete_files
     from product_upload_api import Dropbox
 
-    st.write('Move the selected PSDs and their matching upload JSON files to Dropbox Deleted Files.')
+    st.write('Stop pending uploads and move the selected PSDs and their matching upload JSON files to Dropbox Deleted Files.')
     st.text('\n'.join(title for _, title in selected))
     cancel, confirm = st.columns(2)
     if cancel.button('Cancel', key='design-review-delete-cancel'):
@@ -229,7 +229,7 @@ def _confirm_delete(user, selected):
     with st.spinner('Removing selected designs from Dropbox'):
         for source, title in selected:
             try:
-                warnings.extend(delete_design(provider, source))
+                warnings.extend(delete_design(provider, source, user=user))
             except ValueError as error:
                 warnings.append(f'{title}: {error}')
             except Exception:
@@ -347,7 +347,7 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
             with delete_button:
                 with st.container(key='design-review-delete-'+card_key):
                     remove = st.button('Delete', key=card_key+'-delete', help='Delete '+title,
-                                       disabled=not st.session_state.get(_selection_key(source)))
+                                       disabled=False)
             if remove:
                 st.session_state['_review_delete_selection'] = [(source, title)]
                 st.rerun()
