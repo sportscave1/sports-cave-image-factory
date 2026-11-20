@@ -835,6 +835,11 @@ class CarouselServiceTests(unittest.TestCase):
         self.assertEqual(ad_result["ad_ownership"], META_OBJECT_CREATED_BY_RUN)
         self.assertTrue(ad_result["carousel_verification"]["verified"])
         self.assertNotIn("product_set_id", client.adset_payload["promoted_object"])
+        tags = client.carousel_creatives[ad_result["meta_creative_id"]]["url_tags"]
+        self.assertIn("&utm_id={{campaign.id}}", tags)
+        self.assertIn("&adset_id={{adset.id}}", tags)
+        self.assertIn("&ad_id={{ad.id}}", tags)
+        self.assertIn("&site_source={{site_source_name}}", tags)
 
     def test_new_mode_validate_only_rejection_blocks_all_persistent_meta_writes(self):
         client = FakeCarouselClient()

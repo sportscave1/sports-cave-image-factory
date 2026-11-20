@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import unittest
 from unittest import mock
+from urllib.parse import parse_qs
 
 from PIL import Image
 
@@ -2759,7 +2760,12 @@ class PostingServiceTests(unittest.TestCase):
                     for name, enrollment in REQUIRED_COLLECTION_FEATURES.items()
                 },
             )
-            self.assertIn("utm_source=facebook", payload["url_tags"])
+            tracking = parse_qs(payload["url_tags"])
+            self.assertEqual(tracking["utm_medium"], ["paid_social"])
+            self.assertEqual(tracking["utm_id"], ["{{campaign.id}}"])
+            self.assertEqual(tracking["adset_id"], ["{{adset.id}}"])
+            self.assertEqual(tracking["ad_id"], ["{{ad.id}}"])
+            self.assertEqual(tracking["site_source"], ["{{site_source_name}}"])
         self.assertTrue(
             all(row["adset_id"] == "adset-1" for row in client.copy_ads.values())
         )
