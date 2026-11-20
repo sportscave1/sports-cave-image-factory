@@ -3641,7 +3641,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "route": "Premium Scarcity — Straight On",
         "supporting_label": "Straight-on product photograph",
         "copy_row": "Premium Scarcity — Straight On Copy Variation 1",
-        "purpose": "Create CENTRE / straight-on Room 2 in a refined home office with the shared bottom banner.",
+        "purpose": "Create CENTRE / straight-on Room 2 in a premium collector hallway in a different home with the shared bottom banner.",
         "camera_role": "front",
         "camera_side": "predominantly straight-on camera with maximum 0-2 degree natural offset",
         "camera_instruction": "Use a predominantly straight-on view with a maximum natural offset of 0-2 degrees. Keep the complete product geometrically balanced. Avoid artificial showroom symmetry by placing the room cue primarily toward one outer edge. This must be the clearest and most direct scarcity hero of the three.",
@@ -4869,7 +4869,7 @@ Resolved sibling fingerprints supplied for comparison:
 Within one three-image package:
 - Preserve the same immutable product and shared realism in three distinct premium rooms.
 - Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 15.625% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 15.625% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 collector hallway in a different home with the same fixed bottom 15.625% black/gold banner.
 - Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 15.625% black/gold banner.
 - Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
 - Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned headline and the fixed CTA.
@@ -4981,7 +4981,7 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 minimal artwork-first residential wall, LEFT-angle Room 3 distinctive restrained collector interior. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
+Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 collector hallway in a different home, LEFT-angle Room 3 distinctive restrained collector interior. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
@@ -5777,7 +5777,7 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
 - Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 15.625% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 15.625% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 collector hallway in a different home with the same fixed bottom 15.625% black/gold banner.
 - Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 15.625% black/gold banner.
 - Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glazing realism, physical mounting, realistically textured quiet walls, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 15.625% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
@@ -8071,7 +8071,7 @@ def get_instant_experience_setting(category):
 
 
 ADS_IE_COMBINED_EXECUTION_VERSION = "ADS_IE_COMBINED_EXECUTION_V1"
-IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as the straight-on architectural product wall with a small residential glimpse, and Ad 3 as the premium residential man cave setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
+IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as a front-view collector hallway in a different home with clear passage depth, and Ad 3 as the premium residential man cave setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
 Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 

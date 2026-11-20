@@ -18,7 +18,7 @@ class SceneNamesTests(unittest.TestCase):
             self.assertEqual(rows[1]['camera_role'], 'FRONT')
             self.assertEqual({rows[0]['camera_role'], rows[2]['camera_role']}, {'LEFT', 'RIGHT'})
             self.assertIn('collector hallway', rows[0]['room_type'])
-            self.assertIn('product wall', rows[1]['room_type'])
+            self.assertIn('collector hallway', rows[1]['room_type'])
             self.assertIn('residential man cave', rows[2]['room_type'])
             self.assertIn('clear but minimal man-cave setup', rows[2]['scene_brief'])
             for i, row in enumerate(rows):
@@ -43,7 +43,7 @@ class SceneNamesTests(unittest.TestCase):
                 self.assertEqual(actual['camera_side'], saved['assigned_camera_angle'])
 
     def test_display_names_leave_upload_and_csv_identities_unchanged(self):
-        names = ['Collector Hallway', 'Architectural Wall', 'Man Cave']
+        names = ['Collector Hallway', 'Collector Hallway Front View', 'Man Cave']
         slots = images.campaign_image_slots('Instant Experience')
         self.assertEqual([s['display_name'] for s in slots], names)
         for slot, spec in zip(slots, INSTANT_EXPERIENCE_CONCEPTS):

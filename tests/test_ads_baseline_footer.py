@@ -77,11 +77,11 @@ def test_baseline_sections_and_live_receipt():
     from prompt_library import catalog, digest
     from prompt_bundle import bundle_prompt
     original = json.loads(Path('tests/fixtures/ads_v1_baseline_hashes.json').read_text())
-    allowed = {'e4c95a923482686ea19136c3', '3cb795b06730af64f234ddc9',
+    allowed = {'91a51d174a3108ab54cb4f97', 'e4c95a923482686ea19136c3', '3cb795b06730af64f234ddc9',
                '29739817000c06f922bc9c1b', '3ee6646ef382cd48773bc7ae',
                'd9d02cb110b7f42fd61b3196', '7ca8830571db316b90527e08',
                '704462a5b422e7982db8880f', '7c37c4b9ddc9337b4253c1cc',
-               '6137aef6ef1b942197a3aa91'}  # Authorized review and shared footer fit updates.
+               '6137aef6ef1b942197a3aa91'}  # Authorized footer, creative review and room-role updates.
     rows = [p for p in catalog() if p.category == 'Ads']
     assert {p.key for p in rows} == set(original)
     for p in rows:

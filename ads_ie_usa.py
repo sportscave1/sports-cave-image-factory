@@ -19,8 +19,8 @@ GLAZING = ('For every framed edition: Show believable premium glass reflections 
            'Keep strong reflections away from those areas. At thumbnail size, product recognition takes priority over reflection visibility. '
            'Preserve premium glass, never an acrylic appearance or pasted-on product. Keep realistic frame-edge highlights and mounting shadows; '
            'no bright window grids across important details. Preserve unframed products without adding a frame or pane.')
-COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the collector hallway, straight-on architectural product wall and residential man cave, '
-               'with their resolved cameras: a subtle randomly selected left/right viewpoint for the hallway and man cave, and a mostly straight-on architectural wall. Resolve once and preserve saved camera assignments; legacy route IDs and copy labels never determine the camera. Use three recognisably different residential compositions, different room styles, '
+COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the angled collector hallway, front-view collector hallway in a different home and residential man cave, '
+               'with their resolved cameras: a subtle randomly selected left/right viewpoint for the first hallway and man cave, and a mostly straight-on view of the second collector hallway with clear passage depth. Resolve once and preserve saved camera assignments; legacy route IDs and copy labels never determine the camera. Use three recognisably different residential compositions, different room styles, '
                'clearly different wall-colour families, different wall finishes and different lighting setups. Priority: product fidelity and real scale; subject and defining-detail recognition; desirable '
                'residential presentation; meaningful composition variety; then environmental novelty. Moderate perspective, no extreme foreshortening. '
                'Move the camera closer when needed, never enlarge the product. Keep the full frame, breathing room and footer clearance. '
@@ -99,7 +99,8 @@ def resolve_camera(visual, index, seed, saved):
     visual.update(camera_side=camera, assigned_camera_angle=camera,
                   camera_role=camera.split(':', 1)[0],
                   camera_instruction=camera + '. Keep the existing subtle perspective, straight verticals and rigid complete frame. Never mirror artwork.')
-    names = ('COLLECTOR HALLWAY', 'ARCHITECTURAL WALL', 'MAN CAVE')
+    from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
+    names = tuple(idea['scene_name'].upper() for idea in INSTANT_EXPERIENCE_CONCEPTS)
     visual['group_heading'] = f'GROUP {index + 1} — {names[index]}'
 
 

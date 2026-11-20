@@ -19,7 +19,7 @@ CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2(
 COUNTRIES = {'Australia': ('AUS', 'AU', 'Australia'), 'USA': ('USA', 'US', 'United States'),
              'UK': ('UK', 'GB', 'United Kingdom'), 'Canada': ('CAN', 'CA', 'Canada'),
              'New Zealand': ('NZ', 'NZL', 'New Zealand')}
-COVERS = {idea['id']: idea['scene_name'].lower().replace(' ', '-') + '.jpg'
+COVERS = {idea['id']: idea.get('artifact_filename') or idea['scene_name'].lower().replace(' ', '-') + '.jpg'
           for idea in INSTANT_EXPERIENCE_CONCEPTS}
 LABELS = {'waiting': 'Waiting for the published product', 'preparing': 'Preparing the verified mockup',
           'opening': 'Opening Meta Ads in ChatGPT',
@@ -184,6 +184,7 @@ final response, with exactly these filenames (the companion will save them to th
 - CSV: {folder}/ad_copy.csv
 
 Return actual JPEGs under the given .jpg filenames, not preview thumbnails or contact sheets.
+Filenames identify saved delivery slots; each resolved scene below determines the room.
 Keep the original bytes available until delivery is confirmed. Check that each attachment
 points to the actual exported file, rather than renaming only its link label. Include a
 table with each exact filename in its first column and its original Library link when
