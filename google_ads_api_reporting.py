@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import math
 import os
+import re
 from zoneinfo import ZoneInfo
 
 import requests
@@ -55,7 +56,8 @@ def _read(query, token, post):
         try:
             for detail in response.json().get("error", {}).get("details", []):
                 for error in detail.get("errors", []):
-                    codes.update(str(v) for v in error.get("errorCode", {}).values())
+                    codes.update(str(v) for v in error.get("errorCode", {}).values()
+                                 if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", str(v)))
         except (ValueError, TypeError, AttributeError):
             pass
         if "CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION" in codes:
@@ -65,7 +67,7 @@ def _read(query, token, post):
         if response.status_code == 429:
             raise AdsReportingError("rate_limited", "Google Ads reporting is rate limited. Retry later.")
         raise AdsReportingError("api_access_required" if response.status_code == 403 else "report_failed",
-                                "Google Ads could not return this report. Check Cloud API access and account permissions.")
+                                f"Google Ads could not return this report (HTTP {response.status_code}; {', '.join(sorted(codes)) or 'no Ads error code'}). Check Cloud API access and account permissions.")
     payload = response.json()
     if not isinstance(payload, list):
         raise AdsReportingError("invalid_response", "Google Ads returned an unexpected response.")
