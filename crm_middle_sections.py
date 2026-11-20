@@ -210,7 +210,8 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
         if 'SC_CHECKOUT_RECOVERY_URL' in s.get('html',''):raise ValueError('Resolve the original checkout recovery link before rendering this email.')
         if 'SC_ABANDONED_CHECKOUT' in s.get('html',''):raise ValueError('Abandoned Checkout requires a checkout recovery automation. Campaign recipients have no checkout context.')
         if 'SC_WALL_PREVIEW_URL' in s.get('html',''):raise ValueError('Resolve the wall preview product link before rendering this email.')
-        source = s['html'] if s['type'] in ('html', 'image', 'discount') else catalogue_html(s, campaign_key=campaign_key)
+        source = s['html'] if s['type'] in ('html', 'image', 'discount') else catalogue_html(s, campaign_key=campaign_key,
+            theme='light' if 'email-light-v1' in doc.get('tags',[]) else 'dark')
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,
             campaign_key=campaign_key if s['type'] in ('html', 'image', 'discount') else '',trusted_catalogue=s['type']=='catalogue',inline_styles=s.get('css_version')==1)
