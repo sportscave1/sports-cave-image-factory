@@ -58,6 +58,11 @@ class GitStore:
         row = self.request('GET', 'contents/' + quote(path, safe='/') + '?ref=' + quote(ref, safe=''), missing=missing)
         if row is None:
             return None, None
+        if row.get('encoding') == 'none':
+            # GitHub Contents omits inline content for histories over 1 MB.
+            # Resolve the exact immutable blob, not a mutable branch/raw URL.
+            blob = self.request('GET', 'git/blobs/' + row['sha'])
+            return base64.b64decode(blob['content']).decode('utf-8'), row['sha']
         return base64.b64decode(row['content']).decode('utf-8'), row['sha']
 
     def history(self, prompt):
