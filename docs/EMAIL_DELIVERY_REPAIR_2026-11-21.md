@@ -16,6 +16,8 @@ Owner: codex-email-recovery-01a1fad3-20261121
 - Yield after 45 seconds of due-checkout processing so queued delivery can run before another slow batch. A single in-flight provider read remains bounded by its existing timeout.
 - Use completed delivery work for the abandoned-checkout health display and activity view. Recent lease activity alone cannot mark delivery healthy.
 - Retain purchase exits, permission checks, availability checks, send identity and uncertain-submission protections.
+- Live follow-up identified a second pre-submission failure: the edition label compared a nullable remaining count to zero. Render the verified edition limit when availability is unknown; never invent a next-available claim. The regression renders the complete recovery email with a null remaining count.
+- Unexpected failures now retain code filenames, line numbers and function names only, excluding exception text, source lines, local values and recovery URLs.
 
 ## Branding already applied through the OS
 
@@ -30,5 +32,6 @@ The existing shared-branding policy applies this header to future campaign and a
 - python -m unittest tests.test_crm_recovery_elements tests.test_crm_batch_dispatch tests.test_crm_checkout_eligibility tests.test_crm_shopify_automation_triggers tests.test_crm_checkout_purchase_exit tests.test_crm_discount_delivery — 104 tests, 54 requiring disposable SQL skipped.
 - git diff --check; python scripts/validate_render_topology.py; Studio Verify passed.
 - Full delivered-inbox and disposable-SQL integration checks have not been run. No production credential was used in local tests.
+- Combined follow-up run with safe error-location and nullable-edition regressions: 129 tests, 74 passed and 55 disposable-SQL tests skipped. The recovery renderer retains the original recovery URL and avoids unsupported availability claims.
 
 The user explicitly authorized committing, integrating into main, pushing and deploying this fix on 21 November 2026. The existing canonical OS and supporting worker are the release targets; no new service or Blueprint change is required. Production verification must follow the actual Render deployment.
