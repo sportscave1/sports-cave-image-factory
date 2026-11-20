@@ -54,6 +54,7 @@ def test_fixed_search_only_totals_and_fractional_purchase_credit(auth):
         assert "mutate" not in call.args[0]
         assert f"campaign.id = {ads.CAMPAIGN_ID}" in call.kwargs["json"]["query"]
     assert "conversion_action_category = 'PURCHASE'" in post.call_args_list[2].kwargs["json"]["query"]
+    assert "segments.conversion_action_category" in post.call_args_list[2].kwargs["json"]["query"].split(" FROM ")[0]
 
 
 def test_no_scope_never_calls_google(auth):
