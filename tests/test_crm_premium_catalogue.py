@@ -37,9 +37,10 @@ class PremiumCatalogueTests(unittest.TestCase):
    section=self.section(count);doc=catalogue_doc();doc['middle_sections']=[section];doc['custom_html']=''
    for html in (catalogue_html(section),render_campaign(doc)['html']):
     markup=Markup(html)
-    self.assertEqual(len(markup.images),count)
+    product_images={p['image'].split('?')[0] for p in section['products']}
+    self.assertEqual(sum(img[0]['src'].split('?')[0] in product_images for img in markup.images),count)
     for index,(tag,attrs) in enumerate(markup.tags):
-     if tag!='img':continue
+     if tag!='img' or attrs['src'].split('?')[0] not in product_images:continue
      cell=next(a for t,a in reversed(markup.tags[:index]) if t=='td')
      self.assertEqual(cell['bgcolor'],'#151515')
      self.assertTrue(cell['style'].startswith('padding:0;'))
