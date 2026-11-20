@@ -35,8 +35,8 @@ def render_page(user, store=None):
         for column, label, value in zip(st.columns(3), ('Awaiting review', 'Published listings', 'New enquiries'),
                 (counts['pending'], counts['published'], sum(r['status'] == 'new' for r in enquiries))):
             column.metric(label, value)
-        tabs = st.tabs(['Listings', 'Enquiries', 'Website & publish'], on_change='rerun', key='marketplace-tabs')
-        for name, tab in zip(('listings', 'enquiries', 'website'), tabs):
+        tabs = st.tabs(['Listings', 'Enquiries', 'Website & publish', 'Outreach'], on_change='rerun', key='marketplace-tabs')
+        for name, tab in zip(('listings', 'enquiries', 'website', 'outreach'), tabs):
             if not tab.open:
                 continue
             with tab:
@@ -44,6 +44,9 @@ def render_page(user, store=None):
                     render_listings(st, store, rows, user)
                 elif name == 'enquiries':
                     render_enquiries(st, store, enquiries)
+                elif name == 'outreach':
+                    from marketplace_outreach import render
+                    render(st, store.connect)
                 else:
                     render_website(st, store)
 

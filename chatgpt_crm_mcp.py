@@ -64,7 +64,18 @@ HISTORY_INPUT = {
                    "refresh": {"type": "boolean"}},
     "required": ["since", "until"], "additionalProperties": False,
 }
+OUTREACH_INPUT = {"type": "object", "properties": {"edition": {"type": "object"}},
+                  "required": ["edition"], "additionalProperties": False}
+OUTREACH_HISTORY = {"type": "object", "properties": {"offset": {"type": "integer", "minimum": 0}},
+                    "required": [], "additionalProperties": False}
 BRIEF_TOOLS = {
+    "get_marketplace_outreach": (PUBLISH_SCOPE, "marketplace", "Read Marketplace Outreach",
+        "Read private seller history. Start at offset 0 and follow next_offset until null.",
+        OUTREACH_HISTORY),
+    "submit_marketplace_outreach": (PUBLISH_SCOPE, "marketplace", "Save Marketplace Outreach",
+        "Save up to 20 new sellers for today's Sydney date. Supply edition.date and edition.sellers, "
+        "each with seller, category, item, source_url, contact_url and contact_basis. Both URLs must "
+        "be HTTPS. Returns the saved batch after cross-date duplicate checks.", OUTREACH_INPUT),
     "submit_google_ads_review": (PUBLISH_SCOPE, "ads_google", "Sync Google weekly review",
         "Queue a completed Friday–Thursday Google Ads review for Ads > Google. "
         "Use AUD, separate exclusive Shopify channels from overlapping platform claims, "
@@ -476,7 +487,7 @@ async def mcp(request):
             {
                 "name": name, "title": title, "description": description,
                 "inputSchema": schema,
-                "annotations": {"readOnlyHint": schema not in (BRIEF_SUBMIT, GOOGLE_SUBMIT),
+                "annotations": {"readOnlyHint": schema not in (BRIEF_SUBMIT, GOOGLE_SUBMIT, OUTREACH_INPUT),
                                 "destructiveHint": False, "openWorldHint": False,
                                 "idempotentHint": True},
                 "securitySchemes": [{"type": "oauth2", "scopes": [scope]}],
@@ -510,7 +521,27 @@ async def mcp(request):
         try:
             if not await run_in_threadpool(_active_owner, claims, page):
                 return _challenge()
-            if schema is GOOGLE_SUBMIT:
+            if name == "submit_marketplace_outreach":
+                from marketplace_outreach import OutreachStore
+                summary = await run_in_threadpool(OutreachStore().submit, arguments["edition"])
+            elif name == "get_marketplace_outreach":
+                from marketplace_outreach import OutreachStore
+                summary = await run_in_threadpool(OutreachStore().history_page, arguments.get("offset", 0))
+            elif (schema is BRIEF_SUBMIT and arguments.get("kind") == "meta"
+                  and isinstance(arguments.get("edition"), dict)
+                  and arguments["edition"].get("destination") == "marketplace_outreach"):
+                # Installed tool catalogs can deliver privately through the existing connector.
+                if not await run_in_threadpool(_active_owner, claims, "marketplace"):
+                    return _challenge()
+                from marketplace_outreach import OutreachStore
+                edition = arguments["edition"]
+                if edition.get("operation") == "history":
+                    summary = await run_in_threadpool(OutreachStore().history_page, edition.get("offset", 0))
+                elif edition.get("operation") == "submit":
+                    summary = await run_in_threadpool(OutreachStore().submit, edition)
+                else:
+                    raise ValueError("Choose history or submit for Marketplace Outreach.")
+            elif schema is GOOGLE_SUBMIT:
                 summary = await run_in_threadpool(google_ads_reviews.enqueue, arguments["edition"], claims)
             elif name == "get_google_ads_reviews":
                 summary = await run_in_threadpool(google_ads_reviews.report_context)

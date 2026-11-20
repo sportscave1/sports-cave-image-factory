@@ -81,6 +81,27 @@ class FakeDatabase:
         return FakeConnection(self)
 
 
+class OutreachTests(unittest.TestCase):
+    def test_retries_and_previous_days_are_excluded(self):
+        from marketplace_outreach import OutreachStore, SYDNEY
+        from datetime import datetime
+        from marketplace_store import put
+        store = OutreachStore(FakeDatabase().connect)
+        row = {'seller': 'First seller', 'category': 'Cards', 'item': 'Card',
+               'source_url': 'https://example.invalid/item', 'contact_url': 'https://example.invalid/message',
+               'contact_basis': 'Invites dealer enquiries'}
+        with store.db() as conn:
+            put(conn, 'outreach:day:2020-01-01', {'date': '2020-01-01', 'sellers': [row]})
+        new = dict(row, seller='New seller', source_url='https://new.invalid/item',
+                   contact_url='https://new.invalid/message')
+        edition = {'date': datetime.now(SYDNEY).date().isoformat(), 'sellers': [dict(row, seller='Alias'), new]}
+        self.assertEqual(store.submit(edition)['sellers'], [new])
+        self.assertEqual(store.submit(edition)['sellers'], [new])
+        self.assertEqual(len(store.history_page(0)['sellers']), 2)
+        with self.assertRaises(ValueError):
+            store.submit(dict(edition, sellers=[dict(new, contact_url='javascript:bad')]))
+
+
 class ContractTests(unittest.TestCase):
     def test_exact_fee_and_money(self):
         self.assertEqual(core.fee_quote(20000), {'fee_cents': 1000, 'payout_cents': 19000})
@@ -365,7 +386,7 @@ class AdminTests(unittest.TestCase):
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'admin'})").run()
             self.assertFalse(page.exception)
             self.assertIn('Marketplace', [t.value for t in page.title])
-            self.assertEqual([t.label for t in page.tabs], ['Listings', 'Enquiries', 'Website & publish'])
+            self.assertEqual([t.label for t in page.tabs], ['Listings', 'Enquiries', 'Website & publish', 'Outreach'])
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'worker'})").run()
             self.assertFalse(page.exception)
             self.assertTrue(page.error)
