@@ -197,5 +197,3 @@ def test_page_loads_fresh_api_report_and_does_not_replace_history(monkeypatch):
     assert not test.exception
     assert test.metric[0].value == "A$20.00"
     assert test.metric[4].value == "—"  # Historical unknown stays unknown.
-
-

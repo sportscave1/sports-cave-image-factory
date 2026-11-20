@@ -148,4 +148,3 @@ def report(start, end, *, store=None):
         return {"status": error.code, "note": str(error)}
     except Exception:
         return {"status": "unavailable", "note": "Google Ads reporting is unavailable. Check the existing connection."}
-
