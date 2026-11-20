@@ -43,6 +43,10 @@ def enqueue(user, result, selection, *, request_key=None):
         saved = cur.fetchone()['value']
         if request_key and any(saved.get(field)!=payload.get(field) for field in ('product_gid','country','sport')):
             raise ValueError('This request already queued different selections. Choose the product again for a new request.')
+    from product_upload_staff_queue import _HEADER_DISPLAYS
+    from companion_display import invalidate
+    _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
+    invalidate()
     return dict(id=key, **companion.public(saved))
 
 

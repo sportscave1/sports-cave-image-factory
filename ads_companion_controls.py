@@ -1,5 +1,6 @@
 """Admin job controls; independent tombstones cannot be overwritten by a worker."""
 import json
+import logging
 from uuid import UUID, uuid4
 import design_publish_ad as ads
 
@@ -26,6 +27,13 @@ def action(user, job, operation):
         row=cur.fetchone()
         if not row: raise ValueError('Ad job not found.')
         value=row['value']
+        cur.execute('SELECT value FROM app_settings WHERE key=%s FOR UPDATE', (PREFIX+job,))
+        prior=cur.fetchone()
+        prior=(prior or {}).get('value', {}).get('action')
+        if prior=='delete':
+            if operation=='play':
+                raise ValueError('This ad was removed from the queue. Add it again to create a new job.')
+            operation='delete'  # Late Cancel/retry cannot undo a confirmed Delete.
         if operation=='play':
             cur.execute("SELECT 1 FROM app_settings WHERE key=%s AND updated_at > now()-interval '10 minutes'", (ads.PREFIX+'lease',))
             if cur.fetchone(): raise ValueError('The companion is finishing a step. Press Play again shortly.')
@@ -54,7 +62,7 @@ def action(user, job, operation):
             cur.execute('UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s',(json.dumps(value),ads.PREFIX+job))
             cur.execute('DELETE FROM app_settings WHERE key=%s',(PREFIX+job,))
             cur.execute("INSERT INTO app_settings(key,value) VALUES(%s,'true') ON CONFLICT(key) DO UPDATE SET value='true',updated_at=now()",(ads.CONTROL_KEY,))
-        else:
+        elif operation=='delete' or value['stage']!='complete':
             # A cancel cannot undo a Meta operation already accepted. Retain its receipt.
             cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()',
                         (PREFIX+job,json.dumps(dict(action=operation,actor=str(user['id'])))))
@@ -63,7 +71,15 @@ def action(user, job, operation):
     from companion_display import invalidate
     _HEADER_DISPLAYS.invalidate_matching(lambda _: True)
     invalidate()
-    return {'id':job,'action':operation}
+    logging.getLogger(__name__).info('ads_queue_control job=%s action=%s',job,operation)
+    receipt=None
+    if operation!='delete':
+        try:
+            rows=ads.dashboard(job_id=job)['jobs']
+            receipt=rows[0] if rows else None
+        except Exception:
+            logging.getLogger(__name__).warning('Ads action committed; status receipt temporarily unavailable job=%s',job,exc_info=True)
+    return {'id':job,'action':operation,'job':receipt}
 
 
 async def route(request):

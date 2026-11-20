@@ -1,14 +1,43 @@
 """Small queue composer using the same catalog, metadata and prompt builder as Ads."""
 from uuid import UUID, uuid4
+from threading import Lock
+from time import monotonic
+import logging
+from crm_cache import DisplayCache
+from workspace_display_cache import user_scope
 import design_publish_ad as queue
 
 
-def catalog():
+_RECORDS = DisplayCache(limit=8, byte_limit=8_000_000)
+_RECORDS_LOCK = Lock()
+
+
+def records(user=None, *, refresh=False):
+    """Share one short-lived catalog read across opening, retrying and submitting."""
+    import ads_page as ads
+    key = user_scope(user)
+    with _RECORDS_LOCK:
+        saved = None if refresh else _RECORDS.get(key)
+        if saved is not None:
+            return saved
+        if refresh:
+            clear=getattr(ads.load_live_edition_product_rows,'clear',None)
+            if clear:clear()
+        started = monotonic()
+        value = ads.build_ads_product_selector_records(ads.load_edition_ops_product_rows())
+        # A transient empty provider result must remain immediately retryable.
+        if value:
+            _RECORDS.put(key, value, ttl=45)
+        logging.getLogger(__name__).info('ads_picker_catalog count=%s elapsed_ms=%s',len(value),round((monotonic()-started)*1000))
+        return value
+
+
+def catalog(user=None, *, refresh=False):
     import ads_page as ads
     from ads_product_catalog import recommend_new_ads_category
-    records=ads.build_ads_product_selector_records(ads.load_edition_ops_product_rows())
+    choices=records(user, refresh=refresh)
     products=[]
-    for row in records:
+    for row in choices:
         sport=recommend_new_ads_category(row['row'],row['label'])
         country=queue.country_name(row['row'].get('primary_market')) or {
             'NFL':'USA','Baseball':'USA','Basketball':'USA','NASCAR':'USA','AFL':'Australia','NRL':'Australia',
@@ -26,11 +55,10 @@ def enqueue(user, body):
     request_id=str(UUID(body.get('request_id','')))
     kind=body.get('type','Instant Experience')
     if kind!='Instant Experience': raise ValueError('Automatic ads currently support Instant Experience.')
-    rows=ads.load_edition_ops_product_rows()
-    records=ads.build_ads_product_selector_records(rows)
-    record=next((r for r in records if r['identity']==body.get('product')),None)
+    choices=records(user)
+    record=next((r for r in choices if r['identity']==body.get('product')),None)
     if not record: raise ValueError('Select a current Edition Ops product.')
-    selection=ads.resolve_ads_product_selector_value(record['identity'],records=records)
+    selection=ads.resolve_ads_product_selector_value(record['identity'],records=choices)
     sport,country=queue.check_request(user,body.get('sport'),body.get('country'))
     result=ads.build_ads_result_record(ads._product_name_from_edition_ops_row(record['row']),sport,country,kind,product_id=record['product_id'],
         product_url=record['product_url'],variation_token=request_id,
@@ -84,7 +112,8 @@ async def route(request):
     try:
         user=await run_in_threadpool(_request_user,request,required_page='Upload Companion')
         if not can_control_queues(user):raise PermissionError('Administrator required.')
-        if request.method=='GET':result=await run_in_threadpool(catalog)
+        if request.method=='GET':
+            result=await run_in_threadpool(catalog, user, refresh=request.query_params.get('refresh')=='1')
         else:
             if not request.headers.get('origin') or not _same_origin(request):raise PermissionError('Request origin rejected.')
             body=await request.json()

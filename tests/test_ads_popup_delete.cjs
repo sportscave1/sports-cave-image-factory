@@ -4,6 +4,7 @@ class Element {
   constructor() {this.children=[];this.dataset={};this.style={};this.events={};this.classList={toggle(){}};}
   focus() {this.focused=true;}
   append(...items) {for(const item of items){item.parent=this;this.children.push(item);}}
+  insertBefore(item,before) {if(item.parent)item.remove();const i=before?this.children.indexOf(before):this.children.length;item.parent=this;this.children.splice(i,0,item);}
   replaceChildren(...items) {this.children=[];this.append(...items);}
   contains(item) {return item === this || this.children.some(child=>child.contains(item));}
   setAttribute(k,v) {this[k]=v;}
@@ -63,7 +64,7 @@ install();
  await context.refresh();
  const list=nodes.get('#sc-os-ads-list');
  const first=list.children[0];
- payload.checked_at='new timestamp';await context.refresh();
+ one.updated_at='new timestamp';payload.checked_at='new timestamp';await context.refresh();
  assert.equal(list.children[0],first,'timestamp refresh must not replace pressed controls');
  const deleting=first.children[0].children[2].onclick();
  assert.equal(list.children.length,2,'clicked row disappears before POST resolves; other row and link remain');
@@ -80,7 +81,7 @@ install();
  resolveAction({ok:false,json:async()=>({error:'Delete rejected'})});
  await failing;
  assert.equal(list.children.length,2,'failed delete restores only rejected job');
- assert.equal(nodes.get('#sc-upload-notices').children[0].children[0].textContent,'Delete rejected');
+ assert.equal(nodes.get('#sc-upload-notices').children.length,0,'Ads errors stay inline and cannot cover retry controls');
  assert.equal(nodes.get('#sc-ad-message').textContent,'Delete rejected');
  state.config.uploadScope='new-account';payload.checked_at='next';await context.refresh();
  assert.equal(list.children.length,3,'local deletions cannot leak across account scopes');

@@ -1,4 +1,5 @@
 from uuid import uuid4
+from unittest.mock import Mock
 import json
 import pytest
 import ads_companion_controls as controls
@@ -52,11 +53,14 @@ def test_quick_add_uses_ads_defaults_and_deduplicates_retry(queued_store,monkeyp
     import ads_page
     monkeypatch.setattr(uploads,'can_control_queues',lambda _:True)
     monkeypatch.setattr(ads_page,'load_edition_ops_product_rows',lambda:[ROW])
-    data=quick.catalog();product=data['products'][0]
+    quick._RECORDS.invalidate()
+    loader=Mock(return_value=[ROW]);monkeypatch.setattr(ads_page,'load_edition_ops_product_rows',loader)
+    data=quick.catalog(USER);product=data['products'][0]
     assert product['sport']=='Baseball' and product['country']=='USA'
     body=dict(product=product['id'],sport=product['sport'],country='Canada',type='Instant Experience',request_id=str(uuid4()))
     first=quick.enqueue(USER,body);second=quick.enqueue(USER,body)
     assert first['id']==second['id']
+    assert loader.call_count==1
     assert len(ads.dashboard()['jobs'])==1
     assert ads.dashboard()['jobs'][0]['country']=='Canada'
     third=quick.enqueue(USER,{**body,'request_id':str(uuid4())})
@@ -88,7 +92,7 @@ def test_new_routes_require_admin_and_same_origin(monkeypatch):
     actor={'id':'fixture'}
     monkeypatch.setattr(files_upload_api,'_request_user',lambda *args,**kw:actor)
     monkeypatch.setattr(uploads,'can_control_queues',lambda user:bool(user.get('admin')))
-    monkeypatch.setattr(quick,'catalog',lambda:{'products':[]})
+    monkeypatch.setattr(quick,'catalog',lambda *args,**kwargs:{'products':[]})
     client=TestClient(Starlette(routes=[Route(path,endpoint,methods=methods) for path,endpoint,methods in uploads.ROUTES]))
     base='/api/staff-product-uploads/'
     assert client.get(base+'ad-quick-add').status_code==403
@@ -98,3 +102,82 @@ def test_new_routes_require_admin_and_same_origin(monkeypatch):
     for endpoint in ('ad-quick-add','ad-control'):
         assert client.post(base+endpoint,json={}).status_code==403
         assert client.post(base+endpoint,json={},headers={'origin':'https://untrusted.test'}).status_code==403
+
+
+def test_deleted_job_cannot_be_restored_by_late_cancel_or_play(queued_store,monkeypatch):
+    monkeypatch.setattr(uploads,'can_control_queues',lambda _:True)
+    uploads.pair(USER);key=job()
+    assert controls.action(USER,key,'delete')['job'] is None
+    assert controls.action(USER,key,'cancel')['action']=='delete'
+    assert controls.action(USER,key,'delete')['action']=='delete'
+    with pytest.raises(ValueError,match='removed'):
+        controls.action(USER,key,'play')
+    assert ads.dashboard()['jobs']==[]
+
+
+def test_control_returns_exact_receipt_and_cached_status_can_confirm_it(queued_store,monkeypatch):
+    monkeypatch.setattr(uploads,'can_control_queues',lambda _:True)
+    uploads.pair(USER);first=job()
+    second=queue.enqueue(USER,brief(),{'row':ROW},request_key=str(uuid4()))['id']
+    receipt=controls.action(USER,first,'cancel')['job']
+    assert receipt['id']==first and receipt['stage']=='cancelled'
+    assert receipt['control_action']=='cancel' and not receipt['can_cancel']
+    assert [r['id'] for r in ads.dashboard(job_id=second)['jobs']]==[second]
+
+
+def test_product_records_empty_retry_refresh_and_account_scope(monkeypatch):
+    import ads_page
+    quick._RECORDS.invalidate()
+    loader=Mock(side_effect=[[],[ROW],[ROW],[ROW]])
+    monkeypatch.setattr(ads_page,'load_edition_ops_product_rows',loader)
+    assert not quick.catalog(USER)['products']
+    data=quick.catalog(USER)
+    assert data['products'] and loader.call_count==2
+    data['products'][0]['name']='changed by client'
+    assert quick.catalog(USER)['products'][0]['name']!='changed by client'
+    assert loader.call_count==2
+    quick.catalog(USER,refresh=True)
+    assert loader.call_count==3
+    quick.catalog({**USER,'session_version':2})
+    assert loader.call_count==4
+
+
+def test_committed_stop_is_success_even_if_status_receipt_read_fails(queued_store,monkeypatch):
+    monkeypatch.setattr(uploads,'can_control_queues',lambda _:True)
+    uploads.pair(USER);key=job()
+    def unavailable(**kwargs):raise RuntimeError('Synthetic status read outage')
+    monkeypatch.setattr(ads,'dashboard',unavailable)
+    assert controls.action(USER,key,'cancel')==dict(id=key,action='cancel',job=None)
+    assert controls.stopped(key)
+    assert controls.action(USER,key,'delete')==dict(id=key,action='delete',job=None)
+
+
+def test_transient_catalog_database_error_is_not_cached(monkeypatch):
+    from unittest.mock import MagicMock
+    import ads_product_catalog as catalog
+    import supabase_backend
+    conn=MagicMock();conn.__enter__.return_value=conn
+    conn.cursor.return_value.__enter__.return_value.fetchall.return_value=[ROW]
+    connect=Mock(side_effect=[OSError('Synthetic transient read failure'),conn])
+    monkeypatch.setattr(supabase_backend,'is_configured',lambda:True)
+    monkeypatch.setattr(supabase_backend,'connect',connect)
+    catalog.load_live_edition_product_rows.clear()
+    try:
+        assert catalog.load_live_edition_product_rows()==[]
+        assert catalog.load_live_edition_product_rows()==[ROW]
+        assert catalog.load_live_edition_product_rows()==[ROW]
+        assert connect.call_count==2
+    finally:catalog.load_live_edition_product_rows.clear()
+
+
+def test_late_stop_keeps_completed_posting_receipt_truthful(queued_store,monkeypatch):
+    monkeypatch.setattr(uploads,'can_control_queues',lambda _:True)
+    uploads.pair(USER);key=job()
+    with queued_store() as conn,conn.cursor() as cur:
+        cur.execute('SELECT value FROM app_settings WHERE key=%s',(ads.PREFIX+key,))
+        value=cur.fetchone()['value']
+    value.update(stage='complete',posting_id=str(uuid4()))
+    ads.write(ads.PREFIX+key,value)
+    receipt=controls.action(USER,key,'cancel')['job']
+    assert receipt['stage']=='complete' and receipt['posting_id']==value['posting_id']
+    assert not controls.stopped(key)

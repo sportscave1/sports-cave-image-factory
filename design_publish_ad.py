@@ -104,7 +104,7 @@ def settings(enabled=None):
         return {'enabled': _enabled(cur)}
 
 
-def dashboard():
+def dashboard(job_id=None):
     from companion_read_connection import read_connection
     with read_connection(connect) as conn, conn.cursor() as cur:
         enabled = _enabled(cur)
@@ -118,11 +118,12 @@ def dashboard():
             FROM app_settings a LEFT JOIN product_upload_staff_jobs j ON a.key=%s || j.id::text
             WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
               AND NOT EXISTS (SELECT 1 FROM app_settings c WHERE c.key='ads_job_control:' || (a.value->>'upload') AND c.value->>'action'='delete')
+              AND (%s::text IS NULL OR a.key=%s)
             ORDER BY CASE a.value->>'stage'
                 WHEN 'preparing' THEN 0 WHEN 'opening' THEN 0 WHEN 'generating' THEN 0 WHEN 'posting' THEN 0
                 WHEN 'waiting' THEN 1 ELSE 2 END,
                 CASE WHEN a.value->>'stage'='waiting' THEN a.updated_at END,
-                a.updated_at DESC, a.key LIMIT 100""", (PREFIX, PREFIX + '%'))
+                a.updated_at DESC, a.key LIMIT 100""", (PREFIX, PREFIX + '%', job_id, PREFIX + job_id if job_id else None))
         jobs = []
         for row in cur.fetchall():
             value = row['value']
@@ -131,8 +132,8 @@ def dashboard():
                 value.update(stage='cancelled',detail='Automation stopped. Already-started Meta operations must be reviewed in Posting.')
             entry = dict(public(value), id=value['upload'], updated_at=row['updated_at'].isoformat(),
                          title=row['title'], country=value['country'], sport=value['sport'],
-                         stage=value['stage'], chat_url=value.get('chat_url'), targeting=value.get('targeting'),
-                         can_play=value['stage']!='complete', can_cancel=value['stage'] not in ('complete','cancelled'),
+                         stage=value['stage'], control_action=row['control'] or '', chat_url=value.get('chat_url'), targeting=value.get('targeting'),
+                         can_play=value['stage'] in ('waiting','failed','cancelled'), can_cancel=value['stage'] not in ('complete','cancelled'),
                          resumable=value['stage'] in ('failed','generating') and bool(value.get('chat_url') and value.get('folder')) and not value.get('posting_id'))
             if value['stage'] == 'waiting' and row['upload_stage'] == 6:
                 entry['label'] = 'Ready for the ad queue' if enabled else 'Ready · queue paused'

@@ -67,3 +67,37 @@ Render for testing. The task was advanced to the latest production revision
 Release uses the existing primary service's automatic deployment from main;
 no Blueprint sync, service creation, production configuration change or desktop
 companion installation is required. Live ad generation is left to the user's test.
+
+
+## Status-bar reliability update — 21 November 2026
+
+Ads rows retain their buttons while progress and timestamps change. Stop displays
+its pending state immediately; Delete removes the row immediately and restores it
+if rejected. Confirmed action receipts override older header snapshots. Delete
+remains authoritative if a late Cancel arrives. Errors stay inline so a toast
+cannot cover the retry controls. Action requests have a 15-second timeout and
+release their buttons without waiting for the next status poll. Existing chats,
+files and Posting receipts remain available; stopping automation cannot reverse
+Meta operations already accepted.
+
+Quick Add keeps the typed query while products load, shares one in-flight read,
+and supports Reload products after an error or empty result. Search normalizes
+spacing, punctuation and accents, accepts words in any order and renders at most
+80 matching options at once. Selecting a result preserves its exact product ID;
+duplicate display names are never silently substituted. The dropdown overlays the
+form instead of moving Add to queue during a click. Retries after an uncertain
+submission reuse the same request ID to avoid duplicate jobs.
+
+Catalog records have a bounded, account-scoped 45-second cache shared by the picker
+and submission. Successful live catalog reads retain their existing five-minute
+cache; failed reads are no longer cached as empty results. Reload explicitly
+refreshes the live catalog. Logs `ads_picker_catalog` and `ads_queue_control` record
+read duration/count and committed action IDs without product/customer content.
+
+Regression coverage includes `test_ads_status_reliability_browser.py`,
+`test_ads_companion_controls.py`, `test_ad_quick_picker_browser.py`,
+`test_ads_queue_popup_browser.py` and `test_ads_popup_delete.cjs`, using synthetic
+endpoints or disposable PostgreSQL. A broader legacy prompt test,
+`AdsPageTests.test_added_categories_have_specific_outputs_for_all_campaign_sections`,
+has existing Instant Experience assertions that also fail with the previous
+release's catalog module; those prompt requirements are outside this change.
