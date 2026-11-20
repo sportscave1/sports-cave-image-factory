@@ -53,8 +53,15 @@ def _read(query, token, post):
         headers=headers, json={"query": query}, timeout=(5, 40))
     if response.status_code != 200:
         codes = set()
+        provider_message = ""
         try:
-            for detail in response.json().get("error", {}).get("details", []):
+            error_payload = response.json().get("error", {})
+            if isinstance(error_payload, dict):
+                provider_message = str(error_payload.get("message") or "")
+            for detail in error_payload.get("details", []):
+                reason = str(detail.get("reason") or "")
+                if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", reason):
+                    codes.add(reason)
                 for error in detail.get("errors", []):
                     codes.update(str(v) for v in error.get("errorCode", {}).values()
                                  if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", str(v)))
@@ -66,8 +73,14 @@ def _read(query, token, post):
             raise AdsReportingError("reconnect_required", "Reconnect Google Ads access.")
         if response.status_code == 429:
             raise AdsReportingError("rate_limited", "Google Ads reporting is rate limited. Retry later.")
+        # Fixed queries contain no customer contacts. Never reflect OAuth credentials
+        # or provider contact addresses, even in diagnostic messages.
+        detail = ""
+        if response.status_code == 400:
+            detail = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[redacted]",
+                            provider_message.replace(token, "[redacted]"))[:600]
         raise AdsReportingError("api_access_required" if response.status_code == 403 else "report_failed",
-                                f"Google Ads could not return this report (HTTP {response.status_code}; {', '.join(sorted(codes)) or 'no Ads error code'}). Check Cloud API access and account permissions.")
+                                f"Google Ads could not return this report (HTTP {response.status_code}; {', '.join(sorted(codes)) or 'no Ads error code'}). {detail}".strip())
     payload = response.json()
     if not isinstance(payload, list):
         raise AdsReportingError("invalid_response", "Google Ads returned an unexpected response.")

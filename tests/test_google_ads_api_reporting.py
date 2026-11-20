@@ -108,6 +108,18 @@ def test_bad_date_result_never_becomes_zero_report(auth):
         ads.fetch(START, END, store=store(), post=post, now=NOW)
 
 
+def test_generic_bad_request_diagnostic_redacts_credentials(auth):
+    post = Mock(return_value=SimpleNamespace(status_code=400, json=lambda: {"error": {
+        "message": "Unsupported setting synthetic-token owner@example.test",
+        "details": [{"reason": "INVALID_ARGUMENT"}]}}))
+    with pytest.raises(ads.AdsReportingError) as error:
+        ads.fetch(START, END, store=store(), post=post, now=NOW)
+    assert "Unsupported setting" in str(error.value)
+    assert "INVALID_ARGUMENT" in str(error.value)
+    assert "synthetic-token" not in str(error.value)
+    assert "owner@example.test" not in str(error.value)
+
+
 def test_oauth_ads_scope_is_explicit_and_seo_keeps_readonly_default():
     config = {"client_id": "synthetic", "redirect_uri": "https://example.com/callback"}
     regular = parse_qs(urlparse(google_seo.build_authorization_url("state", config)).query)["scope"][0]
