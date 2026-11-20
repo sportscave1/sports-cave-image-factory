@@ -105,6 +105,21 @@ class DeliveryFreshnessTests(TestCase):
         self.assertEqual(engine.advance.call_count, 2)
         self.assertFalse(any(call.args[0].startswith('UPDATE') for call in self.store.q.call_args_list))
 
+    def test_unexpected_send_error_records_code_locations_without_private_values(self):
+        engine = Engine(self.store, Mock(), config=Mock(enabled=True))
+        row = {'id':'fixture-send','enrollment_id':'fixture-journey',
+               'shopify_customer_id':'fixture-customer','test_send':False}
+        self.store.claim_send.return_value = row
+        self.store.q.return_value = {'id':'fixture-journey'}
+        engine.validate = Mock(side_effect=TypeError('private recovery token must not be logged'))
+        with self.assertLogs('crm_engine', level='WARNING') as logs:
+            self.assertTrue(engine.send_one())
+        detail = self.store.set_state.call_args.args[1]
+        self.assertTrue(detail['locations'])
+        self.assertTrue(all(set(f)=={'file','line','function'} for f in detail['locations']))
+        self.assertNotIn('private recovery token', str(detail)+str(logs.output))
+        self.store.defer_send.assert_called_once_with(row)
+
     def test_abandoned_diagnostic_uses_real_completed_delivery_work(self):
         import crm_automation_diagnostic_ui as ui
         health = {'checked_at': now().isoformat(), 'status': 'ok'}
