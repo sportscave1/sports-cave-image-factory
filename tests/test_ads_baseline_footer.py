@@ -85,7 +85,7 @@ def test_baseline_sections_and_live_receipt():
                '6137aef6ef1b942197a3aa91'}  # Authorized footer, creative review and room-role updates.
     rows = [p for p in catalog() if p.category == 'Ads']
     assert set(original).issubset({p.key for p in rows})
-    assert all(p.path == 'ads_ie_two_line.py' for p in rows if p.key not in original)
+    assert all(p.path in ('ads_ie_two_line.py', 'ads_reserve_scenes.py') for p in rows if p.key not in original)
     for p in rows:
         if p.key in original and p.key not in allowed:
             assert digest(p.text) == original[p.key], p.symbol or p.path

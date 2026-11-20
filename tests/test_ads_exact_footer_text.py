@@ -25,12 +25,14 @@ def test_exact_footer_baselines_reach_every_image_and_final_export(country):
         assert '/fixture/'+name in prompt
 
 
-def test_reserve_is_one_missing_slot_and_never_a_safety_retry():
+def test_reserves_are_bounded_missing_slots_and_never_safety_retries():
+    from ads_reserve_scenes import RULES
+    RULES = ' '.join(RULES.split())
     assert 'three-cover Instant Experience task, never Carousel or Single Image' in RULES
     assert 'provider explicitly identifies a retryable technical failure' in RULES
-    assert 'at most one reserve-room attempt' in RULES
-    assert 'private collector study or a sunlit reading lounge' in RULES
-    assert 'retain its camera role, product scale, footer wording, route identity, filename and CSV row' in RULES
+    assert 'at most two reserve attempts in the pack' in RULES
+    assert 'COLLECTOR MAN CAVE' in RULES and 'DARK COLLECTOR STUDIO APARTMENT' in RULES
+    assert 'Retain its camera role, product scale, footer wording, route identity, filename and CSV row' in RULES
     assert 'never an additional fourth cover' in RULES
     assert 'safety rejection, moderation_blocked result or unexplained rejection never authorizes' in RULES
     assert 'recovery of the existing bytes, not another image generation' in RULES

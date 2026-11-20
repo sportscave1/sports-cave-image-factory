@@ -61,4 +61,4 @@ def test_initial_generation_and_review_are_separate_from_download_recovery():
         assert 'initial image for each ad' in prompt
         assert 'Deliver exactly three final covers' in prompt
         assert 'downloaded/display error requires recovery of the existing bytes' in prompt
-        assert 'moderation_blocked result or unexplained rejection never authorizes' in prompt
+        assert 'moderation_blocked result or unexplained rejection never authorizes' in ' '.join(prompt.split())

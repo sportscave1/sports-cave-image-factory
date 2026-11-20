@@ -1,0 +1,17 @@
+# Two conditional reserve scenes
+
+Task 20261120-ab1c4297, owner codex-ad-reserves-20261120-11. User authorized two optional backup scenes and Git/Render release while preserving the existing ads and two-line footer.
+
+The previous single generic collector-study/reading-lounge reserve is replaced with two dormant specifications. Reserve A is a collector man cave with one or two small, softly out-of-focus hanging sports keepsakes at the distant/peripheral edge, with the supplied edition remaining the hero. Reserve B is a dark collector studio apartment with restrained leather/timber details, practical/window light and a clear dominant edition.
+
+Complete the three initial assigned attempts first. Only an original slot with no image and an explicitly provider-identified retryable technical failure is eligible. Allocate A to the first eligible missing slot and B only to a second distinct eligible missing slot, in original Ad 1/2/3 order. One reserve attempt per eligible slot, two in the pack; B is not another retry for A. A failed reserve preserves successes and reports the unresolved slot. Safety/moderation/unexplained rejection never triggers replacement, reworded retry or changed reference; download/display errors use original-byte recovery. This does not guarantee completion after a moderation block, nor claim a cause for the user's latest block.
+
+Preserve the missing slot's exact reference, camera, physical scale, frame, glazing, 100-variation title, two-line footer and saved second-line/written-headline complement. Keep the same 160 px footer, shimmer, type, copy framework, targeting, filename, route/CSV row and final-review/delivery workflow. No Ad 4/5 deliverable or generation when all three images already exist. The normal initial image calls do not contain the alternative reserve descriptions. Existing creative review is unchanged; reserve handling cannot replace a successful slot.
+
+The complete pre-existing review text before the reserve tail is unchanged apart from trailing whitespace. Source and receipt tests preserve all previous Ads sections, the two-line footer and original v1.0 history. No Companion binary, pairing, queue, CSV schema, Meta campaign or infrastructure behavior changes.
+
+Updated/reopened live project Instructions and verified their unchanged pre-reserve prefix. Settings use docs/meta_ads_project/PROJECT_INSTRUCTIONS.txt (under the settings text limit). The full aligned source is PROJECT_ROLE_AND_TASK_PRIORITY_TWO_RESERVES_V2.txt, canonically stored as PROJECT_ROLE_AND_TASK_PRIORITY.txt. Its preview was checked for both scenes, technical-only eligibility and correct successful-slot scope. Removed the superseded TWO_LINE_V1 role association and temporary TWO_RESERVES_V1 association after verifying V2; retained typography and image assets.
+
+84 focused Python/browser tests passed, including all five markets, reserve placement/isolation, two-line/Meta mapping, stable saved selections, original review prefix, source/manifest/library, downloads, packaging and existing handoff. Nine Node download/receipt tests passed. Topology and whitespace checks passed. Prompt-boundary tests are not evidence that a model has executed a reserve or that a generated image passed visual review; no live image generation/posting run was started.
+
+The new prompt revision retains the Baseline 2.0 two-line label. Earlier versions, including original v1.0, remain archived and inactive. Only the existing canonical sports-cave-os Render service is used.

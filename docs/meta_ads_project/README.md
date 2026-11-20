@@ -1,3 +1,9 @@
+Latest: task 20261120-ab1c4297 replaces the single generic technical reserve
+with conditional collector-man-cave and dark-studio-apartment replacements.
+Settings use PROJECT_INSTRUCTIONS.txt; the full role source uploaded is
+PROJECT_ROLE_AND_TASK_PRIORITY_TWO_RESERVES_V2.txt. Typography is unchanged.
+See [the conditional-reserve release](../ADS_TWO_CONDITIONAL_RESERVES_20261120.md).
+
 Latest: task 20261120-460f491b withdraws the Beta footer and activates the
 Baseline 2.0 two-line variant. Line 1 remains the 100-variation title; line 2
 randomly shows its FOMO sentence or Claim Your Edition, and the unused line is
