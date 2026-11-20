@@ -51,7 +51,7 @@ async def page(request):
                 rows = await run_in_threadpool(MarketplaceStore().listings, public=True)
             except Exception:
                 rows, unavailable = [], True
-            document = views.home(config, rows, request.query_params, nonce, unavailable)
+            document = views.home(config, rows, request.query_params, nonce, unavailable, browse=path == core.BASE_PATH + '/browse')
         headers = security(nonce)
         headers['X-Sports-Cave-Marketplace-Release'] = config['release_id']
         if path in (core.BASE_PATH, core.BASE_PATH + '/terms'):
@@ -73,8 +73,11 @@ def unavailable_page(nonce, status):
 async def asset(request):
     name = request.path_params['asset']
     paths = {'marketplace.css': (ASSET_ROOT / 'marketplace.css', 'text/css'),
+             'marketplace-home.css': (ASSET_ROOT / 'marketplace-home.css', 'text/css'),
+             'collector-room-1600.webp': (ASSET_ROOT / 'collector-room-1600.webp', 'image/webp'),
+             'collector-room-800.webp': (ASSET_ROOT / 'collector-room-800.webp', 'image/webp'),
              'marketplace.js': (ASSET_ROOT / 'marketplace.js', 'text/javascript'),
-             'logo.webp': (core.ROOT / 'assets' / 'sports-cave-logo-landscape-gold-transparent.webp', 'image/webp')}
+             'logo.webp': (ASSET_ROOT / 'logo-320.webp', 'image/webp')}
     if name not in paths:
         return Response(status_code=404)
     path, media = paths[name]
@@ -192,7 +195,7 @@ def form_error(error, headers):
 async def sitemap(request):
     try:
         rows = await run_in_threadpool(MarketplaceStore().listings, public=True)
-        paths = [core.BASE_PATH, core.BASE_PATH + '/sell', core.BASE_PATH + '/terms'] + [core.listing_url(row) for row in rows]
+        paths = [core.BASE_PATH, core.BASE_PATH + '/browse', core.BASE_PATH + '/sell', core.BASE_PATH + '/terms'] + [core.listing_url(row) for row in rows]
         urls = ''.join('<url><loc>' + xml_escape(core.PUBLIC_ORIGIN + p) + '</loc></url>' for p in paths)
         return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + urls + '</urlset>', media_type='application/xml', headers={'Cache-Control': 'no-store'})
     except Exception:
@@ -207,6 +210,7 @@ async def robots(request):
 ROUTES = (
     (BASE := core.BASE_PATH, page, ('GET', 'HEAD')),
     (BASE + '/', page, ('GET', 'HEAD')),
+    (BASE + '/browse', page, ('GET', 'HEAD')),
     (BASE + '/sell', page, ('GET', 'HEAD')),
     (BASE + '/terms', page, ('GET', 'HEAD')),
     (BASE + '/item/{listing_id}', page, ('GET', 'HEAD')),

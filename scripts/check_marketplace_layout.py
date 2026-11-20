@@ -53,7 +53,7 @@ with patch.object(api, 'MarketplaceStore', return_value=store), TestClient(app, 
         assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
         page.screenshot(path=str(OUT / f'home-{width}.png'), full_page=True)
         results.append({'page': 'home', 'width': width, 'height': page.locator('body').bounding_box()['height'], 'overflow': False})
-    page.get_by_role('link', name='Sell an item', exact=True).click()
+    page.locator('.header-actions a[href="/marketplace/sell"]').click()
     page.locator('input[name=price]').fill('200')
     assert '190.00' in page.locator('#fee-quote').inner_text()
     page.screenshot(path=str(OUT / 'sell-320.png'), full_page=True)

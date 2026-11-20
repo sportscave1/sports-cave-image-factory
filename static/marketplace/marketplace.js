@@ -1,5 +1,16 @@
 'use strict';
 (() => {
+  for (const menu of document.querySelectorAll('.browse-menu')) {
+    document.addEventListener('click', event => {
+      if (menu.open && !menu.contains(event.target)) menu.open = false;
+    });
+    menu.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        menu.open = false;
+        menu.querySelector('summary').focus();
+      }
+    });
+  }
   const price = document.querySelector('#price');
   if (price) price.addEventListener('input', () => {
     const value = Number(price.value);

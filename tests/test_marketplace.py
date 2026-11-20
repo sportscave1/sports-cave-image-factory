@@ -239,6 +239,54 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get('/marketplace/assets/marketplace.css', headers={'If-None-Match': response.headers['etag']}).status_code, 304)
 
+    def test_home_has_responsive_priority_hero_and_real_search_schema(self):
+        import re
+        response = self.client.get('/marketplace')
+        self.assertIn('class="hero-photo"', response.text)
+        self.assertIn('fetchpriority="high"', response.text)
+        self.assertIn('collector-room-800.webp 800w', response.text)
+        self.assertIn('action="/marketplace/browse"', response.text)
+        self.assertIn('class="browse-menu"', response.text)
+        self.assertEqual(len(re.findall(r'<h1\b', response.text)), 1)
+        graph = json.loads(re.search(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', response.text, re.S).group(1))
+        website = next(row for row in graph['@graph'] if row['@type'] == 'WebSite')
+        self.assertEqual(website['potentialAction']['@type'], 'SearchAction')
+        self.assertNotIn('stillwhite', response.text.lower())
+        self.assertNotIn('5 Star Reviews', response.text)
+
+    def test_browse_has_its_own_canonical_and_functional_price_sort(self):
+        for title, price in (('Higher price jersey', '500'), ('Lower price jersey', '20')):
+            row = core.submission({**sample(), 'title': title, 'price': price})
+            key = self.store.submit(row, [photograph(), photograph()])['id']
+            self.store.moderate(key, 'published', 1, 'admin')
+        low = self.client.get('/marketplace/browse?sort=price_low&sport=NRL')
+        high = self.client.get('/marketplace/browse?sort=price_high&sport=NRL')
+        self.assertEqual(low.status_code, 200)
+        self.assertNotIn('class="hero-photo"', low.text)
+        self.assertIn('href="' + core.PUBLIC_ORIGIN + '/marketplace/browse"', low.text)
+        self.assertLess(low.text.index('<h3>Lower price jersey'), low.text.index('<h3>Higher price jersey'))
+        self.assertLess(high.text.index('<h3>Higher price jersey'), high.text.index('<h3>Lower price jersey'))
+        self.assertIn('name="sport" value="NRL"', low.text)
+        self.assertIn('noindex,follow', low.text)
+
+    def test_editorial_assets_have_small_payloads_and_keep_source_private(self):
+        for asset, limit in (('collector-room-1600.webp', 75000), ('collector-room-800.webp', 25000), ('logo.webp', 8000)):
+            response = self.client.get('/marketplace/assets/' + asset)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers['content-type'], 'image/webp')
+            self.assertLess(len(response.content), limit)
+        self.assertEqual(self.client.get('/marketplace/assets/marketplace-home.css').status_code, 200)
+        self.assertEqual(self.client.get('/marketplace/assets/site.json').status_code, 404)
+        self.assertEqual(self.client.get('/marketplace/assets/original.png').status_code, 404)
+
+    def test_filtered_search_keeps_facets_and_escapes_query_markup(self):
+        response = self.client.get('/marketplace/browse', params={'q': '<script>alert(1)</script>', 'category': 'cards', 'sport': 'NRL'})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('<script>alert(1)</script>', response.text)
+        self.assertIn('&lt;script&gt;', response.text)
+        self.assertIn('name="category" value="cards"', response.text)
+        self.assertIn('/marketplace/browse', self.client.get('/marketplace/sitemap.xml').text)
+
 
 class PublishTests(unittest.TestCase):
     def client(self):
