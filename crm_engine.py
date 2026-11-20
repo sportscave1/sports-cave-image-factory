@@ -314,9 +314,15 @@ class Engine:
                 self.store.set_state('checkout-send-error:'+str(row['id']),{'message':str(exc)})
         except Exception as exc:
             from email_service import EmailDeliveryError
+            from pathlib import Path
+            from traceback import extract_tb
+            # Code locations only: exception messages, source lines and local
+            # values can contain customer data or recovery URLs.
+            locations=[{'file':Path(f.filename).name,'line':f.lineno,'function':f.name}
+                       for f in extract_tb(exc.__traceback__)[-6:]]
             if enrollment:
                 message=exc.safe_message if isinstance(exc,EmailDeliveryError) else ('Verification failed: '+type(exc).__name__)
-                try:self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None)})
+                try:self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None),'locations':locations})
                 except Exception:logging.getLogger(__name__).warning('automation_error_detail_deferred send_id=%s',row['id'])
             if submitting:
                 # No automatic replay after potentially accepted submission, including process crashes.
@@ -328,7 +334,7 @@ class Engine:
                 if enrollment and enrollment.get('checkout_key'):
                     self.store.set_state('checkout-send-attempt:'+str(row['id'])+':'+str(row['attempts']),{'status':'REJECTED' if known_rejection else 'UNCERTAIN','at':self.clock().isoformat(),'enrollment_id':str(enrollment['id']),'http_status':getattr(exc,'status_code',None)})
             else:self.store.defer_send(row)
-            logging.getLogger(__name__).warning('crm_send_held phase=%s type=%s','submission' if submitting else 'revalidation',type(exc).__name__)
+            logging.getLogger(__name__).warning('crm_send_held phase=%s type=%s locations=%s','submission' if submitting else 'revalidation',type(exc).__name__,locations)
         return True
     def stop(self,enrollment,reason):
         status='RECOVERED' if reason=='recovered' else 'STOPPED'
