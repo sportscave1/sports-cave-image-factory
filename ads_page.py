@@ -9074,7 +9074,7 @@ def ensure_current_ads_result_prompt(result):
         workflow_mode=workflow_mode,
     )
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
-    content_current = COMPACT_FOOTER_RULES in str(result["master_prompt"]) and (not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"])))
+    content_current = (ie_badge.active(result["master_prompt"]) or COMPACT_FOOTER_RULES in str(result["master_prompt"])) and (not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"])))
     if is_standard_ie and content_current and ADS_IE_COMBINED_EXECUTION_VERSION not in str(result["master_prompt"]):
         return result  # New description defaults apply only to a fresh pack, never saved copy.
     if result.get("prompt_contract_version") == expected_version and content_current:

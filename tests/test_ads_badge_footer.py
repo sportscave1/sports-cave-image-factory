@@ -16,6 +16,7 @@ def test_badge_profile_isolated_from_normal_footers_and_delivery(country):
     record = ads.build_ads_result_record('Synthetic Collector Edition', 'NBA', country,
         'Instant Experience', product_metadata={'edition_limit': 100}, variation_token='badge-footer')
     prompt = record['master_prompt']
+    assert ads.ensure_current_ads_result_prompt(record) is record
     assert badge.VERSION in prompt
     assert badge.SELECTION_RULES in prompt
     assert prompt.count('\nHEADLINE: ') == 3
