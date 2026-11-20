@@ -26,7 +26,7 @@ MODULES = {
     'Upload': ('product_upload_prompt_core.py', 'product_upload_compact.py', 'product_upload_modes.py'),
     'Ads': ('ads_page.py', 'ads_copy_optimisation.py', 'ads_carousel_winner.py',
             'ads_final_delivery.py', 'ads_footer.py', 'ads_generation_review.py',
-            'ads_ie_legacy_description.py', 'ads_ie_badge.py'),
+            'ads_ie_legacy_description.py', 'ads_ie_two_line.py'),
 }
 
 

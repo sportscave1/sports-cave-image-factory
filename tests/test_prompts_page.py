@@ -38,12 +38,13 @@ class PageTests(unittest.TestCase):
         page = AppTest.from_string(source, default_timeout=30).run()
         self.assertFalse(page.exception)
         picker = next(r for r in page.radio if r.label == 'Open a version')
-        self.assertIn('v2.1 · Baseline 2.1 Beta · Live', picker.options)
-        self.assertIn('v2.0 · Baseline 2.0 · Release', picker.options)
-        picker.set_value('ads-baseline-v1-recovery-clarity-20261120').run()
+        self.assertIn('v2.0 \u00b7 Baseline 2.0 - Two-line footer \u00b7 Live', picker.options)
+        self.assertIn('v1.0 \u00b7 Original Baseline 1.0 (archive) \u00b7 Baseline', picker.options)
+        picker.set_value('9c5d0152a0774ab28468902c952dfc0c').run()
         self.assertFalse(page.exception)
         self.assertFalse(page.error)
-        self.assertIn('PREMIUM COMPACT FOOTER', page.text_area[0].value)
+        import hashlib
+        self.assertEqual(hashlib.sha256(page.text_area[0].value.encode()).hexdigest(), '941229c51de869378dfacaeaf85b64fc7e3a916fa5bfff5840c96d9490077663')
         self.assertNotIn('AD 2 ONLY — SINGLE-LINE GUNMETAL BADGE FOOTER', page.text_area[0].value)
         self.assertTrue(next(b for b in page.button if b.label == 'Activate version').disabled)
 

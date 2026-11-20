@@ -1,3 +1,10 @@
+Latest: task 20261120-460f491b withdraws the Beta footer and activates the
+Baseline 2.0 two-line variant. Line 1 remains the 100-variation title; line 2
+randomly shows its FOMO sentence or Claim Your Edition, and the unused line is
+the written Meta headline. Uploaded source names now end in TWO_LINE_V1.txt.
+Original v1.0 is restored to history only. See
+[the release record](../ADS_BASELINE_2_0_TWO_LINE_20261120.md).
+
 Latest: task 20261120-1aa52674 aligns the live project Instructions and two
 canonical text sources with Baseline 2.1 Beta's per-ad profiles. Ads 1/3 retain
 the normal three-line footer; Ad 2 uses the original gunmetal PNG and smaller
