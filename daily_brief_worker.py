@@ -14,6 +14,7 @@ import home_design_refresh as refresh
 import home_meta_morning_brief as meta
 import home_sports_morning_brief as sports
 import os_accounts
+import google_ads_reviews
 from sports_sales_calendar import sydney_date
 from supabase_backend import connect, get_app_setting
 
@@ -296,6 +297,8 @@ def main():
         except Exception as error:
             LOG.warning("daily_brief_reconciliation_failed type=%s", type(error).__name__)
         try:
+            if google_ads_reviews.process_one():
+                continue
             if process_one():
                 continue
         except Exception as error:

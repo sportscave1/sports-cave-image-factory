@@ -522,10 +522,10 @@ class ExistingTargetClientTests(unittest.TestCase):
 
 
 class PostingNavigationTests(unittest.TestCase):
-    def test_meta_review_is_last_ads_child(self):
+    def test_google_follows_meta_review_in_ads(self):
         self.assertEqual(
             ads_navigation.ADS_ROUTES,
-            ("Ads", "Creative Refresh", "Posting", "Meta Review"),
+            ("Ads", "Creative Refresh", "Posting", "Meta Review", "Google"),
         )
         self.assertEqual(ads_navigation.ADS_NAV_LABELS["Ads"], "New Ads")
 

@@ -24,6 +24,8 @@ from chatgpt_reporting import meta_daily, orders_daily, reporting_day
 from crm_meta_history import meta_ad_history, meta_history_args
 from crm_growth_reporting import growth_report, published_sports_edition, refresh_traffic
 import daily_brief_worker as briefs
+import google_ads_reviews
+import google_ads_reporting
 from supabase_backend import connect
 
 ISSUER = "https://sports-cave-image-factory.onrender.com"
@@ -54,6 +56,8 @@ BRIEF_SUBMIT = {"type": "object", "properties": {"kind": BRIEF_KIND, "edition": 
                 "required": ["kind", "edition"], "additionalProperties": False}
 BRIEF_STATUS = {"type": "object", "properties": {"kind": BRIEF_KIND},
                 "required": ["kind"], "additionalProperties": False}
+GOOGLE_SUBMIT = {"type": "object", "properties": {"edition": {"type": "object"}},
+                 "required": ["edition"], "additionalProperties": False}
 HISTORY_INPUT = {
     "type": "object",
     "properties": {"since": DATE_PROPERTY, "until": DATE_PROPERTY, "cursor": {"type": "string"},
@@ -61,9 +65,19 @@ HISTORY_INPUT = {
     "required": ["since", "until"], "additionalProperties": False,
 }
 BRIEF_TOOLS = {
+    "submit_google_ads_review": (PUBLISH_SCOPE, "ads_google", "Sync Google weekly review",
+        "Queue a completed Friday–Thursday Google Ads review for Ads > Google. "
+        "Use AUD, separate exclusive Shopify channels from overlapping platform claims, "
+        "and null unavailable metrics. Reports are append-only by period and revision.", GOOGLE_SUBMIT),
+    "get_google_ads_reviews": (GROWTH_SCOPE, "ads_google", "Read Google weekly reviews",
+        "Read saved weekly Google workspace reviews and verified publication timestamps.", EMPTY_INPUT),
+    "get_google_ads_reporting": (GROWTH_SCOPE, "ads_google", "Read connected Google workspace sources",
+        "Read GA4 purchase-session channels, stored Shopify order totals and complete Meta ad history "
+        "for the Friday–Thursday week ending on date. Google Ads API inputs remain unavailable.", DAILY_INPUT),
     "submit_daily_home_brief": (PUBLISH_SCOPE, "dashboard", "Submit a completed Home brief",
                                "Queue today's completed Sports, Meta or Designs to Refresh edition "
-                               "for publication to Sports Cave OS Home.", BRIEF_SUBMIT),
+                               "for publication to Sports Cave OS Home. Compatibility for Google weekly reports: "
+                               "kind=meta with edition.destination=ads_google routes only to Ads > Google, never Home.", BRIEF_SUBMIT),
     "get_daily_home_brief_status": (PUBLISH_SCOPE, "dashboard", "Get Home brief publication status",
                                    "Read today's publication status for one Home brief.", BRIEF_STATUS),
 }
@@ -462,7 +476,7 @@ async def mcp(request):
             {
                 "name": name, "title": title, "description": description,
                 "inputSchema": schema,
-                "annotations": {"readOnlyHint": schema is not BRIEF_SUBMIT,
+                "annotations": {"readOnlyHint": schema not in (BRIEF_SUBMIT, GOOGLE_SUBMIT),
                                 "destructiveHint": False, "openWorldHint": False,
                                 "idempotentHint": True},
                 "securitySchemes": [{"type": "oauth2", "scopes": [scope]}],
@@ -496,7 +510,19 @@ async def mcp(request):
         try:
             if not await run_in_threadpool(_active_owner, claims, page):
                 return _challenge()
-            if schema is BRIEF_SUBMIT or schema is BRIEF_STATUS:
+            if schema is GOOGLE_SUBMIT:
+                summary = await run_in_threadpool(google_ads_reviews.enqueue, arguments["edition"], claims)
+            elif name == "get_google_ads_reviews":
+                summary = await run_in_threadpool(google_ads_reviews.report_context)
+            elif name == "get_google_ads_reporting":
+                summary = await run_in_threadpool(google_ads_reporting.connected_sources, *report_args)
+            elif (schema is BRIEF_SUBMIT and arguments.get("kind") == "meta"
+                  and isinstance(arguments.get("edition"), dict)
+                  and arguments["edition"].get("destination") == "ads_google"):
+                # Compatibility with installed connector catalogs until their next tools/list refresh.
+                # The Google publisher independently rechecks owner and Google reporting access.
+                summary = await run_in_threadpool(google_ads_reviews.enqueue, arguments["edition"], claims)
+            elif schema is BRIEF_SUBMIT or schema is BRIEF_STATUS:
                 kind = arguments["kind"]
                 if not isinstance(kind, str) or kind not in briefs.BRIEFS:
                     raise ValueError("Choose a known brief type.")
