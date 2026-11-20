@@ -11,9 +11,9 @@ def test_delivery_and_each_call_keep_assigned_support_and_metallic_seam(country)
     record=ads.build_ads_result_record('Synthetic Cricket Edition','Cricket',country,'Instant Experience',
         product_metadata={'edition_limit':100},variation_token='project-alignment')
     prompt=delivery_prompt(record,'Synthetic original reference','/fixture','fixture-job')
-    assert prompt.count('\nSUPPORTING LINE: ')==3
+    assert prompt.count('\nSUPPORTING LINE: ')==2
     for row in record['product_metadata']['instant_experience_footer_selections']:
-        assert '\nSUPPORTING LINE: '+row['supporting_line'] in prompt
+        assert row['supporting_line'] in prompt
     for forbidden in ('Render no supporting sentence','No supporting sentence on the image',
                       'exactly two footer lines','supporting_line=\'\'',
                       'no decorative flourishes, borders, glow,'):

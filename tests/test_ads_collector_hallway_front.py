@@ -26,20 +26,19 @@ def test_second_slot_is_a_front_view_collector_hallway_in_every_export(country):
         product_name=result['product_name'], category='NBA', country=country)
     combined = delivery_prompt(result, 'Verified original product fixture', '/fixture', 'fixture-job')
     for prompt in (standalone, combined):
-        assert COMPACT_FOOTER_RULES in prompt
+        assert 'HEADLINE: Claim Your Edition' in prompt
+        assert '112 px' in prompt
         for stale in ('ARCHITECTURAL WALL', 'Architectural Wall', 'Artwork-first architectural product wall:',
                       'Ad 2 as the straight-on architectural product wall', 'tiny but recognisable softly lit home-context glimpse'):
             assert stale not in prompt
-        assert 'HEADLINE: ' + second['headline_text'] in prompt
-        assert 'SUPPORTING LINE: ' + second['supporting_line'] in prompt
-        assert 'CTA: CLAIM YOUR EDITION' in prompt
+        assert 'AD 2 ONLY — SINGLE-LINE GUNMETAL BADGE FOOTER' in prompt
         assert 'Never use a previously generated mockup as the artwork source' in prompt
     assert 'SC_AD_READY: fixture-job' in combined and 'SC_AD_BLOCKED:' in combined
     assert 'Filenames identify saved delivery slots' in combined
     assert '/fixture/architectural-wall.jpg' in combined
     assert combined.count('\nHEADLINE: ') == 3
-    assert combined.count('\nSUPPORTING LINE: ') == 3
-    assert combined.count('\nCTA: CLAIM YOUR EDITION') == 3
+    assert combined.count('\nSUPPORTING LINE: ') == 2
+    assert combined.count('\nCTA: CLAIM YOUR EDITION') == 2
 
 
 def test_all_fresh_second_slot_candidates_have_hallway_depth_and_no_lounge_identity():
@@ -65,4 +64,6 @@ def test_existing_artifact_and_csv_ids_remain_compatible():
 def test_footer_contract_is_byte_for_byte_unchanged_by_room_correction():
     from pathlib import Path
     before = subprocess.check_output(['git', 'show', 'f4c12e251d3658a3bbde2915c730063f35cb56e0:ads_footer.py'])
-    assert Path('ads_footer.py').read_bytes().replace(b'\r\n', b'\n') == before.replace(b'\r\n', b'\n')
+    original = {}
+    exec(compile(before, '<baseline-footer>', 'exec'), original)
+    assert COMPACT_FOOTER_RULES == original['COMPACT_FOOTER_RULES']

@@ -23,11 +23,11 @@ def test_three_line_export_has_no_conflicting_directions(country,product,sport):
                      'gold shimmer', 'top separator in place'):
         assert required in prompt, required
     assert prompt.count('\nHEADLINE: ')==3
-    assert prompt.count('\nCTA: CLAIM YOUR EDITION')==3
+    assert prompt.count('\nCTA: CLAIM YOUR EDITION')==2
     assert prompt.index('4. Immediately generate Image 3') < prompt.index('4b. Complete the final creative review') < prompt.index('5. Create and attach')
     for row in record['product_metadata']['instant_experience_footer_selections']:
-        assert 'HEADLINE: '+row['headline_text'] in prompt
-        assert 'SUPPORTING LINE: ' + row['supporting_line'] in prompt
+        assert row['headline_text'] in prompt
+        assert row['supporting_line'] in prompt
     delivered=companion.delivery_prompt(record,'fixture reference','/fixture','fixture-job')
     assert 'SC_AD_READY: fixture-job' in delivered and 'SC_AD_BLOCKED:' in delivered
     assert 'Keep the current CSV format. Do not add image URLs to the CSV.' in delivered
@@ -42,6 +42,10 @@ def test_image_call_receives_exact_three_line_copy():
     for index, row in enumerate(rows, 1):
         brief = ads.build_instant_experience_execution_image_brief(index, row)
         assert 'IMAGE GENERATION PROMPT' in brief
+        if index == 2:
+            assert 'HEADLINE: Claim Your Edition' in brief
+            assert 'SUPPORTING LINE:' not in brief
+            continue
         assert 'HEADLINE: ' + row['headline_text'] in brief
         assert 'CTA: CLAIM YOUR EDITION' in brief
         assert 'SUPPORTING LINE: ' + row['supporting_line'] in brief
@@ -83,15 +87,16 @@ def test_baseline_sections_and_live_receipt():
                '704462a5b422e7982db8880f', '7c37c4b9ddc9337b4253c1cc',
                '6137aef6ef1b942197a3aa91'}  # Authorized footer, creative review and room-role updates.
     rows = [p for p in catalog() if p.category == 'Ads']
-    assert {p.key for p in rows} == set(original)
+    assert set(original).issubset({p.key for p in rows})
+    assert all(p.path == 'ads_ie_badge.py' for p in rows if p.key not in original)
     for p in rows:
-        if p.key not in allowed:
+        if p.key in original and p.key not in allowed:
             assert digest(p.text) == original[p.key], p.symbol or p.path
     manifest = json.loads(Path('prompts/releases.json').read_text())
     for p in [bundle_prompt(rows, 'Ads'), *rows]:
         assert manifest[p.key]['hash'] == digest(p.text)
-        assert manifest[p.key]['version'] == '1.0'
-        assert manifest[p.key]['label'] == 'Baseline'
+        assert manifest[p.key]['version'] == '2.1'
+        assert manifest[p.key]['label'] == 'Baseline 2.1 Beta'
     labels = json.loads(Path('prompts/version_labels.json').read_text())
     assert labels['44b05012bd22482ab965ad0b01891d3c'] == 'Collector Beta'
     assert all(v['id'] != '44b05012bd22482ab965ad0b01891d3c' for v in manifest.values())

@@ -6,6 +6,7 @@ COMPACT_FOOTER_RULES = f"{FOOTER_VERSION}\nPREMIUM COMPACT FOOTER — SINGLE GEO
 
 def apply_footer_contract(prompt):
     """Include the shared policy once at the public prompt boundary."""
-    if COMPACT_FOOTER_RULES in prompt:
+    from ads_ie_badge import active
+    if active(prompt) or COMPACT_FOOTER_RULES in prompt:
         return prompt
     return COMPACT_FOOTER_RULES + "\n\n" + prompt

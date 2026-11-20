@@ -1,7 +1,21 @@
+BASELINE 2.1 BETA — PER-AD FOOTER SCOPE
+The current OS brief selects the footer profile for each ad. For Baseline 2.1 Beta
+Instant Experience, the normal three-line rules below apply ONLY to Ads 1 and 3.
+Ad 2 uses the OS-assigned 112 px black footer, one centred Claim Your Edition
+line and original transparent Blackened Gunmetal Sports Cave Medal.png overlay.
+Use its exact OS asset, placement and export instructions; never redraw the badge.
+The badge's existing raster lettering is not an extra typeset footer line.
+Keep three approved headline/supporting-line candidates; final creative review
+chooses the best two distinct pairs for Ads 1 and 3. Do not apply the three-line
+rule, supporting sentence, separate CTA row or 160 px height to Ad 2.
+Baseline 2.0 and other formats retain their assigned existing footer profiles.
+No change to scenes, product fidelity, targeting, copy/CSV or Companion delivery.
+
+NORMAL THREE-LINE PROFILE — ADS 1 AND 3 IN BASELINE 2.1 BETA
 SPORTS CAVE — PREMIUM COMPACT FOOTER TYPOGRAPHY
 
 PREMIUM COMPACT FOOTER — SINGLE GEOMETRY AND TYPE PROFILE
-At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this same geometry for every ad, route, product and country. Never choose a height from a range or grow the footer to accommodate text.
+At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this geometry for every ad assigned the normal three-line profile, across products and countries. Never choose a height from a range or grow the footer to accommodate text.
 For another output width, multiply the entire footer geometry, type sizes, tracking in pixels and padding by canvas width / 1024. Scale by width, not canvas height. A 1200 px-wide output therefore has a 187.5 px footer; a 960 px-wide output has a 150 px footer. Keep existing layouts without a black footer; do not add a footer to them.
 Render exactly three lines: assigned HEADLINE, assigned SUPPORTING LINE, then CLAIM YOUR EDITION. Preserve their exact wording, casing and punctuation. Apply this shared typography profile rather than copying type size, spacing or footer height from an earlier generated image.
 Title type: 50 px Baskerville-style editorial serif, Medium weight (500), warm ivory #F3EBDD. Use natural kerning plus 0.03 em letter spacing. The title is the dominant footer element, with refined open letterforms and stronger optical presence; never heavy, bold, blocky, condensed or stretched. Use the same title size and tracking for every approved headline, including short ones. Tracking is a font setting, not extra typed spaces. Keep gold digits and their fine underline inside the headline line; never create a quantity caption.
@@ -14,11 +28,11 @@ The framed edition remains the dominant visual. Preserve all artwork, frame, roo
 In the existing final creative review, count exactly three visible text baselines and inspect their exact wording, optical hierarchy, spacing and metallic seam. Correct any extra or missing footer text, crowded type, wasted padding or flat separator through that existing review before delivery. No new approval, mandatory compositor, extra image, or handoff step.
 
 CONSISTENCY AND SCOPE
-Use this same font pairing, weight, colours, hierarchy and compact spacing across every ad, regardless of product, sport, room or country. Check that all three lines remain readable at thumbnail size and that the top seam has a visible metallic shimmer.
+Use this same font pairing, weight, colours, hierarchy and compact spacing across every normal three-line ad, regardless of product, sport, room or country. Check that all three lines remain readable at thumbnail size and that the top seam has a visible metallic shimmer.
 
 Preserve the existing approved headline bank, exact wording, assigned selections and random selection without replacement. This rule controls typography only; it does not select or replace headlines.
 
-Project image sources are visual references only. Their missing text, badge or plain seam must not replace the OS-assigned wording or three-line footer/shimmer specification. Generate the complete footer in the existing image workflow, without a mandatory compositor, asset-pasting step or new approval.
+Project image sources are visual references only. Their missing text, badge or plain seam must not replace the OS-assigned wording or three-line footer/shimmer specification. Generate each normal three-line footer in the existing image workflow. Ad 2 uses its required original PNG overlay during existing export, without a new approval or handoff.
 
 Keep every other instruction unchanged, including scenes, camera angles, product fidelity, realistic scale, glazing, image count, generation workflow, ad copy and CSV structure.
 

@@ -16,12 +16,13 @@ def test_exact_footer_baselines_reach_every_image_and_final_export(country):
     assert 'count visible text baselines' in prompt
     assert 'Inspect the exported JPEG again' in prompt
     assert 'Emit the completion marker only after' in prompt
-    assert prompt.count('Footer baseline map: HEADLINE on line 1; SUPPORTING LINE on line 2; CTA on line 3.')==3
+    assert prompt.count('NORMAL THREE-LINE FOOTER')==2
+    assert prompt.count('AD 2 ONLY — SINGLE-LINE GUNMETAL BADGE FOOTER')==1
     assert 'Always highlight all three digits' not in prompt
     assert 'full number 100 only' not in prompt
     for selected in record['product_metadata']['instant_experience_footer_selections']:
-        assert '\nHEADLINE: '+selected['headline_text'] in prompt
-        assert '\nSUPPORTING LINE: '+selected['supporting_line'] in prompt
+        assert selected['headline_text'] in prompt
+        assert selected['supporting_line'].replace('’', '\u2019') in prompt
     for name in ('ad_copy.csv','collector-hallway.jpg','architectural-wall.jpg','man-cave.jpg'):
         assert '/fixture/'+name in prompt
 

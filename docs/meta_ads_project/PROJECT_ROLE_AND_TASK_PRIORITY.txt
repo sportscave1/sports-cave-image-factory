@@ -1,3 +1,7 @@
+BASELINE 2.1 BETA — PER-AD FOOTER SCOPE
+Use the OS-assigned footer profile. In 2.1 Beta, all normal three-line rules below apply ONLY to Ads 1 and 3. Ad 2 uses its 112 px black footer, one centred Claim Your Edition line and original gunmetal PNG overlay during existing JPEG export. Follow its OS asset/placement instructions; badge raster lettering is not an extra typeset line. Keep three approved candidate pairs; final review picks the best two for Ads 1/3. Baseline 2.0 retains its original profiles. Preserve all other workflow rules.
+
+NORMAL THREE-LINE PROFILE — ADS 1 AND 3 IN BASELINE 2.1 BETA
 PROJECT ROLE AND TASK PRIORITY
 
 Use the current OS app prompt as the authority for the product, market, image count, individual rooms, camera angles, lighting, selected headlines, ad copy and CSV structure.
@@ -22,12 +26,12 @@ Use only:
 
 Use the OS app’s assigned headlines when they are approved and distinct. Do not reroll valid assignments.
 
-If headlines are not assigned, randomly select three different headlines from this bank without replacement before generating any images. Assign one to each ad and preserve those assignments throughout the package.
+If headlines are not assigned, randomly select three different headlines from this bank without replacement before generating any images. Keep all three candidates; for Baseline 2.1 Beta select the best two distinct pairs for Ads 1 and 3. For Baseline 2.0 assign one to each ad. Preserve exact wording.
 
-If the OS prompt contains an obsolete or unapproved headline, replace only that headline with an unused approved option. No other headline wording is permitted.
+If the OS prompt contains an obsolete or unapproved headline, replace only that headline with an unused approved option. For the normal three-line profile, no other scarcity headline wording is permitted. Ad 2’s fixed Claim Your Edition title is a separate OS profile, not a scarcity candidate.
 
 PREMIUM COMPACT FOOTER — SINGLE GEOMETRY AND TYPE PROFILE
-At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this same geometry for every ad, route, product and country. Never choose a height from a range or grow the footer to accommodate text.
+At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this geometry for every ad assigned the normal three-line profile, across products and countries. Never choose a height from a range or grow the footer to accommodate text.
 For another output width, multiply the entire footer geometry, type sizes, tracking in pixels and padding by canvas width / 1024. Scale by width, not canvas height. A 1200 px-wide output therefore has a 187.5 px footer; a 960 px-wide output has a 150 px footer. Keep existing layouts without a black footer; do not add a footer to them.
 Render exactly three lines: assigned HEADLINE, assigned SUPPORTING LINE, then CLAIM YOUR EDITION. Preserve their exact wording, casing and punctuation. Apply this shared typography profile rather than copying type size, spacing or footer height from an earlier generated image.
 Title type: 50 px Baskerville-style editorial serif, Medium weight (500), warm ivory #F3EBDD. Use natural kerning plus 0.03 em letter spacing. The title is the dominant footer element, with refined open letterforms and stronger optical presence; never heavy, bold, blocky, condensed or stretched. Use the same title size and tracking for every approved headline, including short ones. Tracking is a font setting, not extra typed spaces. Keep gold digits and their fine underline inside the headline line; never create a quantity caption.

@@ -1,3 +1,10 @@
+Latest: task 20261120-1aa52674 aligns the live project Instructions and two
+canonical text sources with Baseline 2.1 Beta's per-ad profiles. Ads 1/3 retain
+the normal three-line footer; Ad 2 uses the original gunmetal PNG and smaller
+single-line footer. The old PREMIUM_COMPACT_V2 associations were replaced,
+while the badge, collector icon and true-to-scale sources were retained.
+See [Baseline 2.1 Beta release](../ADS_BASELINE_2_1_BETA_20261120.md).
+
 # Meta Ads Baseline project alignment — 20 November 2026
 
 Latest: task 20261120-fb2a5c5e consolidates live project Instructions and the

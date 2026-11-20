@@ -27,8 +27,8 @@ def test_all_routes_and_delivery_use_one_geometry_without_height_or_padding_conf
     prompt=delivery_prompt(record,'Synthetic approved original','/fixture','fixture-job')
     check_profile(prompt)
     assert prompt.count('\nHEADLINE: ')==3
-    assert prompt.count('\nSUPPORTING LINE: ')==3
-    assert prompt.count('\nCTA: CLAIM YOUR EDITION')==3
+    assert prompt.count('\nSUPPORTING LINE: ')==2
+    assert prompt.count('\nCTA: CLAIM YOUR EDITION')==2
     assert 'SC_AD_READY: fixture-job' in prompt
     assert 'SC_AD_BLOCKED:' in prompt
     rows=ads.resolve_standard_instant_experience_visuals(product_name='Synthetic Collector Edition',
@@ -36,6 +36,10 @@ def test_all_routes_and_delivery_use_one_geometry_without_height_or_padding_conf
     for index,row in enumerate(rows,1):
         standalone=ads.build_standard_instant_experience_image_prompt(index,row,
             product_name='Synthetic Collector Edition',category='NBA',country=country)
+        if index == 2:
+            assert 'HEADLINE: Claim Your Edition' in standalone
+            assert '112 px' in standalone and 'SUPPORTING LINE:' not in standalone
+            continue
         check_profile(standalone)
         assert 'HEADLINE: '+row['headline_text'] in standalone
         assert 'SUPPORTING LINE: '+row['supporting_line'] in standalone

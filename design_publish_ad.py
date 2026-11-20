@@ -171,6 +171,9 @@ preservation rules below. A storefront image, preview or other frame is not a su
 
 
 def delivery_prompt(result, reference, folder, job):
+    from ads_ie_badge import active, REVIEW_CHECK
+    footer_review = (REVIEW_CHECK if active(result.get('master_prompt')) else
+        'Before the final response, inspect every actual cover against its assigned HEADLINE, SUPPORTING LINE and CTA: all three lines must be visible, with the top separator replaced in place by the specified metallic gold shimmer. Correct missing footer elements through the supplied final creative review, keeping the rest unchanged. Then verify all four downloadable attachments are present above.')
     outputs = '\n'.join(f'- {idea["scene_name"]}: {folder}/{COVERS[idea["id"]]}'
                         for idea in INSTANT_EXPERIENCE_CONCEPTS)
     return f"""Sports Cave automatic ad job {job}
@@ -198,7 +201,7 @@ followed by the exact incomplete checkpoint. Once delivery is verified, report c
 
 {result['master_prompt']}
 
-Before the final response, inspect every actual cover against its assigned HEADLINE, SUPPORTING LINE and CTA: all three lines must be visible, with the top separator replaced in place by the specified metallic gold shimmer. Correct missing footer elements through the supplied final creative review, keeping the rest unchanged. Then verify all four downloadable attachments are present above.
+{footer_review}
 """
 
 

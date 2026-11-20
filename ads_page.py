@@ -32,6 +32,7 @@ import ads_package_paths
 from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 from ads_footer import COMPACT_FOOTER_RULES, FOOTER_VERSION, apply_footer_contract
+import ads_ie_badge as ie_badge
 from ads_final_delivery import VERSION as FINAL_DELIVERY_VERSION, apply_final_delivery
 from ads_generation_review import VERSION as GENERATION_REVIEW_VERSION, apply_generation_review
 import ads_carousel_winner as carousel_winner
@@ -5003,7 +5004,8 @@ def build_instant_experience_canonical_prompt_v4(
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
     shared_realism_rules = physical_realism.build(visual.get("physical_product"), compact=True, glazing_requirement=ie_usa.GLAZING if usa else ie_visuals.GLAZING_REQUIREMENT)
-    ie_quality_contract = "\n\n".join((
+    badge = index == 2
+    ie_quality_contract = ie_badge.BADGE_FOOTER if badge else "\n\n".join((
         build_instant_experience_fixed_opaque_footer_rules(),
         build_instant_experience_on_image_copy_fit_rules(),
         build_instant_experience_creative_cta_rules(visual["concept_id"]),
@@ -5027,9 +5029,14 @@ def build_instant_experience_canonical_prompt_v4(
             "and supporting line exactly. Do not invent a number."
         )
     )
+    footer_intro = ("Use only Ad 2's single-line badge footer below." if badge else IE_FOOTER_TEXT_CLARIFICATION)
+    footer_copy = ("HEADLINE: Claim Your Edition" if badge else
+                   f"HEADLINE: {visual.get('headline_text')}\nSUPPORTING LINE: {visual.get('supporting_line')}\nCTA: {visual.get('cta_text')}")
+    if badge:
+        scarcity_note = "Preserve verified product facts; no scarcity copy belongs in this footer."
     prompt = f"""{visual["prompt_heading"]}
 
-{IE_FOOTER_TEXT_CLARIFICATION}
+{footer_intro}
 
 Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
 
@@ -5068,11 +5075,11 @@ The final image must be:
 - clear and readable at a 256 x 256 preview
 
 Composition is locked:
-- Upper photographed residential room scene: exactly 84.375% of the canvas.
-- Fixed opaque black footer: exactly the bottom 15.625% of the canvas.
+- Upper photographed residential room scene: exactly {"89.0625%" if badge else "84.375%"} of the canvas.
+- Fixed opaque black footer: exactly the bottom {"10.9375%" if badge else "15.625%"} of the canvas.
 - Framed product width: approximately {visual["product_width"]} of the canvas.
 - Complete frame visible with no cropped outer frame edges.
-- Footer safe areas: 64 px horizontally and 16 px vertically at 1024 px width.
+- Footer safe areas: 64 px horizontally; use the assigned profile for vertical spacing.
 - The supplied framed product is the largest and most important visual element.
 
 {SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0]}
@@ -5080,15 +5087,13 @@ Composition is locked:
 
 FIXED BLACK FOOTER AND EXACT TYPOGRAPHY
 
-Use the centralized fixed opaque footer and on-image copy-fit contracts below as the sole footer style authority. Preserve the Baseline matte-black background, headline, supporting-line and CTA typography; replace only the top separator with the thin gold shimmer as part of the finished ad.
+{"Use the single-line badge footer contract below as the sole footer style authority." if badge else "Use the centralized fixed opaque footer and on-image copy-fit contracts below as the sole footer style authority. Preserve the Baseline matte-black background, headline, supporting-line and CTA typography; replace only the top separator with the thin gold shimmer as part of the finished ad."}
 Keep all collector typography flat inside the footer, never inside the photographed room. Inspect actual wording, geometry and alignment; report unresolved defects.
 
 Resolved on-image copy:
-HEADLINE: {visual.get("headline_text")}
-SUPPORTING LINE: {visual.get("supporting_line")}
-CTA: {visual.get("cta_text")}
+{footer_copy}
 
-Keep the exact selected headline per route. Never repeat a headline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
+Keep this route’s exact resolved footer wording. Never copy description text onto the image.
 
 INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 
@@ -5104,7 +5109,7 @@ FINAL ROUTE CHECK
 - Wall colour and cues differ from the other routes.
 - Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.
 - The room never becomes a themed sports bar.
-- The fixed black footer remains at the shared 160 px height at 1024 px width.
+- The fixed black footer remains at {"112" if badge else "160"} px height at 1024 px width.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
     prompt = ie_usa.adapt_prompt(prompt) if usa else prompt
@@ -8081,13 +8086,13 @@ IE_FOOTER_TEXT_CLARIFICATION = 'Read the entire prompt before generating. For ea
 IE_EXECUTION_CHECKLIST = 'EXECUTION CHECKLIST\n- Read the entire brief and ORIGINAL product reference before starting.\n- Generate exactly three separate images, one per ad, in order.\n- Use the original product image for every call.\n- Preserve the product, plausible physical scale and assigned camera angles.\n- Follow the three resolved, visibly different home settings.\n- Apply the specified opaque footer, subtle collector typography and exact selected wording.\n- Keep CLAIM YOUR EDITION unchanged.\n- Complete matching copy, the populated CSV and supplied setup.\n- Review the outputs and report unresolved defects.\nGLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.\n\nRead the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification.'
 
 
-def build_instant_experience_shared_template(physical_product=None, *, usa=False, controlled_glazing=False):
+def build_instant_experience_shared_template(physical_product=None, *, usa=False, controlled_glazing=False, mixed_footer=False):
     """Deduplicate unchanged rendering rules in the master; expand for each tool call."""
     prompt = "\n\n".join((
         "SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call\n"
         f"{ie_visuals.SCENE_VERSION}\n"  # Required saved-prompt recognition, not a variation token.
-        "1024 x 1024, 1:1, sRGB; upper photograph 84.375%. Baseline matte-black "
-        "footer with the Baseline three-line typography and thin top gold shimmer. Keep architectural verticals straight. "
+        + ("1024 x 1024, 1:1, sRGB; use only the active ad’s scoped footer profile. " if mixed_footer else
+         "1024 x 1024, 1:1, sRGB; upper photograph 84.375%. Baseline matte-black footer with the Baseline three-line typography and thin top gold shimmer. ") + "Keep architectural verticals straight. "
         "Never place the long description or Meta headline inside the image.",
         "PACK COMPOSITION: each pair must differ in architectural "
         "structure AND visible depth arrangement, wall family AND treatment, lighting character/direction, and "
@@ -8101,11 +8106,11 @@ def build_instant_experience_shared_template(physical_product=None, *, usa=False
         "separation from the supplied frame through wall choice and physical light; never change its finish. "
         "Explicit saved overrides remain authoritative. "
         "Use the resolved choices as one coherent home per image; prompt differences are not proof of distinct pixels.",
-        build_instant_experience_fixed_opaque_footer_rules(),
-        build_instant_experience_on_image_copy_fit_rules(),
-        build_instant_experience_creative_cta_rules("premium_scarcity_right"),
-        build_instant_experience_typography_quality_rules(shared=True),
-        ie_visuals.SCARCITY_RULE,
+        "" if mixed_footer else build_instant_experience_fixed_opaque_footer_rules(),
+        "" if mixed_footer else build_instant_experience_on_image_copy_fit_rules(),
+        "" if mixed_footer else build_instant_experience_creative_cta_rules("premium_scarcity_right"),
+        "" if mixed_footer else build_instant_experience_typography_quality_rules(shared=True),
+        "" if mixed_footer else ie_visuals.SCARCITY_RULE,
         ie_visuals.SCENE_REFERENCE_RULES.strip(),
         ie_visuals.SCENE_VISIBILITY_RULES.strip(),
         physical_realism.build(physical_product, compact=True, glazing_requirement=ie_usa.GLAZING if usa else ie_visuals.GLAZING_REQUIREMENT),
@@ -8119,6 +8124,16 @@ def build_instant_experience_execution_image_brief(index, visual):
     # only its exact shared prefix/suffix here, never rebuild/reroll scene fields.
     visibility = ie_glazing.apply(ie_visuals.SCENE_VISIBILITY_RULES) if ie_glazing.active(visual) else ie_visuals.SCENE_VISIBILITY_RULES
     scene = visual['scene_brief'].removeprefix(ie_visuals.SCENE_REFERENCE_RULES).removesuffix(visibility)
+    footer = (ie_badge.BADGE_FOOTER if index == 2 else
+              f"ADS {index} ONLY — NORMAL THREE-LINE FOOTER\n" +
+              build_instant_experience_fixed_opaque_footer_rules() + "\n\n" +
+              build_instant_experience_on_image_copy_fit_rules() + "\n\n" +
+              build_instant_experience_typography_quality_rules(visual))
+    footer = footer.replace("Use this same geometry for every ad, route, product and country.", "Use this geometry for this normal-footer ad in every product and country.")
+    footer = footer.replace("for every image and pack", "for this normal-footer image")
+    wording = ("HEADLINE: Claim Your Edition" if index == 2 else
+               f"HEADLINE: {visual['headline_text']}\nSUPPORTING LINE: {visual['supporting_line']}\nCTA: {visual['cta_text']}\n"
+               "Initial candidate pair; final review may select another supplied pair for Ads 1 and 3 only.")
     return f"""{visual['group_heading']}
 
 IMAGE GENERATION PROMPT
@@ -8128,10 +8143,9 @@ Camera: {visual['camera_side']}.
 SCENE: {scene}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}.
 Resolved on-image copy — use exactly:
-HEADLINE: {visual['headline_text']}
-SUPPORTING LINE: {visual['supporting_line']}
-CTA: {visual['cta_text']}
-Footer baseline map: HEADLINE on line 1; SUPPORTING LINE on line 2; CTA on line 3. Gold digits stay inside line 1. No additional footer text baseline.
+{wording}
+
+{footer}
 
 {ie_copy.ad_copy(visual['route'])}"""
 
@@ -8188,7 +8202,10 @@ def build_standard_instant_experience_prompt(
     groups = "\n\n".join(build_instant_experience_execution_image_brief(i, v) for i, v in enumerate(visuals, 1))
     prompt = f"""{ADS_IE_COMBINED_EXECUTION_VERSION}
 SPORTS CAVE INSTANT EXPERIENCE — THREE IMAGES AND COMPLETED CSV
-{IE_FOOTER_TEXT_CLARIFICATION}
+{ie_badge.VERSION}
+Read the whole brief. Ads 1 and 3 use their normal three-line footer; Ad 2 uses
+only its single-line badge footer. Include only the active ad's footer block
+in each image call, never a sibling's footer geometry or wording.
 
 {IE_EXECUTION_CHECKLIST}
 
@@ -8202,22 +8219,24 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines in every set; preserve the assigned selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Retain the three resolved approved headline/supporting-line pairs as the candidate bank below. Select the best two distinct pairs for Ads 1 and 3 using the supplied selection/review policy. Ad 2 uses only Claim Your Edition. Meta copy rules must never rewrite these exact on-image fields. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+{ie_badge.SELECTION_RULES}
+Candidate pairs: {json.dumps([{'headline': v['headline_text'], 'supporting_line': v['supporting_line']} for v in visuals], ensure_ascii=False)}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 5. Create and attach the completed downloadable ad_copy.csv from the final copy records.
 6. Display the three matching copy groups and provide the existing shared Instant Experience setup below. Then stop.
 No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
-For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
+For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer profile and copy. The Ad 2 original PNG is a footer asset only, never a room/product reference. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 OUTPUT REVIEW AND DELIVERY
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline, supporting line and CTA wording; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and the selected normal pairs and CTA on Ads 1/3, and the single Claim Your Edition line plus original PNG on Ad 2. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
 Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
 If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If any image is missing, the three-cover delivery requirement is incomplete: apply the failure handling above and never label a two-image result as three completed covers; preserve completed outputs and all three final copy records, matching CSV rows and setup. State any inspection limitation. Return only actually created assets, final copy, setup and the specific failure report; do not print these instructions, internal plans or research notes.
 
-{build_instant_experience_shared_template(visuals[0].get('physical_product'), usa=usa, controlled_glazing=ie_glazing.active(visuals[0]))}
+{build_instant_experience_shared_template(visuals[0].get('physical_product'), usa=usa, controlled_glazing=ie_glazing.active(visuals[0]), mixed_footer=True)}
 
 {ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
 
@@ -9030,9 +9049,12 @@ def _instant_experience_visual_contract_is_current(prompt):
                 "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
                 "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
                 "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE")
+    if ie_usa.VERSION in prompt:
+        required = (ie_visuals.VERSION, SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2,
+                    "GROUP 1 — COLLECTOR HALLWAY", "GROUP 2 — COLLECTOR HALLWAY FRONT VIEW", "GROUP 3 — MAN CAVE")
     return (any(version in prompt for version in (ie_copy.VERSION, ie_copy.LEGACY_VERSION))
             and all(marker in prompt for marker in required)
-            and prompt.count(SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]) == (1 if ADS_IE_COMBINED_EXECUTION_VERSION in prompt else 3)
+            and prompt.count(SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]) == (2 if ie_badge.active(prompt) else 1 if ADS_IE_COMBINED_EXECUTION_VERSION in prompt else 3)
             and "FOR THE ROOM THAT REMEMBERS." not in prompt
             and "full-height right graphic column" not in prompt)
 
