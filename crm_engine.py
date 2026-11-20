@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import uuid
+from time import monotonic
 from datetime import timedelta
 from crm_logic import now,date,email,consent,eligibility,recipient_hash,LiveFacts,matches,safe_url
 from crm_resend import Config,Resend,MarketingDisabled
@@ -39,6 +40,7 @@ class Engine:
         self.hold_lease()
         self._delivery_checkpoint=at
         if self.config.enabled:
+            self.refresh_automation_capabilities()
             from crm_campaign_schedule import activate_due
             activate_due(self.store)
             self.advance_due()
@@ -55,6 +57,13 @@ class Engine:
         self.store.set_state('automation_delivery_health',{'checked_at':self.clock().isoformat(),
             'status':'ok',**worker_configuration(self.config)})
         self._delivery_checkpoint=self.clock()
+    def refresh_automation_capabilities(self):
+        """Renew real trigger evidence during long cycles, never extend stale evidence."""
+        from crm_automation_capabilities import verify,refresh_due
+        if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
+            try:verify(self.shop,self.store,include_pixel=False)
+            except Exception:
+                logging.getLogger(__name__).warning('automation_capability_check_unavailable')
     def complete_campaigns(self):
         # Persist confirmed completion at the delivery boundary. Source/analytics
         # maintenance can keep the surrounding worker cycle open for minutes.
@@ -98,6 +107,7 @@ class Engine:
                 from crm_automation_definition import qualifies
                 kind=frozen['trigger']
                 from crm_automation_capabilities import require as require_trigger
+                self.refresh_automation_capabilities()
                 require_trigger(self.store,kind)
                 identity_rules=[r for r in frozen['rules'] if r['field'] in ('market','customer_country')]
                 if not qualifies({'rules':identity_rules},c):return c,context,'automation_rules_changed'
@@ -420,6 +430,7 @@ class Engine:
             # Events merely expedite reconciliation; only abandonedCheckouts is eligibility authority.
             self.store.set_state('reconcile:abandoned',{})
     def reconcile(self,automation):
+        self.refresh_automation_capabilities()
         from crm_automation_definition import native
         if native(automation):
             from crm_automation_runtime import reconcile
@@ -445,9 +456,13 @@ class Engine:
         more=page['pageInfo'].get('hasNextPage')
         self.store.set_state(key,{'cursor':page['pageInfo'].get('endCursor') if more else None,'after_time':(self.clock()+timedelta(seconds=2 if more else 300)).isoformat()})
     def advance_due(self):
+        # Yield to queued delivery even with a backlog of slow Shopify checks.
+        # The next checkpoint continues from persisted eligibility/retry state.
+        deadline=monotonic()+45
         due=self.store.q("SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND (e.retry_after IS NULL OR e.retry_after<=now()) ORDER BY e.next_due_at LIMIT 20")
         logging.getLogger(__name__).info('crm_due_batch count=%s',len(due))
         for e in due:
+            if monotonic()>=deadline:break
             self.hold_lease()
             from crm_checkout_purchase_exit import stop_if_purchased
             if stop_if_purchased(self.store,e):continue
@@ -471,10 +486,7 @@ class Engine:
         logging.getLogger(__name__).info('crm_worker_run_start')
         try:
             self.hold_lease()
-            from crm_automation_capabilities import verify as verify_automation,refresh_due
-            if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
-                try:verify_automation(self.shop,self.store,include_pixel=False)
-                except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
+            self.refresh_automation_capabilities()
             # One durable publication per leased cycle, independent of mail gates.
             try:
                 from crm_automation_publication import tick as publication_tick
