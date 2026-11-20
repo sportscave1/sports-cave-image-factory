@@ -539,6 +539,14 @@ async def mcp(request):
             elif scope == GROWTH_SCOPE:
                 reader = refresh_traffic if name == "get_design_refresh_traffic" else growth_report
                 summary = await run_in_threadpool(reader, *report_args)
+                if (name == "get_growth_analytics"
+                        and await run_in_threadpool(_active_owner, claims, "ads_google")):
+                    # Existing installed catalogs can read Ads without a connector reinstall.
+                    # Independent Google-page access is checked before financial data is read.
+                    from datetime import timedelta
+                    from google_ads_api_reporting import report as ads_report
+                    end = report_args[0]
+                    summary["google_ads"] = await run_in_threadpool(ads_report, end - timedelta(days=6), end)
             elif scope == SPORTS_SCOPE:
                 summary = await run_in_threadpool(published_sports_edition, *report_args)
             else:

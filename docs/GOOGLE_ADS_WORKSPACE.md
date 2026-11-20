@@ -9,6 +9,44 @@ exclusive Shopify journey ledger, tracking evidence, research prompts and prepar
 copy. Source status, dates and attribution basis remain visible. Manual Google Ads
 figures are never relabelled as a current API connection.
 
+## Google Ads automatic reporting connection
+
+The optional Ads connection extends the existing encrypted Google OAuth grant.
+Only the explicit /api/os/google/ads/connect route requests the standard adwords
+scope; ordinary SEO connection requests retain their original read-only scopes.
+The callback binds purpose to the single-use server-side OAuth state and requires
+the Ads grant before saving a changed authorisation. An administrator must approve
+Google's consent. Google has no separate read-only Ads OAuth scope; this adapter
+contains only fixed SearchStream reporting requests and no mutation endpoints.
+
+Enable Google Ads API in the same Cloud project that owns the existing OAuth
+client and obtain Explorer or higher production access. Google sunset developer
+tokens on 9 September 2026; do not request a new manager account/developer token.
+No new client secret or database migration is needed. If an existing account
+hierarchy requires it, GOOGLE_ADS_LOGIN_CUSTOMER_ID can identify that manager;
+it never creates an account link.
+
+google_ads_api_reporting fixes customer 6581121605 and campaign 24420240881,
+uses API v26, validates AUD/account identity and completed account-timezone dates,
+and reads campaign settings, delivery and primary PURCHASE conversions. Purchase
+values use interaction-date attribution and can differ from store order-date
+revenue. Fractional credit is retained. Cost micros are converted to AUD once.
+Zero omitted protobuf fields represent zero only after a successful full response;
+an authentication/API failure returns an explicit status without fabricated totals.
+The observed budget is compared with A$20/day but is never changed.
+
+On opening the Overview, campaign reporting loads automatically with a 15-minute
+cache keyed to connection identity and requested dates. The dated weekly archive
+remains separate. Refresh Google Ads clears that process cache. Connected-source
+refresh and get_google_ads_reporting include Ads. For installed catalogs without
+the new tool, get_growth_analytics also returns a google_ads member after checking
+Ads Google page access independently. It reads the seven days ending on date.
+The scheduled weekly review can use these fresh API figures and publish through
+the existing verified archive; absent access remains explicitly unavailable.
+
+Official setup references: https://developers.google.com/google-ads/api/docs/oauth/cloud-project
+and https://developers.google.com/google-ads/api/docs/api-policy/developer-token .
+
 ## Existing source connections
 
 Refresh connected data uses the existing Google reporting client (GA4 purchase

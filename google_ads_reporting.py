@@ -88,10 +88,11 @@ def connected_sources(end):
     if end.weekday() != 3 or end >= sydney_date():
         raise ValueError("Choose a completed Thursday for a weekly report.")
     start, end = period(end)
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    import google_ads_api_reporting as ads
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ads_future = pool.submit(ads.report, start, end)
         futures = {name: pool.submit(_available, lambda f=fetch: f(end))
                    for name, fetch in (("ga4", ga4), ("shopify", shopify), ("meta", meta))}
         sources = {name: future.result() for name, future in futures.items()}
     return {"period_start": start.isoformat(), "period_end": end.isoformat(), "sources": sources,
-            "google_ads": {"status": "manual_review_required",
-                           "note": "No Google Ads reporting API is configured in this workspace. Weekly Ads inputs need an authorised account review; never reuse old figures."}}
+            "google_ads": ads_future.result()}

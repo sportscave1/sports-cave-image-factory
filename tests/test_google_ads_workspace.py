@@ -162,13 +162,15 @@ def test_meta_pages_preserve_unknowns_and_read_every_page(monkeypatch):
 
 
 def test_connected_source_failure_does_not_fabricate_ads_metrics(monkeypatch):
+    import google_ads_api_reporting as ads
+    monkeypatch.setattr(ads, "report", lambda *args: {"status": "authorization_required", "note": "Connect Ads"})
     monkeypatch.setattr(reporting, "ga4", Mock(side_effect=TimeoutError))
     monkeypatch.setattr(reporting, "shopify", lambda end: {"status": "connected"})
     monkeypatch.setattr(reporting, "meta", lambda end: {"status": "partial"})
     result = reporting.connected_sources(date(2026, 11, 19))
     assert result["sources"]["ga4"]["status"] == "unavailable"
     assert result["sources"]["shopify"]["status"] == "connected"
-    assert result["google_ads"]["status"] == "manual_review_required"
+    assert result["google_ads"]["status"] == "authorization_required"
 
 
 def test_ga4_uses_only_the_audited_property(monkeypatch):
@@ -188,6 +190,7 @@ def test_navigation_and_page_render_synthetic_review(monkeypatch):
     monkeypatch.setattr(reviews, "history", lambda: [{"edition": value,
         "published_at": "2026-11-20T00:00:00Z", "sha256": reviews.digest(value)}])
     monkeypatch.setattr(page, "sydney_date", lambda: TODAY)
+    monkeypatch.setattr(page.ads_api, "report", lambda *args: {"status": "authorization_required", "note": "Connect Ads"})
     assert ads_navigation.ADS_NAV_LABELS["Google"] == "Google"
     test = AppTest.from_string("import ads_google_page\nads_google_page.render_page({})").run(timeout=15)
     assert not test.exception

@@ -6,6 +6,8 @@ import json
 import streamlit as st
 import google_ads_reviews as reviews
 import google_ads_reporting as reporting
+import google_ads_api_reporting as ads_api
+import os_accounts
 from sports_sales_calendar import sydney_date
 
 REVIEW_PROMPT = """Review Sports Cave's preceding Friday–Thursday in Australia/Sydney.
@@ -102,6 +104,31 @@ def render_page(user):
     overview, weekly, tracking, prompts = st.tabs(["Overview", "Weekly reviews", "Tracking", "Prompts"])
     latest = history[0] if history else None
     with overview:
+        start, end = latest_week(sydney_date())
+        st.subheader("Automatic Google Ads reporting")
+        st.caption("Fixed Sports Cave account and PM021126 campaign. Refreshes on page load with a 15-minute cache. Reads reporting only; budget stays at A$20/day.")
+        automatic = ads_api.report(start, end)
+        if automatic["status"] == "connected":
+            st.caption(f'{automatic["period_start"]} to {automatic["period_end"]} · {automatic["timezone"]} · fetched {automatic["fetched_at"]}')
+            a, b = st.columns(2)
+            a.metric("API spend", _money(automatic["totals"]["spend"]))
+            b.metric("API attributed purchases", str(automatic["totals"]["purchases"]))
+            a.metric("API purchase value", _money(automatic["totals"]["value"]))
+            b.metric("API value / spend", _ratio(automatic["totals"]))
+            st.write(f'Campaign: {automatic["campaign_name"]} · {automatic["campaign_status"]} · observed daily budget {_money(automatic["daily_budget"])}')
+            if not automatic["budget_matches_plan"] or automatic["budget_shared"]:
+                st.warning("The observed budget differs from the A$20/day individual campaign plan, or is shared. Review it in Google Ads; this integration makes no budget changes.")
+            st.caption(automatic["note"])
+            st.dataframe(automatic["daily"], hide_index=True, width="stretch")
+        else:
+            st.info(automatic["note"])
+            if os_accounts.is_admin(user):
+                st.link_button("Connect Google Ads reporting", ads_api.CONNECT_PATH)
+                st.caption("Use the existing Google Cloud project with Google Ads API enabled and Explorer or higher access. Google requests its standard Ads permission; this OS integration only reads reports.")
+        if st.button("Refresh Google Ads", key="google_ads_api_refresh"):
+            ads_api.CACHE.clear()
+            st.rerun()
+        st.subheader("Latest saved weekly review")
         if latest:
             edition = latest["edition"]
             st.caption(f'Latest sync: {_synced_at(latest["published_at"])} · {edition["period_start"]} to {edition["period_end"]}')
@@ -120,7 +147,7 @@ def render_page(user):
         else:
             st.info("The first weekly review is awaiting sync.")
         st.subheader("Connected reporting")
-        st.caption("Refresh uses the OS's existing GA4, Shopify and Meta connections. Google Ads API data is not configured here.")
+        st.caption("Refresh reads Google Ads, GA4, stored Shopify orders and Meta through the OS connections. Each source shows its actual access and coverage.")
         end = st.date_input("Week ending Thursday", value=latest_week(sydney_date())[1],
                             max_value=sydney_date() - timedelta(days=1), key="google_report_end")
         if st.button("Refresh connected data", key="google_connected_refresh"):
@@ -128,6 +155,7 @@ def render_page(user):
                 st.error("Choose a Thursday for a Friday–Thursday review.")
             else:
                 _connected.clear()
+                ads_api.CACHE.clear()
                 with st.spinner("Reading connected sources"):
                     st.session_state["google_connected_result"] = _connected(end)
         connected = st.session_state.get("google_connected_result")
@@ -150,7 +178,13 @@ def render_page(user):
                                        "rows_missing_value": source["missing_rows"][field]}
                                       for field, value in source["known_totals"].items()],
                                      hide_index=True, width="stretch")
-            st.info(connected["google_ads"]["note"])
+            source = connected["google_ads"]
+            with st.expander(f'GOOGLE ADS · {source["status"]}'):
+                st.caption(source["note"])
+                if source.get("totals"):
+                    st.write(source["totals"])
+                    st.caption(f'{source["currency"]} · {source["timezone"]} · fetched {source["fetched_at"]}')
+                    st.dataframe(source["daily"], hide_index=True, width="stretch")
         links = st.columns(4)
         links[0].link_button("Google Ads", "https://ads.google.com/")
         links[1].link_button("GA4", "https://analytics.google.com/analytics/web/#/a258394589p355333982/")
