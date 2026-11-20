@@ -105,8 +105,10 @@ def test_flow(row):
 
 
 def activity(store,row,user=None,*,rerun_scope='app'):
-    health=store.state('worker_health');checked=date(health.get('checked_at'))
-    st.caption('Scheduler · '+('Healthy · '+checked.isoformat() if checked and now()-checked<timedelta(minutes=5) else 'No recent worker heartbeat — check the existing CRM worker'))
+    from crm_automation_readiness import recent_health
+    health=store.state('automation_delivery_health') or store.state('worker_health')
+    checked=date(health.get('checked_at'))
+    st.caption('Delivery worker · '+('Recent completed work · '+checked.isoformat() if recent_health(health) else 'No recent completed delivery work — check the existing CRM worker'))
     journeys=store.q('''SELECT j.id,j.shopify_customer_id AS customer,j.trigger_shopify_id AS reference,
         CASE WHEN j.status='ACTIVE' THEN j.current_step+1 END AS email,
         CASE WHEN j.status='ACTIVE' THEN COALESCE((SELECT s.due_at FROM crm_marketing_sends s WHERE s.enrollment_id=j.id AND s.step_index=j.current_step AND s.status IN ('PENDING','CLAIMED','SUBMITTING') AND NOT s.test_send LIMIT 1),j.next_due_at) END AS next_due_at,j.status,j.stop_reason,

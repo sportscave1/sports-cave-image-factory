@@ -46,9 +46,9 @@ gallery._gallery(SimpleNamespace(), {'id': 'synthetic-reviewer'})
     next(button for button in ui.button if button.label == 'Refresh').click().run()
     assert not ui.exception
     assert folder.call_count == rows.call_count == 2
-    ui.text_input[0].set_value('Design 2').run()
+    assert not ui.text_input
+    ui.selectbox[0].select('Cricket').run()
     assert not ui.exception
-    assert len(ui.checkbox) == 1
     assert folder.call_count == rows.call_count == 3
 
 

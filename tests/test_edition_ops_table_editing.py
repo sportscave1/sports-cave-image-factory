@@ -45,7 +45,8 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         })
         fake_st.data_editor = Mock(side_effect=fake_st.data_editor)
         with patch.object(edition_ops, "st", fake_st), patch.object(
-            edition_ops, "_configured_supabase_backend", return_value=object()
+            edition_ops, "_configured_supabase_backend",
+            return_value=SimpleNamespace(get_app_setting=lambda *args, **kwargs: None)
         ):
             edition_ops._render_table()
         kwargs = fake_st.data_editor.call_args.kwargs

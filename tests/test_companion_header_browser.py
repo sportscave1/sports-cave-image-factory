@@ -6,6 +6,70 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 
+def test_two_designs_rotate_in_one_card_without_changing_other_panels():
+    source = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
+    config = dict(appName='Sports Cave OS', filesEnabled=True, uploadScope='dual-fixture',
+                  staffUploadProgress=True, currentRouteKey='dashboard', revision='dual-fixture',
+                  searchIndex=[], navigationRouteLabels={}, navigationRouteKeys={})
+    designs = [dict(id='first',title='First design',state='running',label='Generating',percent=35,estimated=True),
+               dict(id='second',title='Second design',state='running',label='Checking output',percent=80,estimated=True)]
+    payload = dict(online=True,jobs=[dict(id='upload',title='Current upload',stage=2,label='Uploading',percent=40)],
+                   queues=dict(upload=dict(enabled=True,waiting=0,display=True),
+                       design=dict(enabled=True,waiting=3,jobs=designs),
+                       ads=dict(enabled=True,online=True,waiting=0,jobs=[dict(id='ad',title='Current ad',state='running',label='Posting',percent=80)])))
+    html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
+    errors = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page = browser.new_page(viewport={'width':1600,'height':600})
+            page.clock.install()
+            page.on('pageerror',lambda error: errors.append(str(error)))
+            def respond(route):
+                if route.request.url == 'http://fixture.test/':
+                    route.fulfill(body=html,content_type='text/html')
+                elif route.request.url.split('?')[0].endswith('/status'):
+                    route.fulfill(json=payload)
+                else:
+                    route.fulfill(json={})
+            page.route('**/*',respond)
+            page.goto('http://fixture.test/')
+            title = page.locator('#sc-os-design-title')
+            stage = page.locator('#sc-os-design-stage')
+            expect(title).to_have_text('First design')
+            expect(stage).to_contain_text('2 working · 1/2')
+            page.locator('#sc-os-design-status > summary').click()
+            expect(page.locator('#sc-os-design-list strong')).to_have_text(['First design','Second design'])
+            page.clock.run_for(5100)
+            expect(title).to_have_text('Second design')
+            expect(stage).to_contain_text('2 working · 2/2')
+            expect(page.locator('#sc-os-design-meter')).to_have_attribute('aria-valuetext','Estimated 80% · 2 working · 2/2 · Checking output · 3 waiting')
+            expect(page.locator('#sc-os-ads-title')).to_have_text('Current ad')
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Current upload')
+            # Rotation changes only the summary: it never rebuilds the open popup.
+            assert page.locator('#sc-os-design-status').evaluate('(el)=>el.open')
+            page.emulate_media(reduced_motion='reduce')
+            page.clock.run_for(5000)
+            expect(title).to_have_text('First design')
+            payload['queues']['design']['jobs'] = [designs[1]]
+            page.evaluate("document.dispatchEvent(new CustomEvent('sc-design-edit-queued'))")
+            expect(title).to_have_text('Second design')
+            expect(stage).not_to_contain_text('2 working')
+            page.clock.run_for(5000)
+            expect(title).to_have_text('Second design')
+            assert not errors
+            # A cold reload must initialize the entire controller, not only
+            # queue functions evaluated with a pre-created fixture state.
+            page.reload()
+            expect(page.locator('#sc-os-companion-status')).to_be_visible()
+            expect(page.locator('#sc-os-design-title')).to_have_text('Second design')
+            expect(page.locator('#sc-os-ads-title')).to_have_text('Current ad')
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Current upload')
+            assert not errors
+        finally:
+            browser.close()
+
+
 def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
     source = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
     payload = dict(online=True, jobs=[dict(id='upload',title='Collector Tribute',stage=2,
@@ -32,7 +96,7 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
                 request = route.request
                 if request.url == 'http://fixture.test/':
                     route.fulfill(body=html,content_type='text/html')
-                elif request.url.endswith('/status'):
+                elif request.url.split('?')[0].endswith('/status'):
                     route.fulfill(json=payload)
                 elif request.url.endswith('/queue-control'):
                     data=request.post_data_json
@@ -80,3 +144,94 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
             page.screenshot(path=str(output/'companion-header-mobile.png'))
         finally:
             browser.close()
+
+
+def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_requeueing():
+    source = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
+    config = dict(appName='Sports Cave OS', filesEnabled=True, uploadScope='publish-fixture',
+                  staffUploadProgress=True, currentRouteKey='design_studio', revision='publish-fixture',
+                  searchIndex=[], navigationRouteLabels={}, navigationRouteKeys={})
+    old = dict(id='old', title='Previous upload', stage=6, label='Published and PSD mapped', percent=100, updated_at='old')
+    new = dict(id='new', title='Requested artwork', stage=0, label='Waiting for desktop companion', percent=0, updated_at='new')
+    requests, writes = [], []
+    payload = dict(online=True, jobs=[old], queues=dict(upload=dict(enabled=True,display=True,waiting=0)))
+    html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page = browser.new_page(viewport={'width':1600,'height':700})
+            errors = []
+            page.on('pageerror',lambda error: errors.append(str(error)))
+            def respond(route):
+                if route.request.method != 'GET':
+                    writes.append(route.request.url)
+                if route.request.url == 'http://fixture.test/':
+                    route.fulfill(body=html,content_type='text/html')
+                elif route.request.url.split('?')[0].endswith('/status'):
+                    requests.append(route.request.url)
+                    route.fulfill(json=payload)
+                else:
+                    route.fulfill(json={})
+            page.route('**/*',respond)
+            page.goto('http://fixture.test/')
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Previous upload')
+            before = len(requests)
+            payload['jobs'] = [old,new]  # Do not rely on API ordering to focus the request.
+            # Exact receipt reads can precede the background queue-count snapshot.
+            payload['queues']['upload'].pop('waiting')
+            notice = dict(id='new',job_id='new',interaction_id='click-1',title='Requested artwork',open_upload=True,kind='success',text='Request saved')
+            page.evaluate('(cfg)=>window.SportsCaveTopBar.install(cfg)',dict(config,uploadNotice=notice))
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Requested artwork')
+            expect(page.locator('#sc-os-staff-upload-stage')).to_contain_text('Waiting for desktop companion')
+            expect(page.get_by_role('button',name='Pause upload queue',exact=True)).to_be_visible()
+            expect(page.locator('#sc-os-companion-status')).not_to_contain_text('NaN')
+            assert page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            assert len(requests) > before and any('job_id=new' in url for url in requests)
+            # Repeat a deliberate click: reopen status, never submit another upload.
+            page.locator('#sc-os-staff-upload-summary').click()
+            assert not page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            notice['interaction_id'] = 'click-2'
+            page.evaluate('(cfg)=>window.SportsCaveTopBar.install(cfg)',dict(config,uploadNotice=notice))
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Requested artwork')
+            assert page.locator('#sc-os-staff-uploads').evaluate('(el)=>el.open')
+            # A cancelled pinned receipt must yield the summary to the next active job.
+            new.update(stage=7,label='Cancelled',cancelled=True)
+            old.update(stage=2,label='Generating mockups',percent=34)
+            page.evaluate("document.dispatchEvent(new CustomEvent('sc-design-edit-queued'))")
+            expect(page.locator('#sc-os-staff-upload-title')).to_have_text('Previous upload')
+            assert not writes and not errors
+        finally:
+            browser.close()
+
+
+def test_design_defer_and_cancel_controls_follow_the_next_job_without_enqueuing():
+    source=(Path(__file__).resolve().parents[1]/'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
+    config=dict(appName='Sports Cave OS',filesEnabled=True,uploadScope='design-controls',staffUploadProgress=True,
+                currentRouteKey='dashboard',revision='design-controls',searchIndex=[],navigationRouteLabels={},navigationRouteKeys={})
+    first=dict(id='first',title='Stalled design',state='running',label='Waiting for output',percent=10,updated_at='checkpoint',can_defer=True,can_cancel=True)
+    second=dict(id='second',title='Next design',state='waiting',label='Pending',percent=0,can_cancel=True)
+    payload=dict(online=True,jobs=[],queues=dict(upload=dict(enabled=True,waiting=0,display=True),design=dict(enabled=True,waiting=1,jobs=[first,second])))
+    writes=[]
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page(viewport={'width':1200,'height':750})
+            def respond(route):
+                if route.request.url=='http://fixture.test/':
+                    route.fulfill(body=source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config)),content_type='text/html')
+                elif route.request.url.endswith('/api/morning-designs/control'):
+                    body=route.request.post_data_json;writes.append(body)
+                    first.update(state='pending',label='Pending · queue continues',can_defer=False)
+                    second.update(state='running',label='Opening ChatGPT',can_defer=True,updated_at='next')
+                    payload['queues']['design']['waiting']=0
+                    route.fulfill(json=dict(job=dict(id=body['id'],stage=5)))
+                else:route.fulfill(json=payload)
+            page.route('**/*',respond);page.goto('http://fixture.test/')
+            page.locator('#sc-os-design-status > summary').click()
+            page.get_by_role('button',name='Move to pending · Stalled design',exact=True).click()
+            expect(page.locator('#sc-os-design-title')).to_have_text('Next design')
+            assert writes==[dict(id='first',updated_at='checkpoint',action='defer')]
+            expect(page.get_by_role('button',name='Cancel design · Stalled design',exact=True)).to_be_visible()
+            expect(page.get_by_role('button',name='Cancel design · Stalled design',exact=True)).to_be_enabled()
+            expect(page.get_by_role('button',name='Move to pending · Stalled design',exact=True)).to_have_count(0)
+        finally:browser.close()

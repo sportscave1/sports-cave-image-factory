@@ -22,8 +22,8 @@ class GoogleSEOAccessError(RuntimeError):
     pass
 
 
-def _redirect(result, *, status_code=303):
-    query = urlencode({"page": SEO_RETURN_PAGE, "google_oauth": str(result or "attention")})
+def _redirect(result, *, status_code=303, page=SEO_RETURN_PAGE):
+    query = urlencode({"page": page, "google_oauth": str(result or "attention")})
     return RedirectResponse(
         f"{SEO_RETURN_PATH}?{query}",
         status_code=status_code,
@@ -95,7 +95,7 @@ def _start_connection(request):
         google_seo.default_store(),
         user,
         config,
-        return_page=SEO_RETURN_PAGE,
+        return_page="ads_google" if request.url.path.endswith("/ads/connect") else SEO_RETURN_PAGE,
     )
 
 
@@ -123,7 +123,8 @@ def _complete_callback(request):
         request.query_params.get("state", ""),
         user,
     )
-    if str(state_record.get("return_page") or "") != SEO_RETURN_PAGE:
+    return_page = str(state_record.get("return_page") or "")
+    if return_page not in (SEO_RETURN_PAGE, "ads_google"):
         raise google_seo.GoogleOAuthStateError(
             "Google connection could not be verified. Please try again.",
             code="state_return_mismatch",
@@ -141,12 +142,14 @@ def _complete_callback(request):
         user,
         request.query_params.get("code", ""),
         config,
+        require_ads=return_page == "ads_google",
     )
+    return return_page
 
 
 async def google_oauth_callback(request: Request):
     try:
-        await run_in_threadpool(_complete_callback, request)
+        return_page = await run_in_threadpool(_complete_callback, request)
     except GoogleSEOAccessError:
         return _redirect("access_denied")
     except google_seo.GoogleConfigurationError:
@@ -161,10 +164,11 @@ async def google_oauth_callback(request: Request):
         return _redirect("access_denied")
     except Exception:
         return _redirect("attention")
-    return _redirect("connected")
+    return _redirect("connected", page=return_page or SEO_RETURN_PAGE)
 
 
 GOOGLE_SEO_ROUTE_HANDLERS = (
+    ("/api/os/google/ads/connect", google_oauth_connect, ("GET",)),
     (google_seo.GOOGLE_OAUTH_CONNECT_PATH, google_oauth_connect, ("GET",)),
     (google_seo.GOOGLE_OAUTH_CALLBACK_PATH, google_oauth_callback, ("GET",)),
 )

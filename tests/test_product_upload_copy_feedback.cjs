@@ -90,6 +90,16 @@ function harness(crypto,textItem=true,options={}){
  const manual=harness(require('node:crypto').webcrypto,true,{companion:{accepted:false}});
  manual.render('manual copy',{...workflow,automatic:false});await flush();assert.equal(manual.requests.length,0);
  await manual.elements.get('uploadToChat').onclick();assert.deepEqual(manual.popups,[project]);assert.equal(manual.writes[0],full);
+ for(const state of ['cancelled','blocked','future-job-state']){
+  const health=harness(require('node:crypto').webcrypto,true,{companion:{state,version:'1.7.8',reason:'Saved work retained'}});
+  health.render('',{},'companion-health');await flush();
+  const status=health.elements.get('root').children[0].textContent;
+  assert.match(status,/Companion responding/);assert.match(status,/1\.7\.8/);assert.match(status,/Saved work retained/);
+  assert.doesNotMatch(status,/not connected/);
+  assert.deepEqual(health.requests.map(r=>r.action),['health']); // Read-only; never re-pair or start work.
+ }
+ const absent=harness(require('node:crypto').webcrypto,true,{companion:null});absent.render('',{},'companion-health');await flush();
+ assert.match(absent.elements.get('root').children[0].textContent,/not connected/);
  console.log('Copy feedback: success-only, 2000ms reset, independent timers, repeat clicks, rejection, original payloads, rerender and unmount cleanup passed.');
  console.log('Prompt proof: complete long Unicode payload, byte lengths, SHA-256, feedback preservation and stale render rejection passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

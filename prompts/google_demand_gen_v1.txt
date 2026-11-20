@@ -565,7 +565,6 @@ framing
 negative space
 furniture positioning
 product scale
-footer height
 architecture visible
 
 must be adapted to the final aspect ratio.
@@ -578,10 +577,10 @@ SQUARE COMPOSITION
 1200 × 1200
 
 Room:
-approximately upper 72–76%
+the photograph above the shared 187.5 px footer
 
 Footer:
-approximately bottom 24–28%
+exactly 187.5 px at 1200 px canvas width
 
 Product:
 large, dominant
@@ -602,10 +601,10 @@ Do NOT crop the square.
 Recompose horizontally.
 
 Room:
-approximately upper 68–72%
+the photograph above the shared 187.5 px footer
 
 Footer:
-approximately bottom 28–32%
+exactly 187.5 px at 1200 px canvas width
 
 Use extra lateral room context.
 
@@ -629,10 +628,10 @@ Do NOT vertically crop the square.
 Recompose vertically.
 
 Room:
-approximately upper 77–80%
+the photograph above the shared 150 px footer
 
 Footer:
-approximately bottom 20–23%
+exactly 150 px at 960 px canvas width
 
 Move framed product slightly higher.
 
@@ -663,15 +662,15 @@ Foundation:
 #0B0B0D
 
 Warm white:
-#F5F2EA
+#F3EBDD
 
 Premium gold:
-#D4A54C
+#C7A15A
 
 Muted secondary:
-#A6A19A
+#C5C0B5
 
-Add one thin restrained gold separator across the top boundary.
+Replace the original top separator in place with one thin restrained gold shimmer across the top boundary; use the shared premium compact footer profile for height, typography and spacing; preserve its opaque black background.
 
 Never use:
 
@@ -703,7 +702,7 @@ maximum six words
 large
 readable at small Google preview size
 
-When a verified number appears, the number may use #D4A54C.
+When a verified number appears, the number may use #C7A15A.
 
 
 ==================================================
@@ -1285,7 +1284,7 @@ realistic lighting
 
 opaque Sports Cave footer
 
-footer recomposed for each ratio
+footer scaled by canvas width using the shared profile in every ratio
 
 exactly 5 Headlines
 every Headline <= 40 characters
@@ -1308,3 +1307,16 @@ no generic AI advertising language
 market language matches {{COUNTRY}}
 
 package is ready for Google Demand Gen.
+
+PREMIUM COMPACT FOOTER — SINGLE GEOMETRY AND TYPE PROFILE
+At 1024 × 1024, the full-width opaque matte-black footer is exactly 160 px high (15.625%); its top seam is y=864 and the photograph occupies 864 px (84.375%). Use this same geometry for every ad, route, product and country. Never choose a height from a range or grow the footer to accommodate text.
+For another output width, multiply the entire footer geometry, type sizes, tracking in pixels and padding by canvas width / 1024. Scale by width, not canvas height. A 1200 px-wide output therefore has a 187.5 px footer; a 960 px-wide output has a 150 px footer. Keep existing layouts without a black footer; do not add a footer to them.
+Render exactly three lines: assigned HEADLINE, assigned SUPPORTING LINE, then CLAIM YOUR EDITION. Preserve their exact wording, casing and punctuation. Apply this shared typography profile rather than copying type size, spacing or footer height from an earlier generated image.
+Title type: 50 px Baskerville-style editorial serif, Medium weight (500), warm ivory #F3EBDD. Use natural kerning plus 0.03 em letter spacing. The title is the dominant footer element, with refined open letterforms and stronger optical presence; never heavy, bold, blocky, condensed or stretched. Use the same title size and tracking for every approved headline, including short ones. Tracking is a font setting, not extra typed spaces. Keep gold digits and their fine underline inside the headline line; never create a quantity caption.
+Supporting type: 22 px Montserrat Regular, muted warm off-white #C5C0B5, natural kerning with no additional tracking. Render the exact assigned supporting/FOMO sentence. Keep this subordinate to the title and on one line.
+CTA type: 23 px Montserrat Medium (500), antique gold #C7A15A, 0.10 em letter spacing. Render exactly CLAIM YOUR EDITION on one line, as a discreet collector inscription rather than a button.
+At 1024 px width, use 64 px horizontal text margins. The footer has 16 px top padding, a 58 px headline line box, a 6 px clear gap, a 28 px supporting line box, an 8 px clear gap, a 28 px CTA line box and 16 px bottom padding. These sum to 160 px. Centre the glyphs optically in their line boxes. The headline underline stays within its line box. Keep the visible ink separated; no touching lines, empty spacer rows or large black tail. These are the footer's vertical safe areas; general canvas-safe rules must not add extra bottom padding or increase its height.
+Use one thin continuous restrained gold shimmer replacing the existing top separator in place, inside the same 160 px footer. The top seam has a visible champagne-gold specular sheen varying softly along its length, with a restrained brighter section and gently fading luminous edges; never a uniform flat gold rule. Keep it within the existing thin separator footprint, without an extra strip, lens flare or glitter. The black panel stays fully opaque, with no fade, gradient, transparency or floating text overlay.
+Check the longest assigned headline and supporting sentence at the shared size, tracking and horizontal margins before generation; never wrap, squeeze, truncate, rewrite or drop a field. Keep title prominence and clear line separation at mobile preview size. Resolve a genuine fit defect in the existing creative review, preserving exact copy and this footer height; do not inflate the panel or compound font reductions from a previous generation.
+The framed edition remains the dominant visual. Preserve all artwork, frame, room, brand-colour, realism, generation, CSV and Companion workflow instructions. Footer typography applies only to the graphic footer; never restyle text printed inside the original framed edition. Project image sources are visual references only; their proportions or missing text cannot override this shared footer profile.
+In the existing final creative review, count exactly three visible text baselines and inspect their exact wording, optical hierarchy, spacing and metallic seam. Correct any extra or missing footer text, crowded type, wasted padding or flat separator through that existing review before delivery. No new approval, mandatory compositor, extra image, or handoff step.

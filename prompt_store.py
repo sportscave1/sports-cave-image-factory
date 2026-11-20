@@ -166,6 +166,12 @@ def load_prompt(prompt_id, default_text="", *, prompt_name="", module="", seed_d
     if not prompt_id:
         return _default_record(prompt_id, default_text, warning="Prompt key is missing.")
 
+    from prompt_release_runtime import active_version
+    version = active_version(prompt_id)
+    if version:
+        return {**_default_record(prompt_id, default_text), 'source': 'git_release',
+                'source_label': f'Deployed source v{version} · managed in Prompts', 'persisted': True}
+
     runtime_record = _runtime_saved_record(prompt_id)
     if runtime_record:
         return runtime_record
@@ -320,6 +326,9 @@ def load_prompt_records(prompt_specs, *, module="", force_supabase=False):
 
 
 def save_prompt(prompt_id, title, text, *, module="", updated_by="sports_cave_os"):
+    from prompt_release_runtime import active_version
+    if active_version(str(prompt_id or '').strip()):
+        raise RuntimeError('This prompt is version-controlled. Save a new version in Prompts.')
     prompt_id = str(prompt_id or "").strip()
     if not prompt_id:
         raise ValueError("Prompt ID is missing.")

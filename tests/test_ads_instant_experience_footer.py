@@ -45,12 +45,12 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
         contract = ads_page.build_instant_experience_fixed_opaque_footer_rules()
         for wording in (
             "span the complete image width from the left edge to the right edge",
-            "occupy approximately the bottom 18–20% of the canvas",
+            "occupy exactly the bottom 209 px of the 1024 px square, beginning at y = 815 and including the shimmer",
             "anchored flush to the bottom edge",
             "perfectly straight, hard top edge",
             "be fully opaque",
             "completely conceal the room photograph behind it",
-            "thin restrained gold separator",
+            "thin antique-gold line at the existing seam",
         ):
             self.assertIn(wording, contract)
 

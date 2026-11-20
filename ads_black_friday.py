@@ -23,6 +23,10 @@ FOOTER_REPLACEMENTS = (
 
 def build_black_friday_prompt(normal_prompt):
     """Derive the current three-cover footer variant without rerolling any choices."""
+    from ads_footer import COMPACT_FOOTER_RULES
+    from ads_ie_two_line import active
+    if active(normal_prompt) or COMPACT_FOOTER_RULES in normal_prompt:
+        return normal_prompt  # The current two-line footer has no seasonal supporting row.
     from ads_ie_usa import VERSION as USA_VERSION
     if USA_VERSION in normal_prompt:
         return normal_prompt  # USA footer remains fixed; written offers use the existing offer mechanism.

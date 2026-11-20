@@ -40,6 +40,11 @@ def test_edge_attachment_matching_waits_and_isolates_the_original_turn():
         page.evaluate("""() => document.querySelector('article').insertAdjacentHTML('beforeend','<a href="/file">ad_copy.csv</a>')""")
         assert 'Ambiguous' in request('ad_copy.csv')['reason']
         assert len(page.evaluate('clicked'))==2
+        page.evaluate("""j=>document.body.insertAdjacentHTML('beforeend',
+            '<div data-message-author-role="user">Restore files for Sports Cave automatic ad job '+j+'</div>'+
+            '<article><div data-message-author-role="assistant" data-message-id="restored-files"><a href="/restored">ad_copy.csv</a></div></article>')""",job)
+        assert request('ad_copy.csv',recover=True)['response']=='restored-files'
+        assert not request('ad_copy.csv',recover=True,response='wrong')['clicked']
         # A saved-chat recovery does not depend on the original prompt still
         # being rendered by ChatGPT's history virtualization.
         page.evaluate("""() => document.body.innerHTML='<article><div data-message-author-role="assistant" data-message-id="existing-files"><a href="/file">ad_copy.csv Spreadsheet</a></div></article>'""")
@@ -89,6 +94,27 @@ def test_work_pasted_brief_requires_bound_chat_and_finished_original_files():
         first=request(chat=url)
         assert first['clicked']
         assert page.evaluate('clicked.at(-1)')=='CSV download'
+        page.evaluate("""() => document.querySelector('h4[data-conversation-role="assistant"]').nextElementSibling.insertAdjacentHTML('beforeend',
+          '<table><tr><td>ad_copy.csv</td><td><a href="https://chatgpt.com/library?file_id=libfile_abc123&amp;account_id=personal">Open original</a></td></tr>'+
+          '<tr><td>man-cave.jpg</td><td><a href="https://chatgpt.com/library?file_id=libfile_def456">Open original</a></td></tr></table>')""")
+        first=request(chat=url)
+        assert first['library']=='https://chatgpt.com/library?file_id=libfile_abc123'
+        # A second conflicting Library source is not a safe fallback.
+        page.evaluate("""() => document.querySelector('tr').insertAdjacentHTML('beforeend','<td><a href="https://chatgpt.com/library?file_id=libfile_999">Other</a></td>')""")
+        assert not request(chat=url).get('library')
+        page.evaluate("document.querySelector('tr').lastChild.remove()")
+        first=request(chat=url)
+        page.evaluate("""() => document.body.insertAdjacentHTML('beforeend','<ol><li role="status">Failed to download file. Please try again later.</li></ol>')""")
+        status=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
+            dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))
+        assert status['error']=='ChatGPT could not download ad_copy.csv'
+        unrelated=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
+            dict(type='project:ad-download-status',job=job,name='man-cave.jpg',chat=url,response=first['response']))
+        assert not unrelated['error']
+        request(chat=url)  # A stale toast must not contaminate a new attempt.
+        status=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
+            dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))
+        assert not status['error']
         # ChatGPT creates and promptly revokes a blob for the native download.
         # The next alarm can still transfer its original bytes.
         page.evaluate("""() => {

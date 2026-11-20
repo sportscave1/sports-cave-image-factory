@@ -259,7 +259,7 @@ class Health:
                     (ca.event='colour_recovered' AND ca.detail->>'preparation_hash'=q.preparation_hash
                      OR ca.event='technical_cloud_ready' AND ca.detail->>'hash'=q.preparation_hash)) AS colour_recovered,
                 (m.dropbox_file_id=q.file_id AND p.edition_total BETWEEN 1 AND 1000 AND
-                 (SELECT count(*) FROM edition_products other WHERE COALESCE(NULLIF(other.shopify_product_gid,''),other.shopify_product_id)=q.product_gid)=1) AS eligible,
+                 p.identity_count=1) AS eligible,
                 (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='claimed' ORDER BY created_at DESC,id DESC LIMIT 1) AS claimed_at,
                 (SELECT event FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event IN ('queued','mapping_confirmed','claimed','Preparing','Blocked','Cloud Ready','Needs PSD Repair','visual_quality_approved','preparation_metrics','retry','prepare_now') ORDER BY created_at DESC,id DESC LIMIT 1) AS latest_checkpoint,
                 (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='preparation_metrics' AND a.detail->>'preparation_hash'=q.preparation_hash ORDER BY created_at DESC,id DESC LIMIT 1) AS completed_at,
@@ -267,7 +267,8 @@ class Health:
                     AND a.created_at>=COALESCE((SELECT max(c.created_at) FROM auto_edition_onboarding_audit c WHERE c.product_gid=q.product_gid AND c.event='claimed'),q.created_at)
                     ORDER BY created_at DESC,id DESC LIMIT 1) AS last_diagnostic
                 FROM auto_edition_onboarding q LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
-                LEFT JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
+                LEFT JOIN (SELECT ep.*,count(*) OVER (PARTITION BY COALESCE(NULLIF(ep.shopify_product_gid,''),ep.shopify_product_id)) AS identity_count
+                    FROM edition_products ep) p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
                 WHERE q.product_gid>%s ORDER BY q.product_gid LIMIT 500"""
             successes_sql="""SELECT a.id,a.product_gid,p.product_title,a.created_at,
                 EXTRACT(EPOCH FROM a.created_at-c.created_at) AS duration_seconds
@@ -297,8 +298,14 @@ class Health:
             return dict(cur.fetchone())
 
     def snapshot(self):
+        from companion_read_connection import read_connection
+        return Health(lambda: read_connection(self.connect))._snapshot()
+
+    def _snapshot(self):
         from auto_editions_status import batch
         start=time.perf_counter();enabled=telemetry_enabled();telemetry_error=not enabled;reads=1
+        def budget():
+            if time.perf_counter()-start > 20: raise TimeoutError('Editions display refresh exceeded 20 seconds')
         try:raw=self._read_snapshot(enabled)
         except Exception:
             if not enabled:raise
@@ -307,13 +314,17 @@ class Health:
             raw=self._read_snapshot(False);telemetry_error=True;reads+=1
         rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause'];scan=raw.get('recovery_scan')
         while len(raw['rows'])==500:
+            budget()
             raw=self._read_snapshot(False,raw['rows'][-1]['product_gid']);reads+=1;rows.extend(raw['rows'])
+            if len(rows)>10000: raise ValueError('Editions display backlog exceeds 10000 jobs')
         state_rows=[];state_reads=0
         ids=list(dict.fromkeys(r['product_gid'] for r in rows))
         for index in range(0,len(ids),500):
+            budget()
             part=batch(self.connect,ids[index:index+500],writable=True,evidence=True)
             state_rows.extend(part['rows']);state_reads+=part['query_count']
         states=dict(rows=state_rows,query_count=state_reads)
+        budget()
         result=project(rows,{r['product_gid']:r for r in states['rows']},beats,successes,pause,telemetry_error=telemetry_error)
         instance=result['transfer_control']['instance']
         if instance and result['transfer_control']['effective']:
@@ -354,6 +365,7 @@ class Health:
             automatic.update(status='Recovering',reason='Queued or owned work is progressing; completion requires verified exports and cloud receipts.')
         else:
             automatic.update(status='Monitoring',reason='No failed backlog requires recovery.')
+        budget()
         result['cost']=dict(queries=reads+states['query_count'],dropbox_calls=0,duration_ms=round((time.perf_counter()-start)*1000,2))
         return result
 

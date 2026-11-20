@@ -3976,8 +3976,8 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("render_active_upcoming_events", render_body)
         self.assertNotIn("load_calendar_events", render_body)
         self.assertLess(
-            render_body.index("home_sports_morning_brief.render(st, user, today)"),
-            render_body.index("render_home_weekly_work(user, local_now)"),
+            render_body.index("home_fast.render_briefs(st, user, today)"),
+            render_body.index("home_fast.render_weekly(st, user, local_now,"),
         )
         self.assertIn('st.container(key="home-ops-dashboard")', render_body)
         self.assertNotIn("st.title(", render_body)

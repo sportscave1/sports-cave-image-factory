@@ -8,7 +8,7 @@ from crm_cache import DisplayCache
 
 def user_scope(user):
     user = user or {}
-    return (str(user.get("id") or ""), user.get("session_version"), user.get("role"),
+    return (str(user.get("id") or ""), str(user.get("email") or ""), str(user.get("username") or ""), user.get("session_version"), user.get("role"),
             user.get("is_active"), user.get("account_status"), user.get("timezone"),
             tuple(sorted(str(p) for p in user.get("page_permissions") or ())))
 
@@ -39,3 +39,5 @@ def home_weekly_snapshot(state, user, local_now, loader):
 
 def invalidate_home(state):
     state.pop("home-weekly-display-cache", None)
+    from home_fast import SNAPSHOTS
+    SNAPSHOTS.invalidate_matching(lambda key: key[-1] == "This Week's Work")

@@ -20,11 +20,12 @@ def test_failed_upload_icons_are_small_and_click_only(tmp_path):
                 const root=document.querySelector('#root');
                 root.innerHTML=eval('`'+markup+'`');
                 const doc=document,parentWindow=window,listenerController=new AbortController(),listenerOptions={signal:listenerController.signal};
-                const state={config:{uploadScope:'fixture',staffUploadProgress:true}},icon=()=>'',later=()=>{};
-                window.requests=[];
+                const state={config:{uploadScope:'fixture',staffUploadProgress:true}},icon=()=>'',later=()=>{},timers=new Set();
+                window.requests=[];window.reads=[];
                 let job={id:'fixture-id',title:'Silver & Soul – Lewis Hamilton Wall Art',stage:7,restartable:true,
-                         label:'Needs attention',detail:'ChatGPT submitted · timed out.',percent:0,updated_at:'fixture-stamp'};
+                         label:'Needs attention',detail:'ChatGPT submitted · timed out.',percent:0,updated_at:'fixture-stamp',dispatch_id:'fixture-id'};
                 parentWindow.fetch=async(url,options)=>{
+                    if(options?.method!=='POST') reads.push(url);
                     if(options?.method==='POST') {requests.push({url,body:JSON.parse(options.body)});job={...job,stage:0,restartable:false,label:'Restart requested'};}
                     return {ok:true,json:async()=>({online:true,jobs:[job]})};
                 };
@@ -61,11 +62,12 @@ def test_active_upload_can_be_cancelled_from_popup_without_restarting():
             page.evaluate('''({markup,logic}) => {
                 const root=document.querySelector('#root');root.innerHTML=eval('`'+markup+'`');
                 const doc=document,parentWindow=window,listenerController=new AbortController(),listenerOptions={signal:listenerController.signal};
-                const state={config:{uploadScope:'fixture',staffUploadProgress:true}},icon=()=>'',later=()=>{};
-                window.requests=[];
+                const state={config:{uploadScope:'fixture',staffUploadProgress:true}},icon=()=>'',later=()=>{},timers=new Set();
+                window.requests=[];window.reads=[];
                 let job={id:'fixture-id',title:'Forever Panda',stage:5,cancellable:true,label:'Waiting for publication',
-                    detail:'',percent:93,updated_at:'fixture-stamp'};
+                    detail:'',percent:93,updated_at:'fixture-stamp',dispatch_id:'fixture-id'};
                 parentWindow.fetch=async(url,options)=>{
+                    if(options?.method!=='POST') reads.push(url);
                     if(options?.method==='POST') {
                         requests.push({url,body:JSON.parse(options.body)});
                         job={...job,stage:7,cancelled:true,cancellable:false,label:'Cancelled'};
@@ -78,8 +80,9 @@ def test_active_upload_can_be_cancelled_from_popup_without_restarting():
             assert page.evaluate('requests') == []
             page.get_by_role('button',name='Cancel upload: Forever Panda',exact=True).click()
             assert page.evaluate('requests') == [dict(url='/api/staff-product-uploads/cancel',
-                body=dict(id='fixture-id',updated_at='fixture-stamp'))]
+                body=dict(id='fixture-id',updated_at='fixture-stamp',dispatch_id='fixture-id'))]
             assert page.get_by_role('button',name='Cancel upload: Forever Panda',exact=True).count() == 0
             assert 'Cancelled' in page.locator('#sc-os-staff-upload-list').inner_text()
+            assert page.evaluate('reads[reads.length-1]') == '/api/staff-product-uploads/status?display=1&job_id=fixture-id'
         finally:
             browser.close()

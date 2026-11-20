@@ -51,7 +51,7 @@ def operational_status(store,automation):
         report=automation_status(store,automation)
         from crm_automation_readiness import recent_health
         delivery=report.get('delivery_health') or {}
-        if automation['trigger_type']!='abandoned' and recent_health(delivery):
+        if recent_health(delivery):
             st.caption('CRM delivery work recent · '+utc(delivery['checked_at']))
             st.caption('Last full cycle completed · '+utc((report.get('worker') or {}).get('checked_at')))
         else:st.caption(worker_label(report.get('worker') or {}))

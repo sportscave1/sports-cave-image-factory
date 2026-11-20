@@ -1,4 +1,4 @@
-"""Local CLI access to the same Photoshop.Application.200 IDispatch interface.
+"""Local CLI access to the installed Photoshop IDispatch interface.
 
 No listener, app installation or remote command interface. Equivalent to run_inspection.ps1.
 """
@@ -7,6 +7,48 @@ import json
 from pathlib import Path
 import sys
 import time
+import re
+
+
+def select_photoshop_registration(registrations, exists=None):
+    """Prefer the newest installed version, not a stale unversioned alias.
+
+    Resolve before activation. Never switch application versions after Invoke:
+    an uncertain script result must retain its existing duplicate protection.
+    """
+    exists = exists or (lambda path: Path(path).is_file())
+    candidates = []
+    for progid, command in registrations:
+        version = re.fullmatch(r'Photoshop\.Application\.(\d+)', progid, re.I)
+        executable = re.match(r'^\s*"?(.+?\.exe)"?(?:\s+.*)?$', command, re.I)
+        if version and executable and Path(executable[1]).name.lower() == 'photoshop.exe' and exists(executable[1]):
+            candidates.append((int(version[1]), progid))
+    if not candidates:
+        raise PhotoshopActivationUnavailable()
+    return max(candidates)[1]
+
+
+def photoshop_registration():
+    import winreg
+    registrations = []
+    index = 0
+    while True:
+        try:
+            name = winreg.EnumKey(winreg.HKEY_CLASSES_ROOT, index)
+        except OSError:
+            break
+        index += 1
+        if not re.fullmatch(r'Photoshop\.Application\.\d+', name, re.I):
+            continue
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, name + r'\CLSID') as key:
+                clsid = winreg.QueryValueEx(key, '')[0]
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, 'CLSID\\' + clsid + r'\LocalServer32') as key:
+                command = winreg.QueryValueEx(key, '')[0]
+            registrations.append((name, command))
+        except OSError:
+            continue
+    return select_photoshop_registration(registrations)
 
 
 class GUID(c.Structure):
@@ -80,7 +122,7 @@ def run(script):
 def _run(ole, auto, script):
     auto.SysAllocString.argtypes=[c.c_wchar_p];auto.SysAllocString.restype=c.c_void_p
     auto.SysFreeString.argtypes=[c.c_void_p];auto.VariantClear.argtypes=[c.POINTER(Variant)]
-    cls=GUID();iid=GUID();null=GUID();ole.CLSIDFromProgID('Photoshop.Application.200',c.byref(cls));ole.CLSIDFromString('{00020400-0000-0000-C000-000000000046}',c.byref(iid))
+    cls=GUID();iid=GUID();null=GUID();ole.CLSIDFromProgID(photoshop_registration(),c.byref(cls));ole.CLSIDFromString('{00020400-0000-0000-C000-000000000046}',c.byref(iid))
     dispatch=c.c_void_p()
     activate_photoshop(lambda: ole.CoCreateInstance(c.byref(cls),None,4,c.byref(iid),c.byref(dispatch)))
     table=c.cast(dispatch,c.POINTER(c.POINTER(c.c_void_p))).contents
