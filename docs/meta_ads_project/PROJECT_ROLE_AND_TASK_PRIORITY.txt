@@ -1,0 +1,130 @@
+SCOPE: The two-line rules apply when the OS task specifies SPORTS CAVE BASELINE 2.0 — TWO-LINE FOOTER V1. Explicitly selected saved releases and other formats retain their own supplied profiles; do not migrate or restyle saved ads.
+
+PROJECT ROLE AND TASK PRIORITY — BASELINE 2.0 TWO-LINE FOOTER
+Use the current OS brief as authority for product, market, rooms, cameras,
+lighting, exact copy, route order, image count and CSV. Preserve all Baseline 2.0
+photographic design, original framed-product fidelity, realistic scale and glazing.
+Generate three separate covers in order, using the original product reference
+for each, then complete the existing downloadable CSV and Companion handoff.
+No new approval between images and no replacement with another ad format.
+
+ON-IMAGE SCARCITY TITLES
+Keep the existing three distinct assignments from the approved bank:
+Limited to 100 Editions; Only 100 Will Ever Exist; Only 100 Editions Available;
+Limited to 100 Worldwide; 100 Edition Collector Run.
+These remain the first footer line. Do not substitute Claim Your Edition for
+an image's scarcity title. Preserve saved wording and all source-artwork text.
+
+SECOND LINE AND WRITTEN HEADLINE
+WRITTEN META HEADLINE — UNUSED FOOTER LINE
+For each ad, use its supplied META HEADLINE verbatim in displayed AD COPY and
+the existing CSV headline cell. It is the exact line omitted from that image's
+footer. When the footer's second line is CLAIM YOUR EDITION, the Meta headline
+is that ad's selected FOMO sentence. When the footer's second line is the FOMO
+sentence, the Meta headline is Claim Your Edition. Do not invent another heading,
+apply the former product-specific headline angles or word-count targets, or
+rewrite the assigned text for novelty. Repeated Claim Your Edition headlines
+are intentional. The image's 100-variation title is unchanged and stays on-image.
+Keep each assigned split throughout generation, review, display, reopen and CSV
+export; no swapping or rerolling during final review. Preserve descriptions,
+copy/CSV CTA Claim Your Edition, native Shop Now button, route order and schema.
+
+SPORTS CAVE BASELINE 2.0 — TWO-LINE FOOTER V1
+Use the Baseline 2.0 full-width opaque matte-black footer, exactly 160 px high
+at 1024 × 1024; top seam y=864, photograph 864 px (84.375%). Scale by output
+width / 1024 for other sizes. Keep the existing thin champagne-gold shimmer
+at the photo/footer seam, with softly varying specular sheen, never a flat rule.
+No badge or PNG overlay. Preserve the original product, frame, rooms and glazing.
+Render exactly two centred text baselines, never three:
+Line 1: the exact assigned 100-variation HEADLINE from the existing approved bank.
+Title: 50 px Baskerville-style editorial serif Medium (500), warm ivory #F3EBDD,
+natural kerning plus 0.03 em tracking. Keep gold 100 digits and their fine
+underline inline, not a quantity caption or extra row.
+Line 2: only the exact assigned FOOTER SECOND LINE. If kind is CTA, render
+CLAIM YOUR EDITION in the existing 23 px Montserrat Medium, antique gold
+#C7A15A, 0.10 em tracking. If kind is FOMO, render its exact supporting sentence
+in the existing 22 px Montserrat Regular, warm off-white #C5C0B5, natural kerning.
+Keep 64 px horizontal margins. Centre these two lines within the same 160 px
+panel: 32 px top padding, 58 px title line box, 10 px gap, 28 px second-line
+box and 32 px bottom padding. No wrap, extra caption, separate CTA row or blank
+third text row. Typography and colours remain Baseline 2.0; never restyle text
+printed inside the framed edition. The black footer remains fully opaque.
+Inspect the actual exported JPEG at full size and 256 px: exactly these two
+baselines, exact wording, title prominence, clear spacing and metallic shimmer.
+Correct defects through the existing final creative review before export.
+
+REFERENCE AND WORKFLOW SCOPE
+Footer example images are style references; their old three-line layout or badge
+cannot override the current two-line OS assignment. The archived v1.0, original
+three-line Baseline 2.0 and withdrawn 2.1 Beta are history only. Do not mix their
+footer rules with this task. Follow an explicitly supplied saved task's own
+profile when recovering original exports; do not redraw completed images.
+Keep existing copy frameworks, identity/factual safeguards, image filenames,
+CSV fields, targeting, native Shop Now button and Companion behavior unchanged.
+
+RESERVE ROOMS — TECHNICAL FAILURES ONLY
+SPORTS CAVE TWO CONDITIONAL RESERVE SCENES V1
+Applies only to a three-cover Instant Experience task, never Carousel or Single Image.
+These are two dormant replacement specifications, not instructions to generate
+Ad 4 or Ad 5 in a successful pack. Complete the three initial assigned calls
+first, preserving successful outputs and finishing independent unattempted slots.
+If all three images exist, skip this entire reserve section and continue the
+existing final review, three-image export, CSV and Companion handoff unchanged.
+
+ELIGIBILITY AND ALLOCATION
+An original slot is eligible only when its call produced no image and the
+provider explicitly identifies a retryable technical failure. An ambiguous
+result requires recovery/inspection of the existing call result first.
+A safety rejection, moderation_blocked result or unexplained rejection never
+authorizes a reserve room, reworded retry or substitute generation. Preserve
+those completed outputs and copy and report the provider's actual reason.
+A downloaded/display error requires recovery of the existing bytes, not another
+image generation. Never change a reference or rewrite a prompt to evade a block.
+
+After the initial three attempts, order eligible missing slots by Ad 1/2/3.
+Use Reserve A for the first eligible missing slot. Use Reserve B only if a
+second distinct original slot has an eligible failure. At most one reserve-room
+attempt per eligible missing slot, at most two reserve attempts in the pack.
+Do not use Reserve B as another retry for Reserve A's slot. Do not reset this
+budget on review, reopen or resume, use a reserve to replace a successful slot, or restart
+the set. If a reserve also fails, retain every completed file and report the
+remaining missing slot honestly using the existing incomplete-delivery marker.
+
+RESERVE A — OPTIONAL FOURTH CALL: COLLECTOR MAN CAVE
+A premium private residential collector man cave, with believable warm directional
+light and quiet tactile walls. The supplied framed edition remains the main
+piece and unmistakable hero. At the distant edge or on a peripheral background
+wall, include one or two small, softly out-of-focus hanging sports keepsakes;
+keep them subdued, secondary and without readable invented claims, signatures
+or certificates. No competing hero artwork, clutter or themed sports-bar layout.
+Choose a different residential composition, wall treatment and lighting from
+the completed covers while preserving the missing slot's assigned camera role,
+physical product scale, complete frame and visible glazing.
+
+RESERVE B — OPTIONAL FIFTH CALL: DARK COLLECTOR STUDIO APARTMENT
+A premium dark-themed residential studio apartment with a restrained masculine
+collector aesthetic, quiet deep-toned wall, subtle leather/timber details and
+soft practical/window light. A compact sofa or desk may appear only at the
+periphery. Keep the supplied framed edition the main piece, legible and tonally
+separated from the wall, with believable reflections and architectural depth.
+This is a home, not a black void, showroom or sports bar. Make its composition
+distinct from completed covers and Reserve A; retain the missing slot's camera
+role, scale, complete frame and original framed-product reference.
+
+UNCHANGED CONTRACT FOR EITHER REPLACEMENT
+For the eligible missing slot only, combine the ORIGINAL product reference,
+existing shared image requirements and that slot's exact resolved specification;
+replace only its room/scene description with its allocated reserve scene above.
+Do not pass the unused reserve or sibling instructions into the image call.
+Retain its camera role, product scale, footer wording, route identity, filename
+and CSV row. Keep the assigned 100-variation title, two-line footer, exact second
+line and complementary written Meta headline; never reroll their saved split.
+Preserve Baseline 2.0 typography, 160 px opaque black footer, gold shimmer,
+1024 × 1024 sRGB JPEG, product fidelity, glazing, targeting and copy framework.
+Label/save the result as the ORIGINAL missing Ad 1/2/3 slot, not as Ad 4/5.
+Reuse completed images. Deliver three final covers, never an additional fourth
+cover or fifth deliverable. Export the same three-row ad_copy.csv and continue
+the existing review, attachments, completion markers and Companion workflow.
+If fewer than three covers can actually be completed, preserve all successes
+and copy records and identify the incomplete slot; never claim three images
+or emit a successful completion marker for a two-image package.

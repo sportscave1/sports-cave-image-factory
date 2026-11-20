@@ -7,6 +7,21 @@ from auto_editions_preflight import validate, verify_resize
 from tests.test_auto_editions_onboarding import inspection
 
 
+def test_photoshop_registration_uses_newest_installed_version_before_dispatch():
+    from scripts.photoshop_dispatch import select_photoshop_registration, PhotoshopActivationUnavailable
+    entries = [('Photoshop.Application.200', 'C:/Adobe/2026/Photoshop.exe /Automation'),
+               ('Photoshop.Application.210', '"C:/Adobe/2027/Photoshop.exe" /Automation'),
+               ('Photoshop.Application.999', 'C:/Removed/Photoshop.exe /Automation'),
+               ('Photoshop.Application', 'C:/Adobe/2026/Photoshop.exe /Automation')]
+    present = lambda path: 'Removed' not in path
+    assert select_photoshop_registration(entries, present) == 'Photoshop.Application.210'
+    assert select_photoshop_registration(entries[:1], present) == 'Photoshop.Application.200'
+    with pytest.raises(PhotoshopActivationUnavailable):
+        select_photoshop_registration(entries, lambda path: False)
+    with pytest.raises(PhotoshopActivationUnavailable):
+        select_photoshop_registration([('Photoshop.Application.210','C:/Adobe/other.exe')], lambda path: True)
+
+
 def test_preflight_cleanup_cannot_release_a_later_uncertain_rpc(tmp_path):
     from scripts.prepare_auto_editions import native_dispatch,native_cleanup_uncertain
     (tmp_path/'photoshop-dispatch.json').write_text('{"started":true}')

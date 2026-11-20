@@ -48,6 +48,8 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
+    {"key": "marketplace", "route": "Marketplace", "label": "Marketplace", "worker_assignable": False, "top_level": True},
+    {"key": "prompts", "route": "Prompts", "label": "Prompts", "worker_assignable": False, "top_level": True},
     {"key": "task_recorder", "route": "Task Recorder", "label": "Task Recorder", "worker_assignable": False, "top_level": True},
     {"key": "worker_health", "route": "Worker Health", "label": "Editions Companion", "worker_assignable": False, "top_level": True},
     {"key": "upload_companion", "route": "Upload Companion", "label": "Companion Queues", "worker_assignable": False, "top_level": True},
@@ -112,6 +114,14 @@ PAGE_REGISTRY = (
         "key": ads_navigation.META_REVIEW_PAGE_KEY,
         "route": ads_navigation.META_REVIEW_ROUTE,
         "label": ads_navigation.META_REVIEW_ROUTE,
+        "worker_assignable": False,
+        "parent_key": ads_navigation.ADS_PAGE_KEY,
+        "navigation_child": True,
+    },
+    {
+        "key": ads_navigation.GOOGLE_PAGE_KEY,
+        "route": ads_navigation.GOOGLE_ROUTE,
+        "label": ads_navigation.GOOGLE_ROUTE,
         "worker_assignable": False,
         "parent_key": ads_navigation.ADS_PAGE_KEY,
         "navigation_child": True,
@@ -428,7 +438,7 @@ def can_access_page(user, route_or_key):
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
     if page and page["key"] == "developer_studio":
         return is_reporting_owner(user)
-    if page and page['key'] in {'worker_health', 'upload_companion', 'task_recorder'}:return is_admin(user)
+    if page and page['key'] in {'worker_health', 'upload_companion', 'task_recorder', 'prompts', 'marketplace'}:return is_admin(user)
     if page and page['key']=='crm_settings_view':
         return is_admin(user) or any(key in permission_keys(user) for key,_,_ in crm_navigation.PAGES)
     if page and page["key"] == REPORTING_PAGE_KEY:

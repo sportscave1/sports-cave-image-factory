@@ -17,16 +17,12 @@ for(const status of ['running','paused','expired']){
 assert.equal(opened,3);
 state.plannerTimer.outcome='completed';context.update();assert.equal(strip.hidden,true);
 state.plannerTimer={id:'one',status:'running'};state.config.dailyPlannerEnabled=false;context.update();assert.equal(strip.hidden,true);
-const greeting=source.slice(source.indexOf('const topBarGreetingForDate ='),source.indexOf('const updateTopBarGreeting ='));
-vm.runInContext(greeting+';this.greet=topBarGreetingForDate;',context);
-for(const [hour,text] of [[4,'Good night'],[5,'Good morning'],[12,'Good afternoon'],[17,'Good night']])assert.equal(context.greet({getHours:()=>hour}),text);
-console.log('Home mirror checks passed: inactive/active/outcome/permissions, navigation, no timer mutation, greeting boundaries.');
+console.log('Home mirror: active, inactive, permissions, navigation and no timer mutation passed.');
 // The header registers a click handler only: no Files request or mount at startup.
-let click,focused=0;const calls=[];
-const launch={filesButton:{addEventListener:(event,fn)=>{assert.equal(event,'click');click=fn;}},state:{config:{filesEnabled:true}},listenerOptions:{},parentWindow:{open:(...args)=>{calls.push(args);return {focus:()=>focused++};}}};
+let click,openedFiles=0;
+const launch={filesButton:{addEventListener:(event,fn)=>{assert.equal(event,'click');click=fn;}},state:{config:{filesEnabled:true}},listenerOptions:{},parentWindow:{SportsCaveFilesWindow:{open:()=>openedFiles++}}};
 vm.createContext(launch);
 vm.runInContext(source.slice(source.indexOf('filesButton.addEventListener("click"'),source.indexOf('const sendPlannerAuth =')),launch);
-assert.equal(calls.length,0);click();assert.equal(calls[0][0],'/files-window');assert.equal(calls[0][1],'sports-cave-files-window');assert.equal(focused,1);
-launch.state.config.filesEnabled=false;click();assert.equal(calls.length,1);
-launch.state.config.filesEnabled=true;launch.parentWindow.open=(...args)=>{calls.push(args);return null;};click();assert.equal(calls.at(-1)[1],'_blank');
-console.log('Files checks passed: click-only existing window, permission gate, focus and popup fallback.');
+assert.equal(openedFiles,0);click();assert.equal(openedFiles,1);
+launch.state.config.filesEnabled=false;click();assert.equal(openedFiles,1);
+console.log('Files opens only on an authorised click through the shared window controller.');

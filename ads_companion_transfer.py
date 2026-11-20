@@ -2,6 +2,10 @@
 import hashlib
 import json
 import re
+import asyncio
+from threading import BoundedSemaphore
+
+_BODY_SLOTS = BoundedSemaphore(2)
 from uuid import UUID, uuid4
 
 import design_publish_ad as ads
@@ -25,6 +29,7 @@ def receive(token, job_id, name, chat_url, response_id, data):
         raise ValueError('Invalid ad file name or size.')
     if not ads.CHAT.fullmatch(chat_url) or not re.fullmatch(r'[A-Za-z0-9_-]{1,160}', response_id):
         raise ValueError('The original ad response is required.')
+    digest = content_hash(data)
     lease = str(uuid4())
     with ads.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT 1 FROM product_upload_desktop WHERE singleton AND token_hash=%s FOR UPDATE', (ads.digest(token),))
@@ -37,6 +42,14 @@ def receive(token, job_id, name, chat_url, response_id, data):
         value = row['value']
         user = DEFAULT_STORE.get_user(value['requester'])
         ads.check_request(user, value['sport'], value['country'])
+        # A lost HTTP acknowledgement must not reconvert or reupload a verified file.
+        receipt = (value.get('artifacts') or {}).get(name)
+        if receipt and value.get('chat_url') == chat_url and (value.get('response_ids') or {}).get(name) == response_id:
+            if receipt.get('hash') != digest or receipt.get('size') != len(data):
+                raise ValueError('A different file already occupies this ad slot. Existing files were preserved.')
+            if receipt.get('id') and receipt.get('rev'):
+                return dict(received=name, ready=all(filename in value['artifacts'] for filename in FILES),
+                            detail=progress(value), reused=True)
         if value['stage'] != 'generating' or value.get('posting_id'):
             raise ValueError('This job is not accepting creative files.')
         if value.get('chat_url') != chat_url or (value.get('response_ids') or {}).get(name, response_id) != response_id:
@@ -67,7 +80,6 @@ def receive(token, job_id, name, chat_url, response_id, data):
         path = value['folder'] + '/' + name
         if not dbx.api.path_is_within_root(path, dbx.context['root_path']):
             raise ValueError('Ad destination is outside the Files root.')
-        digest = content_hash(data)
         existing = dbx.metadata_if_present(path)
         if not existing:
             existing = dbx.api.upload_file(dbx.token, path, data)
@@ -91,6 +103,7 @@ def progress(value):
 
 def delivery(value):
     return dict(id=value['upload'], stage=value['stage'], receipt=ads._source_token(value['upload']),
+                repair=value.get('attachment_repair'),
                 recover=bool(value.get('collect_only')),resume_token=value.get('resume_token'),response_ids=value.get('response_ids') or {},
                 chat_url=value.get('chat_url'),
                 missing=[name for name in FILES if name not in (value.get('artifacts') or {})])
@@ -113,6 +126,9 @@ def resume(job_id, user, settings=None):
         if not row:
             raise ValueError('Ad job not found.')
         value = row['value']
+        value.pop('catalog_retry', None)
+        if value.get('attachment_repair'):
+            value.setdefault('attachment_repair_history', []).append(value.pop('attachment_repair'))
         if settings is not None:
             if value['stage'] != 'failed':
                 raise ValueError('Targeting can be corrected after the job stops for review.')
@@ -136,14 +152,27 @@ async def file_route(request):
         auth = request.headers.get('authorization', '')
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}', auth):
             raise PermissionError('Desktop credential required.')
-        data = bytearray()
-        async for chunk in request.stream():
-            data.extend(chunk)
-            if len(data) > 20*1024**2:
-                raise ValueError('Ad file exceeds the transfer limit.')
         q = request.query_params
-        result = await run_in_threadpool(receive, auth[7:], q.get('job',''), q.get('name',''),
-            q.get('chat',''), q.get('response',''), bytes(data))
+        name = q.get('name', '')
+        if name not in FILES: raise ValueError('Invalid ad file name.')
+        limit = (2 if name.endswith('.csv') else 20)*1024**2
+        declared = request.headers.get('content-length')
+        if declared and (not declared.isdigit() or int(declared)>limit):
+            raise ValueError('Ad file exceeds the transfer limit.')
+        if not _BODY_SLOTS.acquire(blocking=False):
+            raise ValueError('Ad transfer is busy. Retry the same file shortly.')
+        try:
+            async def body():
+                data = bytearray()
+                async for chunk in request.stream():
+                    if len(data)+len(chunk)>limit: raise ValueError('Ad file exceeds the transfer limit.')
+                    data.extend(chunk)
+                return bytes(data)
+            data = await asyncio.wait_for(body(), timeout=30)
+            result = await run_in_threadpool(receive, auth[7:], q.get('job',''), name,
+                q.get('chat',''), q.get('response',''), data)
+        finally:
+            _BODY_SLOTS.release()
         return JSONResponse(result, headers=HEADERS)
     except Exception as error:
         return failure(error)

@@ -6,7 +6,8 @@ const {test} = require('node:test');
 
 function fixture(records = new Map()) {
   const listeners = [], opened = [], sent = [], tabs = new Map();
-  let result = {jobs:[]}, events;
+  let result = {jobs:[]}, events, progress={blocked:false,generating:false,finished:true,chat_url:job(1).project.replace('/project','/c/00000000-0000-0000-0000-000000000099')}, allowStop=true;
+  const actions=[];
   const chrome = {
     runtime:{id:'companion',getManifest:()=>({version:'1.2.0'}),onMessage:{addListener:fn=>listeners.push(fn)},
       onStartup:{addListener(){}},onInstalled:{addListener(){}}},
@@ -17,9 +18,12 @@ function fixture(records = new Map()) {
     tabs:{
       create:async ({url,active})=>{const tab={id:opened.length+1,url,active};opened.push(tab);tabs.set(tab.id,tab);return tab;},
       get:async id=>tabs.get(id),
+      reload:async id=>actions.push('reload'),
       sendMessage:async (id,message)=>{
+        actions.push(message.type);
         if(message.type==='project:ready')return {ready:true};
-        if(message.type==='project:progress')return {blocked:false,chat_url:job(1).project.replace('/project','/c/00000000-0000-0000-0000-000000000099')};
+        if(message.type==='project:progress')return progress;
+        if(message.type==='project:cancel'){if(allowStop)progress={...progress,generating:false};return {stopped:true};}
         const sender={url:tabs.get(id).url,frameId:0,tab:{id}};
         const permission=await new Promise(resolve=>listeners[0]({type:'project:permit',id:message.id},sender,resolve));
         assert.equal(permission.ok,true);
@@ -28,12 +32,12 @@ function fixture(records = new Map()) {
       },
     },
   };
-  const context=vm.createContext({chrome,URL,AbortSignal,setTimeout,setInterval,clearInterval,
+  const context=vm.createContext({chrome,URL,AbortSignal,setTimeout,clearTimeout,setInterval,clearInterval,
     fetch:async (_url,options)=>{events=JSON.parse(options.body);return {ok:true,json:async()=>result};}});
   context.importScripts=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion',file),'utf8'),context);
   context.importScripts('worker.js');
   records.set('staffQueueCredential','x'.repeat(43));
-  return {records,opened,sent,events:()=>events,respond:value=>{result=value;},
+  return {records,opened,sent,tabs,actions,setProgress:value=>progress=value,allowStop:value=>allowStop=value,events:()=>events,respond:value=>{result=value;},
     run:code=>vm.runInContext(code,context)};
 }
 function job(n) {
@@ -63,6 +67,34 @@ test('one design submits through the existing mutex and never resubmit on repeat
   assert.equal(restart.sent.length,0);
 });
 
+test('requests one slot and never opens two new design chats from an older server response',async()=>{
+  const f=fixture(), jobs=[job(1),job(2)];
+  f.respond({enabled:true,jobs});
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.events().capacity,1);
+  assert.equal(f.sent.length,1);
+  assert.equal(f.opened.length,1);
+  f.respond({enabled:true,jobs:[{...jobs[0],stage:2},jobs[1]]});
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,1,'a running design prevents opening another');
+});
+
+test('continues reporting two already submitted jobs without opening any replacement chat',async()=>{
+  const f=fixture(), jobs=[{...job(1),stage:2},{...job(2),stage:2}];
+  const saved={};
+  for(const j of jobs){
+    f.records.set('upload:'+j.receipt,{state:'submitted'});
+    saved[j.id]={id:j.id,receipt:j.receipt};
+  }
+  f.records.set('morningDesignJobs',saved);
+  f.respond({enabled:true,jobs});
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.events().capacity,1);
+  assert.equal(f.events().events.length,2);
+  assert.equal(f.sent.length,0);
+  assert.equal(Object.keys(f.records.get('morningDesignJobs')).length,2);
+});
+
 test('persisted sending state after restart is reported uncertain, without opening another chat',async()=>{
   const f=fixture(), j=job(1);
   f.records.set('upload:'+j.receipt,{state:'sending'});
@@ -80,6 +112,14 @@ test('invalid project or changed job correlation cannot open or submit a chat',a
   f.respond({jobs:[{...j,prompt:'Uncorrelated prompt'}]});
   await f.run('designQueueTick()');
   assert.equal(f.opened.length,0);
+});
+
+test('queued edit submits its unchanged prompt once without a new-design receipt',async()=>{
+  const f=fixture(),j={...job(1),kind:'edit',prompt:'**USER-REQUESTED DESIGN CHANGES**\nFix spacing\n\nEXACT EXISTING EDIT PROMPT'};
+  f.respond({jobs:[j]});await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent[0].prompt,j.prompt);
+  await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,1);
 });
 
 
@@ -128,5 +168,49 @@ test('an explicitly requeued design uses a fresh receipt and submits exactly onc
   await f.run('designQueueTick()'); await f.run('queue');
   assert.equal(f.sent.length,2);
   await f.run('designQueueTick()'); await f.run('queue');
+  assert.equal(f.sent.length,2);
+});
+
+test('deferral stops the previous generation before opening the next design and retains its chat',async()=>{
+  const f=fixture(),first=job(1),second=job(2);
+  f.respond({jobs:[first]});await f.run('designQueueTick()');await f.run('queue');
+  const chat=first.project.replace('/project','/c/00000000-0000-0000-0000-000000000099');
+  f.tabs.get(1).url=chat;
+  f.setProgress({generating:true,finished:false,blocked:false,chat_url:chat,activity:'one'});
+  f.respond({jobs:[{...first,stage:2}]});await f.run('designQueueTick()');
+  f.respond({jobs:[second]});await f.run('designQueueTick()');await f.run('queue');
+  assert.equal(f.sent.length,2);
+  assert.ok(f.actions.indexOf('project:cancel')<f.actions.lastIndexOf('project:send'));
+  assert.equal(f.records.get('upload:'+first.receipt).state,'cancelled');
+  assert.ok(f.tabs.has(1),'saved chat remains available');
+});
+
+test('does not start another design until the previous owned response actually stops',async()=>{
+  const f=fixture(),first=job(1);
+  f.respond({jobs:[first]});await f.run('designQueueTick()');await f.run('queue');
+  f.setProgress({generating:true,finished:false,blocked:false});
+  f.tabs.get(1).url=first.project.replace('/project','/c/00000000-0000-0000-0000-000000000099');
+  f.allowStop(false);f.respond({jobs:[job(2)]});
+  await f.run('designQueueTick()');await f.run('queue');assert.equal(f.sent.length,1);
+  await f.run('designQueueTick()');assert.equal(f.actions.filter(a=>a==='reload').length,1);
+  f.allowStop(true);await f.run('designQueueTick()');await f.run('queue');assert.equal(f.sent.length,2);
+});
+
+test('only the owned design tab can wake immediate blocker reporting and advance once',async()=>{
+  const f=fixture(),first=job(1),second=job(2);
+  f.respond({jobs:[first]});await f.run('designQueueTick()');await f.run('queue');
+  const chat=first.project.replace('/project','/c/00000000-0000-0000-0000-000000000099');
+  f.tabs.get(1).url=chat;
+  f.setProgress({generating:false,finished:true,blocked:true,reason:'Image service rejected generation; replacement PSD pending.',chat_url:chat,activity:'blocked'});
+  f.respond({jobs:[second]});
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:0,tab:{id:99},url:${JSON.stringify(chat)}})`)).accepted,false);
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:1,tab:{id:1},url:${JSON.stringify(chat)}})`)).accepted,false);
+  assert.equal(f.sent.length,1);
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:0,tab:{id:1},url:${JSON.stringify(chat)}})`)).accepted,true);
+  await f.run('queue');
+  assert.equal(f.events().events[0].state,'blocked');
+  assert.equal(f.sent.length,2);
+  assert.ok(f.tabs.has(1));
+  assert.equal((await f.run(`wakeDesignFromTab({frameId:0,tab:{id:1},url:${JSON.stringify(chat)}})`)).accepted,false);
   assert.equal(f.sent.length,2);
 });

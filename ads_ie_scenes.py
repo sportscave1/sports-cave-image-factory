@@ -49,7 +49,7 @@ WALLS = (
 )
 
 # setting, architecture, depth, furniture/edge cue, compatible wall indices, light rig.
-# Image 1 always remains a collector hallway; Image 2 is one minimal edge glimpse;
+# Images 1 and 2 are collector hallways in different homes; Image 2 is front-view.
 # Image 3 is a restrained interior. Shared setting labels prevent same-home packs.
 HOMES = (
     (
@@ -63,14 +63,14 @@ HOMES = (
         ("Restrained media lounge", "contemporary garden-home entrance", "low collector corridor with a distant stepped wall return", "slim pale oak console at outer left", (3, 5, 6, 9, 11, 15, 17), "corner window"),
     ),
     (
-        ("Refined apartment living corner", "quiet contemporary apartment", "one tall recessed window reveal with a distant furniture silhouette at the far left", "none; architecture is the single peripheral cue", (0, 3, 5, 7, 9, 13, 14, 17), "tall window"),
-        ("Contemporary courtyard home", "single-storey courtyard house", "one shallow limestone passage return at the far right with a tiny softly lit adjoining sitting-area glimpse", "none; architecture is the single peripheral cue", (2, 3, 6, 10, 14, 17), "courtyard window"),
-        ("Heritage collector hallway", "quiet heritage townhouse interior", "one solid heritage wall pier framing a softly lit stair-landing glimpse at the far left", "none; architecture is the single peripheral cue", (0, 1, 4, 8, 12, 18), "side window"),
-        ("Bay-window sitting room", "restrained bay-window home", "one window recess with a partial distant furniture silhouette at the far right", "none beyond the silhouette inside the single window recess", (0, 4, 11, 12, 15, 16), "bay window"),
-        ("Quiet home study", "garden-facing reading home", "one garden-facing window recess with a distant seating silhouette at the far right", "none; no desk in the photographic foreground", (0, 4, 5, 10, 14, 19), "garden window"),
-        ("Architectural entry alcove", "oak-accented architectural home", "one small oak-lined opening at the far left revealing a softly lit recessed window seat", "none; architecture is the single peripheral cue", (2, 3, 5, 10, 15, 17), "clerestory window"),
-        ("Split-level lounge", "mid-century split-level home", "one lowered floor-plane glimpse beyond a low residential ledge at the far right with a softly lit recessed bench edge", "none; architecture is the single peripheral cue", (2, 6, 7, 9, 10, 13, 17), "high side window"),
-        ("Restrained media lounge", "contemporary private residential retreat", "one broad layered wall return at the far left revealing a softly lit sliver of an adjoining living area", "none; architecture is the single peripheral cue", (0, 5, 6, 9, 11, 14, 16), "corner window"),
+        ("Apartment entry collector hallway", "quiet contemporary apartment entrance", "collector corridor continuing past an offset doorway at the far left", "one narrow console at the outer edge", (0, 3, 5, 7, 9, 13, 14, 17), "tall window"),
+        ("Courtyard collector hallway", "single-storey courtyard-house entrance", "collector passage receding toward a courtyard opening at the far right", "one slim stone console at the outer edge", (2, 3, 6, 10, 14, 17), "courtyard window"),
+        ("Townhouse collector hallway", "quiet heritage townhouse entrance", "collector hall continuing toward a distant stair landing at the far left", "one narrow timber console at the outer edge", (0, 1, 4, 8, 12, 18), "side window"),
+        ("Bay-window collector hallway", "restrained bay-window house entrance", "collector passage leading toward a distant bay opening at the far right", "one slim upholstered bench at the outer edge", (0, 4, 11, 12, 15, 16), "bay window"),
+        ("Garden-facing collector hallway", "garden-facing collector-house entrance", "collector corridor extending past a recessed garden doorway at the far right", "one narrow oak ledge at the outer edge", (0, 4, 5, 10, 14, 19), "garden window"),
+        ("Oak-accented collector hallway", "oak-accented home entrance", "collector entry gallery continuing through an oak-lined passage at the far left", "one slim timber console at the outer edge", (2, 3, 5, 10, 15, 17), "clerestory window"),
+        ("Split-level collector hallway", "mid-century split-level home entrance", "collector hallway with a distant floor-level step at the far right", "one narrow wall-mounted ledge at the outer edge", (2, 6, 7, 9, 10, 13, 17), "high side window"),
+        ("Contemporary collector hallway", "contemporary private-home entrance", "collector entry passage receding around a layered return at the far left", "one slim dark console at the outer edge", (0, 5, 6, 9, 11, 14, 16), "corner window"),
     ),
     (
         ("Bay-window sitting room", "refined Victorian sitting room", "off-centre bay-window seating recess", "one oatmeal wool banquette edge at the outer perimeter", (0, 1, 4, 11, 12, 15), "bay window"),
@@ -89,8 +89,7 @@ HOMES = (
 # architectural glimpse is made explicit, so colour changes cannot pass as variety.
 SPATIAL_FAMILIES = (
     ("circulation axis",) * 8,
-    ("window volume", "folded wall plane", "solid architectural pier", "window volume",
-     "window volume", "recessed seating opening", "split-level plane", "layered wall planes"),
+    ("entry gallery axis",) * 8,
     ("window volume", "split-level plane", "intersecting-wall corner", "window volume",
      "courtyard court", "double-height volume", "ceiling step", "intersecting-wall corner"),
 )
@@ -150,11 +149,10 @@ def candidates(slot):
                     furniture = ("one leather media-lounge edge at the outer perimeter", "one pool-table corner deep in the room", "one restrained home-bar joinery edge deep in the recess")[h % 3]
                 scene = dict(scene_selection_version=VERSION, scene_id=f"{slot}:{h}:{w}:{l}", scene_slot=slot,
                     home_setting=setting, architecture_style=architecture,
-                    room_type=(f"{architecture} collector hallway" if slot == 0 else
-                               f"minimal {architecture} product wall" if slot == 1 else architecture),
+                    room_type=(f"{architecture} collector hallway" if slot in (0, 1) else architecture),
                     wall_colour=colour, wall_colour_family=family, wall_lightness=lightness, wall_visual_group=group,
                     wall_material=finish, wall_finish=finish, architectural_cue=depth,
-                    depth_family=source, primary_cue=depth if slot == 1 else furniture, furniture_cue=furniture,
+                    depth_family=source, primary_cue=furniture, furniture_cue=furniture,
                     lighting=light, light_source=source, light_direction=direction, light_softness=softness,
                     light_family=light_family, reflection_source=f"the actual {source} on the {direction}",
                     reflection_placement=placement)
@@ -314,14 +312,14 @@ COLLECTOR_DETAILS = (
         ("clean architectural setting with no accessory", "none"),
     ),
     (
-        ("leather armchair edge", "seating"),
-        ("dark media cabinet", "cabinet"),
-        ("timber study-desk corner", "desk"),
-        ("recessed sports-book shelf", "books"),
-        ("side table with one whisky tumbler resting on it", "drinks"),
-        ("record cabinet", "music"),
-        ("understated home-bar cabinetry", "cabinet"),
-        ("dark fabric sofa edge", "seating"),
+        ("narrow console with a leather catchall resting on it", "console"),
+        ("slim upholstered hallway bench", "seating"),
+        ("small sports-book stack resting on a narrow console", "books"),
+        ("discreet lamp resting on a narrow console", "lamp"),
+        ("slim wall-mounted entry ledge", "ledge"),
+        ("compact entry cabinet at the outer edge", "cabinet"),
+        ("narrow timber console with one ceramic bowl", "console"),
+        ("clean collector passage with no accessory", "none"),
     ),
     (
         ("pool-table corner", "games"),
@@ -339,7 +337,7 @@ COLLECTOR_DETAILS = (
 COLLECTOR_DETAIL_RULES = (
     " Use only the resolved collector-home detail or small coherent arrangement, replacing the previous peripheral cue, "
     "never adding to it. Keep it small, secondary and partially visible at the perimeter or softly in the background; "
-    "Image 2 confines it to the existing tiny residential glimpse. Never widen the shot, shrink the edition or clutter "
+    "Image 2 keeps it peripheral to the collector passage. Never widen the shot, shrink the edition or clutter "
     "the room to fit it; the edition remains the clear focal point at realistic physical scale. "
     "Use believable construction and placement on a real supporting surface where applicable, realistic proportions, "
     "materials, perspective, lighting and contact shadows. No decorative plants, flowers or vases; incidental natural "
@@ -377,7 +375,7 @@ def resolve_collector_details(chosen, seed, recent=(), selections=()):
         ):
             depth = depth.replace(old, new)
         placement = ("small and peripheral at the outer edge or distant passage",
-                     "only inside the existing tiny residential glimpse",
+                     "only at the outer edge or distant collector passage",
                      "only a subtle peripheral or background portion")[slot]
         scene.update(collector_detail=detail, collector_detail_family=family,
                      primary_cue=f"{detail}; {placement}", furniture_cue=detail,

@@ -32,10 +32,10 @@ test('Slow handoff stays active beyond MV3 idle timeout and releases its timer o
         return {sent:outcome==='submitted',reason:'fixture failure'};
       },
     }};
-    const context={chrome,importScripts(){},setTimeout,Date:{now:()=>now},
+    const context={chrome,importScripts(){},setTimeout,clearTimeout,Date:{now:()=>now},
       setInterval(callback,ms){const id=++nextId;timers.set(id,{callback,ms,next:now+ms});return id;},
       clearInterval(id){timers.delete(id);}};
-    vm.runInNewContext(source+'\nglobalThis.testRun=run;',context);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/message-deadline.js'),'utf8')+'\n'+source+'\nglobalThis.testRun=run;',context);
     await context.testRun('receipt','offline fixture',job);
     assert.ok(now>=65000,'Worker must survive upload rather than fail at 30 seconds');
     assert.equal(timers.size,0,'Keepalive must stop after success, error or cancellation');

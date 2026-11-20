@@ -50,8 +50,8 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
- LEFT JOIN edition_products p ON p.shopify_product_gid=w.pid OR
-   (NULLIF(p.shopify_product_gid,'') IS NULL AND p.shopify_product_id IN(w.pid,regexp_replace(w.pid,'^gid://shopify/Product/','')))
+ LEFT JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),
+   CASE WHEN p.shopify_product_id ~ '^[0-9]+$' THEN 'gid://shopify/Product/'||p.shopify_product_id ELSE p.shopify_product_id END)=w.pid
  LEFT JOIN auto_edition_preparations prep ON prep.hash=q.preparation_hash
  LEFT JOIN LATERAL (SELECT
    bool_or((value->>'pixel_exact')='true') AS pixel_exact,

@@ -64,7 +64,7 @@ async function stopStaffJob(local) {
     const address = tab?.url || '';
     const owned = address === project || /^https:\/\/chatgpt\.com\/g\/g-p-6a387a17627081918e1700ec2783a12b(?:-sc-mockups-uploads)?\/c\/[a-f0-9-]{36}$/.test(address);
     if (tab && owned && (!local.chatUrl || local.chatUrl === address)) {
-      const result = await chrome.tabs.sendMessage(chat, {type:'project:cancel'}, {frameId:0}).catch(() => null);
+      const result = await companionMessage(chat, {type:'project:cancel'}, {frameId:0}).catch(() => null);
       if (!result?.stopped) {
         // Existing conversations may still have the previous content script.
         // Reload only this job's exact chat, then retry Stop on the next tick.
@@ -98,24 +98,28 @@ async function staffQueueTick() {
     const local = await staffRead(staffJobKey);
     const report = local?.receipt ? await health(local.receipt) : {};
     let progress;
-    if (local?.chatTab && report.state === 'submitted') {
+    const observing = ['submitted', 'uncertain'].includes(report.state);
+    if (local?.chatTab && observing) {
       const tab = await chrome.tabs.get(local.chatTab).catch(() => null);
-      progress = tab ? await chrome.tabs.sendMessage(local.chatTab, {type:'project:progress'}, {frameId:0}).catch(() => null) :
-        {blocked:true, reason:'The upload conversation tab was closed before publication and PSD mapping were verified.'};
+      progress = tab ? await companionMessage(local.chatTab, {type:'project:progress'}, {frameId:0}).catch(() => null) :
+        null; // Missing browser contact is not a confirmed workflow failure.
       if (progress?.finished && !progress.blocked) {
         const idleSince = local.progressKey === progress.activity ? (local.idleSince || Date.now()) : Date.now();
         await staffWrite(staffJobKey, {...local, idleSince, progressKey:progress.activity, chatUrl:progress.chat_url || local.chatUrl});
-        if (Date.now() - idleSince > 3 * 60 * 1000) progress = {blocked:true,
-          reason:'ChatGPT finished responding, but publication and PSD mapping remain unverified. Review the conversation before restarting.'};
       } else if (local.idleSince) {
         await staffWrite(staffJobKey, {...local, idleSince:null});
       }
-      if (!progress && Date.now() - (report.time || Date.now()) > 3 * 60 * 1000) {
-        progress = {blocked:true, reason:'The companion cannot read the upload conversation. Reopen it in the paired Edge profile and review its error.'};
-      }
     }
-    const event = (local?.blocked || progress?.blocked) && report.state === 'submitted'
-      ? {id:local.id, state:'blocked', reason:local.blocked || progress.reason}
+    // Send can succeed while its receipt times out (notably pasted-text files).
+    // Keep observing that exact owned chat; never resend an uncertain prompt.
+    const failure = progress?.blocked ? progress.reason : local?.blocked;
+    const observedResponse = progress?.finished || progress?.generating;
+    if (report.state === 'uncertain' && observedResponse && !failure) {
+      await save(local.receipt, 'submitted');
+      report.state = 'submitted';
+    }
+    const event = failure && !progress?.generating && observing
+      ? {id:local.id, state:'blocked', reason:failure}
       : {id:local?.id, state:report.state, reason:report.reason};
     const response = await fetch(osOrigin + '/api/staff-product-uploads/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},

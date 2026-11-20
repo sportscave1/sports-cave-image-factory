@@ -36,6 +36,7 @@ from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
 from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
 from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
 from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
+from marketplace_api import ROUTES as MARKETPLACE_ROUTES
 
 
 
@@ -53,6 +54,7 @@ routes = [
         *WORKER_HEALTH_ROUTES,
         *PRODUCT_UPLOAD_ROUTES,
         *TASK_RECORDER_ROUTES,
+        *MARKETPLACE_ROUTES,
 
         *COLLECTOR_VAULT_ROUTES,
         *CHATGPT_CRM_ROUTES,

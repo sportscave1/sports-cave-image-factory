@@ -20,89 +20,51 @@ ORIGINAL_REV = 'abcdef123'
 PREFIX = REVIEW + '/Collector - EDIT-' + ORIGINAL_REV
 
 
-def test_edit_prioritises_the_request_and_preserves_review_checkpoints():
+def test_edit_prioritises_request_and_reuses_shared_creative_stages():
     standard = _prompt('Collector', 'Verified story')
     edit = _prompt('Collector', 'Verified story', edit={
         'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH},
-        'metadata': {'shopify_product_id': 'gid://shopify/Product/123'},
+        'metadata': {'upload_intent': 'new_product'},
     })
-    checkpoints = (
-        'user-requested design changes as the primary brief',
-        'Search online for the exact photograph',
-        'Generate two separate full artwork revisions',
-        'Save the trial in create-only mode',
-        'Compare the current design, Pass 1 and Pass 2',
-        'Save the replacement separately in create-only mode',
-        'Create a separate recoverable backup',
-        'Reopen the saved canonical PSD',
-        '**Update the matching Smart Upload JSON**',
-        'recoverably delete only this run’s exact trial, staging and rollback backup PSDs',
-        'Display the winner and the three-design scorecard',
-    )
-    offsets = [edit.index(checkpoint) for checkpoint in checkpoints]
-    assert offsets == sorted(offsets)
-    assert len(edit.split()) < 2600
-    assert ORIGINAL_PATH in edit and 'gid://shopify/Product/123' in edit
-    assert PREFIX + ' - TRIAL.psd' in edit and PREFIX + ' - STAGING.psd' in edit
-    for safeguard in (
-        'Continue immediately to Pass 2', 'at most two additional image-generation attempts',
-        'skip it without prompting and use an authorised alternative', 'PASS, CHANGE or UNVERIFIED',
-        'Confirm each edit delivers the explicit request before ranking it',
-        'Keep the current design if no eligible edit scores higher',
-        'higher realism, then collector appeal, then Pass 1',
-        'Keep original and finish edit', 'Apply staged replacement',
-        'Never delete the canonical PSD', 'revision-aware update',
-        'ORIGINAL REVIEW SOURCE', 'ORIGINAL EDITABLE ARTWORK', 'FINAL POLISHED ARTWORK',
-        'capable PSD parser plus a rendered preview', 'Target an even border inset of 2%',
-        'design_title at the canonical PSD path',
-        'Preserve the design’s confirmed sport, upload intent, Shopify product ID and collection linkage',
-        'recorded ID, path and unchanged revision',
-    ):
-        assert safeguard.casefold() in edit.casefold(), safeguard
-    assert REVIEW_METADATA_FOLDER in edit
-    assert '[Product Title] - TRIAL.psd' not in edit
-    assert 'upload_intent (new_product)' not in edit
-    assert 'REVIEW REPLACEMENT RULE' not in edit
-    assert 'Search online for the exact photograph' not in standard
-    assert CREATE_DESIGN_AUTHENTICITY_CHECK in standard
-    assert EDIT_AUTHENTICITY_CHECK in edit
-    for requirement in (
-        'A similar pose or a different frame cannot verify the original',
-        'Keep AI-generated skin, plastic smoothing, beauty retouching',
-        'original facial pixels and a precise mask',
-        'body and positioning changes within the requested scope',
-    ):
-        assert requirement in edit
-    assert COLLECTOR_ASSET_PLACEMENT in edit
-    for prompt in (standard, edit):
-        assert prompt.count(AUTHENTICITY_HEADING) == 1
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box are the main creative priority' in edit
+    assert edit.split('**1.', 1)[1].split('**5.', 1)[0] == standard.split('**1.', 1)[1].split('**5.', 1)[0]
+    assert 'one creative image-generation call' in edit
+    assert 'Generate two separate full artwork revisions' not in edit
+    assert 'three-design scorecard' not in edit or 'without a second generation or three-design scorecard' in edit
+    assert 'Target an even border inset of 2%' not in edit
+    assert PREFIX + ' - STAGING.psd' in edit
+    assert PREFIX + ' - TRIAL.psd' not in edit
+    assert ORIGINAL_PATH in edit and 'id:Original' in edit
+    assert CREATE_DESIGN_AUTHENTICITY_CHECK in edit
+    assert edit.count(AUTHENTICITY_HEADING) == 1
+    assert 'hidden ORIGINAL REVIEW SOURCE' in edit
+    assert 'Never delete the original first to clear a path' in edit
+    assert edit.index('staged PSD and its matching JSON are saved, reopened and verified') < edit.index('Apply the verified staged contents by revision-aware update')
+    assert edit.index('Bind the canonical') < edit.index('recoverably delete only this run')
+    assert 'one current canonical PSD' in edit and REVIEW_METADATA_FOLDER in edit
 
 
-def test_refresh_closeout_verifies_staged_pair_before_product_cleanup():
-    from home_design_refresh import _refresh_prompt
-
-    refresh = _refresh_prompt(dict(title='Collector', product_id='123', suggestion='Refine', sessions=4),
-                              'https://www.sportscaveshop.com/products/collector')
+def test_refresh_edit_preserves_exact_target_and_uses_the_same_closeout():
     edit = _prompt('Collector', 'Verified story', edit={
         'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH},
-        'metadata': {'upload_intent': 'existing_product_refresh',
-                     'shopify_product_id': 'gid://shopify/Product/123'},
+        'metadata': {'upload_intent': 'existing_product_refresh', 'shopify_product_id': 'gid://shopify/Product/123'},
     })
-    assert 'Never delete the canonical PSD' not in edit
-    assert 'Apply staged replacement' not in edit
-    assert 'Target an even border inset of 2%' in edit
-    for prompt in (refresh, edit):
-        assert prompt.count('**REVIEW REPLACEMENT RULE**') == 1
-        assert prompt.index('Read back both files') < prompt.index('Recoverably delete only')
-        assert prompt.index('retain the previous refresh') < prompt.index('Recoverably delete only')
-        assert prompt.index('Recoverably delete only') < prompt.index('Rename the staged PSD')
-        assert prompt.index('Rename the staged PSD') < prompt.index('Update the moved JSON')
-        assert 'exact Shopify product' in prompt and 'its Product GID as the same ID' in prompt
-        assert (EDIT_AUTHENTICITY_CHECK if prompt is edit else AUTHENTICITY_CHECK) in prompt
-        assert prompt.count(AUTHENTICITY_HEADING) == 1
-        assert prompt.index('**IDENTITY OVERRIDES GENERATION CONTINUITY**') < prompt.index(AUTHENTICITY_HEADING)
-        assert ('AI-generated skin' if prompt is edit else 'AI warping') in prompt
-        assert 'needs_attention' in prompt
+    assert 'upload_intent (existing_product_refresh)' in edit
+    assert 'existing_shopify_product_id ("gid://shopify/Product/123")' in edit
+    assert 'upload_intent (new_product)' not in edit
+    assert '**Complete the selected Review edit and clean up Dropbox**' in edit
+    assert 'Live PSDs, Shopify products and live mappings untouched' in edit
+    assert 'Read back the PSD and JSON together' in edit
+
+
+def test_edit_inherits_future_shared_creative_updates(monkeypatch):
+    import home_morning_brief_actions as actions
+    monkeypatch.setattr(actions, 'CREATIVE_REVIEW', 'FUTURE SHARED EDIT CREATIVE RULE')
+    edit = _prompt('Collector', 'Verified story', edit={
+        'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH}, 'metadata': {}})
+    assert edit.count('FUTURE SHARED EDIT CREATIVE RULE') == 1
+    assert 'upload_intent (new_product)' not in edit
+    assert 'never default this edit to new_product' in edit
 
 
 @pytest.fixture
@@ -291,29 +253,15 @@ def test_layer_verification_requires_original_number_id_and_alignment(monkeypatc
 
 
 @pytest.mark.parametrize('refresh', [False, True])
-def test_edit_review_replacement_allows_preserved_subject_with_inherited_limitations(refresh):
+def test_edit_uses_shared_authenticity_and_retains_review_limitations(refresh):
     metadata = {'upload_intent': 'existing_product_refresh', 'shopify_product_id': '123'} if refresh else {}
     prompt = _prompt('Collector', 'Verified story', edit={
-        'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH},
-        'metadata': metadata,
-    })
-    assert EDIT_AUTHENTICITY_CHECK in prompt
-    assert 'compare the revision with the exact pre-edit PSD' in prompt
-    assert 'If the edit wins and required PSD and collector-layer checks pass, continue verified replacement' in prompt
-    assert 'The pre-edit PSD establishes preservation only.' in prompt
-    assert 'unresolved or unverified facial fidelity is ineligible' not in prompt
-    assert 'If any discrepancy remains unverified' not in prompt
-    assert 'preserve any verified PSD it was meant to replace' not in prompt
-    assert 'If preservation cannot be verified, a discrepancy is visible' in prompt
-    assert 'needs_attention' in prompt
-    if refresh:
-        assert 'Once the staged pair is verified and ready_for_review' not in prompt
-        assert 'Do not relabel that inherited limitation ready_for_review' in prompt
-    else:
-        assert 'Never delete the canonical PSD to clear the path.' in prompt
-        assert 'If direct revision-aware update is unavailable' in prompt
-        assert 'Unresolved review notes' in prompt
-        assert 'After verifying the replacement and matching JSON' in prompt
+        'source': {'id': 'id:Original', 'rev': ORIGINAL_REV, 'path_display': ORIGINAL_PATH}, 'metadata': metadata})
+    assert CREATE_DESIGN_AUTHENTICITY_CHECK in prompt
+    assert 'Keep inherited source limitations accurately marked needs_attention' in prompt
+    assert 'never invent detail or claim missing verification passed' in prompt
+    assert 'continue independent work without a new approval pause' in prompt
+    assert 'Apply staged replacement' in prompt
 
 
 def test_replace_carries_missing_source_notes_and_cleans_verified_drafts(files, monkeypatch):
@@ -352,3 +300,59 @@ def test_unresolved_notes_require_matching_json_before_replacement(files, monkey
     provider.api.upload_revision.assert_not_called()
     provider.api.copy_path.assert_not_called()
     provider.api.delete_path_recoverable.assert_not_called()
+
+
+def test_single_generation_replacement_needs_no_trial_and_cleans_only_its_files(files):
+    provider, original, trial, staged, current, validate = files
+    final, backup, warnings = apply(provider, original, '', staged['path_display'])
+    assert not warnings
+    assert final['id'] == original['id'] and final['content_hash'] == staged['content_hash']
+    assert current[trial['id']] == trial  # An unrelated legacy trial is not this run's output.
+    assert [(x.args[1], x.kwargs['expected_revision']) for x in provider.api.delete_path_recoverable.call_args_list] == [
+        (staged['path_display'], staged['rev']), (backup['path_display'], backup['rev'])]
+    validate.assert_called_once()
+
+
+@pytest.mark.parametrize('changed_target', [False, True])
+def test_single_result_handoff_preserves_product_binding_and_cleans_staging_json(files, monkeypatch, changed_target):
+    import json
+    provider, original, trial, staged, current, _ = files
+    old = dict(design_title='Old Title', design_story='Original story', sport='Basketball',
+               upload_intent='existing_product_refresh', existing_shopify_product_id='123',
+               design_origin='designs_to_refresh', morning_design_job_id='original-job',
+               dropbox_file_id=original['id'], dropbox_revision=original['rev'], dropbox_path=original['path_display'])
+    revised = dict(old, design_title='New Title \u2013 Kobe Bryant Wall Art', design_story='Revised story',
+                   review_status='needs_attention', review_notes='Source detail remains limited',
+                   dropbox_file_id=staged['id'], dropbox_revision=staged['rev'], dropbox_path=staged['path_display'])
+    if changed_target:
+        revised['existing_shopify_product_id'] = '999'
+    sidecar = dict(id='id:JSON', rev='json1', path_display=REVIEW_METADATA_FOLDER+'/Collector.upload.json')
+    staging_json = dict(id='id:StagedJSON', rev='stage-json1',
+                        path_display=REVIEW_METADATA_FOLDER+'/'+staged['name'][:-4]+'.upload.json')
+    current[staging_json['id']] = current[staging_json['path_display']] = staging_json
+    monkeypatch.setattr('design_review_replace.read_handoff_record', lambda _, source:
+        (dict(revised), dict(staging_json)) if source['id'] == staged['id'] else (dict(old), dict(sidecar)))
+    upload = provider.api.upload_revision.side_effect
+    def write(token, path, file, revision):
+        if path == sidecar['path_display']:
+            assert revision == sidecar['rev']
+            old.update(json.loads(file.read_text(encoding='utf-8')))
+            sidecar['rev'] = 'json2'
+            return sidecar
+        return upload(token, path, file, revision)
+    provider.api.upload_revision.side_effect = write
+    monkeypatch.setattr('design_review_title.sync_review_title', lambda _, source, **kwargs: (source, ''))
+    if changed_target:
+        with pytest.raises(ValueError, match='exact Shopify target'):
+            apply(provider, original, '', staged['path_display'])
+        provider.api.upload_revision.assert_not_called()
+        provider.api.delete_path_recoverable.assert_not_called()
+        return
+    final, _, warnings = apply(provider, original, '', staged['path_display'])
+    assert not warnings
+    assert old['design_title'] == revised['design_title'] and old['design_story'] == 'Revised story'
+    assert old['existing_shopify_product_id'] == '123' and old['morning_design_job_id'] == 'original-job'
+    assert old['design_origin'] == 'designs_to_refresh' and old['review_status'] == 'needs_attention'
+    assert old['dropbox_revision'] == final['rev']
+    assert staging_json['id'] not in current and staged['id'] not in current
+    assert current[trial['id']] == trial
