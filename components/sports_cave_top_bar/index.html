@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v5-publish-status";
+  const CONTROLLER_VERSION = "companion-header-v6-ads-reliability";
   const TEMPORARY_TOAST_MS = 3000;
   const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1259,6 +1259,8 @@
       finally {parentWindow.clearTimeout(timeout);listenerController.signal.removeEventListener('abort',abort);}
     };
     const adRows = new Map(), adControlReceipts = new Map();
+    // A new controller must rebind buttons retained by Streamlit's parent shell.
+    root.querySelector('#sc-os-ads-list').dataset.signature='';
     const reconcileRows = (list, rows) => {
       for(const child of [...list.children]) if(!rows.includes(child)) child.remove();
       rows.forEach((row,index)=>{if(list.children[index]!==row) list.insertBefore(row,list.children[index]||null);});
@@ -1355,18 +1357,18 @@
                 try {
                   const response=await companionFetch('/api/staff-product-uploads/ad-control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,action})});
                   const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update job');
-                  if(scope!==state.config.uploadScope)return;
+                  if(listenerController.signal.aborted || scope!==state.config.uploadScope)return;
                   if(result.action==='delete'){deletedAdJobs.add(item.id);adControlReceipts.delete(item.id);}
                   else adControlReceipts.set(item.id,{action,job:result.job ? adDisplayJob(result.job) : {...item,stage:action==='cancel'?'cancelled':'waiting',state:action==='cancel'?'cancelled':'waiting',label:action==='cancel'?'Cancelled':'Resuming saved job',can_cancel:action!=='cancel',can_play:action==='cancel'}});
                   renderCompanions(lastCompanionStatus);
                   root.querySelector('#sc-ad-message').textContent=action==='play'?'Resuming saved job':action==='cancel'?(result.job?.stage==='complete'?'Job already completed':'Job cancelled'):'Removed from queue';
                   lastStaffStatus='';
                   void refreshStaffProgress(false);
-                }catch(error){if(scope===state.config.uploadScope){
+                }catch(error){if(!listenerController.signal.aborted && scope===state.config.uploadScope){
                   deletedAdJobs.delete(item.id);if(priorReceipt)adControlReceipts.set(item.id,priorReceipt);else adControlReceipts.delete(item.id);
                   root.querySelector('#sc-ad-message').textContent=error.message;
                 }}
-                finally{if(scope===state.config.uploadScope){
+                finally{if(!listenerController.signal.aborted && scope===state.config.uploadScope){
                   pendingAdActions.delete(item.id);
                   renderCompanions(lastCompanionStatus);
                   renderQueueButtons();
@@ -1395,6 +1397,7 @@
     let adProducts=[],adQuickScope='',adRequest='',adSelected='',adOptions=[],adActive=-1;
     let adCatalogRead=null,adCatalogError='',adCatalogLoaded=false,adCatalogScope='';
     const adMessage=root.querySelector('#sc-ad-message'),adProduct=root.querySelector('#sc-ad-product');
+    adSelected=adProduct.dataset.selectedProduct||'';adCatalogScope=adProduct.dataset.pickerScope||'';
     const quick=root.querySelector('#sc-ad-quick');
     const adList=root.querySelector('#sc-ad-products'),adReload=root.querySelector('#sc-ad-reload');
     const normaliseProduct=value=>String(value||'').normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
@@ -1405,7 +1408,7 @@
       if(adList.children[index]){adProduct.setAttribute('aria-activedescendant',adList.children[index].id);adList.children[index].scrollIntoView({block:'nearest'});}
     };
     const chooseProduct=product=>{
-      adSelected=product.id;adProduct.value=product.name;adRequest='';closeProducts();
+      adSelected=product.id;adProduct.dataset.selectedProduct=product.id;adProduct.value=product.name;adRequest='';closeProducts();
       root.querySelector('#sc-ad-sport').value=product.sport;
       root.querySelector('#sc-ad-country').value=product.country;
     };
@@ -1431,7 +1434,7 @@
     };
     const loadAdProducts=(force=false)=>{
       const scope=state.config.uploadScope;
-      if(adCatalogScope!==scope){adCatalogScope=scope;adProducts=[];adSelected='';adProduct.value='';adRequest='';adCatalogLoaded=false;adCatalogRead=null;adCatalogError='';}
+      if(adCatalogScope!==scope){adCatalogScope=scope;adProduct.dataset.pickerScope=scope;adProduct.dataset.selectedProduct='';adProducts=[];adSelected='';adProduct.value='';adRequest='';adCatalogLoaded=false;adCatalogRead=null;adCatalogError='';}
       if(adCatalogRead)return adCatalogRead;
       if(adCatalogLoaded&&!force)return Promise.resolve();
       adCatalogError='';adReload.disabled=true;adReload.textContent='Loading products…';
@@ -1439,7 +1442,7 @@
         try {
           const response=await companionFetch('/api/staff-product-uploads/ad-quick-add'+(force?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'});
           const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load products. Use Reload products to retry.');
-          if(scope!==state.config.uploadScope)return;
+          if(listenerController.signal.aborted || scope!==state.config.uploadScope)return;
           if(!Array.isArray(data.products)||!data.products.length)throw Error('No products loaded. Use Reload products to retry.');
           adProducts=data.products.map(p=>({...p,nameSearch:normaliseProduct(p.name),search:normaliseProduct([p.name,p.sport,p.country].join(' '))})).sort((a,b)=>a.name.localeCompare(b.name));
           adQuickScope=scope;adCatalogLoaded=true;
@@ -1449,8 +1452,8 @@
             if(values.includes(previous))select.value=previous;
           }
           adMessage.textContent='Choose a product and check its market.';
-        }catch(error){if(scope===state.config.uploadScope){adCatalogError=error.message;adMessage.textContent=error.message;}}
-        finally{if(scope===state.config.uploadScope && adCatalogRead===read){adCatalogRead=null;adReload.disabled=false;adReload.textContent='Reload products';if(doc.activeElement===adProduct)showProducts();}}
+        }catch(error){if(!listenerController.signal.aborted && scope===state.config.uploadScope){adCatalogError=error.message;adMessage.textContent=error.message;}}
+        finally{if(!listenerController.signal.aborted && scope===state.config.uploadScope && adCatalogRead===read){adCatalogRead=null;adReload.disabled=false;adReload.textContent='Reload products';if(doc.activeElement===adProduct)showProducts();}}
       })();
       adCatalogRead=read;
       return read;
@@ -1471,7 +1474,7 @@
     },listenerOptions);
     quick.addEventListener('toggle',()=>{if(quick.open)void loadAdProducts();else closeProducts();},listenerOptions);
     adReload.addEventListener('click',()=>{void loadAdProducts(true);},listenerOptions);
-    adProduct.addEventListener('input',()=>{adSelected='';adRequest='';void loadAdProducts();showProducts();},listenerOptions);
+    adProduct.addEventListener('input',()=>{adSelected='';adProduct.dataset.selectedProduct='';adRequest='';void loadAdProducts();showProducts();},listenerOptions);
     for(const name of ['sport','country','type'])root.querySelector('#sc-ad-'+name).addEventListener('change',()=>{adRequest='';},listenerOptions);
     root.querySelector('#sc-ad-form').addEventListener('submit',async event=>{
       event.preventDefault();const scope=state.config.uploadScope;
@@ -1483,11 +1486,11 @@
       try {
         const response=await companionFetch('/api/staff-product-uploads/ad-quick-add',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:matches[0].id,country:root.querySelector('#sc-ad-country').value,sport:root.querySelector('#sc-ad-sport').value,type:root.querySelector('#sc-ad-type').value,request_id:requestId})});
         const data=await response.json();if(!response.ok)throw Error(data.error||'Could not add ad. Retry to confirm the same request.');
-        if(scope!==state.config.uploadScope)return;
+        if(listenerController.signal.aborted || scope!==state.config.uploadScope)return;
         if(adRequest===requestId)adRequest='';
         adMessage.textContent='Added to Ads queue';lastStaffStatus='';void refreshStaffProgress(false);
-      }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
-      finally{if(scope===state.config.uploadScope){button.disabled=false;button.textContent='Add to queue';}}
+      }catch(error){if(!listenerController.signal.aborted && scope===state.config.uploadScope)adMessage.textContent=error.message;}
+      finally{if(!listenerController.signal.aborted && scope===state.config.uploadScope){button.disabled=false;button.textContent='Add to queue';}}
     },listenerOptions);
     let queueRevision = 0;
     const pendingQueues = new Set();
@@ -1566,6 +1569,7 @@
       staffProgress.open = false;
       for (const {panel} of Object.values(companionPanels)) panel.open=false;
       uploadNotices.replaceChildren();
+      quick.open=false;closeProducts();
     };
     // The shell can outlive its controller during Streamlit reruns.
     dismissUploadOverlays();

@@ -88,6 +88,12 @@ duplicate display names are never silently substituted. The dropdown overlays th
 form instead of moving Add to queue during a click. Retries after an uncertain
 submission reuse the same request ID to avoid duplicate jobs.
 
+The header version changes when its markup changes, including Reload products.
+On a same-version Streamlit rerun, retained Ads buttons are rebound, pending reads
+from the old controller cannot update the new panel, and the account-scoped typed
+query/selected product survives reopening. Browser coverage exercises both the
+retained shell and upgrading an open older header.
+
 Catalog records have a bounded, account-scoped 45-second cache shared by the picker
 and submission. Successful live catalog reads retain their existing five-minute
 cache; failed reads are no longer cached as empty results. Reload explicitly

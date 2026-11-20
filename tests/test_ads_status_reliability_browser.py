@@ -144,3 +144,51 @@ def test_timed_out_add_reenables_button_and_retries_same_request():
             expect(page.locator('#sc-ad-message')).to_have_text('Added to Ads queue')
             assert len(writes)==2 and writes[0]['request_id']==writes[1]['request_id']
         finally:browser.close()
+
+
+def test_controller_rebind_and_upgrade_keep_controls_working_and_query_visible():
+    product=dict(id='fixture',name='LeBron James Wall Art',sport='NBA',country='USA')
+    job=dict(id='00000000-0000-0000-0000-000000000001',title='Fixture Ad',state='waiting',stage='waiting',
+        label='Queued',can_play=True,can_cancel=True,updated_at='2026-11-20T00:00:00+00:00')
+    writes=[];errors=[];held=[]
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page()
+            page.on('pageerror',lambda e:errors.append(str(e)))
+            def respond(route):
+                if route.request.url=='https://fixture.test/':route.fulfill(body=header(),content_type='text/html')
+                elif route.request.method=='POST':writes.append(route.request.post_data_json);route.fulfill(json=dict(id=job['id'],action='cancel',job=None))
+                elif 'ad-quick-add' in route.request.url:
+                    if 'refresh=1' in route.request.url:held.append(route)
+                    else:route.fulfill(json=dict(products=[product],sports=['NBA'],countries=['USA']))
+                else:route.fulfill(json=status([job]))
+            page.route('**/*',respond);page.goto('https://fixture.test/')
+            def open_picker():
+                page.locator('#sc-os-ads-status > summary').click();page.locator('#sc-ad-quick > summary').click()
+            def reinstall():
+                script=header().split('<script>',1)[1].rsplit('</script>',1)[0]
+                page.evaluate('(code)=>{const script=document.createElement("script");script.textContent=code;document.body.append(script);script.remove();}',script)
+            open_picker();field=page.locator('#sc-ad-product');field.fill('james')
+            expect(page.get_by_role('option',name=product['name'],exact=True)).to_be_visible()
+            page.locator('#sc-ad-reload').click()
+            expect(page.locator('#sc-ad-reload')).to_be_disabled()
+            assert held
+            reinstall();open_picker()
+            expect(page.locator('#sc-ad-reload')).to_be_enabled()
+            expect(page.locator('#sc-ad-message')).to_have_text('Choose a product and check its market.')
+            expect(field).to_have_value('james');field.click()
+            expect(page.get_by_role('option',name=product['name'],exact=True)).to_be_visible()
+            page.get_by_role('option',name=product['name'],exact=True).click()
+            page.get_by_role('button',name='Cancel job · Fixture Ad',exact=True).click()
+            expect(page.locator('#sc-ad-message')).to_have_text('Job cancelled')
+            assert len(writes)==1
+            # Upgrade an already-open old-version parent shell with no Reload control.
+            page.locator('#sports-cave-os-top-bar').evaluate('(el)=>{el.dataset.controllerVersion="companion-header-v5-publish-status";}')
+            page.locator('#sc-ad-reload').evaluate('(el)=>el.remove()')
+            reinstall();open_picker()
+            expect(page.locator('#sc-ad-reload')).to_be_visible()
+            field.fill('lebron')
+            expect(page.get_by_role('option',name=product['name'],exact=True)).to_be_visible()
+            assert not errors
+        finally:browser.close()
