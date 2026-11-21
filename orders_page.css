@@ -43,6 +43,9 @@
 .st-key-orders-actions [data-testid="stCaptionContainer"] p { color:#79612c; font-size:12px; font-weight:600; }
 .st-key-orders-prepare-prodigi button:enabled { background:#a7802e !important; border-color:#a7802e !important; color:#fff !important; }
 [data-testid="stForm"]:has(.st-key-orders_search_text) button { background:#252720 !important; border-color:#252720 !important; color:#fff !important; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) button p,
+[data-testid="stForm"]:has(.st-key-orders_search_text) button span { color:#fff !important; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) button:hover { background:#3b3e33 !important; }
 .st-key-orders-table [data-testid="stDataFrame"] { height: auto !important; }
 .st-key-orders-table { min-width: 0; max-width: 100%; }
 /* Background event frames stay loaded without reserving blank widget rows. */

@@ -56,3 +56,22 @@ def test_no_supplier_io_or_writes_when_table_refreshes(screen):
     reply['event']={'event':'nonce','type':'refresh'}
     grid.render([{'edition_order_id':2}],[{'product':'Untrusted <script>text</script>'}],grid_key='selection',selected=[],actor={'id':'staff'})
     assert not calls and view['rows'][0]['cells']['product']=='Untrusted <script>text</script>'
+
+
+def test_complete_order_is_not_sendable_even_with_a_stale_send_event(screen,monkeypatch):
+    state,calls,view,reply=screen
+    row={'edition_order_id':2,'prodigi':'Complete'}
+    monkeypatch.setattr(grid,'batch_status',lambda _: {'2':{'status':'Ready for manual payment','order_id':'existing'}})
+    reply['event']={'event':'nonce','type':'send','id':grid.row_identity(row)}
+    grid.render([row],[{'prodigi':'Complete','shipping':'Express','print_jpg':'/auto-editions/open#Open'}],grid_key='selection',selected=[],actor={'id':'staff'})
+    item=view['rows'][0]
+    assert item['state']['label']=='✓ Complete' and not item['state']['action'] and not item['state']['url']
+    assert item['cells']['prodigi']=='Complete' and item['cells']['shipping']=='Express shipping'
+    assert item['jpg_label']=='Open JPG' and not calls
+
+
+def test_checkbox_selection_only_reruns_orders_fragment(screen):
+    state,calls,view,reply=screen
+    reply['event']={'event':'selection','type':'select','ids':['allocation:2']}
+    grid.render([{'edition_order_id':2}],[{}],grid_key='selection',selected=[],actor={'id':'staff'})
+    assert calls==[('rerun',{'scope':'fragment'})]

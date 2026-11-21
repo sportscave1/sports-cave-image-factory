@@ -12,7 +12,9 @@ def supplier_link(order_id):
     return 'https://dashboard.prodigi.com/orders/'+value+'/detail' if re.fullmatch(r'[A-Za-z0-9-]{1,100}',value) else ''
 
 
-def action_state(saved):
+def action_state(saved, fulfilment=""):
+    if str(fulfilment).strip().lower()=="complete":
+        return dict(label="✓ Complete",tone="complete",action="",url="",detail="This order is already complete.")
     if not saved:return dict(label='Send',tone='plain',action='send',url='',detail='Prepare this existing draft. Payment and Submit stay manual.')
     state=saved.get('status','Needs review')
     if state=='Ready for manual payment':
@@ -62,13 +64,16 @@ def render(rows,display_rows,*,grid_key,selected,actor):
     payload=[]
     for r,d in zip(rows,display_rows):
         aid=str(r.get('edition_order_id') or '')
-        state=action_state(statuses.get(aid)) if allowed and aid.isdigit() else dict(label='—',action='',tone='muted',url='',detail='')
+        state=action_state(statuses.get(aid),r.get("prodigi")) if allowed and aid.isdigit() else dict(label='—',action='',tone='muted',url='',detail='')
         if str(r.get('prodigi','')) in ('Refunded','Refund Pending'):state=dict(label='Blocked',action='',tone='warning',url='',detail='Refunded order')
         payload.append(dict(id=row_identity(r),cells={k:str(d.get(k) or '') for k in ('order','edition','customer','product','variant','shipping','date','prodigi')},
             psd=safe_link(d.get('file')),jpg=safe_link(d.get('print_jpg')),
-            jpg_label=str(d.get('print_jpg') or '').rsplit('#',1)[-1] if '#' in str(d.get('print_jpg') or '') else ('Open' if safe_link(d.get('print_jpg')) else str(d.get('print_jpg') or '')),
+            jpg_label=str(d.get('print_jpg') or '').rsplit('#',1)[-1] if '#' in str(d.get('print_jpg') or '') else ('Open JPG' if safe_link(d.get('print_jpg')) else str(d.get('print_jpg') or '')),
             state=state))
-        if statuses.get(aid,{}).get('status')=='Ready for manual payment':payload[-1]['cells']['prodigi']='QA ready'
+        if payload[-1]['jpg_label']=='Open':payload[-1]['jpg_label']='Open JPG'
+        shipping=payload[-1]['cells']['shipping']
+        if shipping.strip().lower() in ('standard','express'):payload[-1]['cells']['shipping']=shipping.strip()+' shipping'
+        if state.get('tone')!='complete' and statuses.get(aid,{}).get('status')=='Ready for manual payment':payload[-1]['cells']['prodigi']='QA ready'
     active=any(v.get('status') in ACTIVE for v in statuses.values())
     event=component(rows=payload,selected=[row_identity(r) for r in selected],active=active,
                     key='orders-prodigi-grid',default=None)
@@ -79,12 +84,14 @@ def render(rows,display_rows,*,grid_key,selected,actor):
         chosen=set(str(i) for i in event.get('ids',[]) if str(i) in by_id)
         st.session_state['orders-grid-selected-ids']=list(chosen)
         st.session_state[grid_key]={'selection':{'rows':[i for i,r in enumerate(rows) if row_identity(r) in chosen]}}
-        st.rerun()
+        st.rerun(scope='fragment')
+        return
     rid=str(event.get('id',''))
     if rid not in by_id or not allowed:return
     aid=str(by_id[rid].get('edition_order_id') or '')
     if not aid.isdigit():return
     if event.get('type')=='send':
+        if str(by_id[rid].get('prodigi','')).strip().lower()=='complete':return
         try:
             queued=queue.request(actor,int(aid))
         except Exception as error:

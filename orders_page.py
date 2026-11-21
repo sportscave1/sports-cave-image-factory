@@ -2819,8 +2819,17 @@ def _render_orders_table(rows):
     _render_inline_prodigi_actions(rows)
     import auto_editions_runtime
     resources = _order_display_resources(rows)
+    with st.container(border=False, key="orders-table"):
+        from orders_prodigi_grid import render
+        render(rows,_display_rows(rows,normalised=True,resources=resources),grid_key=GRID_KEY,
+            selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {})
+        psd_directory.render_missing_link_guard(st)
     selected_print_rows = _selected_rows_from_state(rows)
-    if selected_print_rows:
+    if selected_print_rows and not st.session_state.get('orders-prodigi-review'):
+        if st.button('Review selected edition details',key='orders-review-selected-details'):
+            st.session_state['orders-prodigi-review']=str(selected_print_rows[0].get('edition_order_id') or '')
+            st.rerun(scope='fragment')
+    if selected_print_rows and st.session_state.get('orders-prodigi-review'):
         mapping, cloud_links = resources
         with st.expander("Selected unit details / Print JPG", expanded=bool(st.session_state.get('orders-prodigi-review'))):
             for selected in _selected_detail_rows(selected_print_rows):
@@ -2833,7 +2842,7 @@ def _render_orders_table(rows):
                 if allocation_id in cloud_links:
                     if cloud_links[allocation_id].startswith('/auto-editions/'):
                         with st.container(horizontal=True):
-                            st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                            st.link_button(('Open JPG' if auto_editions_runtime.link_label(cloud_links[allocation_id])=='Open' else auto_editions_runtime.link_label(cloud_links[allocation_id])),cloud_links[allocation_id])
                             _render_send_artwork(selected, 'selected')
                     else:
                         st.caption('Edition JPG: '+cloud_links[allocation_id])
@@ -2845,14 +2854,6 @@ def _render_orders_table(rows):
                     st.caption(f"Print JPG — {status['label']}: {status['reason']}")
                 if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
                     st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
-    with st.container(border=False, key="orders-table"):
-        @st.fragment
-        def compact_grid():
-            from orders_prodigi_grid import render
-            render(rows,_display_rows(rows,normalised=True,resources=resources),grid_key=GRID_KEY,
-                selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {})
-        compact_grid()
-        psd_directory.render_missing_link_guard(st)
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 
@@ -2866,6 +2867,9 @@ def _render_send_artwork(row, placement):
     actor=st.session_state.get('sports_cave_current_user') or {}
     allocation=str(row.get('edition_order_id') or '')
     if not queue.enabled() or not allocation.isdigit() or not os_accounts.is_admin(actor):
+        return
+    if str(row.get('prodigi','')).strip().lower()=='complete':
+        st.caption('Complete')
         return
     if st.button('Send to Prodigi',key='orders-send-'+placement+'-'+allocation,
                  help='Queues the exact numbered JPG for the existing draft. Payment and production stay manual.'):
@@ -2913,7 +2917,7 @@ def _render_mobile_orders(rows):
             if allocation_id in cloud_links:
                 if cloud_links[allocation_id].startswith('/auto-editions/'):
                     with st.container(horizontal=True):
-                        st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                        st.link_button(('Open JPG' if auto_editions_runtime.link_label(cloud_links[allocation_id])=='Open' else auto_editions_runtime.link_label(cloud_links[allocation_id])),cloud_links[allocation_id])
                         _render_send_artwork(row,'mobile')
                 else:
                     st.caption('Edition JPG: '+cloud_links[allocation_id])
