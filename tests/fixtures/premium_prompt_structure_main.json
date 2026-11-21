@@ -2322,174 +2322,118 @@
   "detail/Motorsport/refresh_Carousel": {
     "output_headings": [],
     "csv_headers": [
-      "schema_version,campaign_type,row_type,position,slot_id,image_filename,headline,description,primary_text,destination_url,cta,setup_notes\r"
+      "schema_version,ad_number,product_name,strategy,primary_text,headline,description,cta,image_prompt\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1080 x 1080"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
-      "https://example.com/products/example,Shop",
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "cards",
-      "characters",
-      "cta",
-      "description",
-      "descriptions",
-      "destination_url",
+      "authority",
+      "axes",
+      "dimension_source",
       "evidence",
-      "fragments",
-      "headline",
-      "headlines",
-      "image_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lines",
       "measurement_basis",
       "orientation",
-      "paragraphs",
-      "passed",
-      "position",
-      "primary_texts",
-      "reason",
-      "role",
-      "scene",
       "selected_size",
-      "source_attachment_id",
-      "source_creative_id",
-      "source_id",
-      "text",
-      "winner_reference",
-      "word_bounds",
-      "words"
+      "width_cm"
     ]
   },
   "detail/Motorsport/Instant Experience": {
     "output_headings": [
-      "IMAGE GENERATION PROMPT",
-      "AD COPY",
       "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
       "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
       "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY"
     ],
-    "csv_headers": [],
+    "csv_headers": [
+      "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta"
+    ],
     "template_variables": [],
     "output_dimensions": [
       "1024 x 1024",
-      "256 x 256"
+      "1024 × 1024",
+      "256 x 256",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architectural_cue",
-      "camera_angle",
-      "camera_family",
-      "campaign_line",
+      "axes",
+      "campaign_type",
       "copy_family",
-      "cover_composition",
-      "cover_layout",
-      "creative_cta",
-      "creative_variation_token",
+      "copy_product_key",
+      "description_key",
+      "description_label",
+      "description_role",
       "description_style",
-      "edition_limit_used",
-      "fan_archetype",
-      "fomo_line",
+      "dimension_source",
+      "glazing",
       "headline_family",
-      "hook_family",
-      "lighting_direction",
+      "height_cm",
       "market",
       "market_lens",
       "measurement_basis",
       "opening_hook_family",
       "orientation",
-      "overlay_position",
-      "primary_cue",
-      "product_era_or_mood",
-      "product_position",
-      "product_sport",
-      "prompt_number",
-      "room_atmosphere",
-      "room_profile",
-      "room_type",
-      "route",
+      "output_mode",
+      "premium_scarcity_front",
+      "premium_scarcity_left",
+      "premium_scarcity_right",
       "route_key",
+      "route_label",
       "scarcity_close",
-      "secondary_cue",
+      "schema_version",
       "selected_size",
       "sentence_rhythm",
-      "shot_distance",
       "sport",
-      "sport_family",
-      "sub_angle",
-      "time_of_day",
-      "urgency_placement",
+      "variation",
       "visual_family",
-      "wall_colour_family",
-      "wall_finish",
-      "wall_material"
+      "width_cm"
     ]
   },
   "detail/Motorsport/refresh_Instant Experience": {
-    "output_headings": [
-      "HEADLINE",
-      "HEADLINE",
-      "HEADLINE"
-    ],
+    "output_headings": [],
     "csv_headers": [
       "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1024 x 1024"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architecture",
       "authority",
-      "campaign_type",
-      "category",
-      "compatibility",
-      "context",
+      "axes",
+      "dimension_source",
       "evidence",
-      "exclusions",
-      "family",
-      "furniture_materials",
-      "id",
-      "identity_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lighting",
       "measurement_basis",
-      "name",
       "orientation",
-      "product",
-      "recent_styles",
-      "references",
-      "run_id",
-      "seed",
       "selected_size",
-      "styles",
-      "version",
-      "visual_analysis",
-      "wall_hue",
-      "wall_material",
-      "wall_value"
+      "width_cm"
     ]
   },
   "detail/Motorsport/Single Image / Video": {
@@ -2521,174 +2465,118 @@
   "detail/Football/refresh_Carousel": {
     "output_headings": [],
     "csv_headers": [
-      "schema_version,campaign_type,row_type,position,slot_id,image_filename,headline,description,primary_text,destination_url,cta,setup_notes\r"
+      "schema_version,ad_number,product_name,strategy,primary_text,headline,description,cta,image_prompt\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1080 x 1080"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
-      "https://example.com/products/example,Shop",
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "cards",
-      "characters",
-      "cta",
-      "description",
-      "descriptions",
-      "destination_url",
+      "authority",
+      "axes",
+      "dimension_source",
       "evidence",
-      "fragments",
-      "headline",
-      "headlines",
-      "image_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lines",
       "measurement_basis",
       "orientation",
-      "paragraphs",
-      "passed",
-      "position",
-      "primary_texts",
-      "reason",
-      "role",
-      "scene",
       "selected_size",
-      "source_attachment_id",
-      "source_creative_id",
-      "source_id",
-      "text",
-      "winner_reference",
-      "word_bounds",
-      "words"
+      "width_cm"
     ]
   },
   "detail/Football/Instant Experience": {
     "output_headings": [
-      "IMAGE GENERATION PROMPT",
-      "AD COPY",
       "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
       "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
       "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY"
     ],
-    "csv_headers": [],
+    "csv_headers": [
+      "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta"
+    ],
     "template_variables": [],
     "output_dimensions": [
       "1024 x 1024",
-      "256 x 256"
+      "1024 × 1024",
+      "256 x 256",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architectural_cue",
-      "camera_angle",
-      "camera_family",
-      "campaign_line",
+      "axes",
+      "campaign_type",
       "copy_family",
-      "cover_composition",
-      "cover_layout",
-      "creative_cta",
-      "creative_variation_token",
+      "copy_product_key",
+      "description_key",
+      "description_label",
+      "description_role",
       "description_style",
-      "edition_limit_used",
-      "fan_archetype",
-      "fomo_line",
+      "dimension_source",
+      "glazing",
       "headline_family",
-      "hook_family",
-      "lighting_direction",
+      "height_cm",
       "market",
       "market_lens",
       "measurement_basis",
       "opening_hook_family",
       "orientation",
-      "overlay_position",
-      "primary_cue",
-      "product_era_or_mood",
-      "product_position",
-      "product_sport",
-      "prompt_number",
-      "room_atmosphere",
-      "room_profile",
-      "room_type",
-      "route",
+      "output_mode",
+      "premium_scarcity_front",
+      "premium_scarcity_left",
+      "premium_scarcity_right",
       "route_key",
+      "route_label",
       "scarcity_close",
-      "secondary_cue",
+      "schema_version",
       "selected_size",
       "sentence_rhythm",
-      "shot_distance",
       "sport",
-      "sport_family",
-      "sub_angle",
-      "time_of_day",
-      "urgency_placement",
+      "variation",
       "visual_family",
-      "wall_colour_family",
-      "wall_finish",
-      "wall_material"
+      "width_cm"
     ]
   },
   "detail/Football/refresh_Instant Experience": {
-    "output_headings": [
-      "HEADLINE",
-      "HEADLINE",
-      "HEADLINE"
-    ],
+    "output_headings": [],
     "csv_headers": [
       "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1024 x 1024"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architecture",
       "authority",
-      "campaign_type",
-      "category",
-      "compatibility",
-      "context",
+      "axes",
+      "dimension_source",
       "evidence",
-      "exclusions",
-      "family",
-      "furniture_materials",
-      "id",
-      "identity_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lighting",
       "measurement_basis",
-      "name",
       "orientation",
-      "product",
-      "recent_styles",
-      "references",
-      "run_id",
-      "seed",
       "selected_size",
-      "styles",
-      "version",
-      "visual_analysis",
-      "wall_hue",
-      "wall_material",
-      "wall_value"
+      "width_cm"
     ]
   },
   "detail/Football/Single Image / Video": {
@@ -2720,174 +2608,118 @@
   "detail/Cricket/refresh_Carousel": {
     "output_headings": [],
     "csv_headers": [
-      "schema_version,campaign_type,row_type,position,slot_id,image_filename,headline,description,primary_text,destination_url,cta,setup_notes\r"
+      "schema_version,ad_number,product_name,strategy,primary_text,headline,description,cta,image_prompt\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1080 x 1080"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
-      "https://example.com/products/example,Shop",
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "cards",
-      "characters",
-      "cta",
-      "description",
-      "descriptions",
-      "destination_url",
+      "authority",
+      "axes",
+      "dimension_source",
       "evidence",
-      "fragments",
-      "headline",
-      "headlines",
-      "image_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lines",
       "measurement_basis",
       "orientation",
-      "paragraphs",
-      "passed",
-      "position",
-      "primary_texts",
-      "reason",
-      "role",
-      "scene",
       "selected_size",
-      "source_attachment_id",
-      "source_creative_id",
-      "source_id",
-      "text",
-      "winner_reference",
-      "word_bounds",
-      "words"
+      "width_cm"
     ]
   },
   "detail/Cricket/Instant Experience": {
     "output_headings": [
-      "IMAGE GENERATION PROMPT",
-      "AD COPY",
       "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
       "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
       "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY"
     ],
-    "csv_headers": [],
+    "csv_headers": [
+      "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta"
+    ],
     "template_variables": [],
     "output_dimensions": [
       "1024 x 1024",
-      "256 x 256"
+      "1024 × 1024",
+      "256 x 256",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architectural_cue",
-      "camera_angle",
-      "camera_family",
-      "campaign_line",
+      "axes",
+      "campaign_type",
       "copy_family",
-      "cover_composition",
-      "cover_layout",
-      "creative_cta",
-      "creative_variation_token",
+      "copy_product_key",
+      "description_key",
+      "description_label",
+      "description_role",
       "description_style",
-      "edition_limit_used",
-      "fan_archetype",
-      "fomo_line",
+      "dimension_source",
+      "glazing",
       "headline_family",
-      "hook_family",
-      "lighting_direction",
+      "height_cm",
       "market",
       "market_lens",
       "measurement_basis",
       "opening_hook_family",
       "orientation",
-      "overlay_position",
-      "primary_cue",
-      "product_era_or_mood",
-      "product_position",
-      "product_sport",
-      "prompt_number",
-      "room_atmosphere",
-      "room_profile",
-      "room_type",
-      "route",
+      "output_mode",
+      "premium_scarcity_front",
+      "premium_scarcity_left",
+      "premium_scarcity_right",
       "route_key",
+      "route_label",
       "scarcity_close",
-      "secondary_cue",
+      "schema_version",
       "selected_size",
       "sentence_rhythm",
-      "shot_distance",
       "sport",
-      "sport_family",
-      "sub_angle",
-      "time_of_day",
-      "urgency_placement",
+      "variation",
       "visual_family",
-      "wall_colour_family",
-      "wall_finish",
-      "wall_material"
+      "width_cm"
     ]
   },
   "detail/Cricket/refresh_Instant Experience": {
-    "output_headings": [
-      "HEADLINE",
-      "HEADLINE",
-      "HEADLINE"
-    ],
+    "output_headings": [],
     "csv_headers": [
       "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1024 x 1024"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architecture",
       "authority",
-      "campaign_type",
-      "category",
-      "compatibility",
-      "context",
+      "axes",
+      "dimension_source",
       "evidence",
-      "exclusions",
-      "family",
-      "furniture_materials",
-      "id",
-      "identity_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lighting",
       "measurement_basis",
-      "name",
       "orientation",
-      "product",
-      "recent_styles",
-      "references",
-      "run_id",
-      "seed",
       "selected_size",
-      "styles",
-      "version",
-      "visual_analysis",
-      "wall_hue",
-      "wall_material",
-      "wall_value"
+      "width_cm"
     ]
   },
   "detail/Cricket/Single Image / Video": {
@@ -2919,174 +2751,118 @@
   "detail/NBA/refresh_Carousel": {
     "output_headings": [],
     "csv_headers": [
-      "schema_version,campaign_type,row_type,position,slot_id,image_filename,headline,description,primary_text,destination_url,cta,setup_notes\r"
+      "schema_version,ad_number,product_name,strategy,primary_text,headline,description,cta,image_prompt\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1080 x 1080"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
-      "https://example.com/products/example,Shop",
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "cards",
-      "characters",
-      "cta",
-      "description",
-      "descriptions",
-      "destination_url",
+      "authority",
+      "axes",
+      "dimension_source",
       "evidence",
-      "fragments",
-      "headline",
-      "headlines",
-      "image_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lines",
       "measurement_basis",
       "orientation",
-      "paragraphs",
-      "passed",
-      "position",
-      "primary_texts",
-      "reason",
-      "role",
-      "scene",
       "selected_size",
-      "source_attachment_id",
-      "source_creative_id",
-      "source_id",
-      "text",
-      "winner_reference",
-      "word_bounds",
-      "words"
+      "width_cm"
     ]
   },
   "detail/NBA/Instant Experience": {
     "output_headings": [
+      "GROUP 1 — COLLECTOR HALLWAY",
       "IMAGE GENERATION PROMPT",
       "AD COPY",
-      "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
+      "GROUP 2 — COLLECTOR HALLWAY FRONT VIEW",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY",
-      "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
+      "GROUP 3 — MAN CAVE",
       "IMAGE GENERATION PROMPT",
-      "HEADLINE",
-      "AD COPY",
-      "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
-      "IMAGE GENERATION PROMPT",
-      "HEADLINE",
       "AD COPY"
     ],
-    "csv_headers": [],
+    "csv_headers": [
+      "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta"
+    ],
     "template_variables": [],
     "output_dimensions": [
       "1024 x 1024",
-      "256 x 256"
+      "1024 × 1024",
+      "256 x 256",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architectural_cue",
-      "camera_angle",
-      "camera_family",
-      "campaign_line",
+      "axes",
+      "campaign_type",
       "copy_family",
-      "cover_composition",
-      "cover_layout",
-      "creative_cta",
-      "creative_variation_token",
+      "copy_product_key",
+      "description_key",
+      "description_label",
+      "description_role",
       "description_style",
-      "edition_limit_used",
-      "fan_archetype",
-      "fomo_line",
+      "dimension_source",
+      "glazing",
       "headline_family",
-      "hook_family",
-      "lighting_direction",
+      "height_cm",
       "market",
       "market_lens",
       "measurement_basis",
       "opening_hook_family",
       "orientation",
-      "overlay_position",
-      "primary_cue",
-      "product_era_or_mood",
-      "product_position",
-      "product_sport",
-      "prompt_number",
-      "room_atmosphere",
-      "room_profile",
-      "room_type",
-      "route",
+      "output_mode",
+      "premium_scarcity_front",
+      "premium_scarcity_left",
+      "premium_scarcity_right",
       "route_key",
+      "route_label",
       "scarcity_close",
-      "secondary_cue",
+      "schema_version",
       "selected_size",
       "sentence_rhythm",
-      "shot_distance",
       "sport",
-      "sport_family",
-      "sub_angle",
-      "time_of_day",
-      "urgency_placement",
+      "variation",
       "visual_family",
-      "wall_colour_family",
-      "wall_finish",
-      "wall_material"
+      "width_cm"
     ]
   },
   "detail/NBA/refresh_Instant Experience": {
-    "output_headings": [
-      "HEADLINE",
-      "HEADLINE",
-      "HEADLINE"
-    ],
+    "output_headings": [],
     "csv_headers": [
       "schema_version,campaign_type,output_mode,route_key,route_label,variation,description_key,description_label,primary_text,headline,cta\r"
     ],
     "template_variables": [],
     "output_dimensions": [
-      "1024 x 1024"
+      "1024 x 1024",
+      "256 × 256"
     ],
     "product_urls": [
       "https://www.sportscaveshop.com/products/collector"
     ],
     "schema_keys": [
-      "architecture",
       "authority",
-      "campaign_type",
-      "category",
-      "compatibility",
-      "context",
+      "axes",
+      "dimension_source",
       "evidence",
-      "exclusions",
-      "family",
-      "furniture_materials",
-      "id",
-      "identity_hash",
+      "glazing",
+      "height_cm",
       "image_sha256",
       "image_url",
       "label",
-      "lighting",
       "measurement_basis",
-      "name",
       "orientation",
-      "product",
-      "recent_styles",
-      "references",
-      "run_id",
-      "seed",
       "selected_size",
-      "styles",
-      "version",
-      "visual_analysis",
-      "wall_hue",
-      "wall_material",
-      "wall_value"
+      "width_cm"
     ]
   },
   "detail/NBA/Single Image / Video": {

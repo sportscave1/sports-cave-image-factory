@@ -130,6 +130,10 @@ this exception requires both an explicit reuse declaration and the exact source
 hash. Edited outputs and separate Carousel cards retain duplicate checks.
 Optional copy review is tested directly as a compatibility component while
 current generation retains its integrated review.
+Current Carousel records now return immediately on reopen, avoiding repeated
+prompt rebuilds and preserving their creation timestamp and saved copy. Shared
+editor, upload and Carousel fixtures were also aligned with their deployed
+interfaces and current physical-scale/publication wording.
 
 Run the complete Ads and queue checks with:
 
@@ -142,3 +146,5 @@ The runner strips inherited production credentials, refuses unmocked provider
 HTTP/database access, runs Python prompt/UI/queue tests and then the Node status,
 request, navigation and download checks. Browser fixtures use synthetic endpoints;
 no real advertising, uploads or customer automations are executed.
+The standalone prompt editor runs in a separate test process from legacy upload
+modules so their imported application adapters cannot pollute its Streamlit state.

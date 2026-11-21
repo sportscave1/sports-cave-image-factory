@@ -8985,6 +8985,10 @@ def ensure_current_ads_result_prompt(result):
     )
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
     content_current = (ie_two.active(result["master_prompt"]) or COMPACT_FOOTER_RULES in str(result["master_prompt"])) and (not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"])))
+    if result.get('campaign_type') == 'Carousel':
+        content_current = ADS_CAROUSEL_DETAIL_CONTRACT_VERSION in str(result['master_prompt'])
+        if result.get('prompt_contract_version') == expected_version and content_current:
+            return result  # Current saved carousels need no rebuild or copy-boundary rewrite.
     if is_standard_ie and content_current and ADS_IE_COMBINED_EXECUTION_VERSION not in str(result["master_prompt"]):
         return result  # New description defaults apply only to a fresh pack, never saved copy.
     if result.get("prompt_contract_version") == expected_version and content_current:
