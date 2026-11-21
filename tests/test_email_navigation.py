@@ -20,7 +20,9 @@ class EmailNavigationTests(unittest.TestCase):
         children=[b.label for b in at.button if (b.key or '').startswith('sidebar-child::')]
         self.assertEqual(children,['Inbox','Campaigns','Automations'])
         self.assertNotIn('CRM & Marketing',[b.label for b in at.button])
-        self.assertNotIn('Settings',[b.label for b in at.button])
+        # Global app Settings is separate from the Email navigation group.
+        self.assertNotIn('Settings', children)
+        self.assertFalse(any(b.key == 'sidebar-child::CRM Settings' for b in at.button))
         self.assertEqual(crm_navigation.SIDEBAR_ROUTES,('Email','CRM Campaigns','CRM Automations'))
 
     def test_parent_defaults_to_existing_inbox_and_can_collapse(self):

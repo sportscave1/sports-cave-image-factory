@@ -1,0 +1,194 @@
+EMAIL INBOX: CONNECTION RECOVERY AND PERFORMANCE
+21 November 2026 (Sydney)
+
+RELEASE UPDATE -- SUPERSEDES THE INITIAL INVESTIGATION BELOW
+
+User authorized completing the fixes and pushing them live. The isolated task
+now includes current production baseline 56d7030c382ce6c906f92dac073570c92db4f8ca.
+All local phases are complete and validated; the exact deployment SHA/status
+will be recorded in Studio and the release response.
+
+Phase 1 complete: async errors reach recovery controls; slow successful reads
+are retained for their full TTL after completion, avoiding duplicate fetching.
+No dependency, new worker, speculative fetch or persistent body store was added.
+
+Phase 2 complete: direct SSH was denied (publickey), so the authenticated Render
+web shell ran python scripts/check_support_email_health.py on the CURRENT
+production instance gjckw at 11:29:35 AM Sydney. Configuration, DNS, TCP, verified
+TLS, capability/greeting, IDLE advertisement, authentication, read-only INBOX
+selection, STATUS and logout ALL PASSED. Timings: DNS 3 ms, TCP 153 ms, TLS
+307 ms, login 198 ms, selection 183 ms, STATUS 196 ms, logout 195 ms.
+The earlier timeouts came from former instance xmghf. The underlying external
+cause is unproven; current connectivity works without changing credentials,
+firewall policy or infrastructure. No FETCH, flag change or email send.
+
+Phase 3 complete: 50 fabricated controller iterations produced p95 timings of
+66.989 ms cold mailbox (including fixture setup), 0.674 ms warm mailbox,
+1.251 ms cold conversation, 0.087 ms warm conversation and 3.566 ms refresh.
+Each iteration used two header reads including refresh, one body read and zero
+attachment reads. Evidence is in mailbox-reliability-evidence/
+inbox-20261121-release-timings.json. Real-component headless Edge checks passed
+at 390/1440/1920 pixels: cached body and 50 rows survive outage; Retry restores
+Connected; zero external requests/runtime errors. 50 warm DOM renders had
+median 0.6 ms / p95 1 ms. These are local synthetic, not production timings.
+tests/email_inbox_release_browser.cjs uses a fabricated WorkspaceTests model,
+task-local Playwright and blocked network. No full app preview/server was run.
+
+Phase 4 local gate complete: 591 Python tests, 546 passed / 45 opt-in database
+tests skipped; all 17 JavaScript suites passed. Task-local pglast and IMAPClient
+restored missing test dependencies. Corrected obsolete test harness assumptions
+about edition wording, global versus Email Settings, lazy Orders dispatch and
+the current top-bar scheduler document/clock. Application policy/navigation
+were not changed. No feature/safety tests were removed. Full gate command:
+python scripts/test_email_reliability.py, with PYTHONPATH pointing to private
+.studio/runtime/20261121-4fbd524e/test-deps. Logs: %TEMP%/
+email-inbox-release-verified-gate.log and email-inbox-release-browser.log.
+
+Release will use only the canonical primary service and existing main-branch
+auto-deploy. No Blueprint sync, migration or topology change. Production
+application HTTP health and read-only mailbox connectivity must pass again on
+the exact deployed revision. Unrelated category work remains untouched.
+
+INITIAL INVESTIGATION RECORD -- EARLIER STATUS, RETAINED FOR TRACEABILITY
+
+Task: 20261121-4fbd524e
+Owner: codex-inbox-20261121-bf1573be
+Approved starting revision: 7f9f617e2bce2f150d51561c2f0873412312b036
+Status: implemented locally, uncommitted; production unchanged.
+
+DIAGNOSIS
+
+The supplied screenshot shows cached Inbox headers, a failed selected body, and
+the existing pre-authentication connection diagnosis. This is not evidence of an
+incorrect password. Earlier recorded investigations in
+docs/mailbox-reliability-evidence/REPORT.md and docs/EMAIL_RECONNECT_RELIABILITY.md
+found TCP timeouts before login. They cannot establish today's external cause.
+Provider filtering, routing and network availability require diagnostics from
+the affected host. The user confirmed Nathan's workspace for read-only logs.
+Filtered existing sports-cave-os logs on instance xmghf confirm TODAY'S failure:
+- 10:29:12 AM Sydney: TCP IPv4 TimeoutError, 8,007 ms; index retry 16 seconds.
+- 10:30:18 AM: TCP timeout; index retry 62 seconds.
+- 10:43:48 AM: TCP timeout; index retry 303 seconds.
+- 11:10:46 AM: TCP timeout; index duration 8,117 ms, retry 302 seconds.
+- 11:15:56 AM: TCP IPv4 timeout, 8,031 ms; provider failure 8,383 ms.
+These entries are 20 November 23:29 through 21 November 00:15 UTC. The query
+returned no successful sync/authentication entries in the narrower 11:10-11:30
+AM window; absence from the filtered logs does not prove no successful operation.
+The proven failing stage is TCP before authentication. Logs do not establish
+whether provider filtering, firewall policy or routing is responsible. No
+service configuration, workspace selection fallback or live mailbox was changed.
+
+Two reproducible application defects in support_email_reads.py compounded failures:
+
+1. request() removed every completed failed Future BEFORE calling result(). The
+   asynchronous UI/readiness path could therefore restart a job instead of seeing
+   its failure. Specific errors and retry metadata never reached the controller.
+2. Successful result TTL started at submission. A queued/slow read taking over
+   20 seconds was already expired when polled, prompting another fetch instead
+   of displaying the completed result.
+
+PHASE 1 -- IMPLEMENTED: CORRECT RECOVERY AND REMOVE DUPLICATE READS
+
+Completed failures now reach the controller with their original safe category
+and retry deadline, even when first observed after TTL. The observed failed job
+is then released for the next controlled recovery attempt. Existing provider
+backoff remains authoritative. Successful cache TTL starts at completion.
+Cancelled queued jobs can be replaced; an active read that exceeds a caller's
+bounded wait is retained and reused. A late completion cannot overwrite a newer
+job. Existing two read workers, 24-job limit, mailbox identity boundaries,
+mutations, SMTP and connection admission are unchanged. No dependency or new
+worker was added.
+
+Measured deterministic performance contracts:
+- 50 pending polls submit one job.
+- A synthetic 60-second read remains usable at completion +19 seconds, with
+  one submission; the old submission-based 20-second TTL discarded that result.
+- Completed async failures return their real category instead of another pending
+  response. Recovery is possible on the next controlled attempt.
+These are workload/duplicate-fetch assertions, not measured production latency.
+
+Seven new tests cover categories, failed-job delivery after TTL, slow success,
+copy isolation, coalescing, recovery, late completion, cancellation and timeout
+ownership. No production credentials, mail, database, SMTP or preview was used.
+
+PHASE 2 -- PARTLY COMPLETE: RESOLVE THE EXTERNAL CONNECTION CAUSE
+
+Completed read-only: inspected narrowly filtered existing primary-service
+transport/index logs around the screenshot. Correlated stage, family, category,
+duration and retry deadline. No message content, credentials or raw provider
+response text was collected.
+
+At the affected deployment host, deliberately run the existing read-only
+scripts/check_support_email_health.py diagnostic with operational authorization.
+Distinguish DNS, TCP, verified TLS and authentication. Give the provider only
+necessary safe timing/source information for firewall and connection-limit checks.
+Do not hardcode an IP, disable TLS verification or infer bad credentials from TCP
+timeouts. Network/provider changes require explicit authorization.
+
+Exit: repeated successful TCP/TLS/login/read-only selection from that host and
+automatic recovery after a controlled interruption. An external outage cannot be
+made impossible by a UI patch. Keep last-synced labels accurate during outages.
+
+PHASE 3 -- NEXT: PERFORMANCE BUDGETS AND PROFESSIONAL READER QA
+
+First enable only an approved isolated Phase 2 preview under
+docs/DEVELOPER_STUDIO_PREVIEW_SAFETY.md. Use synthetic mail and blocked SMTP.
+Benchmark cold/warm Inbox, slow provider, rapid switching, long threads, large
+HTML, attachments, search and 50-message pagination; compare median/p95 and peak
+memory against the same fixture/base revision. Proposed acceptance budgets:
+warm local reader selection under 100 ms p95; no duplicate body fetch per
+identity while in flight; no body fetch on first metadata-only Inbox load;
+bounded two workers/24 jobs; controls responsive during provider outage.
+Treat targets as proposed, not already measured results.
+
+Only optimize bottlenecks demonstrated by that profiling. Preserve UIDVALIDITY
+identity checks, sanitizer policy, lazy bodies, bounded caches and explicit
+mutation confirmation. Verify keyboard focus, accessible status/Retry controls,
+folder switching, stale-content labels and delayed body completions in-browser.
+Do not add speculative body prefetch or persistent mail-content storage without
+a separate privacy/resource review. Never label cached headers as a live sync.
+
+PHASE 4 -- NEXT: COMPLETE LOCAL GATE AND CONTROLLED RELEASE
+
+Restore missing pglast/imapclient in a task-local compatible test environment.
+Reconcile existing prompt/navigation/lazy-route test expectations with their
+owners; do not silently broaden this inbox patch to unrelated UI/policy work.
+Run the complete Email gate plus isolated mock browser checks when permitted.
+Review exact diff, retain this task worktree, and obtain explicit commit/release
+authorization. Preserve the canonical Render primary service. No duplicate
+service, schema change or automatic deployment belongs to this task.
+After an authorized release, check provider connections, first body success,
+retry rate and latency without sending real test email or replaying mutations.
+
+VALIDATION
+
+Focused run: 86 tests, 80 passed / 6 disposable-PostgreSQL tests skipped:
+python -m unittest tests.test_email_async_read_recovery tests.test_email_fast_status
+  tests.test_email_inbox_reliability tests.test_email_v2c_performance
+  tests.test_email_dial_backoff tests.test_email_reconnect_lifecycle
+  tests.test_mailbox_reliability_recovery
+
+JavaScript: all 17 Email/component test files passed:
+node --test tests/test_email*.cjs tests/test_support_email*.cjs
+
+Final full gate: 591 tests; 540 passed, 45 skipped, two failures and four errors.
+It is NOT green. Unchanged baseline reproduced
+the same two failures and four errors (584 tests, 45 skipped):
+- test_module_imports_are_lazy_and_unrelated_routes_do_not_connect: existing
+  NameError for _render_orders_workspace in the extracted test namespace.
+- Two migration tests: missing pglast test dependency.
+- IDLE transport test: missing imapclient dependency.
+- Change-of-mind prompt test: old 'artwork' expectation versus 'edition'.
+- Navigation test: existing Settings button expectation mismatch.
+Baseline comparison substituted only HEAD:support_email_reads.py in memory;
+working files and unrelated existing Email-category changes were preserved.
+
+Logs: %TEMP%/email-inbox-20261121-focused.log,
+email-inbox-20261121-node.log, email-inbox-20261121-baseline.log,
+email-inbox-20261121-gate-final.log.
+
+Local automated verification does not prove the production network path or
+browser behavior. No commit, push, merge, deployment, real send or live mutation.
+Studio static/syntax/secret-pattern/infrastructure verification passed; topology
+validation and git diff --check passed. Task remains Implemented Locally, not
+Ready for Review: uncommitted changes and existing full-gate blockers remain.
