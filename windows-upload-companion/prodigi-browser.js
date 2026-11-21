@@ -3,6 +3,14 @@
 // Only server-issued exact drafts. No API key, supplier requests or Submit click.
 let prodigiBrowserTransfer = null;
 const ordersDelay = ms => new Promise(resolve => setTimeout(resolve,ms));
+function prodigiOrderAddress(address,expected) {
+  try {
+    const actual=new URL(address),pinned=new URL(expected);
+    return actual.origin===pinned.origin && actual.pathname===pinned.pathname && !actual.hash &&
+      !actual.username&&!actual.password&&Array.from(actual.searchParams.keys()).every(
+        key=>['imageLibraryType','imageLibraryFileType'].includes(key));
+  } catch {return false;}
+}
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
@@ -56,7 +64,7 @@ async function prodigiBrowserRun(plan) {
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const job=prodigiBrowserTransfer;
-  if(!job || sender.frameId!==0 || sender.tab?.id!==job.tab || sender.url!==job.plan.order_url) return;
+  if(!job || sender.frameId!==0 || sender.tab?.id!==job.tab || !prodigiOrderAddress(sender.url,job.plan.order_url)) return;
   if(message?.type==='prodigi:chunk') {
     const offset=message.offset;
     if(!Number.isSafeInteger(offset)||offset<0||offset>=job.bytes.length||offset%262144) {reply({error:true});return;}

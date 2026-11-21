@@ -42,6 +42,16 @@ test('only exact pinned artwork and supplier order destinations are accepted',()
     context.plan={...plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
   }
 });
+test('the image library may add its own filters without changing the pinned order',()=>{
+  const {context}=setup();context.expected=plan.order_url;
+  context.address=plan.order_url+'?imageLibraryType=artwork%2Cbook&imageLibraryFileType=png%2Cjpg';
+  assert.equal(vm.runInContext('prodigiOrderAddress(address,expected)',context),true);
+  for(const address of [plan.order_url.replace('/99/','/100/'),
+    plan.order_url.replace('sandbox-beta-dashboard.pwinty.com','dashboard.prodigi.com'),
+    plan.order_url+'?redirect=elsewhere',plan.order_url+'#other']) {
+    context.address=address;assert.equal(vm.runInContext('prodigiOrderAddress(address,expected)',context),false);
+  }
+});
 test('worker uploads only verified bytes and opens the exact draft without activation',async()=>{
   const {context,calls,tabs,storage}=setup();context.plan=plan;
   const result=await vm.runInContext('prodigiBrowserRun(plan)',context);

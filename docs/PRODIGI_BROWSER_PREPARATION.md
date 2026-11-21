@@ -21,7 +21,7 @@ and performs the upload/editor actions. Render retains provider keys, serializes
 handoffs, checks the allocation and draft before Save, and performs supplier
 readback/QA. No supplier API key, customer address or password goes into a handoff.
 
-Versions 1.7.13–1.7.15 add content scripts only on exact Prodigi order detail pages.
+Versions 1.7.13–1.7.16 add content scripts only on exact Prodigi order detail pages.
 It requests no cookie/network interception permissions and never accesses login
 pages. New supplier-site access requires the owner's approval and extension reload.
 

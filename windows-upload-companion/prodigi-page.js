@@ -24,12 +24,15 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow};
     throw Error('Prodigi did not reach the expected upload state.');
   }
   function locationMatches(plan) {
-    if(location.href!==plan.order_url) throw Error('The supplier order changed.');
+    const actual=new URL(location.href),pinned=new URL(plan.order_url);
+    if(actual.origin!==pinned.origin||actual.pathname!==pinned.pathname||actual.hash||
+       actual.username||actual.password||!Array.from(actual.searchParams.keys()).every(
+        key=>['imageLibraryType','imageLibraryFileType'].includes(key))) throw Error('The supplier order changed.');
     const sandbox=Array.from(document.querySelectorAll('strong')).some(e=>text(e)==='Sandbox environment');
     if(sandbox!==(plan.environment==='sandbox')) throw Error('Supplier environment differs.');
     if(!Array.from(document.querySelectorAll('h1')).some(e=>text(e).startsWith(plan.order_id)))
       throw Error('The exact supplier order heading is missing.');
-    if(!document.body.innerText.includes(plan.reference)) throw Error('The exact order reference is missing.');
+    if(!document.querySelector('main')?.textContent.includes(plan.reference)) throw Error('The exact order reference is missing.');
   }
   let running=false;
   async function upload(plan) {
