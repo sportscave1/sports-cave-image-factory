@@ -87,6 +87,7 @@ def payload(snapshot):
 
 def request(user, allocation_id, *, synthetic_recipient=False):
     prep.require_user(user)
+    if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':raise ValueError('Test preparation is disabled; use live Orders.')
     if not prep.enabled():
         raise ValueError('Enable Orders preparation first.')
     SandboxClient()  # Reject missing/cross-environment credentials before storing anything.
@@ -194,6 +195,7 @@ def run(value, provider, resolver, link, persist):
 
 
 def tick():
+    if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':return None
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (LOCK,))
         if not cur.fetchone()['acquired']:

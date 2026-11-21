@@ -26,6 +26,9 @@ def context(key):
     if re.fullmatch(r'prodigi_prepare:\d+', key):
         return Client(), prep.resolve, prep.artwork_link, False
     if re.fullmatch(r'prodigi_sandbox_test:[a-f0-9-]{36}', key):
+        import os
+        if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':
+            raise ValueError('Test preparation is disabled; use live Orders.')
         return sandbox.SandboxClient(), sandbox.resolve, lambda s: sandbox.artwork_link(s, key.split(':')[1]), True
     raise ValueError('Unknown Orders handoff.')
 
@@ -85,10 +88,14 @@ def claim():
             return None
         cur.execute('''SELECT key,value FROM app_settings WHERE
             (key LIKE 'prodigi_prepare:%%' OR key LIKE 'prodigi_sandbox_test:%%')
+            AND (key LIKE 'prodigi_prepare:%%' OR %s)
             AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 20''', (WAITING,))
+            ORDER BY updated_at LIMIT 20''', (os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()=='true',WAITING))
         for row in cur.fetchall():
             key, value = row['key'], row['value']
+            if key.startswith('prodigi_sandbox_test:'):
+                import os
+                if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':continue
             if key.startswith(prep.PREFIX) and not value.get('browser_requested'):
                 continue  # Old requests cannot be activated by enabling the new worker.
             provider, resolver, link, sandbox = context(key)
@@ -306,5 +313,6 @@ def _finish(key,read_receipt,stage):
             value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                 else 'Supplier artwork could not be verified. Review the exact draft; no automatic retry.')
             value['message']+=' Browser stage: '+stage+'.'
+            prep.record_failure(value,'artwork.'+stage,value['message'],type(error).__name__)
         save(cur,key,value)
     return {'status':value['status']}

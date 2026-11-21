@@ -3007,8 +3007,6 @@ def _render_orders_data_area():
 
     _responsive_orders_mode()
     _render_top_actions(visible_rows, None)
-    from prodigi_sandbox_ui import render as render_prodigi_sandbox
-    render_prodigi_sandbox(_selected_rows_from_state(visible_rows), st.session_state.get('sports_cave_current_user') or {})
 
     _render_orders_table(visible_rows)
 

@@ -1,6 +1,6 @@
 """Single-use companion upload for certificate packing slips; never Submit."""
 from datetime import datetime,timezone
-import hmac,secrets
+import hmac,secrets,os
 from urllib.parse import urlsplit
 import prodigi_browser as browser
 import prodigi_preparation as prep
@@ -34,10 +34,13 @@ def claim():
         if not q.fetchone()['acquired']:return None
         q.execute("""SELECT key,value FROM app_settings WHERE
             (key LIKE 'prodigi_prepare:%%' OR key LIKE 'prodigi_sandbox_test:%%')
+            AND (key LIKE 'prodigi_prepare:%%' OR %s)
             AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 1""",(WAITING,));row=q.fetchone()
+            ORDER BY updated_at LIMIT 1""",(os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()=='true',WAITING));row=q.fetchone()
         if not row:return None
         key,value=row['key'],row['value']
+        if key.startswith('prodigi_sandbox_test:'):
+            if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':return None
         if value.get('document_browser'):return None
         try:
             provider,resolver,_,sandbox=browser.context(key)
@@ -121,6 +124,28 @@ def recheck(user,key):
     return _finish(key,provider,resolver,sandbox,read,'readback')
 
 
+def resume_unstarted(user,key):
+    """Explicit staff retry before any upload permit; never resets a used permit."""
+    prep.require_user(user)
+    provider,resolver,_,sandbox=browser.context(key)
+    with prep.connect() as c,c.cursor() as q:
+        q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
+        q.execute('SELECT value FROM app_settings WHERE key=%s',(key,));row=q.fetchone()
+        if not row:raise ValueError('Certificate handoff not found.')
+        value=row['value'];receipt=value.get('document_browser') or {}
+        if value.get('hidden'):raise ValueError('This preparation was removed.')
+        if value.get('status')!='Needs review' or receipt.get('started') is not False or receipt.get('verified'):
+            raise ValueError('Only a stopped, unused certificate permit can receive a new handoff.')
+        _,order,_=current(value,provider,resolver,sandbox)
+        if (order.get('packingSlip') or {}).get('url'):raise ValueError('An existing packing slip requires preservation and review.')
+        value.setdefault('certificate_attempts',[]).append(dict(claimed_at=receipt.get('claimed_at'),
+            stopped_before_permit=True,rechecked_at=prep.now(),actor=str(user['id'])))
+        value.pop('document_browser')
+        value.update(hidden=False,status=WAITING,message='Staff rechecked this unchanged draft. Waiting for a fresh certificate handoff; no upload permit was previously issued.')
+        browser.save(q,key,value)
+    return {'status':WAITING}
+
+
 def _finish(raw,provider,resolver,sandbox,read,stage):
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
@@ -139,5 +164,6 @@ def _finish(raw,provider,resolver,sandbox,read,stage):
         except Exception as error:
             value.update(status='Needs review',message=(str(error) if isinstance(error,ValueError)
                 else 'Certificate verification is unavailable. Recheck this exact draft; no automatic retry.')+' Certificate stage: '+stage+'.')
+            prep.record_failure(value,'certificate.'+stage,value['message'],type(error).__name__)
         browser.save(q,raw,value)
     return {'status':value['status']}

@@ -1,73 +1,47 @@
-# One-click Prodigi draft preparation
+# Live Orders preparation
 
-Orders has a compact Send/status column immediately after Edition JPG. Text
-wraps instead of being clipped. Twenty rows per page, a bounded internal scroll
-and collapsed unit details keep the page short. Selection and actions carry
-stable allocation identities, never just a displayed row position.
+Orders keeps the existing certificate, PSD, JPG and Fulfilment actions. The
+compact table groups the customer with the order and the variant with the
+artwork. Dates and shipping remain visible. It displays 50 edition units per
+page, preserves stable selection identities across pages, and filters locally
+by saved status. The table makes one batched status read, with no supplier call
+per row. Only active, visible preparation polls for status.
 
-Send queues one existing supplier draft. If required, the normal Auto Editions
-worker first generates the allocated numbered JPG. The paired Edge companion
-uploads and saves the artwork; Render performs the API checks and document
-work. This does not add a Docker Orders worker. Payment and Submit stay manual.
+Send prepares the exact existing unpaid Prodigi draft. Auto Editions generates
+the allocated numbered JPG when required. The paired Edge companion uploads
+and saves it; Render validates the supplier identity, artwork, dimensions,
+frame, shipping, edition, certificate and packing slip. The certificate uses
+the existing template on an A4 landscape sheet and is attached by Companion
+1.7.20 using a checksum-bound, single-use permit. Live API item PATCH remains
+blocked. This uses Edge plus Render processing, not a Docker Orders worker.
 
-## QA and documents
+Payment and Submit always remain manual. Green Ready opens the exact supplier
+order only after every QA check passes. It does not mean the order is paid or
+in production. Supplier files marked NotYetDownloaded are attached for manual
+release; raw supplier byte verification is reported separately when available.
 
-After the single-use Save permit and artwork readback, one background pass:
+The original layout and archived bytes must match their saved approvals.
+Enlarging an export does not prove more native detail. Native resolution and
+embedded colour-profile failures block production approval. #SC3522 requires a
+higher-resolution master; no owner quality exception has been recorded. Exact
+recipient/address matching stays mandatory and neither address is silently
+rewritten to resolve a mismatch.
 
-- Revalidates the current layout/source, independent pixel proofs, edition,
-  archived bytes, RGB JPEG encoding, ICC profile, native resolution and supplier
-  catalogue/asset validation.
-- Generates the existing Sports Cave certificate template for this exact unit
-  and archives its PDF by immutable hash/revision. In this workflow the custom
-  packing slip **is the numbered certificate**, matching the existing Fulfilment
-  convention. The original layout is fitted to one A4 landscape sheet with safe
-  margins. It does not claim that a draft's fee has already been paid.
-- Uses Companion 1.7.19 to upload the checksum-pinned certificate PDF through
-  Add packing slip on the exact unpaid draft. The sandbox API document PATCH
-  returned HTTP 500 on 21 November; the automatic flow does not use that write.
-  A durable single-use permit precedes the browser upload. An uncertain result
-  is re-read, never uploaded again. Existing different slips are preserved.
-- Rechecks all business fields, artwork, certificate and supplier slip status.
-  Green Ready appears only when every check passes. The link opens the exact
-  supplier order for manual review/payment/submission.
+Failures retain their stage, timestamp, error type and message on the preparation
+record, with history events and a review prompt. A staff recheck can renew a
+certificate handoff only if its permit was never used, the original source and
+supplier business fields are unchanged, and no packing slip exists. Used or
+uncertain upload permits are never reset. Existing different artwork/slips and
+multiple numbered items stop for review rather than being replaced.
 
-Existing different packing slips and orders with multiple numbered items stop
-for document review. No certificate is silently replaced. Sandbox does not
-publish certificates to Shopify or alter live allocations/orders.
-The optional synthetic-recipient sandbox mode tests transport and QA machinery
-without reading or copying a live supplier recipient. It is labelled in Orders
-and never approves the real customer's address. Normal customer-copy tests keep
-their exact address-match guard; a street mismatch still blocks them.
+Only the live Orders queue is processed in normal operation. Test controls have
+been removed from Orders; previous test rows were stopped and hidden. The
+legacy test adapter defaults off and cannot claim work unless explicitly enabled
+for isolated offline tests. Interrupted test receipts are acknowledged without
+accessing Prodigi so they cannot block the live desktop worker.
 
-## Honest print approval
-
-The draft print certificate records automated technical evidence. It does not
-forge `human_visual_approved` or rewrite Auto Editions' historical TEST flags.
-The original layout/pixel approvals must already exist. An enlarged pixel count
-does not prove more native detail. Native resolution below the supplier's
-recommendation remains a warning that blocks Ready.
-
-A higher-resolution original master is required when native resolution fails.
-This workflow has no automatic resolution exception. The owner specifically
-required a higher-resolution master for #SC3522; neither a larger export nor a
-manually ticked answer can make that artwork Ready.
-
-## Bounds and activation
-
-The table does one batched local status read; it never calls Prodigi per row.
-Only visible active work polls (ten seconds). Expensive file validation is
-cached as immutable job/checksum evidence; pending slips only need readback.
-Certificates use expiring opaque URLs bound to the active preparation and
-current allocation. Hiding a sandbox row revokes its JPG and PDF capabilities.
-The supplier attachment is bound to its unique library asset ID, filename,
-PDF byte count and companion-verified source checksum. If Prodigi's original
-download returns 404, raw supplier byte verification is explicitly false.
-`NotYetDownloaded` means attached for manual release, not already printed or
-downloaded; the UI records that distinction. Errors never pass packing-slip QA.
-
-Full QA is enabled for sandbox by default; `SPORTS_CAVE_PRODIGI_FULL_QA_ENABLED`
-can disable it. Live draft preparation additionally requires the explicit
-`SPORTS_CAVE_PRODIGI_FULL_QA_ACCEPTED=true` acceptance gate. The existing browser
-gate also applies. Live **item artwork PATCH remains hard-blocked**. Supplier
-keys stay on Render; no login, credential, cookie or authentication settings
-are changed.
+Live preparation uses the existing SPORTS_CAVE_PRODIGI_PREPARE,
+SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED and SPORTS_CAVE_PRODIGI_FULL_QA_ACCEPTED
+flags. Credentials stay on Render and existing browser sign-in settings are
+unchanged. Live checks must retain the actual failed result; a real test is not
+permission to pay, Submit, waive quality evidence or create a replacement order.

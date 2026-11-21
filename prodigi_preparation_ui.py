@@ -32,6 +32,9 @@ def render(row, user, *, answers=None, compact=False):
             if saved['status']=='Ready for manual payment':st.success(saved['message'])
             elif saved['status'] in ('Needs QA','Needs review'):st.warning(saved['message'])
             else:st.info(saved['message'])
+            if saved.get('last_failure'):
+                failure=saved['last_failure']
+                st.caption('Last failed check: '+failure['stage']+' · '+failure['at'])
             if saved.get('artwork_expires_at'):
                 st.caption('Recheck before manual payment. Artwork link review date: ' + saved['artwork_expires_at'][:10])
             if saved.get('qa'):

@@ -12,6 +12,7 @@ from test_auto_editions_jobs import database
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','true')
     monkeypatch.setattr(requests.sessions.Session, 'request', lambda *a, **k: pytest.fail('Live network forbidden'))
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_PREPARE','true')
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','true')

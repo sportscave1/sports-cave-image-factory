@@ -343,7 +343,8 @@ def test_one_slot_duplicate_publications_and_next_day(store, monkeypatch):
         assert f'morning_design_job_id = "{job["id"]}"' in job['prompt']
         assert 'Use the original photos as the authority' in job['prompt']
         assert 'Generate the collector treatment once' in job['prompt']
-        assert 'Omit the marker for visual concerns alone.' in job['prompt']
+        assert 'SC_DESIGN_BLOCKED' not in job['prompt']
+        assert 'continue the complete design flow without a confirmation or approval pause.' in job['prompt']
     queue.tick(token, [dict(id=job['id'], state='submitted') for job in first])
     assert {j['stage'] for j in queue.list_jobs() if j['id'] in {r['id'] for r in first}} == {2}
     # A fresh morning is independent, but cannot exceed the occupied slots.

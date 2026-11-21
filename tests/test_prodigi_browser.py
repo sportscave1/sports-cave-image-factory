@@ -16,6 +16,7 @@ KEY=sandbox.PREFIX+'00000000-0000-4000-8000-000000000001'
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','true')
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_FULL_QA_ENABLED','false')
     monkeypatch.setattr(requests.sessions.Session,'request',lambda *a,**k:pytest.fail('Live network forbidden'))
 
