@@ -83,3 +83,21 @@ def test_active_repair_overrides_failed_preparation_and_counts_waiting(store):
     value=header.snapshot(queue.connect)
     assert value['waiting']==1 and value['jobs'][0]['state']=='waiting'
     assert value['jobs'][0]['label']=='Queued for Companion repair'
+
+
+def test_import_stages_and_order_handoff_do_not_claim_jpg_completion(store):
+    queue,sql=store
+    sql.execute("INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,lease_until) VALUES(%s,'id:fixture','Preparing','Uploading',now()+interval '1 minute')",(PID,))
+    for stage,label in [('Uploading','Transferring package'),('Validating','Validating package'),('Publishing','Publishing prepared assets')]:
+        sql.execute('UPDATE auto_edition_onboarding SET reason=%s',(stage,))
+        assert header.snapshot(queue.connect)['jobs'][0]['label']==label
+    sql.execute("INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail) VALUES(%s,'fixture','edition_repair_request','{\"state\":\"Waiting\"}')",(PID,))
+    sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason='Technical verification pending.'")
+    assert header.snapshot(queue.connect)['jobs'][0]['label']=='Verifying preparation'
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES(%s,'{}','[]','{}','fixture')",('a'*64,))
+    sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready',preparation_hash=%s",('a'*64,))
+    job=header.snapshot(queue.connect)['jobs'][0]
+    assert job['label']=='Preparation ready · order JPGs queued' and job['state']!='complete'
+    assert job['updated_at']
+    sql.execute("UPDATE auto_edition_onboarding_audit SET detail=detail||jsonb_build_object('jpg_preparation_hash',%s::text) WHERE event='edition_repair_request'",('a'*64,))
+    assert header.snapshot(queue.connect)['jobs'][0]['label']=='Generating order JPGs'

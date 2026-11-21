@@ -535,6 +535,18 @@ def record_transfer(row, trace):
     except OSError:pass
 
 
+def transient_upload_error(error):
+    """Both HTTP clients participate in upload/reconnect; keep outages recoverable."""
+    import requests
+    from urllib.error import HTTPError, URLError
+    if isinstance(error, HTTPError):
+        return error.code in (408,429) or 500 <= error.code < 600
+    if isinstance(error, requests.RequestException):
+        response=getattr(error,'response',None)
+        return response is None or response.status_code in (408,429) or 500 <= response.status_code < 600
+    return isinstance(error,(URLError,TimeoutError,ConnectionError))
+
+
 @cancellable
 def upload_prepared(key,archive):
     """Retry transfer after deploy without repeating Photoshop or source download."""
@@ -583,10 +595,8 @@ def upload_prepared(key,archive):
                 except OSError:pass
                 finish_upload(row,result,started)
                 return
-            except requests.RequestException as error:
-                response=getattr(error,'response',None)
-                status=response.status_code if response is not None else None
-                if status is not None and status not in (408,429) and status<500:raise
+            except Exception as error:
+                if not transient_upload_error(error):raise
                 if attempt==2 or not row['context'].get('automatic'):raise
                 # Bounded, cancellation-aware backoff. A reconnect can recover
                 # an already accepted upload before any bytes are sent again.
@@ -601,7 +611,7 @@ def upload_prepared(key,archive):
     except Cancelled:raise
     except Exception as error:
         response=getattr(error,'response',None)
-        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code in (408,429) or response.status_code>=500)
+        transient=transient_upload_error(error)
         detail=failure_detail(row,'Uploading',error)
         code=' HTTP '+str(response.status_code) if response is not None else ''
         if transient:row['diagnostic']=safe_diagnostic('upload/checkpoint failed','Uploading')

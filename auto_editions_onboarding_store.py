@@ -199,11 +199,21 @@ class Queue:
             cur.execute("""SELECT 1 FROM auto_edition_onboarding WHERE lease_until>now()
                 AND product_gid<>%s AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing')""",(pid,))
             if cur.fetchone():raise ValueError('Another preparation owns the processor lease.')
-            cur.execute("""UPDATE auto_edition_onboarding SET updated_at=now(),reason=%s,
+            cur.execute("""UPDATE auto_edition_onboarding SET updated_at=now(),reason=CASE WHEN %s='Uploading' AND reason IN ('Validating','Publishing') THEN reason ELSE %s END,
                 lease_until=now()+interval '45 minutes'
                 WHERE product_gid=%s AND lease_token=%s
-                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing') RETURNING product_gid""",(stage,pid,token))
+                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing') RETURNING product_gid""",(stage,stage,pid,token))
             if not cur.fetchone():raise ValueError('Preparation lease was superseded or completed.')
+
+    def import_progress(self,pid,token,stage):
+        """Display-only server checkpoint for the current lease; never renew/revive it."""
+        if stage not in ('Validating','Publishing'):raise ValueError('Unsupported import stage.')
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""UPDATE auto_edition_onboarding SET reason=%s,updated_at=now()
+                WHERE product_gid=%s AND lease_token=%s AND lease_until>now()
+                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing')
+                RETURNING product_gid""",(stage,pid,token))
+            return bool(cur.fetchone())
 
     def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None, metrics=None, diagnostic=None):
         if status not in ('Preparing','Needs PSD Repair','Blocked','Cloud Ready'):

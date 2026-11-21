@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v9-edition-controls";
+  const CONTROLLER_VERSION = "companion-header-v10-phase1";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -988,8 +988,16 @@
     .sc-companion-details[data-state="complete"] summary {border-color:#71936d;color:#cef1c9;}
     .sc-companion-details[data-stale="true"] summary,#sc-os-staff-uploads[data-stale="true"] summary {border-style:dashed;}
     .sc-companion-popup {position:absolute;top:calc(100% + 6px);right:0;width:min(340px,calc(100vw - 20px));box-sizing:border-box;padding:12px;background:#191612;border:1px solid #63512d;border-radius:8px;color:#f8edcf;box-shadow:0 8px 24px #0004;max-height:55vh;overflow:auto;z-index:2;font-size:12px;}
-    #sc-edition-usage label {display:flex;align-items:center;justify-content:space-between;gap:8px;}
-    #sc-edition-usage input {width:100px;}
+    #sc-edition-usage label {color:#f8edcf!important;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    #sc-edition-usage {color:#f8edcf!important;color-scheme:dark;}
+    #sc-edition-usage input {width:110px;}
+    #sc-edition-usage input,#sc-edition-usage select {color:#17130e!important;background:#fffaf0!important;border:1px solid #ad9564!important;}
+    #sc-edition-usage input::placeholder {color:#655b4c!important;opacity:1;}
+    #sc-edition-usage input:disabled {color:#6a6050!important;background:#ddd4c3!important;opacity:1;}
+    #sc-edition-usage button {color:#17130e!important;background:#f3dfae!important;border:1px solid #ad9564!important;}
+    #sc-edition-usage :focus-visible {outline:2px solid #f1ca6b;outline-offset:2px;}
+    #sc-edition-usage small,#sc-edition-message {color:#f0e6d0!important;}
+    #sc-edition-help {line-height:1.4;}
     #sc-edition-usage input,#sc-edition-usage select,#sc-edition-usage button {font:12px Arial,sans-serif;padding:5px;border-radius:4px;}
     #sc-edition-usage button:disabled {opacity:.5;}
     #sc-edition-message {overflow-wrap:anywhere;}
@@ -1138,16 +1146,16 @@
       <div id="sc-os-editions-card" class="sc-companion-card" hidden>
         <details id="sc-os-editions-status" class="sc-companion-details">
           <summary><span class="sc-companion-name">Auto Editions</span><span id="sc-os-editions-title" class="sc-companion-title"></span><span id="sc-os-editions-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-editions-meter" max="100" aria-label="Auto Editions checkpoint"></progress></summary>
-          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-editions-close" type="button" aria-label="Close Auto Editions status">×</button><div id="sc-os-editions-list"></div>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-editions-close" type="button" aria-label="Close Auto Editions status">×</button><div id="sc-os-editions-freshness" role="status" style="color:#f0e6d0;font-size:11px;margin-bottom:8px">Waiting for status.</div><div id="sc-os-editions-list"></div>
             <form id="sc-edition-usage" aria-label="Auto Editions usage" style="border-top:1px solid #63512d;margin-top:10px;padding-top:10px;display:grid;gap:8px">
               <strong>Companion usage</strong>
               <label>Transfer speed <select id="sc-edition-mode" disabled><option>Balanced</option><option>Background</option><option value="Maximum speed">Maximum (uncapped)</option><option>Manual</option></select></label>
-              <label>Upload cap (Mbps) <input id="sc-edition-upload" type="number" min="0.01" max="10000" step="any" disabled></label>
-              <label>Measured upload (Mbps) <input id="sc-edition-measured" type="number" min="0.01" max="10000" step="any" disabled></label>
-              <label>Download cap (Mbps, optional) <input id="sc-edition-download" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Upload cap (Mbps) <input id="sc-edition-upload" placeholder="Not used" aria-describedby="sc-edition-help" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Measured upload (Mbps) <input id="sc-edition-measured" placeholder="Not set" aria-describedby="sc-edition-help" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Download cap (Mbps, optional) <input id="sc-edition-download" placeholder="Uncapped" aria-describedby="sc-edition-help" type="number" min="0.01" max="10000" step="any" disabled></label>
               <div><button id="sc-edition-apply" type="submit" disabled>Apply usage</button> <button id="sc-edition-pause" type="button" disabled>Pause companion</button> <button id="sc-edition-refresh" type="button">Refresh</button></div>
               <span id="sc-edition-message" role="status" aria-live="polite">Open to load current settings.</span>
-              <small>Speed limits transfers. Balanced reserves headroom; Background uses less bandwidth. Pause stops new jobs after current work finishes safely.</small>
+              <small id="sc-edition-help">Blank download cap means uncapped. Upload cap is used only in Manual mode; measured upload is used for Balanced/Background. Speed limits transfers. Balanced reserves headroom; Background uses less bandwidth. Pause stops new jobs after current work finishes safely.</small>
             </form></div>
         </details>
       </div>
@@ -1318,6 +1326,7 @@
       if(desired && !usageDirty){usage.mode.value=desired.mode;usage.upload.value=desired.manual_mbps??'';usage.measured.value=desired.sustainable_mbps??'';usage.download.value=desired.download_mbps??'';}
       for(const key of ['mode','download','apply'])usage[key].disabled=usageBusy||!usageSupported();
       usage.upload.disabled=usageBusy||!usageSupported()||usage.mode.value!=='Manual';
+      usage.upload.placeholder=usage.mode.value==='Manual'?'Enter Mbps':'Not used';
       usage.measured.disabled=usageBusy||!usageSupported()||!['Balanced','Background'].includes(usage.mode.value);
       usage.pause.disabled=usageBusy||!usageData;
       usage.refresh.disabled=usageBusy;
@@ -1380,6 +1389,12 @@
         pendingAdActions.clear();deletedAdJobs.clear();adRows.clear();adControlReceipts.clear();adActionScope=state.config.uploadScope;
       }
       lastCompanionStatus = status;
+      const editionFreshness=root.querySelector('#sc-os-editions-freshness');
+      if(status.display_state!=='stale' && !status.queues?.editions?.unavailable){
+        const checked=Date.parse(status.checked_at||'');
+        editionFreshness.dataset.checkedAt=Number.isFinite(checked)?new Date(checked).toLocaleTimeString():new Date().toLocaleTimeString();
+      }
+      editionFreshness.textContent='Last successful status: '+(editionFreshness.dataset.checkedAt||'not available')+(status.display_state==='stale'||status.queues?.editions?.unavailable?' · delayed, showing last known state':'');
       if(adQuickScope && adQuickScope!==state.config.uploadScope) {
         adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
         root.querySelector('#sc-ad-products').replaceChildren();
@@ -1971,7 +1986,7 @@
         for (const button of Object.values(queueButtons)) button.disabled=true;
         staffDelay = _error.message === 'Status refreshing' ? 1000 : Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
         for (const {panel,stage} of Object.values(companionPanels)) {
-          panel.dataset.stale='true';stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
+          panel.dataset.stale='true';if(panel.id==='sc-os-editions-status'){const stamp=root.querySelector('#sc-os-editions-freshness');stamp.textContent='Status delayed · last successful update: '+(stamp.dataset.checkedAt||'not available')+' · showing last known state';}stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
         }
         staffProgress.dataset.stale='true';
         root.querySelector('#sc-os-staff-upload-stage').textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';

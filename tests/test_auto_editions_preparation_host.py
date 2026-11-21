@@ -239,3 +239,65 @@ def test_live_heartbeat_payload_matches_server_contract(monkeypatch,tmp_path):
     payload=local.health_payload()
     assert worker_health.validate_heartbeat(payload)==payload
     assert 'repair_handoff' not in payload
+
+
+@pytest.mark.parametrize('code,transient',[(408,True),(429,True),(500,True),(502,True),(503,True),(504,True),(400,False),(401,False),(403,False),(409,False)])
+def test_upload_http_clients_share_retry_classification(code,transient):
+    import requests
+    from urllib.error import HTTPError
+    response=requests.Response();response.status_code=code
+    assert local.transient_upload_error(requests.HTTPError(response=response)) is transient
+    assert local.transient_upload_error(HTTPError('https://fixture.invalid',code,'fixture',{},None)) is transient
+
+
+def test_reconnect_urllib_outage_retains_package_for_automatic_recovery(tmp_path):
+    import requests
+    from urllib.error import HTTPError
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'verified fixture package')
+    row=dict(folder=tmp_path,grant={'base_url':'https://fixture.invalid','ticket':'fixture','secret':'fixture'},
+             context={'automatic':True},status='Working')
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.ConnectionError()), \
+         patch.object(local,'reconnect',side_effect=HTTPError('https://fixture.invalid',503,'fixture',{},None)), \
+         patch.object(local.HOST_STOP,'wait',return_value=False),patch.object(local,'report_failure') as report, \
+         patch.object(local,'release_verified_temporary_files') as cleanup:
+        local.upload_prepared('job',archive)
+    assert row['status']=='Recovering' and row['recovery_failures']==1 and row['retry_at']>0
+    assert archive.read_bytes()==b'verified fixture package'
+    report.assert_not_called();cleanup.assert_not_called()
+
+
+@pytest.mark.parametrize('code',[403,409])
+def test_reconnect_permanent_failure_stays_blocked(tmp_path,code):
+    import requests
+    from urllib.error import HTTPError
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'retained fixture package')
+    row=dict(folder=tmp_path,grant={'base_url':'https://fixture.invalid','ticket':'fixture','secret':'fixture'},
+             context={'automatic':True},status='Working')
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.ConnectionError()), \
+         patch.object(local,'reconnect',side_effect=HTTPError('https://fixture.invalid',code,'fixture',{},None)), \
+         patch.object(local.HOST_STOP,'wait',return_value=False),patch.object(local,'report_failure') as report:
+        local.upload_prepared('job',archive)
+    assert row['status']=='Blocked' and archive.exists()
+    report.assert_called_once_with(row)
+
+
+def test_reconnect_timeouts_recover_but_local_or_identity_failures_do_not():
+    from urllib.error import URLError
+    for error in (URLError('temporary connection failure'),TimeoutError(),ConnectionError()):
+        assert local.transient_upload_error(error)
+    for error in (OSError('disk full'),ValueError('Preparation identity changed.'),local.Cancelled()):
+        assert not local.transient_upload_error(error)
+
+
+def test_transient_upload_recovery_remains_bounded(tmp_path):
+    import requests
+    from urllib.error import HTTPError
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'retained fixture package')
+    row=dict(folder=tmp_path,grant={'base_url':'https://fixture.invalid','ticket':'fixture','secret':'fixture'},
+             context={'automatic':True},status='Working',recovery_failures=2)
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.ConnectionError()), \
+         patch.object(local,'reconnect',side_effect=HTTPError('https://fixture.invalid',503,'fixture',{},None)), \
+         patch.object(local.HOST_STOP,'wait',return_value=False),patch.object(local,'report_failure') as report:
+        local.upload_prepared('job',archive)
+    assert row['status']=='Blocked' and row['recovery_failures']==3 and archive.exists()
+    report.assert_called_once_with(row)

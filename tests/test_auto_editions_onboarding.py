@@ -193,3 +193,22 @@ def test_completed_receipt_fences_actor_lease_and_mapping(database):
     assert queue.completed_receipt('p','00000000-0000-0000-0000-000000000000','admin') is None
     sql.execute("UPDATE product_psd_mappings SET dropbox_file_id='changed'")
     assert queue.completed_receipt('p',row['lease_token'],'admin') is None
+
+
+def test_server_import_stages_survive_upload_heartbeat_and_fence_completed_lease(database):
+    queue,sql=setup_queue(database)
+    queue.enqueue('p','f','admin');row=queue.claim('admin');token=str(row['lease_token'])
+    assert queue.import_progress('p',token,'Validating')
+    queue.heartbeat('p',token,'admin','Uploading')
+    sql.execute("SELECT reason FROM auto_edition_onboarding WHERE product_gid='p'")
+    assert sql.fetchone()['reason']=='Validating'
+    assert queue.import_progress('p',token,'Publishing')
+    queue.heartbeat('p',token,'admin','Uploading')
+    sql.execute("SELECT reason FROM auto_edition_onboarding WHERE product_gid='p'")
+    assert sql.fetchone()['reason']=='Publishing'
+    assert not queue.import_progress('p',str(__import__('uuid').uuid4()),'Validating')
+    queue.checkpoint('p',token,'admin','Blocked','Technical verification pending.')
+    assert not queue.import_progress('p',token,'Publishing')
+    sql.execute("SELECT status,reason FROM auto_edition_onboarding WHERE product_gid='p'")
+    assert sql.fetchone()==dict(status='Blocked',reason='Technical verification pending.')
+    with pytest.raises(ValueError):queue.import_progress('p',token,'Cloud Ready')

@@ -11,11 +11,13 @@ SQL = """WITH summary AS (
    AND COALESCE(to_jsonb(auto_edition_onboarding)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed')) AS waiting
  FROM auto_edition_onboarding
 ), recent AS (
- SELECT q.product_gid,q.status,q.reason,q.updated_at,q.priority,q.lease_until,
+ SELECT q.product_gid,q.status,q.reason,q.updated_at,q.priority,q.lease_until,q.preparation_hash,
    to_jsonb(q)->'replacement'->>'stage' AS replacement_stage,
    to_jsonb(q)->'reset_cancellation'->>'stage' AS cancellation_stage,
    (SELECT detail->>'state' FROM auto_edition_onboarding_audit a
-     WHERE a.product_gid=q.product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1) AS repair_state
+     WHERE a.product_gid=q.product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1) AS repair_state,
+   (SELECT detail->>'jpg_preparation_hash' FROM auto_edition_onboarding_audit a
+     WHERE a.product_gid=q.product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1) AS jpg_preparation_hash
  FROM auto_edition_onboarding q
  ORDER BY CASE WHEN status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing' THEN 0
    WHEN status='Awaiting preparation' AND priority>0 OR to_jsonb(q)->'replacement'->>'stage' IN ('Queued','Discovering')
@@ -59,9 +61,14 @@ def snapshot(connect):
             elif active:
                 state = 'running'
                 stage = row.get('reason')
-                label = stage if stage in ('Claimed','Photoshop','Preparing','Uploading','Verifying','Recovering') else 'Preparing'
+                label = {'Claimed':'Preparing Photoshop','Photoshop':'Photoshop','Preparing':'Preparing','Uploading':'Transferring package','Validating':'Validating package','Publishing':'Publishing prepared assets','Verifying':'Verifying preparation','Recovering':'Recovering retained package'}.get(stage,'Preparing')
                 if not row.get('lease_valid'):
                     label = 'Recovering · preparation lease expired'
+            elif status=='Blocked' and row.get('reason')=='Technical verification pending.':
+                state,label='running','Verifying preparation'
+            elif status=='Cloud Ready' and row.get('repair_state') in ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing'):
+                state='waiting'
+                label='Generating order JPGs' if row.get('preparation_hash') and row.get('jpg_preparation_hash')==row['preparation_hash'] else 'Preparation ready · order JPGs queued'
             elif row.get('repair_state') in ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing'):
                 repair=row['repair_state']
                 state='running' if repair=='Codex repairing' else 'waiting'
@@ -82,7 +89,7 @@ def snapshot(connect):
             else:
                 state, label = 'failed', 'Preparation needs attention'
             jobs.append(dict(id=row['product_gid'],title=row.get('title') or 'Edition artwork',
-                state=state,label=label,percent=100 if state=='complete' else 0,estimated=False))
+                state=state,label=label,updated_at=row['updated_at'].isoformat(),percent=100 if state=='complete' else 0,estimated=False))
         return dict(enabled=not first['paused'],online=bool(first['online']),waiting=first['waiting'],jobs=jobs)
     except Exception:
         # Do not take down the other companions or publish database error text.

@@ -167,3 +167,20 @@ def test_failed_handoff_cannot_stop_a_resumed_native_queue(broken):
     sql.execute("UPDATE auto_edition_onboarding SET status='Awaiting preparation'")
     repair.returned(d.connect,PID,receipt['request_id'],receipt['handoff_token'],False)
     with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
+
+
+def test_ready_preparation_reaches_order_jpgs_before_older_passive_repairs(broken):
+    d,sql=broken
+    # A full catalogue of older repair monitors must not delay a newly ready PSD.
+    sql.execute("""INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail,created_at)
+      SELECT 'gid://shopify/Product/'||n,'fixture','edition_repair_request',
+        jsonb_build_object('state','Codex queued','product_gid','gid://shopify/Product/'||n,
+          'file_id','id:old','request_id','old-'||n),now()-interval '1 hour'
+      FROM generate_series(1,60) n""")
+    requested=repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready' WHERE product_gid=%s",(PID,))
+    with patch.object(repair,'order_jpgs') as generate:
+        assert repair.run_one(d.connect)
+    assert generate.call_count==1
+    assert generate.call_args.args[1]['detail']['request_id']==requested['request_id']
+    assert generate.call_args.args[2]==PID

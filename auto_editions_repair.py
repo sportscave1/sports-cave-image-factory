@@ -167,10 +167,15 @@ def order_jpgs(connect,record,pid,preparation_hash=None):
 def run_one(connect):
     """One bounded diagnosis/monitor step per existing cloud worker cycle."""
     with connect() as conn,conn.cursor() as cur:
-        cur.execute("""SELECT id,actor_id,detail FROM auto_edition_onboarding_audit
-          WHERE event=%s AND detail->>'state' IN ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing')
-          AND COALESCE((detail->>'next_check')::timestamptz,created_at)<=now()
-          ORDER BY COALESCE((detail->>'next_check')::timestamptz,created_at),id FOR UPDATE SKIP LOCKED LIMIT 1""",(EVENT,))
+        # Completed preparation must reach order JPG generation before passive
+        # repair monitoring consumes another full round of the catalogue backlog.
+        cur.execute("""SELECT a.id,a.actor_id,a.detail FROM auto_edition_onboarding_audit a
+          LEFT JOIN auto_edition_onboarding q ON q.product_gid=a.product_gid
+          WHERE a.event=%s AND a.detail->>'state' IN ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing')
+          AND COALESCE((a.detail->>'next_check')::timestamptz,a.created_at)<=now()
+          ORDER BY CASE WHEN q.status='Cloud Ready' THEN 0 ELSE 1 END,
+            COALESCE((a.detail->>'next_check')::timestamptz,a.created_at),a.id
+          FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(EVENT,))
         record=cur.fetchone()
         if not record:return False
         d={**record['detail'],'next_check':(datetime.now(timezone.utc)+__import__('datetime').timedelta(seconds=30)).isoformat()}

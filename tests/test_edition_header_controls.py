@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright, expect
 def test_usage_preserves_defaults_limits_posts_and_recovers_from_failure():
     source=(Path(__file__).parents[1]/'components/sports_cave_top_bar/index.html').read_text(encoding='utf-8')
     config=dict(appName='Sports Cave OS',filesEnabled=True,uploadScope='usage-fixture',staffUploadProgress=True,currentRouteKey='dashboard',revision='usage-fixture',searchIndex=[],navigationRouteLabels={},navigationRouteKeys={})
-    html=source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
+    html=source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config)).replace('</head>','<style>label {color:black!important} input {color:black;background:black}</style></head>')
     current=dict(mode='Maximum speed',manual_mbps=None,sustainable_mbps=None,headroom_percent=25,background_percent=25,download_mbps=None,paused=False)
     data=dict(control=dict(paused=False),transfer_control=dict(instance='a'*24,age_seconds=2,effective=dict(capability=3,revision='local',settings=current,protection='Maximum speed (uncapped)'),requested=None))
     payload=dict(online=True,jobs=[],queues=dict(upload=dict(enabled=True,waiting=0,display=True),design=dict(enabled=True,waiting=0,jobs=[]),ads=dict(enabled=True,online=True,waiting=0,jobs=[]),editions=dict(enabled=True,online=True,waiting=1,jobs=[])))
@@ -39,6 +39,12 @@ def test_usage_preserves_defaults_limits_posts_and_recovers_from_failure():
             mode=page.locator('#sc-edition-mode');message=page.locator('#sc-edition-message')
             expect(mode).to_have_value('Maximum speed')
             assert not posts and len(reads)==1
+            expect(page.locator('#sc-edition-upload')).to_have_attribute('placeholder','Not used')
+            expect(page.locator('#sc-edition-download')).to_have_attribute('placeholder','Uncapped')
+            assert page.locator('#sc-edition-usage label').first.evaluate('(el)=>getComputedStyle(el).color')=='rgb(248, 237, 207)'
+            assert page.locator('#sc-edition-download').evaluate('(el)=>getComputedStyle(el).backgroundColor')=='rgb(255, 250, 240)'
+            expect(page.locator('#sc-os-editions-freshness')).to_contain_text('Last successful status:')
+            page.locator('#sc-edition-usage').screenshot(path=os.path.join(os.environ['TEMP'],'edition-usage-readable.png'))
             mode.select_option('Manual');page.locator('#sc-edition-upload').fill('3.5');page.locator('#sc-edition-download').fill('6')
             page.locator('#sc-edition-refresh').click()
             expect(message).to_contain_text('Current:')
