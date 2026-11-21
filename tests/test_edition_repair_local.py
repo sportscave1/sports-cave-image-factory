@@ -49,3 +49,20 @@ def test_unconfigured_companion_does_not_claim(monkeypatch,tmp_path):
     monkeypatch.setattr(local,'TARGET',tmp_path/'missing.json');host=Mock()
     assert local.poll({},host) is False
     host.assert_not_called()
+
+
+def test_background_path_falls_back_to_registered_desktop_package(monkeypatch,tmp_path):
+    setup(monkeypatch,tmp_path)
+    monkeypatch.setattr(local.shutil,'which',lambda _:None)
+    binary=tmp_path/'app/resources/codex.exe';binary.parent.mkdir(parents=True);binary.write_bytes(b'synthetic')
+    monkeypatch.setattr(local.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=0,stdout=json.dumps(str(tmp_path))))
+    assert local.executable()==str(binary)
+
+
+def test_missing_executable_is_visible_without_claim(monkeypatch,tmp_path):
+    setup(monkeypatch,tmp_path)
+    monkeypatch.setattr(local,'executable',lambda:None)
+    host=Mock()
+    assert not local.poll({},host)
+    assert local.LAST_STATUS['state']=='Unavailable'
+    host.assert_not_called()

@@ -1,9 +1,9 @@
 {
-  "default_group": "legacy-rgb8-verified-workflow-default",
-  "interpretation": "Explicit owner-approved sRGB interpretation; creator intent remains unknown.",
+  "default_group": "owner-missing-profile-srgb-20261122",
+  "interpretation": "Explicit owner instruction on 22 November 2026 Sydney: use sRGB for all missing-profile edition PSDs. This is an intended interpretation, not a claim about original creator intent.",
   "excluded": [
     "CMYK",
     "conflicting embedded profiles",
-    "unverified workflow membership"
+    "unsupported depth or malformed source"
   ]
 }

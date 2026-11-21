@@ -77,6 +77,8 @@ def health_payload():
         checkpoint_pending=bool(row.get('checkpoint_pending')),processor_lock=locked and not bool(active))
     if row.get('diagnostic') or HOST_LAST_DIAGNOSTIC:result['diagnostic']=row.get('diagnostic') or HOST_LAST_DIAGNOSTIC
     result['transfer_control']=transfer_controller().snapshot()
+    from edition_repair_local import LAST_STATUS
+    result['repair_handoff']=dict(LAST_STATUS)
     byte_count=result['transfer_control']['transfer'].get('transport_bytes')
     if active and byte_count is not None and row.get('_last_transfer_bytes')!=byte_count:
         row['_last_transfer_bytes']=byte_count;row['last_progress_at']=time.time()
@@ -304,7 +306,8 @@ def host_loop():
                     from edition_repair_local import poll as repair_poll
                     repair_poll(config,host_request)
                 except Exception:
-                    pass # Retain the durable repair outbox for next poll.
+                    import edition_repair_local
+                    edition_repair_local.LAST_STATUS={'state':'Unavailable','reason':'Repair handoff needs reconnection; the durable request is retained.'}
                 claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):
@@ -729,8 +732,14 @@ def inspect(key):
         row['phase']='Photoshop';journal(row)
         from auto_editions_colour_source import inspect_psd,ColourReview
         colour=inspect_psd(source)
+        from auto_editions_psd_repair import prune_history
+        repaired=folder/('inspection-source-'+secrets.token_hex(6)+'.psd')
+        # Never reuse an unfenced candidate from another inspection attempt.
+        proof=prune_history(source,repaired)
+        if proof:atomic_json(folder/'psd-repair.json',proof)
+        inspection_source=repaired if repaired.exists() else source
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
-                     entries=[dict(work_path=str(source),product_gid=row['context']['source']['product_gid'],
+                     entries=[dict(work_path=str(inspection_source),product_gid=row['context']['source']['product_gid'],
                                    dropbox_file_id=meta['id'],dropbox_revision=meta['rev'])],
                      smart_object_depth=0,smart_object_limit=0)
         inspector=(transfer.ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')

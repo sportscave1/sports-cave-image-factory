@@ -103,6 +103,66 @@ def handoff(connect,record,row,message):
         return checkpoint(connect,record,'Needs help',message)
     return checkpoint(connect,record,'Codex queued',message,prompt=prompt(row,record['detail']))
 
+def admit(connect,limit=3):
+    """Retain one repair intent per failed source/checkpoint; no blind retry loop."""
+    with connect() as conn,conn.cursor() as cur:
+        from worker_health import control
+        if control(cur)['paused']:return 0
+        cur.execute("""SELECT q.product_gid,q.updated_at FROM auto_edition_onboarding q
+          JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid AND m.dropbox_file_id=q.file_id
+          LEFT JOIN LATERAL (SELECT detail FROM auto_edition_onboarding_audit a
+            WHERE a.product_gid=q.product_gid AND a.event=%s ORDER BY a.id DESC LIMIT 1) a ON true
+          WHERE q.status IN ('Blocked','Needs PSD Repair') AND q.priority>0
+          AND (q.lease_until IS NULL OR q.lease_until<now())
+          AND COALESCE(q.replacement->>'manual_required','false')<>'true'
+          AND COALESCE(q.replacement->>'stage','') NOT IN ('Discovering','Queued','Preparing')
+          AND COALESCE(q.reset_cancellation->>'stage','') NOT IN ('Cancelling','Confirmed')
+          AND (a.detail IS NULL OR a.detail->>'state'='Complete'
+            AND a.detail->>'original_checkpoint'<>q.updated_at::text)
+          ORDER BY q.priority DESC,q.updated_at,q.product_gid LIMIT %s""",(EVENT,limit))
+        rows=cur.fetchall()
+    for row in rows:
+        try:
+            request(connect,row['product_gid'],'auto-editions-repair',str(uuid.uuid5(uuid.NAMESPACE_URL,
+                row['product_gid']+str(row['updated_at']))))
+        except ValueError:
+            continue # A concurrently changed mapping/reset is never guessed.
+    return len(rows)
+
+def order_jpgs(connect,record,pid):
+    """Repair the product once, then resume all its valid outstanding units."""
+    import auto_editions_runtime as runtime
+    d=record['detail']
+    with connect() as conn,conn.cursor() as cur:
+        cur.execute("""SELECT id FROM edition_orders e WHERE shopify_product_gid=%s
+          AND status='assigned' AND allocation_valid=true AND identity_enforced=true
+          AND invalidated_at IS NULL AND to_jsonb(e)->>'cancelled_at' IS NULL
+          AND COALESCE(to_jsonb(e)->>'duplicate_allocation_warning','') IN ('','false') ORDER BY id""",(pid,))
+        ids=[r['id'] for r in cur.fetchall()]
+    if d.get('allocation_id') and d['allocation_id'] not in ids:ids.append(d['allocation_id'])
+    ready=set(d.get('jpg_ready',[]));blocked=dict(d.get('jpg_blocked',{}))
+    remaining=[i for i in ids if i not in ready and str(i) not in blocked]
+    _,jobs=runtime.stores()
+    for allocation in remaining[:10]:
+        try:
+            job,_=runtime.job_for(allocation)
+            if job['identity']['source']['product_gid']!=pid:raise ValueError('Saved allocation identity changed.')
+            result=jobs.enqueue(job,record['actor_id'])
+            if result['status']=='Blocked':
+                from auto_editions_jobs import failure_details
+                if failure_details(result).get('retryable'):result=jobs.retry(job['id'],record['actor_id'])
+                else:raise ValueError('JPG needs review after the guarded retry limit.')
+            if result['status']=='Ready':ready.add(allocation)
+        except ValueError as error:
+            blocked[str(allocation)]=str(error)[:200]
+    if any(i not in ready and str(i) not in blocked for i in ids):
+        runtime.start_worker()
+        checkpoint(connect,record,'Waiting','PSD verified; generating all outstanding order JPGs.',jpg_ready=sorted(ready),jpg_blocked=blocked)
+    elif blocked:
+        checkpoint(connect,record,'Needs help','PSD verified; some order JPGs need review. Other eligible JPGs have completed.',jpg_ready=sorted(ready),jpg_blocked=blocked)
+    else:
+        checkpoint(connect,record,'Complete','PSD verified and all outstanding order JPGs ready.',jpg_ready=sorted(ready),jpg_blocked={})
+
 def run_one(connect):
     """One bounded diagnosis/monitor step per existing cloud worker cycle."""
     with connect() as conn,conn.cursor() as cur:
@@ -120,16 +180,21 @@ def run_one(connect):
         if not row or row['dropbox_file_id']!=d['file_id']:
             checkpoint(connect,record,'Needs help','Mapped PSD changed; repair stopped for review.');return True
         if row['status']=='Cloud Ready':
-            allocation=d.get('allocation_id')
-            if allocation:
-                import auto_editions_runtime as runtime
-                job,_=runtime.job_for(allocation)
-                if job['identity']['source']['product_gid']!=pid:raise ValueError('Saved allocation identity changed.')
-                _,jobs=runtime.stores();result=jobs.enqueue(job,record['actor_id'])
-                if result['status']=='Blocked':raise ValueError('JPG generation is blocked; review the saved job before retrying.')
-                if result['status']!='Ready':
-                    runtime.start_worker();checkpoint(connect,record,'Waiting','PSD verified; generating the saved order JPG.');return True
-            checkpoint(connect,record,'Complete','PSD verified and saved order JPG ready.');return True
+            order_jpgs(connect,record,pid);return True
+        from worker_diagnostics import explain
+        code=explain(row.get('technical_reason') or row.get('reason'))['code']
+        if code in ('PROFILE_MISSING','COLOUR_POLICY_PENDING'):
+            from auto_editions_colour_store import resume_existing
+            from auto_editions_onboarding_store import Queue
+            from auto_editions_runtime import storage
+            assets=storage()
+            try:
+                resume_existing(Queue(connect),pid,row['source'],record['actor_id'],
+                    lambda file_id:assets.integration.psd_open_metadata(assets.token,file_id,include_preview=False))
+            except ValueError:
+                checkpoint(connect,record,'Needs help','Colour approval required: this untagged PSD has no verified colour interpretation. Review its source profile before preparation can resume.')
+            else:checkpoint(connect,record,'Waiting','Approved colour interpretation found; queued for Photoshop preparation.')
+            return True
         if d['state']=='Codex queued':return False
         if d['state']=='Codex repairing':
             started=datetime.fromisoformat(d['handoff_started'])
@@ -164,8 +229,6 @@ def run_one(connect):
         if row.get('preparation_hash') and row['technical_state'] is None:
             from auto_editions_technical import Technical
             Technical(connect).seed();checkpoint(connect,record,'Waiting','Resumed existing package for technical validation.');return True
-        from worker_diagnostics import explain
-        code=explain(row.get('technical_reason') or row.get('reason'))['code']
         if code in ('NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','EDITION_GEOMETRY','FONT_MISSING','PROFILE_MISSING','COLOUR_POLICY_PENDING'):
             handoff(connect,record,row,'PSD or colour evidence needs diagnosis. Queued for the Edition Companion.');return True
         from worker_health_queue import submit

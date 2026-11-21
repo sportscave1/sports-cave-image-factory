@@ -4,16 +4,24 @@ import logging
 LOG = logging.getLogger(__name__)
 SQL = """WITH summary AS (
  SELECT count(*) FILTER (WHERE (status='Awaiting preparation' AND priority>0
-   OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Queued')
+   OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Queued'
+   OR (SELECT detail->>'state' FROM auto_edition_onboarding_audit a
+     WHERE a.product_gid=auto_edition_onboarding.product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1)
+     IN ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing'))
    AND COALESCE(to_jsonb(auto_edition_onboarding)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed')) AS waiting
  FROM auto_edition_onboarding
 ), recent AS (
  SELECT q.product_gid,q.status,q.reason,q.updated_at,q.priority,q.lease_until,
    to_jsonb(q)->'replacement'->>'stage' AS replacement_stage,
-   to_jsonb(q)->'reset_cancellation'->>'stage' AS cancellation_stage
+   to_jsonb(q)->'reset_cancellation'->>'stage' AS cancellation_stage,
+   (SELECT detail->>'state' FROM auto_edition_onboarding_audit a
+     WHERE a.product_gid=q.product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1) AS repair_state
  FROM auto_edition_onboarding q
  ORDER BY CASE WHEN status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing' THEN 0
-   WHEN status='Awaiting preparation' AND priority>0 OR to_jsonb(q)->'replacement'->>'stage' IN ('Queued','Discovering') THEN 1 ELSE 2 END,
+   WHEN status='Awaiting preparation' AND priority>0 OR to_jsonb(q)->'replacement'->>'stage' IN ('Queued','Discovering')
+     OR (SELECT detail->>'state' FROM auto_edition_onboarding_audit a
+       WHERE a.product_gid=q.product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1)
+       IN ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing') THEN 1 ELSE 2 END,
    CASE WHEN status='Awaiting preparation' THEN priority END DESC,
    updated_at DESC,product_gid
  LIMIT 10
@@ -54,6 +62,13 @@ def snapshot(connect):
                 label = stage if stage in ('Claimed','Photoshop','Preparing','Uploading','Verifying','Recovering') else 'Preparing'
                 if not row.get('lease_valid'):
                     label = 'Recovering · preparation lease expired'
+            elif row.get('repair_state') in ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing'):
+                repair=row['repair_state']
+                state='running' if repair=='Codex repairing' else 'waiting'
+                label={'Queued':'Repair queued','Diagnosing':'Diagnosing repair','Waiting':'Repair in progress',
+                    'Codex queued':'Queued for Companion repair','Codex repairing':'Companion repairing PSD'}[repair]
+            elif row.get('repair_state')=='Needs help':
+                state,label='failed','Repair needs attention'
             elif row.get('replacement_stage') == 'Discovering':
                 state, label = 'pending', 'Checking replacement source'
             elif row.get('replacement_stage') == 'Failed':

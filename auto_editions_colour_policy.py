@@ -83,7 +83,9 @@ def validate(policy):
 
 def load_policies():
     filename=os.getenv('AUTO_EDITIONS_COLOUR_POLICIES_FILE')
-    if not filename:return []
+    if not filename:
+        from auto_editions_colour_review import registry
+        return registry()
     path=Path(filename)
     if path.is_symlink() or path.stat().st_size>8*1024*1024:raise ColourReview('Colour policy awaiting approval: invalid policy registry.')
     policies=json.loads(path.read_text(encoding='utf-8-sig'))
@@ -101,6 +103,8 @@ def resolve(source, policies=None, *, memberships=None, default_group=None):
         if memberships is None:memberships=config['memberships']
         if default_group is None:default_group=config['default_group']
     policies=load_policies() if policies is None else policies
+    if default_group is None and not os.getenv('AUTO_EDITIONS_UNTAGGED_RGB_DEFAULT'):
+        default_group=json.loads((Path(__file__).parent/'config/auto_editions/colour-runtime-20261017.json').read_text())['default_group']
     from auto_editions_colour_workflows import matches
     matches=matches(source,policies,memberships=memberships,default_group=default_group)
     if not matches:raise ColourReview('Colour policy awaiting approval: missing source profile; verified source-group approval required.')

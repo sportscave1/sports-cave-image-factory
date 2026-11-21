@@ -74,3 +74,12 @@ def test_pause_replacement_and_cancellation_override_previous_success(store):
     assert header.snapshot(queue.connect)['jobs'][0]['state'] == 'failed'
     sql.execute("UPDATE auto_edition_onboarding SET reset_cancellation='{\"stage\":\"Cancelling\"}'")
     assert header.snapshot(queue.connect)['jobs'][0]['label'].startswith('Cancelling')
+
+
+def test_active_repair_overrides_failed_preparation_and_counts_waiting(store):
+    queue,sql=store
+    sql.execute("INSERT INTO auto_edition_onboarding(product_gid,file_id,status,priority) VALUES(%s,'id:fixture','Blocked',10)",(PID,))
+    sql.execute("INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail) VALUES(%s,'fixture','edition_repair_request','{\"state\":\"Codex queued\"}')",(PID,))
+    value=header.snapshot(queue.connect)
+    assert value['waiting']==1 and value['jobs'][0]['state']=='waiting'
+    assert value['jobs'][0]['label']=='Queued for Companion repair'

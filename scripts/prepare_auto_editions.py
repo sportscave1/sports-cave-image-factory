@@ -99,6 +99,13 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     staged_hash=ae.file_hash(staged)
     if (not policy and staged_hash!=before) or (policy and assignment['source_sha256']!=before):
         raise ValueError('Source preservation check failed before Photoshop preparation.')
+    from auto_editions_psd_repair import prune_history
+    repaired=stage/'repaired.psd'
+    structural=prune_history(staged,repaired)
+    if structural:
+        staged=repaired
+        staged_hash=ae.file_hash(staged)
+        (output/'psd-repair.json').write_text(json.dumps(structural))
     expected_icc=stage/'expected-source.icc';expected_icc.write_bytes(icc)
     request = dict(stage_root=str(stage),input=str(staged),output_root=str(output),
                    icc_path=str(expected_icc),
