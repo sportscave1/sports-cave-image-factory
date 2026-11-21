@@ -83,10 +83,18 @@ def public(value):
         return None
     generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
     retry = value.get('auto_recovery') or {}
+    from ads_partial_delivery import saved_count
+    needs_review = value.get('blocked_collection') or (value['stage'] == 'failed' and 'moderation_blocked' in str(value.get('detail') or '').casefold())
+    from ads_auto_recovery import POLICY_BLOCK
+    reason = (value.get('blocked_collection') or {}).get('reason') or value.get('detail') or ''
+    review_kind = 'provider' if POLICY_BLOCK.search(str(reason)) else 'delivery'
+    review_label = f'Needs {review_kind} review · {saved_count(value)}/3 covers saved' if needs_review and value['stage'] != 'generating' else None
     detail = 'ChatGPT is still generating; waiting for finished attachments' if generating else str(value.get('detail') or '')
     if value['stage'] == 'failed' and 'moderation_blocked' in detail.casefold():
         detail += ' Reserve rooms apply only to retryable technical failures; this provider rejection requires review.'
-    return dict(label=('Continuing updated ad workflow' if value.get('superseded_by') else
+    if value['stage'] == 'complete' and value.get('partial_posting'):
+        detail = 'Two Meta ads created paused using the saved covers and matching copy. ' + value['blocked_collection']['reason']
+    return dict(label=review_label or ('Continuing updated ad workflow' if value.get('superseded_by') else
                        'Automatic recovery scheduled' if value['stage']=='waiting' and retry.get('state')=='scheduled' else
                        'Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
                        'ChatGPT is thinking / generating' if generating else
@@ -313,8 +321,10 @@ def _download(provider, meta, size_limit):
 
 
 def _post_request(value):
-    if value.get('blocked_collection'):
+    if value.get('blocked_collection') and not value.get('partial_posting'):
         raise ValueError('This package contains rejected image slots; preserve its completed exports for review.')
+    from ads_partial_delivery import posting_routes
+    routes = posting_routes(value) if value.get('partial_posting') else list(COVERS.items())
     from ads_creative_contract import obsolete
     if not value.get('posting_id') and obsolete(value.get('result')):
         raise ValueError('An obsolete creative release cannot create a new campaign; rebuild through the current ad queue.')
@@ -327,7 +337,7 @@ def _post_request(value):
 
     result = value['result']
     dbx = Dropbox()
-    filenames = ['ad_copy.csv', *COVERS.values()]
+    filenames = ['ad_copy.csv', *(name for _, name in routes)]
     receipts = value.get('artifacts') or {}
     if receipts and any(name not in receipts for name in filenames):
         return None
@@ -342,7 +352,7 @@ def _post_request(value):
         if not (meta.get('id') and meta.get('rev') and meta.get('content_hash') and
                 meta.get('path_display') == value['folder'] + '/' + name):
             raise ValueError('Dropbox returned an ad file outside this job’s exact delivery folder.')
-    if len({meta['content_hash'] for meta in files[1:]}) != 3:
+    if len({meta['content_hash'] for meta in files[1:]}) != len(routes):
         raise ValueError('The three ad routes need distinct covers.')
     refs = ads_direct_post.references(posting.AD_TYPE, state={})
     from ads_companion_targeting import select
@@ -353,7 +363,7 @@ def _post_request(value):
         write(PREFIX+value['upload'], value)
     copy = ads_page.parse_instant_experience_copy_csv(_download(dbx, files[0], 2 * 1024**2), result)
     creatives = []
-    for (route, name), meta in zip(COVERS.items(), files[1:]):
+    for (route, name), meta in zip(routes, files[1:]):
         data = _download(dbx, meta, 20 * 1024**2)
         ads_image_workflow.inspect_instant_experience_original(data, original_name=name)
         record = ads_image_workflow.build_meta_posting_image_record(data, original_name=name)
@@ -364,13 +374,13 @@ def _post_request(value):
     if not posting._posting_form_ready(product_title=result['product_name'], product_url=result['product_url'],
             country=result['country'], sport=result['category'], creatives=creatives, catalog_id=catalog_id,
             product_set_id=set_id, dataset_id=refs['dataset_resolution']['id'],
-            identities_ready=refs.get('page') and refs.get('instagram')):
+            identities_ready=refs.get('page') and refs.get('instagram'), expected_ads=len(routes)):
         raise ValueError('The completed Dropbox files did not pass the Posting form checks.')
     return posting._build_posting_request(
         submission_id=_posting_id(value['upload']), product_id=result['product_id'],
         product_title=result['product_name'], product_handle=value['handle'], product_url=result['product_url'],
         country=canonical_posting_country(result['country']), sport=result['category'], catalog_id=catalog_id, product_set_id=set_id,
-        audience=audience, creatives=creatives)
+        audience=audience, creatives=creatives, partial_pack=bool(value.get('partial_posting')))
 
 
 def _step(key, value, job, event, age):
@@ -425,6 +435,11 @@ def _step(key, value, job, event, age):
             from ads_partial_delivery import begin
             if not begin(value, reason):
                 raise ValueError(reason)
+        elif event.get('state') == 'blocked':
+            # A finished partial handoff names unavailable files. Collect its
+            # original successful exports before considering two-ad completion.
+            from ads_partial_delivery import begin
+            begin(value, reason)
         if not value.get('collect_only'):
             if stage == 'generating' and CHAT.fullmatch(value.get('chat_url', '')):
                 raise RetryAd(reason, code='generation', mode='complete_missing')
@@ -432,9 +447,11 @@ def _step(key, value, job, event, age):
                 raise RetryAd(reason, code='generation' if stage == 'generating' else 'handoff',
                               mode='complete_missing' if stage == 'generating' else None)
             raise ValueError(reason)
-    if value.get('blocked_collection'):
+    if value.get('blocked_collection') and not value.get('partial_posting'):
         from ads_partial_delivery import advance
-        return advance(value, event)
+        collected = advance(value, event)
+        if collected is not None:
+            return collected
     if stage == 'opening':
         if time.time() - value.get('handoff_started_at', time.time() - age) > 3600:
             raise RetryAd('The desktop could not confirm the existing ChatGPT conversation. Rechecking its saved send receipt without resending the prompt.', code='handoff')
@@ -480,8 +497,8 @@ def _step(key, value, job, event, age):
             repair_event = {**event, 'transfer_failed': True}
         if value.pop('completion_needed', False):
             repair_event = {**repair_event, 'complete_missing': True, 'transfer_failed': True}
-        repair_send = advance_repair(value, repair_event)
-        if value.get('attachment_repair'):
+        repair_send = False if value.get('partial_posting') else advance_repair(value, repair_event)
+        if value.get('attachment_repair') and not value.get('partial_posting'):
             write(key, value)
             if value['attachment_repair']['state'] in ('ready', 'sending'):
                 from ads_companion_transfer import delivery
@@ -522,7 +539,8 @@ def _step(key, value, job, event, age):
             raise RetryAd('The three covers and ad copy did not arrive; retrying the saved chat.', code='generation', mode=None if value.get('collect_only') else 'complete_missing')
     if stage == 'posting':
         row = JOBS.snapshot(value['posting_id'])
-        if row.get('status') == 'COMPLETE' and confirmed_ads(row) == (3, 3):
+        expected_ads = 2 if value.get('partial_posting') else 3
+        if row.get('status') == 'COMPLETE' and confirmed_ads(row) == (expected_ads, expected_ads):
             value.update(stage='complete', detail='')
             if value.get('auto_recovery'):
                 value['auto_recovery'].update(state='complete', completed_at=time.time())
