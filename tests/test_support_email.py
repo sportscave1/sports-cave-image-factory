@@ -550,14 +550,17 @@ class PageTests(unittest.TestCase):
         dispatch = next(n for n in app_tree.body if isinstance(n, ast.FunctionDef) and n.name == "render_selected_page")
         import ads_navigation, analytics_navigation, seo_navigation, social_media
         home, orders, email = Mock(), Mock(), Mock()
+        orders_fragment = Mock()
         namespace = {"render_lightweight_dashboard_page": home, "get_orders_page": orders,
+                     "_render_orders_workspace": orders_fragment,
                      "get_support_email_page": email, "os_accounts": os_accounts, "social_media": social_media,
                      "analytics_nav": analytics_navigation, "seo_nav": seo_navigation, "ads_nav": ads_navigation}
         exec(compile(ast.Module(body=[dispatch], type_ignores=[]), "app.py", "exec"), namespace)
         namespace["render_selected_page"]("Dashboard")
         namespace["render_selected_page"]("Orders")
         home.assert_called_once()
-        orders.return_value.render_page.assert_called_once()
+        orders_fragment.assert_called_once()
+        orders.assert_not_called()  # Orders rendering is deferred to its fragment.
         email.assert_not_called()
         self.imap.assert_not_called()
         for module in (provider, logic, store, page):

@@ -1,6 +1,56 @@
 EMAIL INBOX: CONNECTION RECOVERY AND PERFORMANCE
 21 November 2026 (Sydney)
 
+RELEASE UPDATE -- SUPERSEDES THE INITIAL INVESTIGATION BELOW
+
+User authorized completing the fixes and pushing them live. The isolated task
+now includes current production baseline 56d7030c382ce6c906f92dac073570c92db4f8ca.
+All local phases are complete and validated; the exact deployment SHA/status
+will be recorded in Studio and the release response.
+
+Phase 1 complete: async errors reach recovery controls; slow successful reads
+are retained for their full TTL after completion, avoiding duplicate fetching.
+No dependency, new worker, speculative fetch or persistent body store was added.
+
+Phase 2 complete: direct SSH was denied (publickey), so the authenticated Render
+web shell ran python scripts/check_support_email_health.py on the CURRENT
+production instance gjckw at 11:29:35 AM Sydney. Configuration, DNS, TCP, verified
+TLS, capability/greeting, IDLE advertisement, authentication, read-only INBOX
+selection, STATUS and logout ALL PASSED. Timings: DNS 3 ms, TCP 153 ms, TLS
+307 ms, login 198 ms, selection 183 ms, STATUS 196 ms, logout 195 ms.
+The earlier timeouts came from former instance xmghf. The underlying external
+cause is unproven; current connectivity works without changing credentials,
+firewall policy or infrastructure. No FETCH, flag change or email send.
+
+Phase 3 complete: 50 fabricated controller iterations produced p95 timings of
+66.989 ms cold mailbox (including fixture setup), 0.674 ms warm mailbox,
+1.251 ms cold conversation, 0.087 ms warm conversation and 3.566 ms refresh.
+Each iteration used two header reads including refresh, one body read and zero
+attachment reads. Evidence is in mailbox-reliability-evidence/
+inbox-20261121-release-timings.json. Real-component headless Edge checks passed
+at 390/1440/1920 pixels: cached body and 50 rows survive outage; Retry restores
+Connected; zero external requests/runtime errors. 50 warm DOM renders had
+median 0.6 ms / p95 1 ms. These are local synthetic, not production timings.
+tests/email_inbox_release_browser.cjs uses a fabricated WorkspaceTests model,
+task-local Playwright and blocked network. No full app preview/server was run.
+
+Phase 4 local gate complete: 591 Python tests, 546 passed / 45 opt-in database
+tests skipped; all 17 JavaScript suites passed. Task-local pglast and IMAPClient
+restored missing test dependencies. Corrected obsolete test harness assumptions
+about edition wording, global versus Email Settings, lazy Orders dispatch and
+the current top-bar scheduler document/clock. Application policy/navigation
+were not changed. No feature/safety tests were removed. Full gate command:
+python scripts/test_email_reliability.py, with PYTHONPATH pointing to private
+.studio/runtime/20261121-4fbd524e/test-deps. Logs: %TEMP%/
+email-inbox-release-verified-gate.log and email-inbox-release-browser.log.
+
+Release will use only the canonical primary service and existing main-branch
+auto-deploy. No Blueprint sync, migration or topology change. Production
+application HTTP health and read-only mailbox connectivity must pass again on
+the exact deployed revision. Unrelated category work remains untouched.
+
+INITIAL INVESTIGATION RECORD -- EARLIER STATUS, RETAINED FOR TRACEABILITY
+
 Task: 20261121-4fbd524e
 Owner: codex-inbox-20261121-bf1573be
 Approved starting revision: 7f9f617e2bce2f150d51561c2f0873412312b036
