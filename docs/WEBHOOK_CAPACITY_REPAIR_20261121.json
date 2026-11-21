@@ -1,0 +1,67 @@
+{
+  "task": "20261121-70290293",
+  "owner": "codex-01a1fb88-webhook-errors",
+  "base": "9f1f0c5f777e4be0362f1026867a4f1c95b51602",
+  "authorization": "User requested review, fixes, unchanged functions, proper testing and live release in this chat.",
+  "diagnosis": {
+    "shopify": "Saved product receipt error explicitly reports GraphQL THROTTLED. API helper previously failed immediately without a capacity wait/retry.",
+    "allocation": "Repeated P0001 refusal belongs to an exhausted edition: total100, sold100, remaining0, next101, run sold_out. Allocator correctly refuses new units; shared disabled/archived/sold-out message was misclassified as Error rather than Sold Out.",
+    "read_only_live_validation": "The fresh exhausted-run predicate evaluated true on the affected product. No customer records, credentials or production payloads were copied into test fixtures."
+  },
+  "changes": [
+    "At most three identical attempts for explicit HTTP429 or all-THROTTLED GraphQL errors with no data. Respect Retry-After and cost restoration; at most ten seconds per wait. Long/malformed waits and exhausted retries return to existing durable job retry handling.",
+    "Do not replay network timeouts, HTTP5xx, authentication errors, mixed GraphQL errors or partial GraphQL results.",
+    "After allocator rollback, classify only the exact shared P0001 refusal using fresh consistent exhausted-product/run state. No counter or run writes. Existing Sold Out presentation and unresolved-line retry/review behavior are retained.",
+    "Diagnostic read/rollback failures preserve the original allocator error. Unexpected allocation failures remain failures."
+  ],
+  "preserved": [
+    "HMAC and shop validation, eligibility, credentials and permissions",
+    "Atomic RPC, uniqueness, source identity, quantity checks and idempotency",
+    "Numbering, edition limits, sales counters, version/history guards and tombstones",
+    "Certificates, inventory, publication and product workflows",
+    "Existing review/retry paths; no automatic new edition or sold-out override",
+    "Render topology, plans, schema and production dependencies"
+  ],
+  "tests": [
+    {
+      "suite": "Capacity regression, allocation diagnostics, Shopify client, activation, isolated PostgreSQL onboarding, ledger, cursor, marketplace, receiver health and worker supervision",
+      "passed": 328,
+      "subtests_passed": 18,
+      "skipped": 34,
+      "deselected": 1,
+      "failed": 0,
+      "duration_seconds": 41.92,
+      "note": "Legacy SQLite-only tests remain skipped. One obsolete Render Blueprint assertion excluded after reproducing the identical failure on unmodified base modules and unchanged render.yaml."
+    },
+    {
+      "suite": "Edition versions and cursor overrides on disposable PostgreSQL",
+      "passed": 40,
+      "subtests_passed": 15,
+      "failed": 0,
+      "note": "Existing disposable_read_connection adapter supplied for read leases; original harness only patched write connection and initially failed four read checks for missing production URL. No production URL was supplied."
+    },
+    {
+      "suite": "Independent allocator PostgreSQL scenarios",
+      "passed": 18,
+      "failed": 0,
+      "note": "Includes duplicate delivery, quantity, rollback, sold-out closure, reserved numbers and variant identity. PGlite serializes connections; this is not cross-process PostgreSQL lock stress evidence."
+    }
+  ],
+  "runtime": {
+    "python": "3.14 isolated test interpreter",
+    "pglite": "0.3.14 disposable in-memory PostgreSQL",
+    "pglast": "8.9 local test-only target; missing dependency corrected before final suite",
+    "external_actions": "All Shopify requests mocked. No live writes, emails, ads, customer automations, replay or full-app preview during testing."
+  },
+  "validation": [
+    "Python compilation passed",
+    "git diff --check passed",
+    "Render topology validation passed",
+    "Shopify rate-limit documentation verified for pinned2026-04 API; no GraphQL operations changed"
+  ],
+  "limitations": [
+    "Exhausted edition requires an operator decision for the unallocated order; code cannot legitimately allocate101/100. This release corrects the state/error classification, not the sale itself.",
+    "Shopify can continue throttling under sustained load; bounded retries and existing durable backoff remain necessary.",
+    "No claim that every repository test passes: the obsolete Blueprint assertion is documented separately."
+  ]
+}
