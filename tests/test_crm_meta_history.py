@@ -60,6 +60,7 @@ def raw(ad_id):
 
 def test_live_reads_paginate_reuse_cache_and_force_refresh(monkeypatch):
     monkeypatch.setattr(history, "_cache", {})
+    monkeypatch.setattr(history, "_inventory_cache", {})
     reader = Mock()
     reader.get.return_value = ACCOUNT
     reader.pages.return_value = [raw(n) for n in range(100, 123)]
@@ -83,7 +84,31 @@ def test_live_reads_paginate_reuse_cache_and_force_refresh(monkeypatch):
         assert item["metrics"]["click_ctr"] == 4
         assert item["metrics"]["cpc"] == 5
         history.meta_ad_history(*history.meta_history_args({**args, "refresh": True}))
-        assert reader.pages.call_count == 2
+        assert reader.pages.call_count == 3
+
+
+def test_current_ad_inventory_includes_paused_zero_delivery_and_unknown_destinations(monkeypatch):
+    monkeypatch.setattr(history, '_inventory_cache', {})
+    reader = Mock()
+    reader.pages.return_value = [dict(id='10',name='Paused product',effective_status='PAUSED',creative={
+        'object_story_spec': {'link_data': {'link': 'https://www.sportscaveshop.com/products/test-star?utm_source=meta'}}}),
+        dict(id='11',name='Canvas ad',effective_status='ACTIVE',creative={'link_url':'https://www.facebook.com/canvas/example'})]
+    monkeypatch.setattr(history.live,'Reader',lambda *a,**kw:reader)
+    result = history.ad_inventory(CONFIG)
+    assert result['status'] == 'complete' and result['unmapped_ads'] == 1
+    assert result['ads'][0]['product_handles'] == ['test-star']
+    assert result['ads'][0]['status'] == 'PAUSED'
+    assert history.ad_inventory(CONFIG) == result
+    reader.pages.assert_called_once()
+    monkeypatch.setattr(history, '_inventory_cache', {})
+    reader.pages.side_effect = ValueError('pagination time limit')
+    failed=history.ad_inventory(CONFIG)
+    assert failed['status'] == 'unavailable' and failed['failure_type']=='ValueError'
+    monkeypatch.setattr(history, '_inventory_cache', {})
+    reader.pages.side_effect=[ValueError('expanded destinations unavailable'),[dict(id='12',name='Undelivered ad',effective_status='PAUSED',creative={'id':'13'})]]
+    lean=history.ad_inventory(CONFIG)
+    assert lean['status']=='complete' and lean['unmapped_ads']==1
+    assert lean['ads'][0]['creative_id']=='13'
 
 
 def test_provider_field_fallback_and_wrong_account_rejection():

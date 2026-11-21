@@ -23,6 +23,8 @@ const context={state, timers:new Set(), URLSearchParams, icon:name=>name,
  root:{querySelector:id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},classList:{toggle(){}}},
  listenerController:new AbortController(), listenerOptions:{}, later:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
  parentWindow:{AbortController,
+ // Summary rotation is covered by browser tests; this fixture exercises polling timers only.
+ setInterval:()=>1,
  setTimeout:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
  clearTimeout:timer=>{const i=timers.indexOf(timer);if(i>=0)timers.splice(i,1);},
  addEventListener:(event,callback)=>windowEvents[event]=callback,
@@ -62,9 +64,13 @@ install();
  const row=nodes.get('#sc-os-design-list').children[0];
  await context.refresh();assert.equal(nodes.get('#sc-os-design-list').children[0],row);
  assert.equal(timers.length,1,'manual refresh replaces scheduled refresh');
+ const beforeCommit=reads.length;
+ documentEvents['sc-design-edit-queued']();
+ for(let i=0;i<20;i++)await Promise.resolve();
+ assert.equal(reads.length,beforeCommit+1,'committed enqueue refreshes header immediately');
  hold=true;
  const first=context.refresh(), second=context.refresh();
- assert.equal(reads.length,3,'overlapping polls share one request');
+ assert.equal(reads.length,4,'overlapping polls share one request');
  reads.at(-1).resolve({ok:true,json:async()=>payload});
  await Promise.all([first,second]);assert.equal(timers.length,1);
  const hanging=context.refresh();

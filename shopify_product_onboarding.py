@@ -145,7 +145,7 @@ def process_receipt(row, db, config=None):
     return result
 
 
-def drain(db, config=None, limit=10, renew=None):
+def drain(db, config=None, limit=10, renew=None, stop=None):
     """Caller holds a durable expiring lease, compatible with transaction pools.
 
     Existing failed/processing receipts survive restart. Use the edition mirror
@@ -161,13 +161,16 @@ def drain(db, config=None, limit=10, renew=None):
                    least(3600,30*power(2,least(COALESCE((payload->>'_onboarding_attempts')::int,0),7))) * interval '1 second')
             ), ranked AS (
               SELECT *,row_number() OVER(PARTITION BY lane ORDER BY
-                CASE WHEN lane=0 THEN received_at END DESC,
+                CASE WHEN lane=0 THEN received_at END ASC,
                 COALESCE(processed_at,received_at),webhook_id) AS position FROM due)
             SELECT webhook_id,topic,payload,shop_domain FROM ranked
             ORDER BY (position-1)/(CASE WHEN lane=0 THEN 4 ELSE 1 END),lane,position
             LIMIT %s""", (limit,))
         rows = list(cur.fetchall())
+    completed = 0
     for row in rows:
+        if stop is not None and stop.is_set():
+            break
         if renew:
             renew()
         try:
@@ -181,10 +184,11 @@ def drain(db, config=None, limit=10, renew=None):
                     '{_onboarding_attempts}',to_jsonb(LEAST(8,COALESCE((payload->>'_onboarding_attempts')::int,0)+1)))
                     WHERE webhook_id=%s AND status IN ('pending','failed')""", (row['webhook_id'],))
                 conn.commit()
-    return len(rows)
+        completed += 1
+    return completed
 
 
-def reconcile(db, config=None, max_pages=4, renew=None):
+def reconcile(db, config=None, max_pages=4, renew=None, stop=None, page_size=50):
     """Bounded update-window scan; checkpoint only after durable receipt storage.
 
     Processing belongs to drain, with backoff, independently of scan progress.
@@ -199,11 +203,17 @@ def reconcile(db, config=None, max_pages=4, renew=None):
     after = state.get('after')
     query = f"updated_at:>='{start}' updated_at:<='{end}'"
     for _ in range(max_pages):
-        data, _ = shopify.graphql_request(PRODUCT_PAGE, variables={'first': 50, 'after': after, 'query': query}, config=config)
+        if stop is not None and stop.is_set():
+            return
+        data, _ = shopify.graphql_request(PRODUCT_PAGE, variables={'first': page_size, 'after': after, 'query': query}, config=config)
         connection = data.get('products')
         if not isinstance(connection, dict) or 'nodes' not in connection or 'pageInfo' not in connection:
             raise RuntimeError('Incomplete product reconciliation page.')
         for product in connection['nodes']:
+            # Retain the previous page cursor on interruption. Receipt insertion
+            # is idempotent, so the replacement worker safely replays this page.
+            if stop is not None and stop.is_set():
+                return
             if renew:
                 renew()
             pid = product['id'].rsplit('/', 1)[-1]
@@ -221,7 +231,7 @@ def reconcile(db, config=None, max_pages=4, renew=None):
         db.set_app_setting(CHECKPOINT, {'checkpoint': state.get('checkpoint'), 'since': start, 'until': end, 'after': after}, ensure_schema_first=False)
 
 
-def tick(scan=False, db=None, config=None):
+def tick(scan=False, db=None, config=None, stop=None):
     if db is None:
         import supabase_backend as db
     if not db.is_configured():
@@ -248,11 +258,17 @@ def tick(scan=False, db=None, config=None):
         acquired = cur.fetchone()
         conn.commit()
     if not acquired:
+        LOG.info('edition_product_onboarding_waiting reason=lease_held')
         return
     try:
-        drain(db, config, renew=lease)
-        if scan:
-            reconcile(db, config, renew=lease)
+        # Return to the queue frequently, even during a large catalogue scan.
+        count = drain(db, config, limit=5, renew=lease, stop=stop)
+        if scan and not (stop is not None and stop.is_set()):
+            reconcile(db, config, max_pages=1, page_size=10, renew=lease, stop=stop)
+        LOG.info('edition_product_onboarding_progress processed=%s scan=%s', count, scan)
+        if scan and db.get_app_setting(CHECKPOINT, {}, ensure_schema_first=False).get('after'):
+            return 'scan_pending'
+        return True
     finally:
         lease(release=True)
 
@@ -277,11 +293,12 @@ def run(stop):
     while not stop.is_set():
         scan = time.monotonic() >= next_scan
         try:
-            tick(scan=scan)
+            acquired = tick(scan=scan, stop=stop)
         except Exception:
             LOG.exception('edition_product_onboarding_failed')
-        if scan:
-            next_scan = time.monotonic() + 300
+            acquired = False
+        if scan and acquired:
+            next_scan = time.monotonic() + (5 if acquired == 'scan_pending' else 300)
         stop.wait(5)
 
 
@@ -292,6 +309,26 @@ def validate_shop(shop, config=None):
     if not domain or domain != configured:
         raise ValueError('The saved Shopify shop does not match this server. No product was linked.')
     return domain
+
+
+def main():
+    """Own signals in a supervised process, isolated from other worker pools."""
+    import signal
+    import threading
+    # The backend imports PendingRegistration from the canonical module. Use
+    # that same module when launched as a script so exception identities match.
+    from shopify_product_onboarding import run as worker_run
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    stop = threading.Event()
+    previous = {}
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            previous[sig] = signal.signal(sig, lambda *_: stop.set())
+        worker_run(stop)
+        return 0
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 def enqueue(connect, shop, product_id):
@@ -344,3 +381,7 @@ def ensure(connect, shop, product_id, *, timeout=30, poll=None):
         if time.monotonic() >= deadline:
             raise PendingRegistration('Edition onboarding is still queued. Retry to resume this saved operation.')
         (poll or (lambda:time.sleep(0.5)))()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

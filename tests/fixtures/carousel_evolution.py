@@ -69,9 +69,16 @@ def greg():
                   carousel_cards=[dict(position=i, image_url=f'https://example.fbcdn.net/greg{i}.png',
                     headline=c[0], description=c[1], scene=c[4], role=c[5], destination_url='https://sportscave.com.au/products/wrong')
                     for i,c in enumerate(GREG_CARDS,1)])
+    context=ads.normalize_creative_refresh_context(dict(winning_primary_text=GREG_ORIGINAL,winning_headline='',source_winner=source))
+    context['refresh_plan']=dict(version='WINNER LED REFRESH V3',run_id='greg-saved-v3',
+        identity_hash=plan.identity_hash(context,'Carousel',GREG_TITLE,'Motorsport'),
+        product=GREG_TITLE,category='Motorsport',campaign_type='Carousel',
+        carousel_contract=plan.CAROUSEL_CONTRACT,copy_contract=evolution.CONTRACT,
+        seed='greg-saved',references=plan.reference_map('Carousel',source),styles=[],recent_styles=[],
+        visual_analysis='Saved synthetic attachment-inspection fixture; no pixel analysis claim.')
     result = ads.build_ads_result_record(GREG_TITLE, 'Motorsport', 'Australia', 'Carousel', product_url=GREG_URL,
         product_metadata={'edition_limit':100,'edition_limit_source':'user-supplied regression fixture'},
-        creative_refresh_context=dict(winning_primary_text=GREG_ORIGINAL, winning_headline='', source_winner=source))
+        creative_refresh_context=context)
     carousel = dict(primary_texts=outputs, headlines=['The Mountain Memory', 'Holden Pride At Home', 'Bathurst Comes Back', 'For The Faithful', 'Motorsport Lives Here'],
         descriptions=['Keep that lap close', 'Red blooded passion', 'Recall the roar', 'A collectors memory', 'Your racing story'],
         cards=[dict(position=i, slot_id=f'carousel-{i:02d}', headline=c[2], description=c[3], destination_url=GREG_URL)
@@ -81,6 +88,18 @@ def greg():
     refs = result['creative_refresh_context']['refresh_plan']['references']
     for record, ref in zip(records, refs):
         record.update(scene=ref['scene'],role=ref['role'])
+        position = record['position']
+        record['collective_product_inspected'] = True
+        record['observations'] = {
+            field: f'Synthetic source observation {position}: {field}' for field in
+            ('scene_category', 'ad_role', 'defining_objects', 'composition', 'product_attention',
+             'strengths', 'clutter', 'mood_contrast', 'copy_hook', 'tone', 'structure', 'emotional_appeal')}
+        record['observations']['execution'] = {
+            field: f'Synthetic original {position}: {field}' for field in
+            ('architecture', 'layout', 'wall_palette', 'wall_material', 'camera', 'lighting', 'product_placement')}
+        record['execution'] = {
+            field: f'Synthetic refreshed {position}: {field}' for field in
+            ('architecture', 'layout', 'wall_palette', 'wall_material', 'camera', 'furniture', 'lighting', 'product_placement')}
         record['image_prompt'] = plan.carousel_standalone_brief(GREG_TITLE, ref['label'], scene=ref['scene'], role=ref['role'],
             detail='detail' in ref['role'], references=[r['label'] for r in refs])
     records = attach_reviews(result, carousel, records)

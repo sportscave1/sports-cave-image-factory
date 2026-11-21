@@ -302,7 +302,7 @@ class GoogleUITests(unittest.TestCase):
     def test_switching_platforms_preserves_each_result_images_and_form(self):
         app = self.start()
         field(app.selectbox, "Campaign type").select("Carousel").run()
-        field(app.button, "Submit").click().run()
+        __import__('tests.test_ads_page',fromlist=['seed_saved_result']).seed_saved_result(app)
         field(app.file_uploader, "Carousel 1").set_value([("meta.png", image_bytes(google.IMAGE_SLOTS[0]), "image/png")]).run()
         meta = deepcopy(app.session_state[ads.ADS_RESULT_STATE_KEY])
         meta_work = deepcopy(app.session_state[ads.ADS_IMAGE_STATE_KEY])

@@ -34,3 +34,20 @@ Phase 2 must:
 
 Do not use production launch/deploy scripts for preview. Phase 1 does not invent
 a safe-mode environment flag that the application does not actually implement.
+
+## Speed Optimisation opt-in acceptance
+
+The user authorised completing the isolated Speed preview on 21 November 2026.
+`scripts/verify_speed_preview.py` reuses the hardened `preview_runtime.Preview`
+Docker boundary instead of enabling a host application server. It verifies kernel/
+browser isolation before source transfer, exercises real private PostgreSQL/API
+contracts, proves provider-write/worker/migration denial and captures desktop and
+mobile frames from the actual Streamlit app. The refreshed image supports current
+static navigation and the existing connection-pool dependency. Source export adds
+reviewed `services/*.py` dependencies and the versioned public sports calendar;
+runtime data, credentials and customer data remain excluded.
+
+Evidence must match the exact committed candidate. Successful scoped acceptance
+does not approve uncontained previews, live credentials, all module workflows or
+arbitrary future changes. Each nightly improvement needs its own populated
+synthetic scenario and behaviour/visual/performance checks.

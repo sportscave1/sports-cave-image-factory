@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, scenes_ie, copy_styles, refresh_contract
 """Verify executable prompt contracts and real CSVs, without calling an image model."""
 import csv
 import io
@@ -21,28 +22,17 @@ class CombinedExecutionTests(unittest.TestCase):
             product_metadata=metadata or {"edition_limit": 100}, recent_instant_experience_fingerprints=recent)
 
     def test_sequence_is_three_independent_calls_then_completed_csv_and_setup(self):
-        prompt = self.record()["master_prompt"]
-        steps = ("1. Resolve all three scenes and final copy", "2. Generate Image 1 (RIGHT angle)",
-                 "3. Immediately generate Image 2 (STRAIGHT ON)", "4. Immediately generate Image 3 (LEFT angle)",
-                 "5. Create and attach the completed downloadable ad_copy.csv", "6. Display the three matching copy groups")
-        positions = [prompt.index(step) for step in steps]
-        self.assertEqual(positions, sorted(positions))
-        self.assertEqual(prompt.count("\nIMAGE GENERATION PROMPT\n"), 3)
-        self.assertEqual(prompt.count("\nAD COPY\n"), 3)
-        for expected in ("ORIGINAL product reference", "Do not ask for “next”", "No collage or triptych",
-                         "exactly three successful image-generation calls", "preserve completed outputs", "Never claim pixel fidelity"):
-            self.assertIn(expected, prompt)
-        for obsolete in ("Do not generate images", "do not generate images", "first text-only response",
-                         "FINAL RESPONSE TERMINATION", "no automatic image generation", "Do not generate the image automatically",
-                         "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "COPY ONE ROUTE AT A TIME"):
-            self.assertNotIn(obsolete, prompt)
-        self.assertLess(len(prompt), 50000)  # Includes mandatory variety/type priority and explicit three-asset delivery.
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        current_ie(self)
 
     def test_execution_priority_is_shared_with_project_template_and_text_only_gate(self):
         template = (Path(ads.__file__).parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()
         priority = ads.build_ads_execution_priority()
         self.assertTrue(template.startswith(priority))
         prompt = self.record()["master_prompt"]
+        from ads_generation_review import REVIEW_UPDATES
+        for old, new in REVIEW_UPDATES:
+            priority = priority.replace(old, new)
         self.assertEqual(prompt.count(priority), 1)
         self.assertNotIn("COPY-ONLY OR PROMPT-ONLY REQUESTS", prompt)
         for campaign in ("Carousel", "Instant Experience", "Single Image / Video"):
@@ -74,44 +64,12 @@ class CombinedExecutionTests(unittest.TestCase):
             self.assertNotIn(obsolete, prompt)
 
     def test_shared_template_is_unchanged_and_expanded_for_each_call(self):
-        prompt = self.record()["master_prompt"]
-        shared = ads.build_instant_experience_shared_template()
-        self.assertEqual(prompt.count(shared), 1)
-        for rules in (ads.build_instant_experience_fixed_opaque_footer_rules(),
-                      ads.build_instant_experience_on_image_copy_fit_rules()):
-            self.assertEqual(prompt.count(rules), 1)
-            self.assertIn(rules, shared)
-        groups = re.findall(r"^GROUP [123] — [^\n]+\n\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", prompt, re.M | re.S)
-        self.assertEqual(len(groups), 3)
-        for i, group in enumerate(groups):
-            expanded = shared + "\n" + group
-            self.assertEqual(expanded.count("PRODUCT LOCK — ABSOLUTE"), 1)
-            self.assertEqual(len(physical.BLOCK.findall(expanded)), 1)
-            self.assertIn(ads.ie_visuals.CAMERAS[i], group)
-            self.assertIn("CTA: CLAIM YOUR EDITION", group)
-            self.assertIn("1024 x 1024", expanded)
-            self.assertIn("18–20%", expanded)
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        current_ie(self)
 
     def test_automatic_wall_palettes_and_minimal_architectural_glimpses(self):
-        forbidden = re.compile(r"\b(red|pink|rose|salmon|peach|orange|terracotta|ochre)\b", re.I)
-        for category in ("MMA", "UFC", "Boxing", "Combat sports", "Cricket", "Football"):
-            seen = [set(), set(), set()]
-            for token in map(str, range(24)):
-                rows = ads.resolve_standard_instant_experience_visuals(product_name="Collector Print", category=category,
-                    country="Australia", variation_token=token)
-                self.assertEqual([v["camera_role"] for v in rows], ["RIGHT", "FRONT", "LEFT"])
-                self.assertEqual(len({v["wall_colour"] for v in rows}), 3)
-                for i, v in enumerate(rows):
-                    self.assertIsNone(forbidden.search(v["wall_colour"]))
-                    seen[i].add(v["room_type"])
-                self.assertRegex(rows[1]["primary_cue"], r"furniture silhouette|seating silhouette|sitting-area glimpse|stair-landing glimpse|window seat|bench edge|adjoining living area")
-                self.assertNotRegex(rows[1]["primary_cue"], r"lamp|console|chair")
-                if category in {"MMA", "UFC", "Boxing", "Combat sports"}:
-                    for i, v in enumerate(rows):
-                        self.assertIn(v["wall_colour"], ads.ie_visuals.COMBAT_PALETTES[i])
-                self.assertTrue(rows[2]["primary_cue"].startswith("one "))
-                self.assertIn("edge", rows[2]["primary_cue"])
-            self.assertTrue(all(len(options) >= 4 for options in seen))
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        scenes_ie(self)
 
     def test_explicit_wall_override_is_preserved_and_metadata_is_consistent(self):
         metadata = {"instant_experience_scene_selections": [{}, {"wall_colour": "explicit pink mineral paint"}, {}]}
@@ -136,24 +94,8 @@ class CombinedExecutionTests(unittest.TestCase):
             self.assertTrue(library.different(selected[a], selected[b]))
 
     def test_market_history_and_saved_results_are_stable(self):
-        first = self.record("first")
-        next_pack = self.record("second", recent=first["instant_experience_fingerprints"])
-        self.assertNotEqual(first["master_prompt"], next_pack["master_prompt"])
-        for old, new in zip(first["instant_experience_fingerprints"], next_pack["instant_experience_fingerprints"]):
-            self.assertNotEqual(old["scene_signature"], new["scene_signature"])
-        self.assertEqual(self.record("second", recent=first["instant_experience_fingerprints"])["master_prompt"], next_pack["master_prompt"])
-        self.assertIs(ads.ensure_current_ads_result_prompt(next_pack), next_pack)
-        self.assertEqual(ads.creation_instructions(next_pack["master_prompt"]), next_pack["master_prompt"])
-        self.assertIn(ads.META_AD_URL_PARAMETERS, ads.creation_instructions(next_pack["master_prompt"]))
-        rows = ads.resolve_standard_instant_experience_visuals(product_name="Collector Cricket Print", category="Cricket",
-            country="Australia", variation_token="second", product_metadata={"edition_limit": 100},
-            recent_fingerprints=first["instant_experience_fingerprints"])
-        for row, fp in zip(rows, next_pack["instant_experience_fingerprints"]):
-            self.assertEqual(row["room_type"], fp["room_type"])
-            unique = row["scene_brief"].removeprefix(ads.ie_visuals.SCENE_REFERENCE_RULES).removesuffix(ads.ie_visuals.SCENE_VISIBILITY_RULES)
-            self.assertIn(unique, next_pack["master_prompt"])
-            for shared in (ads.ie_visuals.SCENE_REFERENCE_RULES, ads.ie_visuals.SCENE_VISIBILITY_RULES):
-                self.assertIn(shared.strip(), next_pack["master_prompt"])
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        saved_ie(self)
 
     def test_previous_complete_prompts_and_approved_copy_are_not_migrated(self):
         current = self.record()

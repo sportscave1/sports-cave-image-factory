@@ -16693,6 +16693,35 @@ def require_atomic_edition_allocation_capability():
     )
 
 
+def _atomic_refusal_is_sold_out(conn, error, product_gid):
+    """Classify the allocator's shared refusal only from fresh exhausted-run truth.
+
+    Called after rollback. Never resets counters, changes runs or bypasses the RPC.
+    A failed diagnostic read must preserve the original allocation exception.
+    """
+    if (getattr(error, 'sqlstate', None) != 'P0001' or
+            str(error).split('\n', 1)[0] != 'Edition run is disabled, archived or sold out'):
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT (r.status='sold_out'
+                AND p.edition_total BETWEEN 1 AND 100
+                AND p.edition_total=r.edition_total
+                AND p.sold_count=p.edition_total AND p.remaining_count=0
+                AND p.next_edition_number=p.edition_total+1
+                AND r.next_edition_number=p.next_edition_number
+                AND p.sold_out AND p.is_sold_out) AS exhausted
+                FROM edition_products p JOIN edition_runs r ON r.id=p.active_edition_run_id
+                WHERE p.shopify_product_gid=%s""", (product_gid,))
+            return (cur.fetchone() or {}).get('exhausted') is True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def allocate_edition_line_units_atomic(
     *,
     order,
@@ -16784,6 +16813,12 @@ def allocate_edition_line_units_atomic(
             conn.commit()
         except Exception as error:
             conn.rollback()
+            if _atomic_refusal_is_sold_out(conn, error, product_gid):
+                _webhook_log('atomic_edition_allocation_blocked', 'sold_out', **allocation_context,
+                             reason='edition_limit_reached: sold-out edition requires review; counters unchanged')
+                # The existing caller already presents "Edition limit reached"
+                # as Sold Out and retains the unresolved line for review/retry.
+                raise ValueError('Edition limit reached: this edition is sold out; review the order in Edition Ops.') from error
             # SQL exceptions can include full failing rows and customer data.
             # Log identifiers and SQLSTATE, never the raw exception payload.
             reason = (
@@ -23850,9 +23885,15 @@ def _recalculate_next_edition_number_with_cursor(cur, product, run=None, *, reas
         1,
     )
     max_assigned = max(_max_assigned_for_product(cur, product, run), 0)
-    sold_out = max_assigned >= edition_total
-    next_number = edition_total if sold_out else min(max(max_assigned + 1, 1), edition_total)
-    remaining = max(edition_total - max_assigned, 0)
+    # Issued numbers are not sales counts (legacy gaps and explicit starting
+    # numbers are valid). Preserve sales and derive its complementary counter
+    # from the same authority, or the atomic allocator rejects the next order.
+    sold_count = _int_value(product.get("sold_count"), -1)
+    if not 0 <= sold_count <= edition_total:
+        raise ValueError("Sales unit count requires review before edition recalculation.")
+    sold_out = max_assigned >= edition_total or sold_count >= edition_total
+    next_number = min(max(max_assigned + 1, 1), edition_total + 1)
+    remaining = edition_total - sold_count
     run_status = SOLD_OUT_RUN_STATUS if sold_out else ACTIVE_RUN_STATUS
 
     if run and run.get("id"):

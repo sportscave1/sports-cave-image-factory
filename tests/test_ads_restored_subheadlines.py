@@ -15,37 +15,27 @@ class RestoredSubheadlineTests(unittest.TestCase):
         self.assertEqual(words.APPROVED_SUPPORT_LINES, historical['APPROVED_SUPPORT_LINES'])
         self.assertEqual(words.eligible_support_lines({}), historical['eligible_support_lines']({}))
 
-    def test_only_support_assignments_change_against_current_release(self):
-        baseline = {}
-        exec(subprocess.check_output(['git', 'show', '95b8c223:ads_ie_visual_systems.py']).decode('utf-8'), baseline)
-        history = []
+    def test_footer_split_preserves_support_assignment_and_saved_packs(self):
+        import ads_ie_two_line as footer
         seen = set()
-        for refresh in (False, True):
-            for seed in range(8):
-                kwargs = dict(product_metadata={'edition_limit': 100}, variation_token=str(seed),
-                              recent_instant_experience_fingerprints=history,
-                              creative_refresh_context={'winning_primary_text': 'Synthetic winner', 'winning_headline': 'Synthetic headline'} if refresh else None)
-                args = ('Synthetic Collector Edition', 'Cricket', 'Australia', 'Instant Experience')
-                with patch.object(words, 'resolve_set_copy', baseline['resolve_set_copy']):
-                    old = ads.build_ads_result_record(*args, **copy.deepcopy(kwargs))
-                new = ads.build_ads_result_record(*args, **copy.deepcopy(kwargs))
-                old_meta, new_meta = old['product_metadata'], new['product_metadata']
-                self.assertEqual(old_meta['instant_experience_scene_selections'], new_meta['instant_experience_scene_selections'])
-                selected = new_meta['instant_experience_footer_selections']
-                self.assertEqual([v['headline_text'] for v in old_meta['instant_experience_footer_selections']],
-                                 [v['headline_text'] for v in selected])
-                self.assertEqual(len({v['supporting_line'] for v in selected}), 3)
-                for row in selected:
-                    seen.add(row['supporting_line'])
-                    self.assertTrue(words.coherent_pair(row['headline_text'], row['supporting_line']) or (not refresh and row['supporting_line'] in words.AU_SUPPORT_REPLACEMENTS.values()))
-                    self.assertIn('SUPPORTING LINE: ' + row['supporting_line'], new['master_prompt'])
-                reopened = ads.build_ads_result_record(*args, **{**kwargs, 'product_metadata': new_meta})
-                self.assertEqual(selected, reopened['product_metadata']['instant_experience_footer_selections'])
-                self.assertIn('supporting line 24–26 px, Montserrat Regular', new['master_prompt'])
-                self.assertIn('18–20%', new['master_prompt'])
-                self.assertIn('Always highlight all three digits of 100', new['master_prompt'])
-                history = new['instant_experience_fingerprints'] + history
-        self.assertEqual(seen, set(words.eligible_support_lines({})) | set(words.eligible_support_lines({"supporting_line_market": "Australia"})))
+        history = []
+        args = ('Synthetic Collector Edition', 'Cricket', 'Australia', 'Instant Experience')
+        for seed in range(16):
+            result = ads.build_ads_result_record(*args, variation_token=str(seed),
+                recent_instant_experience_fingerprints=history)
+            selected = result['product_metadata']['instant_experience_footer_selections']
+            self.assertEqual(len({row['supporting_line'] for row in selected}), 3)
+            for row in selected:
+                self.assertIn(row['supporting_line'], words.eligible_support_lines({'supporting_line_market':'Australia'}))
+                self.assertIn(footer.image_copy(row), result['master_prompt'])
+                expected = row['supporting_line'] if row['footer_second_line_kind'] == 'CTA' else 'Claim Your Edition'
+                self.assertEqual(row['meta_headline_text'], expected)
+                seen.add(row['supporting_line'])
+            reopened = ads.build_ads_result_record(*args, variation_token='new', product_metadata=copy.deepcopy(result['product_metadata']))
+            self.assertEqual(selected, reopened['product_metadata']['instant_experience_footer_selections'])
+            self.assertIs(ads.ensure_current_ads_result_prompt(result), result)
+            history = result['instant_experience_fingerprints'] + history
+        self.assertEqual(seen, set(words.eligible_support_lines({'supporting_line_market':'Australia'})))
 
     def test_history_rotates_supports_without_rerolling_headlines(self):
         first = [{'resolved_seed': 'restore-history'} for _ in range(3)]

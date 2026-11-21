@@ -8,8 +8,8 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "3e62aa9a7c6b212a872bb8ce7b2a5b7d840145ad92a6836cfdf4425f6c2cc642",
-    "visuals_sha256": "fa920355f5934ceb4c7c92843a1a439b6c871bc9c921e3c47a6d53529a4fa91a"
+    "prompt_sha256": "1419d5db0a1e1bc88c1f8cab2522a541bd77f2d87cd583b24f728e916df2defe",
+    "visuals_sha256": "6ece6e3edbb09cdab337a7e07ceeea872eb1f607727f790908fe26e9fa709c6e"
   },
   {
     "args": {
@@ -20,7 +20,7 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "8fb1437001bb8ab417f87ba402df2b7e0ed737f2b3ca6e4e9d3e713c0592e72f",
+    "prompt_sha256": "71b97bbdea41f2bf972f11f8004b7ef481916051a0b4e2c3d118c49832ed9025",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -32,7 +32,7 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "prompt_sha256": "6da90f1d088e2dbed9b45dc797528941d366ab247e741af0cd6ef36ccdb34a97",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -47,8 +47,8 @@
         "winning_headline": "Synthetic headline"
       }
     },
-    "prompt_sha256": "109aa9da468d920e600194bf6f361d3dc7693c8f324db9b5f5bc925ea3bcd37e",
-    "visuals_sha256": "cb51388c02569794dc0ba3d0b7178603cf24c763ec19edeadb22e425d03ac819"
+    "prompt_sha256": "995b39893bb1888ded1a0bd589074ebb98fff066e2e66846b02fe889d9e3df6c",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
     "args": {
@@ -62,7 +62,7 @@
         "winning_headline": "Synthetic headline"
       }
     },
-    "prompt_sha256": "aabcb774d5e64665359c82c4247d98ab5041936871158bc70c680c57a748906d",
+    "prompt_sha256": "646b7f68439d3f2258d188ead8522a57180561c2443d7f55e0b1975d6c51fe26",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -89,8 +89,8 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "1144dfef3d182d2b08b1817b822b3a4cc8964e0b32aa6771c5679e45b6cc20e7",
-    "visuals_sha256": "57fea806fbbe9ad1e932f5f6894309c9f91bc14abd7abee1cee17e137c47a89d"
+    "prompt_sha256": "4fde8d695dc01360450ac15bdc1fc7b01b6835b90249ceab44f162517dc7397a",
+    "visuals_sha256": "2dd605e2400269df8c8956c4821a7586b072c77a0a1be67eb4ff475d04457438"
   },
   {
     "args": {
@@ -101,7 +101,7 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "f346f2ecf3234d3741368383fa2279544750716407b4d0f797aabce571f59236",
+    "prompt_sha256": "4fe2e322306702d7d10e1839162b1252f56f42243bdab1bb579833c8adea21b8",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -113,7 +113,7 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "prompt_sha256": "6da90f1d088e2dbed9b45dc797528941d366ab247e741af0cd6ef36ccdb34a97",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -128,22 +128,7 @@
         "winning_headline": "Synthetic headline"
       }
     },
-    "prompt_sha256": "4b8043988b4fa25caa6cb498f2ce40641930c944b8f766be5dae3848e099503e",
-    "visuals_sha256": "57fea806fbbe9ad1e932f5f6894309c9f91bc14abd7abee1cee17e137c47a89d"
-  },
-  {
-    "args": {
-      "product_name": "Synthetic Collector Edition",
-      "category": "Cricket",
-      "country": "Australia",
-      "campaign_type": "Carousel",
-      "variation_token": "support-bank-baseline",
-      "creative_refresh_context": {
-        "winning_primary_text": "Synthetic winner",
-        "winning_headline": "Synthetic headline"
-      }
-    },
-    "prompt_sha256": "bb8f51cda238dc44402d771c2f8152fbdf010b303635397a6a973a7d62490816",
+    "prompt_sha256": "a79b620c24e63d67aa780c66c88c3dcf28817bc363bc123656c19adcb2f8fdc8",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -151,72 +136,6 @@
       "product_name": "Synthetic Collector Edition",
       "category": "Cricket",
       "country": "Australia",
-      "campaign_type": "Single Image",
-      "variation_token": "support-bank-baseline",
-      "creative_refresh_context": {
-        "winning_primary_text": "Synthetic winner",
-        "winning_headline": "Synthetic headline"
-      }
-    },
-    "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
-  },
-  {
-    "args": {
-      "product_name": "Synthetic Collector Edition",
-      "category": "Cricket",
-      "country": "UK",
-      "campaign_type": "Instant Experience",
-      "variation_token": "support-bank-baseline",
-      "creative_refresh_context": null
-    },
-    "prompt_sha256": "b7e6e090d58d347b4426958d6b53f2bfc8ce4fea75845f780686cd73d6c809bb",
-    "visuals_sha256": "bf7f32d77ef034c70d606a32572423bf962c26665c7e245186799e4edacf0c6e"
-  },
-  {
-    "args": {
-      "product_name": "Synthetic Collector Edition",
-      "category": "Cricket",
-      "country": "UK",
-      "campaign_type": "Carousel",
-      "variation_token": "support-bank-baseline",
-      "creative_refresh_context": null
-    },
-    "prompt_sha256": "c2bce7e554bf37d2a4b89d4f6e55bcdac071f2669065ec5c8452c8fd4a2320d4",
-    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
-  },
-  {
-    "args": {
-      "product_name": "Synthetic Collector Edition",
-      "category": "Cricket",
-      "country": "UK",
-      "campaign_type": "Single Image",
-      "variation_token": "support-bank-baseline",
-      "creative_refresh_context": null
-    },
-    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
-    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
-  },
-  {
-    "args": {
-      "product_name": "Synthetic Collector Edition",
-      "category": "Cricket",
-      "country": "UK",
-      "campaign_type": "Instant Experience",
-      "variation_token": "support-bank-baseline",
-      "creative_refresh_context": {
-        "winning_primary_text": "Synthetic winner",
-        "winning_headline": "Synthetic headline"
-      }
-    },
-    "prompt_sha256": "ad4a93c043c97a29f2c73801615e1a9f2e89fe2708ea1dafd1551f5b146ef4ea",
-    "visuals_sha256": "bf7f32d77ef034c70d606a32572423bf962c26665c7e245186799e4edacf0c6e"
-  },
-  {
-    "args": {
-      "product_name": "Synthetic Collector Edition",
-      "category": "Cricket",
-      "country": "UK",
       "campaign_type": "Carousel",
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": {
@@ -224,14 +143,14 @@
         "winning_headline": "Synthetic headline"
       }
     },
-    "prompt_sha256": "b17bcef5490bc48b34dc28af7d4bf5b49eb65e34ebdc4e2e6261867bf660741f",
+    "prompt_sha256": "71599f7140e9736ca4246f8b09205e0e4bec43faa367780bfbd5f8e89e7707d8",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
     "args": {
       "product_name": "Synthetic Collector Edition",
       "category": "Cricket",
-      "country": "UK",
+      "country": "Australia",
       "campaign_type": "Single Image",
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": {
@@ -246,13 +165,94 @@
     "args": {
       "product_name": "Synthetic Collector Edition",
       "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "f3f0c3c720bfa591c983f37fb4c23a5e6a75c3b336be64d3f3243171050761be",
+    "visuals_sha256": "e48e2c5ec510568bcb6526cdf7ee9d8c1712758a8123612d95758c3f0d121250"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "4639449bf261faf579de690c0e82df93be36bd0b8b7caa5ef9d6737c12df57af",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": null
+    },
+    "prompt_sha256": "6da90f1d088e2dbed9b45dc797528941d366ab247e741af0cd6ef36ccdb34a97",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "d352347a4d952278ec968ac27556c13e564823450507a94010126e67fc1e673d",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "eeface79ebee143c7ff2a4a9cf4e2091548bd7e605993fe19bafe65e5b7fd8d4",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Single Image",
+      "variation_token": "support-bank-baseline",
+      "creative_refresh_context": {
+        "winning_primary_text": "Synthetic winner",
+        "winning_headline": "Synthetic headline"
+      }
+    },
+    "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Collector Edition",
+      "category": "Cricket",
       "country": "Canada",
       "campaign_type": "Instant Experience",
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "e209185fc5c7f919caca875dc9ea021c6bf2ce66ce9f2012dced02fd41205274",
-    "visuals_sha256": "13a32e27317f1f640f0256e69646e6355ca5e8b42ed2e60139f245fe7919a6b3"
+    "prompt_sha256": "0df21673ef0cc53f71dcd85ec24b5a071ea8192b3c00e70950207f96f6f2b242",
+    "visuals_sha256": "6a2e0495c17e03e4955a8ecbb1f8075dd9a429a6c76e4f0b5e9076aa387ce65c"
   },
   {
     "args": {
@@ -263,7 +263,7 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "305d66859bf167cbb3f4b751bb219b2d989768e1c7cd7c8fb1d7b61a4bf69f8a",
+    "prompt_sha256": "9196898c8a187eb4361766bed81935176316c972b56920771a570e48b4246c38",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -275,7 +275,7 @@
       "variation_token": "support-bank-baseline",
       "creative_refresh_context": null
     },
-    "prompt_sha256": "b3a2b0db4dbbb7cf3d77580b68bc89a06d36f8e5cff86551afd3d5179cc8ff33",
+    "prompt_sha256": "6da90f1d088e2dbed9b45dc797528941d366ab247e741af0cd6ef36ccdb34a97",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -290,8 +290,8 @@
         "winning_headline": "Synthetic headline"
       }
     },
-    "prompt_sha256": "68e66357de9e2a4bb574031cdac5a809c5a02011f15342b4b7b925410bceca59",
-    "visuals_sha256": "13a32e27317f1f640f0256e69646e6355ca5e8b42ed2e60139f245fe7919a6b3"
+    "prompt_sha256": "e41893b92ea7206b0dd16c9e754217d655e9b92e4004555e0d362e3a3e451e93",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
     "args": {
@@ -305,7 +305,7 @@
         "winning_headline": "Synthetic headline"
       }
     },
-    "prompt_sha256": "ece6f0ddf1557d048672219d348a1bf98ce4dc3d7feeec2a1f0e5b2a4341cbc8",
+    "prompt_sha256": "9ecf28153ed9b8751a445f42ac5d75e9af24ae0a75f457db68c615d1bf893d44",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {

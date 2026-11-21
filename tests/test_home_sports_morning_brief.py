@@ -40,23 +40,26 @@ def legend():
             "product_url": "https://www.sportscaveshop.com/products/tribute-edition"}
 
 
-def test_legends_has_its_own_rows_and_uses_existing_actions_before_calendar():
+def test_designs_replace_legends_and_keep_actions_before_calendar():
     from home_morning_brief_actions import brief_html
 
-    payload = {**json.loads(edition()), "full_brief": "Sports edition", "legends": [legend()]}
+    payload = {**json.loads(edition()), "full_brief": "Sports edition", "summary": "Daily sports summary.",
+               "design_recommendations": [dict(legend(), subject="A hall of fame tribute",
+                    sales_rationale="Strong established collector audience.", opportunity_status="Research first")]}
     parsed = brief.parse_edition(json.dumps(payload), TODAY)
     html = brief_html(parsed, editions=[parsed], today=TODAY, allow_ads=True)
-    assert html.index('<section class="sc-sports-stories"') < html.index('aria-label="Legends Brief"') < html.index('<section class="sc-cal">')
-    rows = html.split('aria-label="Legends Brief"', 1)[1].split('</section>', 1)[0]
-    assert 'USA 1. A hall of fame tribute' in rows
+    assert html.index('<section class="sc-sports-stories"') < html.index('aria-label="Design recommendations"') < html.index('<section class="sc-cal">')
+    rows = html.split('aria-label="Design recommendations"', 1)[1].split('</section>', 1)[0]
+    assert '1. A hall of fame tribute' in rows
     assert 'data-design-key=' in rows and 'Add to Queue' in rows and 'Create Ad' in rows
     assert 'brief_product=tribute-edition' in rows
     assert 'Fixture release' not in rows
-    invalid = {**payload, "legends": [legend()] * 7}
-    assert brief.parse_edition(json.dumps(invalid), TODAY) == {k: v for k, v in parsed.items() if k != "legends"}
+    assert 'Daily sports summary.' in html
+    with pytest.raises(ValueError, match='top four'):
+        brief.parse_edition(json.dumps({**payload, 'design_recommendations': payload['design_recommendations'] * 5}), TODAY)
 
 
-def test_six_legends_group_by_primary_and_keep_secondary_markets_in_order():
+def test_legacy_legends_remain_readable_without_regional_quotas():
     from home_morning_brief_actions import brief_html
 
     payload = json.loads(edition())
@@ -67,12 +70,10 @@ def test_six_legends_group_by_primary_and_keep_secondary_markets_in_order():
     parsed = brief.parse_edition(json.dumps(payload), TODAY)
     assert len(parsed["legends"]) == 6
     html = brief_html(parsed, editions=[parsed], today=TODAY)
-    assert '1. Fixture release (USA, AUS, UK)' in html
-    labels = [f'{market} {number}. {market} pick {number}' for market in ("AUS", "USA", "UK") for number in (1, 2)]
-    assert [html.index(label) for label in labels] == sorted(html.index(label) for label in labels)
-    assert '<small class="sc-brief-secondary">Secondary: AUS, USA</small>' in html
+    assert 'Fresh design recommendations are pending' in html
+    assert 'aria-label="Design recommendations"' in html
     payload["legends"][0].update(primary_market="AUS")
-    assert "legends" not in brief.parse_edition(json.dumps(payload), TODAY)
+    assert len(brief.parse_edition(json.dumps(payload), TODAY)['legends']) == 6
 
 
 def test_legends_can_be_added_today_and_survives_a_sports_only_repeat(database, monkeypatch):
@@ -231,8 +232,7 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     brief.render(st, OWNER, TODAY)
     assert "Today's brief is pending" in st.caption.call_args.args[0]
     markup = st.html.call_args.args[0]
-    assert "Add to Queue" in markup and "Create Ad" in markup
-    assert 'data-design-key=' in markup
+    assert 'Fresh design recommendations are pending' in markup
     assert "<h4>Fixture release</h4>" not in markup
     assert "&lt;script&gt;example&lt;/script&gt;" in markup
     assert "Morning Brief JSON" not in markup
@@ -421,13 +421,10 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     meta.render(st, get_user.return_value, TODAY)
     markup = st.html.call_args.args[0]
     assert "The Final Lap leads recent performance." in markup
-    assert "Test &lt;creative&gt;" in markup
-    assert 'aria-haspopup="dialog">More recommendations</button>' in markup
+    assert 'No verified product' in markup
+    assert "Test &lt;creative&gt;" not in markup
     assert '<dialog class="sc-meta-full"' in markup
-    popup = markup.split('<dialog class="sc-meta-full"', 1)[1].split("</dialog>", 1)[0]
-    assert '<ol start="4">' in popup and popup.count("<li>") == 5
-    assert "Test a baseball creative tied to the awards." in popup
-    assert "Check checkout tracking." not in popup
+    assert '>See more</button>' in markup
     assert "Shopify · catalogue and storefront" in markup
     assert "Search Console · SEO opportunities" in markup
 
@@ -510,7 +507,8 @@ def test_create_design_uses_recent_performance_as_context_for_a_timeless_title()
     assert 'closest comparable sport or collector collection' in result
     assert 'Treat unranked products as style references only' in result
     assert 'For each, identify the visible photographic detail or verified story that earns its wording.' in result
-    assert 'Keep numbers out of headlines' in result
+    assert 'Keep incidental jersey/car numbers, scores, statistics and dates in supporting context' in result
+    assert 'A number integral to verified fan language or a meaningful sporting phrase may remain' in result
     assert 'choose a story supporters would still want to display in five years' in result.lower()
     assert 'Include an accolade, statistic or year only when essential and verified' in result
 
@@ -548,7 +546,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Build every visible athlete and sporting object from the verified original photographs",
         "Completely cover generated renditions",
         "If it passes, proceed directly to the final save",
-        "Correct only the border if clearance fails",
+        "Correct only the border for a rule defect",
         "contact shadows only at actual points of contact",
         "Record unresolved quality or identity as needs_attention",
         "ORIGINAL EDITABLE ARTWORK", "FINAL POLISHED ARTWORK", "REVIEW NOTES",
@@ -558,7 +556,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
         "Completion requires one full generation", "Shopify publication is a separate action",
     ):
         assert guard in result
-    assert len(result.split()) < 3900
+    assert len(result.split()) < 4100  # Includes focused hero-selection and background hierarchy refinements.
 
     data = json.loads(edition())
     data["full_brief"] = "Other sports and updates\n" + ("Additional source detail. " * 130)

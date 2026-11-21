@@ -162,7 +162,7 @@ def test_prepare_verifies_existing_product_and_preserves_manual_brief(monkeypatc
     assert len(folders) == 1
 
 
-def test_real_buttons_share_validation_and_submit_stays_manual(monkeypatch):
+def test_queue_only_button_preserves_validation_and_automation(monkeypatch):
     calls = []
     monkeypatch.setattr(queue, 'enqueue', lambda user, result, selection: calls.append(deepcopy(result)) or
                         dict(id='fixture', active=True))
@@ -173,16 +173,19 @@ def test_real_buttons_share_validation_and_submit_stays_manual(monkeypatch):
     app.session_state['sports_cave_current_user'] = USER
     app.run()
     assert not app.exception
+    assert 'Submit' not in [button.label for button in app.button]
+    assert 'Campaign Moment (Optional)' not in [item.label for item in app.expander]
     app.button(key='ads-add-to-queue').click().run()
     assert not calls  # Incomplete inputs never queue.
     for label, value in [('Product name', 'Collector Tribute'), ('Category', 'Baseball'), ('Country', 'USA')]:
         next(widget for widget in app.selectbox if widget.label == label).select(value).run()
     next(widget for widget in app.text_input if widget.label == 'Product page URL *').set_value(URL).run()
-    next(button for button in app.button if button.label == 'Submit').click().run()
     assert not calls and not app.exception
-    manual = deepcopy(app.session_state[ads_page._ads_result_state_key()])
     app.button(key='ads-add-to-queue').click().run()
-    assert calls == [manual] and not app.exception
+    assert len(calls) == 1 and not app.exception
+    assert calls[0] == app.session_state[ads_page._ads_result_state_key()]
+    from ads_generation_review import RULES
+    assert RULES in calls[0]['master_prompt']
     assert any('Added to the companion' in item.value for item in app.success)
     next(widget for widget in app.selectbox if widget.label == 'Campaign type').select('Carousel').run()
     assert app.button(key='ads-add-to-queue').disabled

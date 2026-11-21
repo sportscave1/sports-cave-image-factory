@@ -19,6 +19,10 @@ class FinalDeliveryTests(unittest.TestCase):
                 with patch.object(ads, 'apply_final_delivery', lambda p: p):
                     original = build()
                 updated = build()
+                if refresh:
+                    self.assertEqual(updated,original)
+                    self.assertNotIn(RULES,updated)
+                    continue
                 self.assertEqual(updated, RULES + '\n\n' + original)
                 self.assertEqual(updated.count(RULES), 1)
                 self.assertEqual(apply_final_delivery(updated), updated)

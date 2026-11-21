@@ -17,7 +17,8 @@ PROFILE_SHA256="4540a0c176f2bdd83936ef958c0b306dc6ab6ea4310608149d11ac0803c68022
 def profile_digest():
     # Git may normalise CRLF on checkout. Pin identical LF policy bytes.
     return hashlib.sha256(PROFILE.read_bytes().replace(b"\r\n",b"\n")).hexdigest()
-IMAGE_TAG="sha256:d74525e5ce7bd49a602399f6ac1e16476b9158bfaab00bb00703b42a85815baa"
+# Same verified network/filesystem boundary; static page metadata parser updated.
+IMAGE_TAG="sha256:b1857ed93a713747038020d59353d04ccab683b126c0b5dd782368dc6054ed17"
 RELAY="""import sys,urllib.request,urllib.error
 data=sys.stdin.buffer.read(12000)
 try:

@@ -201,9 +201,9 @@ def test_edit_endpoint_returns_full_prompt_for_exact_dropbox_source(monkeypatch)
     assert 'https://www.dropbox.com/home' in prompt and '?preview=Design%20%26%20Story.psd' in prompt
     assert record['path_display'] in prompt and record['id'] in prompt
     assert '"rev": "exact"' in prompt
-    assert '**4. Return the winner to Review**' in prompt
-    assert 'user-requested design changes as the primary brief' in prompt
-    assert 'Search online for the exact photograph' in prompt
+    assert '**Complete the selected Review edit and clean up Dropbox**' in prompt
+    assert 'USER-REQUESTED DESIGN CHANGES from the Edit text box' in prompt
+    assert 'Use web image search' in prompt
     assert stale.status_code == 409
 
 
@@ -348,7 +348,7 @@ else:
     cursor.execute((Path(gallery.__file__).parent / 'migrations/20261118070000_product_upload_manual_restart.sql').read_text(encoding='utf-8'))
     cursor.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     monkeypatch.setattr(queue, 'connect', store.connect)
-    next(button for button in ui.button if button.label == 'Publish now').click().run()
+    ui.button(key=gallery.review_key(record)+'-approved').click().run()
     assert not ui.exception and not ui.error, [error.value for error in (*ui.exception, *ui.error)]
     assert ui.session_state['_product_upload_notice']['kind'] == 'success'
     assert not scheduled, 'Publish queues work without rendering or navigating in the requester tab'
@@ -392,3 +392,33 @@ else:
     assert store.copied(key, ADMIN['id'], 'SMART')['data']['copied']
 
     submit.assert_called_once()
+
+
+def test_repeated_delete_is_recoverable_and_stops_queue_before_dropbox(monkeypatch):
+    from design_review_delete import delete_design
+    import product_upload_staff_queue as queue
+    psd = source('art', 'Final.psd')
+    files = {psd['path_display']: psd}
+    events = []
+    def remove(_, path, **kwargs):
+        events.append('delete')
+        files.pop(path)
+    monkeypatch.setattr(queue, 'cancel_for_deletion', lambda record, user: events.append('cancel'))
+    provider = SimpleNamespace(token='fixture', metadata_if_present=files.get,
+                               api=SimpleNamespace(delete_path_recoverable=remove))
+    assert delete_design(provider, psd, user={'id':'fixture'}) == []
+    assert events == ['cancel', 'delete']
+    assert delete_design(provider, psd, user={'id':'fixture'}) == []
+    assert events == ['cancel', 'delete', 'cancel']
+
+
+def test_delete_does_not_treat_a_moved_psd_as_already_deleted():
+    from design_review_delete import delete_design
+    psd = source('art', 'Final.psd')
+    moved = dict(psd, path_display='/Elsewhere/Final.psd')
+    remove = Mock()
+    provider = SimpleNamespace(metadata_if_present=lambda key: moved if key == psd['id'] else None,
+                               api=SimpleNamespace(delete_path_recoverable=remove))
+    with pytest.raises(ValueError, match='changed in Dropbox'):
+        delete_design(provider, psd)
+    remove.assert_not_called()

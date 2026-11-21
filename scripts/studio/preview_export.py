@@ -11,6 +11,7 @@ import drafts
 import studio
 
 ASSETS = {"assets/sports-cave-os-app-icon.webp",
+          "data/home_sports_schedule.json",  # Versioned public sports calendar, no customer data.
           "assets/sports-cave-logo-landscape-gold-transparent.webp",
           "assets/sports-cave-sc-gold-favicon.svg"}
 STUDIO_UI = {"scripts/studio/ui/"+name for name in ("workspace.js","workspace.css","editor.js","editor.css","code-editor.js")}
@@ -18,6 +19,7 @@ DEVELOPMENT_ADDITIONS = STUDIO_UI | {"developer_studio_page.py", "components/dev
                          "components/developer_studio/panel.css", "components/developer_studio/panel.js",
                          "signin_presentation.py", "components/sign_in/presentation.html", "components/sign_in/presentation.css"}
 SOURCE_DIRS = {"components", "ui_components"}
+SOURCE_PACKAGES = {'services'}
 DENIED_MODULES = {"run_migrations.py", "sports_cave_server.py"}
 SYNTHETIC_PASSWORD = "StudioOnly-2026"
 
@@ -28,7 +30,8 @@ def allowed(name):
     if "worker" in p.stem or "webhook" in p.stem:
         return False
     return (name == "design_studio_prompts/SPORTS-CAVE-HIGH-QUALITY-IMAGE-SEARCH-PROMPT-V2.txt" or len(p.parts)==1 and p.suffix in {".py",".css",".js"} or
-            p.parts[0] in SOURCE_DIRS and p.suffix in {".html",".css",".js"} or name in ASSETS or name in STUDIO_UI)
+            p.parts[0] in SOURCE_DIRS and p.suffix in {".html",".css",".js"} or
+            p.parts[0] in SOURCE_PACKAGES and p.suffix == '.py' or name in ASSETS or name in STUDIO_UI)
 
 def raw_source(root, name):
     path=drafts.plain_path(root/name)

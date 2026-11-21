@@ -9,10 +9,11 @@
     const message = event.data;
     if (event.source !== window || event.origin !== location.origin ||
         message?.channel !== channel || message.direction !== 'request' ||
-        !['health', 'start', 'pair'].includes(message.action)) return;
+        !['health', 'start', 'pair', 'wake'].includes(message.action)) return;
     const frame = window.frameElement;
     if (!frame || (message.action === 'start' && frame.id !== 'sc-product-upload-copy') ||
-        (message.action === 'pair' && frame.id !== 'sc-upload-companion-health')) return;
+        (message.action === 'pair' && frame.id !== 'sc-upload-companion-health') ||
+        (message.action === 'wake' && frame.id !== 'sc-upload-queue-wake')) return;
     let result;
     try {
       result = await chrome.runtime.sendMessage({

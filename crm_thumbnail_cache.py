@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from worker_memory import thumbnail_workers
+from worker_memory import thumbnail_workers, thumbnail_has_headroom
 from crm_thumbnail_process import run_renderer
 
 LOG = logging.getLogger(__name__)
@@ -97,6 +97,10 @@ def generate(key, load, store=None):
                 if phase=='BUSY':
                     with LOCK:RECHECK[key]=monotonic()+5
                     return
+            if not thumbnail_has_headroom():
+                # Existing failure cooldown releases the lease and allows a
+                # later UI request to retry without blocking customer delivery.
+                raise RuntimeError('renderer_exit_memory_pressure')
             doc, cfg = load()
             render_started=monotonic()
             with tempfile.TemporaryDirectory(prefix='email-thumb-') as folder:

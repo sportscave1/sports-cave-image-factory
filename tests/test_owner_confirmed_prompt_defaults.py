@@ -18,16 +18,18 @@ class OwnerDefaultsTests(unittest.TestCase):
                     self.assertIn('87 × 62 cm',prompt)
                     self.assertIn('premium glass',prompt)
                     self.assertIn('100 worldwide',prompt)
-                    self.assertNotIn('WORLDWIDE_VERIFIED',prompt)
+                    if not refresh:
+                        self.assertNotIn('WORLDWIDE_VERIFIED',prompt)
+                    self.assertNotIn('WORLDWIDE_VERIFIED must be true',prompt)
                     self.assertNotIn('request product/variant confirmation',prompt)
                     self.assertNotIn('confirm if unknown',prompt)
-                    if campaign=='Instant Experience':
+                    if campaign=='Instant Experience' and not refresh:
                         selected=result['product_metadata']['instant_experience_footer_selections']
                         self.assertEqual(len({r['headline_text'] for r in selected}),3)
                         self.assertTrue(all(r['headline_text'] in ads.ie_visuals.HEADLINES for r in selected))
-                        self.assertIn('headline 42–48 px',prompt)
-                        self.assertIn('CTA 26–28 px',prompt)
-                        self.assertIn('18–20%',prompt)
+                        self.assertIn('50 px Baskerville',prompt)
+                        self.assertIn('exactly two centred text baselines',prompt)
+                        self.assertIn('exactly 160 px high',prompt)
 
     def test_saved_assignments_and_rooms_survive_default_upgrade(self):
         result=ads.build_ads_result_record('Synthetic Collector Edition','Cricket','Australia','Instant Experience',variation_token='saved',product_metadata={'edition_limit':100})
@@ -55,9 +57,9 @@ class OwnerDefaultsTests(unittest.TestCase):
         raw='Exact custom room, right camera.\nWhere the selected product is confirmed as A1, use genuine A1 print dimensions:\n841 × 594 mm\nIf the source frame proportions contradict the intended scale or physical specifications, request clarification.\nPreserve verified product construction. If the actual front is acrylic rather than glass, depict realistic transparent glazing without falsely implying a different manufactured material.'
         text=lifestyle.sequential_instructions(raw)
         self.assertIn('Exact custom room, right camera.',text)
-        self.assertIn('87 × 62 cm',text)
-        self.assertIn('62 × 87 cm',text)
-        self.assertIn('premium glass, not acrylic',text)
+        self.assertIn('87 cm wide × 62 cm high',text)
+        self.assertIn('62 cm wide × 87 cm high',text)
+        self.assertIn('one continuous pane of premium clear glass',text)
         self.assertNotIn('request clarification',text)
         self.assertNotIn('841 × 594',text)
         self.assertIn('100 worldwide',text)

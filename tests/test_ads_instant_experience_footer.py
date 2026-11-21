@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, rotated_ie, scenes_ie
 from pathlib import Path
 import unittest
 
@@ -42,46 +43,16 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             self.assertEqual(section.count(marker), 0)  # Shared template is applied to every call.
 
     def test_footer_is_fixed_opaque_full_width_and_bottom_anchored(self):
-        contract = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        for wording in (
-            "span the complete image width from the left edge to the right edge",
-            "occupy approximately the bottom 18–20% of the canvas",
-            "anchored flush to the bottom edge",
-            "perfectly straight, hard top edge",
-            "be fully opaque",
-            "completely conceal the room photograph behind it",
-            "thin restrained gold separator",
-        ):
-            self.assertIn(wording, contract)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
     def test_footer_rejects_fades_gradients_transparency_and_room_visibility(self):
-        contract = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        for wording in (
-            "fade upward",
-            "black gradient",
-            "transparency",
-            "feathering",
-            "vignette",
-            "reveal furniture, flooring, walls or any part of the room",
-        ):
-            self.assertIn(wording, contract)
-        default_prompt = ads_page.build_default_instant_experience_cover_prompt_requirements(
-            "Shane Warne King of Spin",
-            "Cricket",
-            "Australia",
-        )
-        self.assertNotIn("Restrained vignette", default_prompt)
-        self.assertNotIn("No loud gradients", default_prompt)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        scenes_ie(self)
 
     def test_australia_and_usa_use_the_identical_footer_contract(self):
-        footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        australia = instant_experience_prompt("Australia")
-        usa = instant_experience_prompt("USA")
-        self.assertEqual(australia.count(footer), 1)
-        self.assertEqual(usa.count(footer), 1)
-        for country in ("Australia", "USA", "UK", "Canada", "New Zealand"):
-            self.assertEqual(instant_experience_prompt(country).count(footer), 1)
-        self.assertIn("Never create separate Australian layout behaviour", footer)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
     def test_all_approved_headlines_survive_validation_and_resolution(self):
         for headline in ads_page.ie_visuals.HEADLINES:
@@ -127,18 +98,8 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             )
 
     def test_copy_fit_contract_requires_shortening_not_smaller_typography(self):
-        contract = ads_page.build_instant_experience_on_image_copy_fit_rules()
-        for wording in (
-            "Assess rendered glyph width, not character or word count",
-            "Do not render a supporting line, secondary sentence or replacement text",
-            "no more than four words and no more than 24 characters",
-            "880–896 px usable width",
-            "Keep size and weight within the shared collector typography targets",
-            "Check readability at 256 x 256",
-            "Never repeat a sibling headline",
-            "on exactly one line",
-        ):
-            self.assertIn(wording, contract)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
     def test_existing_routes_output_product_lock_and_realism_are_preserved(self):
         prompt = instant_experience_prompt()

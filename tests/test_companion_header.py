@@ -12,7 +12,7 @@ def test_header_preserves_real_states_and_marks_estimates(monkeypatch):
                    for stage in (5, 4, 0, 2)]
     ad_jobs = [dict(id=stage, title='Ad '+stage, stage=stage, label='Existing '+stage, detail='')
                for stage in ('generating', 'waiting', 'failed', 'complete')]
-    monkeypatch.setattr(morning_design_queue, 'list_jobs', lambda: deepcopy(design_jobs))
+    monkeypatch.setattr(morning_design_queue, 'list_jobs', lambda **kwargs: deepcopy(design_jobs))
     monkeypatch.setattr(design_publish_ad, 'dashboard', lambda: dict(enabled=False, online=True, jobs=deepcopy(ad_jobs)))
     queues = companion_header.enrich_queues(dict(design=dict(waiting=1, enabled=True), upload=dict(waiting=0, enabled=True)))
     assert [job['state'] for job in queues['design']['jobs']] == ['running', 'waiting', 'failed', 'complete']
@@ -30,7 +30,7 @@ def test_delivered_design_review_notes_are_not_a_failed_generation(monkeypatch):
                  label='Uploaded · needs review', detail='Check artwork and upload metadata.'),
             dict(id='oscar', stage=5, file_path='', label='Needs attention',
                  detail='Could not verify thinking level.')]
-    monkeypatch.setattr(morning_design_queue, 'list_jobs', lambda: jobs)
+    monkeypatch.setattr(morning_design_queue, 'list_jobs', lambda **kwargs: jobs)
     monkeypatch.setattr(design_publish_ad, 'dashboard', lambda: dict(enabled=True, online=True, jobs=[]))
     result = companion_header.enrich_queues(dict(design={}, upload={}))['design']['jobs']
     assert result[0]['state'] == 'complete' and result[0]['percent'] == 100

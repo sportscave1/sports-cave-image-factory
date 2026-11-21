@@ -98,8 +98,8 @@ class Resend:
         class MarketingProvider(ResendEmailProvider):
             def _payload(self,mail):
                 payload=super()._payload(mail)
-                payload['headers']={'List-Unsubscribe':'<'+message['unsubscribe_url']+'>'}
-                if message.get('unsubscribe_one_click') is True:
+                payload['headers']=dict(message.get('unsubscribe_headers') or {'List-Unsubscribe':'<'+message['unsubscribe_url']+'>'})
+                if not message.get('unsubscribe_headers') and message.get('unsubscribe_one_click') is True:
                     payload['headers']['List-Unsubscribe-Post']='List-Unsubscribe=One-Click'
                 return payload
         configuration=EmailConfiguration(self.config.api_key,self.config.sender,email(address),self.config.reply_to)

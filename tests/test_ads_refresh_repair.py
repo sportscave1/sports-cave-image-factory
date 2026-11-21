@@ -80,9 +80,8 @@ class ActiveRefreshRepairTests(unittest.TestCase):
             with self.subTest(count=count):
                 app=app_for(count=count)
                 self.assertFalse(app.exception)
-                text='\n'.join(e.value for e in app.markdown)
-                for i in range(1,count+1):
-                    self.assertIn(f'Card {i} — Original Winner → Refreshed Card {i}',text)
+                self.assertEqual([t.label for t in app.text_input if t.label.startswith('Card ') and t.label.endswith(' headline')],
+                                 [f'Card {i} headline' for i in range(1,count+1)])
                 self.assertEqual(len([x for x in app.text_input if x.label.endswith('destination URL')]),count)
 
     def test_settings_mismatch_disables_save_without_losing_images(self):
@@ -203,7 +202,11 @@ class ActiveRefreshRepairTests(unittest.TestCase):
             value=fixture(kind) if context else {'product_name':'Verified Collector Artwork','product_url':'https://sportscave.com.au/products/verified'}
             prompt=ads.build_ads_prompt(value['product_name'],category,'Australia',kind,product_url=value['product_url'],
                 variation_token='baseline',creative_refresh_context=context)
-            self.assertIn(MARKER,prompt,identity)
+            if mode == 'new':
+                self.assertIn(MARKER,prompt,identity)
+            else:
+                self.assertIn('WINNER_',prompt,identity)
+                self.assertIn('CANONICAL_PRODUCT',prompt,identity)
             self.assertEqual(contract_shape(prompt),structures[identity],identity)
 
 

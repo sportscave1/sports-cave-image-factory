@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlencode
 from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
@@ -18,7 +19,7 @@ CHAT = re.compile(r'https://chatgpt\.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2(
 COUNTRIES = {'Australia': ('AUS', 'AU', 'Australia'), 'USA': ('USA', 'US', 'United States'),
              'UK': ('UK', 'GB', 'United Kingdom'), 'Canada': ('CAN', 'CA', 'Canada'),
              'New Zealand': ('NZ', 'NZL', 'New Zealand')}
-COVERS = {idea['id']: idea['scene_name'].lower().replace(' ', '-') + '.jpg'
+COVERS = {idea['id']: idea.get('artifact_filename') or idea['scene_name'].lower().replace(' ', '-') + '.jpg'
           for idea in INSTANT_EXPERIENCE_CONCEPTS}
 LABELS = {'waiting': 'Waiting for the published product', 'preparing': 'Preparing the verified mockup',
           'opening': 'Opening Meta Ads in ChatGPT',
@@ -79,7 +80,10 @@ def enqueue(cur, upload, requester, sport, country):
 def public(value):
     if not value:
         return None
-    return dict(label=LABELS[value['stage']], detail=value.get('detail', ''),
+    generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
+    return dict(label=('Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
+                       'ChatGPT is thinking / generating' if generating else
+                       'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=('ChatGPT is still generating; waiting for finished attachments' if generating else value.get('detail', '')),
                 active=value['stage'] not in ('complete', 'failed', 'cancelled'),
                 posting_id=value.get('posting_id'))
 
@@ -100,8 +104,9 @@ def settings(enabled=None):
         return {'enabled': _enabled(cur)}
 
 
-def dashboard():
-    with connect() as conn, conn.cursor() as cur:
+def dashboard(job_id=None):
+    from companion_read_connection import read_connection
+    with read_connection(connect) as conn, conn.cursor() as cur:
         enabled = _enabled(cur)
         cur.execute("""SELECT updated_at > now()-interval '95 seconds' AS online
                        FROM app_settings WHERE key=%s""", (HEARTBEAT_KEY,))
@@ -113,11 +118,12 @@ def dashboard():
             FROM app_settings a LEFT JOIN product_upload_staff_jobs j ON a.key=%s || j.id::text
             WHERE (j.id IS NOT NULL OR (a.key LIKE %s AND a.value->>'source'='new_ads'))
               AND NOT EXISTS (SELECT 1 FROM app_settings c WHERE c.key='ads_job_control:' || (a.value->>'upload') AND c.value->>'action'='delete')
+              AND (%s::text IS NULL OR a.key=%s)
             ORDER BY CASE a.value->>'stage'
                 WHEN 'preparing' THEN 0 WHEN 'opening' THEN 0 WHEN 'generating' THEN 0 WHEN 'posting' THEN 0
                 WHEN 'waiting' THEN 1 ELSE 2 END,
                 CASE WHEN a.value->>'stage'='waiting' THEN a.updated_at END,
-                a.updated_at DESC, a.key LIMIT 100""", (PREFIX, PREFIX + '%'))
+                a.updated_at DESC, a.key LIMIT 100""", (PREFIX, PREFIX + '%', job_id, PREFIX + job_id if job_id else None))
         jobs = []
         for row in cur.fetchall():
             value = row['value']
@@ -126,8 +132,8 @@ def dashboard():
                 value.update(stage='cancelled',detail='Automation stopped. Already-started Meta operations must be reviewed in Posting.')
             entry = dict(public(value), id=value['upload'], updated_at=row['updated_at'].isoformat(),
                          title=row['title'], country=value['country'], sport=value['sport'],
-                         stage=value['stage'], chat_url=value.get('chat_url'), targeting=value.get('targeting'),
-                         can_play=value['stage']!='complete', can_cancel=value['stage'] not in ('complete','cancelled'),
+                         stage=value['stage'], control_action=row['control'] or '', chat_url=value.get('chat_url'), targeting=value.get('targeting'),
+                         can_play=value['stage'] in ('waiting','failed','cancelled'), can_cancel=value['stage'] not in ('complete','cancelled'),
                          resumable=value['stage'] in ('failed','generating') and bool(value.get('chat_url') and value.get('folder')) and not value.get('posting_id'))
             if value['stage'] == 'waiting' and row['upload_stage'] == 6:
                 entry['label'] = 'Ready for the ad queue' if enabled else 'Ready · queue paused'
@@ -166,6 +172,8 @@ preservation rules below. A storefront image, preview or other frame is not a su
 
 
 def delivery_prompt(result, reference, folder, job):
+    from ads_ie_two_line import active, REVIEW
+    footer_review = REVIEW if active(result.get('master_prompt')) else 'Before the final response, inspect every actual cover against its assigned HEADLINE, SUPPORTING LINE and CTA: all three lines must be visible, with the top separator replaced in place by the specified metallic gold shimmer. Correct missing footer elements through the supplied final creative review, keeping the rest unchanged. Then verify all four downloadable attachments are present above.'
     outputs = '\n'.join(f'- {idea["scene_name"]}: {folder}/{COVERS[idea["id"]]}'
                         for idea in INSTANT_EXPERIENCE_CONCEPTS)
     return f"""Sports Cave automatic ad job {job}
@@ -179,6 +187,11 @@ final response, with exactly these filenames (the companion will save them to th
 - CSV: {folder}/ad_copy.csv
 
 Return actual JPEGs under the given .jpg filenames, not preview thumbnails or contact sheets.
+Filenames identify saved delivery slots; each resolved scene below determines the room.
+Keep the original bytes available until delivery is confirmed. Check that each attachment
+points to the actual exported file, rather than renaming only its link label. Include a
+table with each exact filename in its first column and its original Library link when
+available, so the companion can recover a broken chat-card download without regenerating art.
 Keep the current CSV format. Do not add image URLs to the CSV. Do not publish Meta ads or
 operate the Ads app. The companion downloads these four attachments, saves and verifies them
 in the job's Dropbox folder, selects verified targeting, and submits the existing posting job.
@@ -188,7 +201,7 @@ followed by the exact incomplete checkpoint. Once delivery is verified, report c
 
 {result['master_prompt']}
 
-Before the final response, verify all four downloadable attachments are present above.
+{footer_review}
 """
 
 
@@ -314,6 +327,13 @@ def _post_request(value):
             raise ValueError('Dropbox returned an ad file outside this job’s exact delivery folder.')
     if len({meta['content_hash'] for meta in files[1:]}) != 3:
         raise ValueError('The three ad routes need distinct covers.')
+    refs = ads_direct_post.references(posting.AD_TYPE, state={})
+    from ads_companion_targeting import select
+    targeting = select(refs, result, client=posting.MetaPostingClient(), saved=value.get('targeting'))
+    set_id, audience = targeting['product_set_id'], targeting['audience']
+    if value.get('targeting') != targeting:
+        value['targeting'] = targeting
+        write(PREFIX+value['upload'], value)
     copy = ads_page.parse_instant_experience_copy_csv(_download(dbx, files[0], 2 * 1024**2), result)
     creatives = []
     for (route, name), meta in zip(COVERS.items(), files[1:]):
@@ -323,13 +343,6 @@ def _post_request(value):
         if not record['valid'] or record['source_format'] != 'JPEG':
             raise ValueError(f'{name} must be a valid full-resolution JPEG.')
         creatives.append(dict(copy[route][0], image=record))
-    refs = ads_direct_post.references(posting.AD_TYPE, state={})
-    from ads_companion_targeting import select
-    targeting = select(refs, result, client=posting.MetaPostingClient(), saved=value.get('targeting'))
-    set_id, audience = targeting['product_set_id'], targeting['audience']
-    if value.get('targeting') != targeting:
-        value['targeting'] = targeting
-        write(PREFIX+value['upload'], value)
     catalog_id = str(refs['catalog_resolution']['id'])
     if not posting._posting_form_ready(product_title=result['product_name'], product_url=result['product_url'],
             country=result['country'], sport=result['category'], creatives=creatives, catalog_id=catalog_id,
@@ -364,30 +377,73 @@ def _step(key, value, job, event, age):
         value.pop('prompt', None)
         stage, age = 'generating', 0
         value['stage'] = stage
+        value['last_chat_activity_at'] = time.time()
+        value.pop('handoff_pending', None)
+        value['detail'] = 'ChatGPT accepted the prompt; waiting for the finished covers and copy.'
         write(key, value)
-    if stage in ('opening', 'generating') and not value.get('collect_only') and event.get('state') in ('failed', 'uncertain', 'blocked'):
+    if stage == 'opening' and event.get('state') in ('sending', 'uncertain'):
+        value.update(handoff_pending=True, detail='Checking the existing ChatGPT conversation. The prompt will not be sent again.')
+        # Keep a separate start time so polling cannot extend the handoff timeout.
+        if not value.get('handoff_started_at'):
+            value['handoff_started_at'] = time.time() - age
+        write(key, value)
+    if stage in ('opening', 'generating') and not value.get('collect_only') and event.get('state') in ('failed', 'blocked'):
         raise ValueError(str(event.get('reason') or 'Check the Meta Ads conversation for the blocked step.')[:600])
     if stage == 'opening':
-        if age > 3600:
-            raise ValueError('The desktop did not confirm the ChatGPT handoff.')
+        if time.time() - value.get('handoff_started_at', time.time() - age) > 3600:
+            raise ValueError('The desktop could not confirm the existing ChatGPT conversation. Reconnect the companion; do not resend the prompt.')
         return dict(id=value['upload'], project=PROJECT, receipt=_source_token(value['upload']),
                     prompt=value['prompt'], stage=stage)
     if stage == 'generating':
+        if (CHAT.fullmatch(str(event.get('chat_url') or '')) and event.get('chat_url') == value.get('chat_url')
+                and isinstance(event.get('generating'), bool)):
+            now = time.time()
+            if event['generating'] or event.get('activity') != value.get('chat_activity'):
+                value['last_chat_activity_at'] = now
+            elif not value.get('last_chat_activity_at'):
+                value['last_chat_activity_at'] = now - age
+            value.update(chat_generating=event['generating'], chat_observed_at=now, chat_activity=event.get('activity'))
+            write(key, value)
+        if float((value.get('catalog_retry') or {}).get('next_at', 0)) > time.time():
+            return {}
         transfer_detail = str(event.get('transfer_detail') or '')[:600]
+        from ads_attachment_repair import advance as advance_repair
+        repair_send = advance_repair(value, event)
+        if value.get('attachment_repair'):
+            write(key, value)
+            if value['attachment_repair']['state'] in ('ready', 'sending'):
+                from ads_companion_transfer import delivery
+                return dict(delivery(value), repair_send=repair_send)
         if transfer_detail and transfer_detail != value.get('detail'):
             value['detail'] = transfer_detail
             write(key, value)
-        request = _post_request(value)
+        from ads_companion_targeting import CatalogPending
+        try:
+            request = _post_request(value)
+        except CatalogPending as error:
+            now = time.time()
+            retry = value.setdefault('catalog_retry', {'started_at': now, 'attempts': 0})
+            if now - retry['started_at'] >= 86400:
+                raise ValueError('Meta catalogue membership is still unverified after 24 hours. '
+                                 'All four files are saved. Check the Shopify Meta sync and product-set rules, then Resume import.') from error
+            retry['attempts'] += 1
+            delay = min(900, 60 * 2 ** min(retry['attempts'] - 1, 4))
+            retry.update(next_at=now + delay, reason=str(error))
+            value.update(collect_only=True, detail=f'All ad files are saved. Waiting for Meta catalogue membership; checking again in {delay // 60} min. No regeneration needed.')
+            write(key, value)
+            return {}
         if request:
             if stopped(value['upload']): return {}
             try:
                 value['posting_id'] = JOBS.submit(request)
             except PostingBusyError:
                 return dict(id=value['upload'], stage=stage)
+            value.pop('catalog_retry', None)
+            value['detail'] = 'Files verified - creating ads paused for review'
             stage, age = 'posting', 0
             value['stage'] = stage
             write(key, value)
-        elif age > 7200:
+        elif time.time() - value.get('last_chat_activity_at', time.time() - age) > 7200:
             raise ValueError('The three covers and ad copy did not arrive in Dropbox. Check the Meta Ads conversation.')
     if stage == 'posting':
         row = JOBS.snapshot(value['posting_id'])
@@ -431,7 +487,7 @@ def tick(token, event):
                               AND c.value->>'action' IN ('cancel','delete'))
               AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
                OR (a.value->>'stage'='waiting' AND
-                   (j.stage=7 OR ((j.stage=6 OR a.value->>'source'='new_ads') AND %s))))
+                   ((j.stage=6 OR a.value->>'source'='new_ads') AND %s)))
             ORDER BY (a.value->>'stage'='waiting') ASC, a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled))
         job = cur.fetchone()
         if not job:
@@ -449,14 +505,29 @@ def tick(token, event):
                        FROM app_settings WHERE key=%s""", (job['key'],))
         current = cur.fetchone()
         key, value, age = job['key'], current['value'], float(current['age'])
+        # Repair overlapping checkpoints from older schedulers without losing
+        # their saved chats/files. The selected job owns the slot until terminal.
+        cur.execute('''UPDATE app_settings a SET value=jsonb_set(
+                jsonb_set(a.value, '{resume_stage}', a.value->'stage'),
+                '{stage}', '"waiting"'::jsonb)
+            WHERE a.key LIKE %s AND a.key<>%s
+              AND a.value->>'stage' IN ('preparing','opening','generating','posting')
+              AND NOT EXISTS (SELECT 1 FROM app_settings c
+                  WHERE c.key='ads_job_control:' || (a.value->>'upload')
+                    AND c.value->>'action' IN ('cancel','delete'))''', (PREFIX+'%', key))
+        cur.execute('''SELECT 1 FROM app_settings WHERE key=%s
+            AND value->>'stage'='waiting' AND value ? 'resume_stage' ''', (PREFIX+reported,))
+        deferred_report = reported != value['upload'] and cur.fetchone() is not None
         if value['stage'] == 'waiting' and job['stage'] == 6:
-            value['stage'] = 'preparing'
+            value['stage'] = value.pop('resume_stage', 'preparing')
             age = 0
             cur.execute('UPDATE app_settings SET value=%s::jsonb, updated_at=now() WHERE key=%s',
                         (json.dumps(value), key))
     try:
         from ads_companion_controls import stopped
         if stopped(value['upload']): return {}
+        if deferred_report:
+            return {'stop': {'id': reported}}
         if value['stage'] in ('complete', 'failed'):
             return {}
         requester = DEFAULT_STORE.get_user(value['requester'])

@@ -30,7 +30,7 @@ ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
 EMAIL_STATUS_PATH = "/api/os/top-bar/email-status"
 DAILY_PLANNER_STATUS_PATH = "/api/os/top-bar/daily-planner-status"
 REPAIR_REQUESTS_PATH = "/api/os/top-bar/repair-requests"
-ORDER_SUMMARY_DISPLAY_CACHE_TTL_SECONDS = 30.0
+ORDER_SUMMARY_DISPLAY_CACHE_TTL_SECONDS = 10.0
 _ORDER_SUMMARY_DISPLAY_CACHE_LOCK = threading.Lock()
 _ORDER_SUMMARY_DISPLAY_CACHE = {"expires_at": 0.0, "value": None}
 _TASK_SEARCH_FIELDS = ("title", "text", "section", "category", "status")
@@ -1005,8 +1005,7 @@ def load_daily_planner_status(claims):
             except TypeError:
                 timer = supabase_backend.get_daily_execution_active_timer(user_id)
     except Exception:
-        events = []
-        timer = {}
+        return {"enabled": True, "available": False, "events": []}
     safe_events = [
         {
             "event": str(event.get("event") or ""),

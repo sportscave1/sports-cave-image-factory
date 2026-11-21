@@ -227,12 +227,12 @@ with patch.object(ads, '_render_ads_image_save'):
         app = AppTest.from_string(code).run(timeout=20)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.get('file_uploader')), 4)
-        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
+        self.assertTrue(next(b for b in app.button if b.label == 'Post now').disabled)
         next(b for b in app.button if b.label == 'Simulate successful save').click().run(timeout=20)
         self.assertFalse(app.exception)
-        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
+        self.assertTrue(next(b for b in app.button if b.label == 'Post now').disabled)
         next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=20)
-        self.assertIn('POST NOW', [b.label for b in app.button])
+        self.assertIn('Post now', [b.label for b in app.button])
 
 
 if __name__ == '__main__':

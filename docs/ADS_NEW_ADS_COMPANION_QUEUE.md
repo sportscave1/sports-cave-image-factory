@@ -67,3 +67,84 @@ Render for testing. The task was advanced to the latest production revision
 Release uses the existing primary service's automatic deployment from main;
 no Blueprint sync, service creation, production configuration change or desktop
 companion installation is required. Live ad generation is left to the user's test.
+
+
+## Status-bar reliability update — 21 November 2026
+
+Ads rows retain their buttons while progress and timestamps change. Stop displays
+its pending state immediately; Delete removes the row immediately and restores it
+if rejected. Confirmed action receipts override older header snapshots. Delete
+remains authoritative if a late Cancel arrives. Errors stay inline so a toast
+cannot cover the retry controls. Action requests have a 15-second timeout and
+release their buttons without waiting for the next status poll. Existing chats,
+files and Posting receipts remain available; stopping automation cannot reverse
+Meta operations already accepted.
+
+Quick Add keeps the typed query while products load, shares one in-flight read,
+and supports Reload products after an error or empty result. Search normalizes
+spacing, punctuation and accents, accepts words in any order and renders at most
+80 matching options at once. Selecting a result preserves its exact product ID;
+duplicate display names are never silently substituted. The dropdown overlays the
+form instead of moving Add to queue during a click. Retries after an uncertain
+submission reuse the same request ID to avoid duplicate jobs.
+
+The header version changes when its markup changes, including Reload products.
+On a same-version Streamlit rerun, retained Ads buttons are rebound, pending reads
+from the old controller cannot update the new panel, and the account-scoped typed
+query/selected product survives reopening. Browser coverage exercises both the
+retained shell and upgrading an open older header.
+
+Catalog records have a bounded, account-scoped 45-second cache shared by the picker
+and submission. Successful live catalog reads retain their existing five-minute
+cache; failed reads are no longer cached as empty results. Reload explicitly
+refreshes the live catalog. Logs `ads_picker_catalog` and `ads_queue_control` record
+read duration/count and committed action IDs without product/customer content.
+
+Regression coverage includes `test_ads_status_reliability_browser.py`,
+`test_ads_companion_controls.py`, `test_ad_quick_picker_browser.py`,
+`test_ads_queue_popup_browser.py` and `test_ads_popup_delete.cjs`, using synthetic
+endpoints or disposable PostgreSQL.
+
+## Prompt regression follow-up — 21 November 2026
+
+The follow-up suite covers the current production contract rather than the
+superseded three-line footer, manual New Ads Submit action, automatic saved-pack
+upgrades and old description-style bank. The approved two-line footer is 160px
+high, preserves its assigned headline/second-line split, and uses the unused line
+as the written Meta headline. Existing saved output stays verbatim. New Ads uses
+Add to queue; saved-draft renderer tests explicitly seed an existing draft.
+
+Snapshot fixtures were reconciled with production revision `5073a051` and the
+approved current prompt policies. They remain exact hashes/structure assertions;
+the test run does not auto-accept new snapshots. Public builders additionally run
+across every selectable sport and market, checking the image count, footer,
+standalone briefs and persisted copy assignments. Historical seasonal substitution
+has its own synthetic legacy template; current two-line prompts stay unchanged.
+
+Two functional regressions were corrected: shared racing-copy instructions now
+precede the final CSV instead of becoming extra CSV rows, and refresh packages
+validate uploaded image uniqueness even
+across locally edited and reused original cards, preserving their saved notes.
+Saved copy-only IE variants may intentionally share the verified original bytes;
+this exception requires both an explicit reuse declaration and the exact source
+hash. Edited outputs and separate Carousel cards retain duplicate checks.
+Optional copy review is tested directly as a compatibility component while
+current generation retains its integrated review.
+Current Carousel records now return immediately on reopen, avoiding repeated
+prompt rebuilds and preserving their creation timestamp and saved copy. Shared
+editor, upload and Carousel fixtures were also aligned with their deployed
+interfaces and current physical-scale/publication wording.
+
+Run the complete Ads and queue checks with:
+
+```powershell
+$env:AUTO_EDITIONS_TEST_PGLITE = '<local @electric-sql/pglite/dist/index.js>'
+python scripts/run_ads_regression.py
+```
+
+The runner strips inherited production credentials, refuses unmocked provider
+HTTP/database access, runs Python prompt/UI/queue tests and then the Node status,
+request, navigation and download checks. Browser fixtures use synthetic endpoints;
+no real advertising, uploads or customer automations are executed.
+The standalone prompt editor runs in a separate test process from legacy upload
+modules so their imported application adapters cannot pollute its Streamlit state.

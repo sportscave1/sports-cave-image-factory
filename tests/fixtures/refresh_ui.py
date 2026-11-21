@@ -55,9 +55,16 @@ def ready_carousel(count=5):
             source['carousel_cards'] = source['carousel_cards'][:count]
             copy['cards'] = copy['cards'][:count]
             workflow['slots'] = dict(list(workflow['slots'].items())[:count])
+        # This exercises a saved historical Carousel, not the new three-image
+        # refresh flow. Rebuild its synthetic saved plan for the changed card set.
+        from ads_refresh_plan import preserve, reference_map, identity_hash
+        context = {**result['creative_refresh_context'], 'source_winner':source}
+        context['refresh_plan'] = preserve.build_plan(context, 'Carousel', result['product_name'], result['category'],
+            'synthetic-v3', reference_map('Carousel', source),
+            identity_hash(context, 'Carousel', result['product_name'], result['category']))
         result = ads.build_ads_result_record(result['product_name'], result['category'], result['country'], 'Carousel',
             product_id=result['product_id'], product_url=result['product_url'], variation_token='synthetic-v3',
-            creative_refresh_context={**result['creative_refresh_context'], 'source_winner':source})
+            creative_refresh_context=context)
         workflow['context_key'] = result['context_key']
         # Six-card fixture is for UI/count checks; it deliberately has incomplete analysis.
     from tests.fixtures.carousel_evolution import attach_reviews
@@ -82,6 +89,12 @@ def main():
             context = result['creative_refresh_context']
             for i,card in enumerate(context['source_winner']['carousel_cards'],1):
                 card['image_sha256'] = f'fixture-card-{i}'
+            # Adding fixture media receipts must not silently opt the saved
+            # Carousel into today's three-image refresh contract.
+            from ads_refresh_plan import preserve, reference_map, identity_hash
+            context['refresh_plan'] = preserve.build_plan(context, kind, result['product_name'], result['category'],
+                'synthetic-v3', reference_map(kind, context['source_winner']),
+                identity_hash(context, kind, result['product_name'], result['category']))
             result=ads.build_ads_result_record(result['product_name'],result['category'],result['country'],kind,
                 product_id=result['product_id'],product_url=result['product_url'],variation_token='synthetic-v3',
                 creative_refresh_context=context)

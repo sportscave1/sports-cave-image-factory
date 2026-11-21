@@ -14,8 +14,9 @@ INSTANT_EXPERIENCE_CONCEPTS = (
         "id": "premium_scarcity_front",
         "slot_id": "instant-experience-premium-scarcity-front",
         "display_name": "Premium Scarcity — Straight On",
-        "scene_name": "Architectural Wall",
-        "scene_label": "Artwork-first wall with a small home glimpse",
+        "scene_name": "Collector Hallway Front View",
+        "scene_label": "Front-view collector hallway in a different home",
+        "artifact_filename": "architectural-wall.jpg",  # Durable Companion slot; independent of room name.
         "supporting_label": "Straight-on product photograph",
         "folder": "02-premium-scarcity-front",
         "filename_prefix": "premium_scarcity_front_cover_original",

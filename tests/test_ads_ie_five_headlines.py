@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, rotated_ie, scenes_ie
 """Fresh headline rotation and immutable saved-pack contracts."""
 import copy
 import unittest
@@ -18,19 +19,8 @@ class FiveHeadlinesTests(unittest.TestCase):
             creative_refresh_context={"winning_primary_text":"Winner text", "winning_headline":"Winner headline"} if refresh else None)
 
     def test_exact_bank_and_both_paths_use_distinct_headlines(self):
-        self.assertEqual(words.HEADLINES, APPROVED)
-        for refresh in (False, True):
-            first = self.record(refresh=refresh)
-            second = self.record("next", first["instant_experience_fingerprints"], refresh=refresh)
-            sets = []
-            for record in (first, second):
-                heads = {r["headline_text"] for r in record["instant_experience_fingerprints"]}
-                self.assertEqual(len(heads), 3)
-                self.assertTrue(heads <= set(APPROVED))
-                sets.append(heads)
-                for h in heads:
-                    self.assertIn("HEADLINE: " + h, record["master_prompt"])
-            self.assertNotEqual(sets[0], sets[1])
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        rotated_ie(self)
 
     def test_five_options_rotate_over_many_packs_and_reopen_verbatim(self):
         history = []
@@ -46,38 +36,12 @@ class FiveHeadlinesTests(unittest.TestCase):
         self.assertEqual(used, set(APPROVED))
 
     def test_legacy_or_duplicate_selections_upgrade_once_and_stay_fixed(self):
-        for headline in ("FOR YOUR COLLECTION", "STRICTLY LIMITED TO 100 EDITIONS", APPROVED[0]):
-            for refresh in (False, True):
-                record = self.record(refresh=refresh)
-                metadata = copy.deepcopy(record["product_metadata"])
-                for saved in metadata["instant_experience_footer_selections"]:
-                    saved["headline_text"] = saved["headline_fit_fallback"] = headline
-                    saved["eligible_headline_alternatives"] = ["FOR YOUR COLLECTION"]
-                rebuilt = self.record(metadata=metadata, refresh=refresh)
-                selected = rebuilt["product_metadata"]["instant_experience_footer_selections"]
-                self.assertEqual(len({s["headline_text"] for s in selected}), 3)
-                self.assertTrue(all(s["headline_text"] in APPROVED for s in selected))
-                self.assertNotIn("FOR YOUR COLLECTION", rebuilt["master_prompt"])
-                reopened = self.record("other", metadata=rebuilt["product_metadata"], refresh=refresh)
-                self.assertEqual(selected, reopened["product_metadata"]["instant_experience_footer_selections"])
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        saved_ie(self)
 
     def test_exports_keep_assignments_and_mandatory_number_emphasis(self):
-        for refresh in (False, True):
-            result = self.record(refresh=refresh)
-            rows = ads.resolve_standard_instant_experience_visuals(
-                product_name="Volkanovski", category="MMA", country="Australia",
-                variation_token="different", product_metadata=result["product_metadata"])
-            for index, row in enumerate(rows, 1):
-                prompt = ads.build_standard_instant_experience_image_prompt(
-                    index, row, product_name="Volkanovski", category="MMA", country="Australia")
-                expected = result["product_metadata"]["instant_experience_footer_selections"][index-1]["headline_text"]
-                self.assertIn("HEADLINE: " + expected, prompt)
-                self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
-                self.assertIn("Always highlight all three digits of 100", prompt)
-                self.assertIn("18–20%", prompt)
-                self.assertIn("SUPPORTING LINE: " + row["supporting_line"], prompt)
-                self.assertNotIn("FOR YOUR COLLECTION", prompt)
-                self.assertEqual(row["eligible_headline_alternatives"], [])
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
     def test_no_normalisation_or_fallback_headline(self):
         for text in ("FOR YOUR COLLECTION", APPROVED[0].upper(), "invented headline", "x"*100):

@@ -7,6 +7,7 @@ const suppliedReceipt = /^[a-f0-9]{64}$/;
 const pending = new Map();
 const latest = 'uploadCompanionLast';
 let queue = Promise.resolve();
+importScripts('message-deadline.js');
 importScripts('staff-queue.js');
 importScripts('design-queue.js');
 importScripts('ad-queue.js');
@@ -41,7 +42,7 @@ async function run(id, prompt, job) {
     const deadline = Date.now() + 18000;
     let ready;
     do {
-      try { ready = await chrome.tabs.sendMessage(job.tab, {type:'project:ready'}, {frameId:0}); }
+      try { ready = await companionMessage(job.tab, {type:'project:ready'}, {frameId:0}); }
       catch { /* Edge has not loaded the project content script yet. */ }
       if (job.cancelled) return;
       if (ready?.ready) break;
@@ -52,7 +53,7 @@ async function run(id, prompt, job) {
       return;
     }
     if (job.cancelled) return;
-    const result = await chrome.tabs.sendMessage(job.tab, {type:'project:send', id, prompt,
+    const result = await companionMessage(job.tab, {type:'project:send', id, prompt,
       freshUpload:!job.designJob && !job.adJob, reference:job.reference}, {frameId:0});
     if (job.cancelled) return;
     if (result?.sent && job.sending) {
@@ -135,10 +136,10 @@ async function permit(message, sender) {
 }
 async function backupDraft(message, sender) {
   const job=pending.get(message.id);
-  if (!job || job.designJob || job.sending || sender.frameId!==0 || sender.tab?.id!==job.tab ||
-      sender.url!==project || typeof message.text!=='string' || !message.text.trim() ||
+  if (!job || job.sending || sender.frameId!==0 || sender.tab?.id!==job.tab ||
+      sender.url!==(job.project || project) || typeof message.text!=='string' || !message.text.trim() ||
       message.text.length>1048576) return {ok:false};
-  await chrome.storage.local.set({['draft:'+message.id]:{text:message.text, time:Date.now(), project}});
+  await chrome.storage.local.set({['draft:'+message.id]:{text:message.text, time:Date.now(), project:job.project || project}});
   return {ok:true};
 }
 function isOsComponent(address) {
@@ -152,16 +153,28 @@ function isOsComponent(address) {
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let action;
+  if(message?.type==='os:wake-designs' && sender.frameId===0 &&
+      sender.url && new URL(sender.url).origin===osOrigin) {
+    action=designQueueTick().then(()=>({accepted:true}));
+  } else
   if (message?.type === 'project:permit') {
     action = permit(message, sender);
   } else if (message?.type === 'project:backup-draft') {
     action = backupDraft(message, sender);
+  } else if (message?.type === 'project:design-progress') {
+    action = wakeDesignFromTab(sender);
   } else if (message?.type === 'project:blocked' && sender.frameId === 0) {
     action = recordChatBlock(sender, message.code);
   } else if (sender.frameId > 0 && sender.tab && isOsComponent(sender.url)) {
     if (message?.type === 'os:health') action = health(message.receipt);
     if (message?.type === 'os:start') action = start({...message, senderTab:sender.tab.id}).then(result => ({...result, version:chrome.runtime.getManifest().version}));
     if (message?.type === 'os:pair') action = pairStaffQueue(message.token);
+    if (message?.type === 'os:wake') action = staffRead(staffDeviceKey).then(async token => {
+      if (!token) return {paired:false};
+      await ensureStaffAlarm();
+      void staffQueueTick();
+      return {paired:true};
+    });
   }
   if (!action) return;
   action.then(reply, () => reply({error:true}));

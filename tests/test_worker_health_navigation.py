@@ -4,26 +4,27 @@ import navigation_runtime,os_accounts
 
 ROOT=Path(__file__).parents[1]
 
-def test_developer_default_order_and_active_collapse():
+def test_companion_default_order_and_active_collapse():
     page=AppTest.from_file(str(ROOT/'tests/worker_health_nav_fixture.py'),default_timeout=15).run()
     assert not page.exception
-    page.button(key='sidebar-disclosure::developer').click().run()
-    assert not page.exception and page.session_state['route']=='Worker Health'
-    assert page.button(key='sidebar-child::Worker Health').proto.type=='primary'
+    page.button(key='sidebar-disclosure::companion').click().run()
+    assert not page.exception and page.session_state['route']=='Upload Companion'
+    assert page.button(key='sidebar-child::Upload Companion').proto.type=='primary'
     assert 'Editions Companion' in page.button(key='sidebar-child::Worker Health').label
     children=[button.key for button in page.button]
-    assert children.index('sidebar-child::Upload Companion')==children.index('sidebar-child::Worker Health')+1
-    # Keep original owner-only Dev Mode as a separate-tab native link.
-    links=page.get('link_button');assert any('Developer%20Studio' in x.proto.url and 'dev_mode=1' in x.proto.url for x in links)
-    page.button(key='sidebar-disclosure::developer').click().run()
-    assert not page.exception and page.session_state['route']=='Worker Health'
+    assert children.index('sidebar-child::Worker Health')==children.index('sidebar-child::Upload Companion')+1
+    page.button(key='sidebar-disclosure::companion').click().run()
+    assert not page.exception and page.session_state['route']=='Upload Companion'
     assert not any(x.key=='sidebar-child::Worker Health' for x in page.button)
-    page.button(key='sidebar-disclosure::developer').click().run()
+    page.button(key='sidebar-disclosure::companion').click().run()
     assert page.button(key='sidebar-child::Worker Health')
     assert navigation_runtime.active_disclosure_group('Worker Health')=='developer'
     page.button(key='sidebar-child::Upload Companion').click().run()
     assert not page.exception and page.session_state['route']=='Upload Companion'
     assert page.button(key='sidebar-child::Upload Companion').proto.type=='primary'
+    # Current main keeps Dev Mode in Developer, separate from Companion.
+    page.button(key='sidebar-disclosure::developer').click().run()
+    links=page.get('link_button');assert any('Developer%20Studio' in x.proto.url and 'dev_mode=1' in x.proto.url for x in links)
 
 def test_worker_health_cannot_be_assigned_to_staff_or_replace_owner_dev_mode(monkeypatch):
     admin=dict(role='admin',is_active=True,email='admin@fixture.invalid')

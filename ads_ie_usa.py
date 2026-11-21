@@ -19,8 +19,8 @@ GLAZING = ('For every framed edition: Show believable premium glass reflections 
            'Keep strong reflections away from those areas. At thumbnail size, product recognition takes priority over reflection visibility. '
            'Preserve premium glass, never an acrylic appearance or pasted-on product. Keep realistic frame-edge highlights and mounting shadows; '
            'no bright window grids across important details. Preserve unframed products without adding a frame or pane.')
-COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the collector hallway, straight-on architectural product wall and residential man cave, '
-               'with their resolved cameras: a subtle randomly selected left/right viewpoint for the hallway and man cave, and a mostly straight-on architectural wall. Resolve once and preserve saved camera assignments; legacy route IDs and copy labels never determine the camera. Use three recognisably different residential compositions, different room styles, '
+COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the angled collector hallway, front-view collector hallway in a different home and residential man cave, '
+               'with their resolved cameras: a subtle randomly selected left/right viewpoint for the first hallway and man cave, and a mostly straight-on view of the second collector hallway with clear passage depth. Resolve once and preserve saved camera assignments; legacy route IDs and copy labels never determine the camera. Use three recognisably different residential compositions, different room styles, '
                'clearly different wall-colour families, different wall finishes and different lighting setups. Priority: product fidelity and real scale; subject and defining-detail recognition; desirable '
                'residential presentation; meaningful composition variety; then environmental novelty. Moderate perspective, no extreme foreshortening. '
                'Move the camera closer when needed, never enlarge the product. Keep the full frame, breathing room and footer clearance. '
@@ -99,7 +99,8 @@ def resolve_camera(visual, index, seed, saved):
     visual.update(camera_side=camera, assigned_camera_angle=camera,
                   camera_role=camera.split(':', 1)[0],
                   camera_instruction=camera + '. Keep the existing subtle perspective, straight verticals and rigid complete frame. Never mirror artwork.')
-    names = ('COLLECTOR HALLWAY', 'ARCHITECTURAL WALL', 'MAN CAVE')
+    from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
+    names = tuple(idea['scene_name'].upper() for idea in INSTANT_EXPERIENCE_CONCEPTS)
     visual['group_heading'] = f'GROUP {index + 1} — {names[index]}'
 
 
@@ -166,7 +167,7 @@ def adapt_prompt(prompt):
     prompt = prompt.replace(GLAZING_REQUIREMENT, GLAZING).replace(SCENE_VISIBILITY_RULES.strip(), COMPOSITION+' '+WALL_RULES)
     prompt = prompt.replace(ROOM_STYLE, WALL_RULES)
     prompt = re.sub(r'PACK COMPOSITION:.*?(?=\n\n)', COMPOSITION+' '+WALL_RULES, prompt, flags=re.S)
-    prompt = re.sub(r'MANDATORY CREATIVE VARIETY AND TYPOGRAPHY:.*?(?=\n)', COMPOSITION+' Preserve the existing restrained typography; resolve choices before exactly one image per ad.', prompt)
+    prompt = re.sub(r'MANDATORY CREATIVE VARIETY AND TYPOGRAPHY:.*?(?=\n)', COMPOSITION+' Preserve the existing restrained typography; resolve choices before the initial image for each ad, then use the existing final creative review before export.', prompt)
     replacements = {
         'Generate Image 1 (RIGHT angle)': 'Generate Image 1 (collector hallway; use its resolved camera)',
         'generate Image 3 (LEFT angle)': 'generate Image 3 (man cave; use its resolved camera)',
@@ -176,12 +177,8 @@ def adapt_prompt(prompt):
         'Premium collector hallway: close edition-led photography': 'Premium collector hallway: edition-led photography',
         'retain close edition prominence.': 'retain recognisable edition prominence.',
         'GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.': 'GLAZING CHECK: Product recognition takes priority over reflection visibility at thumbnail size.',
-        'Confirm three different approved footer headlines and distinct supporting lines in every set; preserve the assigned selections verbatim.': 'Confirm three different approved footer headlines and each image’s exact resolved supporting line; preserve all assignments verbatim. Fresh packs draw three distinct approved sentences once without replacement; never reroll saved assignments.',
         'three visibly different homes/walls/light': 'three recognisably different residential compositions',
         'flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count)': 'check premium glazing without obscuring faces, action or defining edition text; thumbnail recognition takes priority',
-        'approved selected headline and supporting-line wording, with maximum eligible variety': 'the three distinct exact approved footer headlines and each image’s assigned approved supporting sentence',
-        'Select three different approved headlines for a fresh pack; no within-pack repeats.': 'Select three different approved headlines without replacement; use each image’s exact resolved supporting sentence. Fresh packs use three distinct sentences from the approved six-line bank, selected once before generation; never invent, paraphrase, combine or reroll sentences.',
-        'Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared.': 'Never repeat an approved headline within this three-image set; repeat the fixed CTA; preserve each image’s resolved supporting sentence through individual calls, retries and exports. Repetition across future packages is allowed.',
         'Keep all signature and fixed template lines verbatim, including': 'Keep signature hooks, scarcity and ownership closes verbatim; generic supporting lines are editable in place. Preserve',
         'Keep the three hook families, mandatory lines and ownership closes even when recent history contains them.': 'Keep the three signature hook families, approved scarcity and ownership closes even when history contains them; personalise generic supporting lines in their existing positions.',
         '- Wall colour and cues differ from the other routes.': '- Room styles, wall-colour families, finishes and lighting must visibly differ across the three resolved scenes.',

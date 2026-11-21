@@ -12,7 +12,8 @@ def exported(selected):
 def test_live_without_edition_metadata_has_publication_then_pending_handoff():
     text = exported('LIVE')
     assert 'Pending edition setup alone does not block Live publication' in text
-    assert 'set ACTIVE and publish the product AND every selected collection' in text
+    assert 'set ACTIVE and publish the product to all enabled normal wall-art channels' in text
+    assert 'Apply every selected collection, deduplicated by stable ID' in text
     assert 'PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING' in text
     assert text.index('7. SELECTED-MODE PUBLICATION') < text.index('8. COMPLETION CHECK')
     assert '15428753948979' not in text

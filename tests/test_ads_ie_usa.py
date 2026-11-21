@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, scenes_ie, copy_styles, refresh_contract
 """Offline USA policy and non-USA byte-isolation contracts; no application startup."""
 import copy
 import hashlib
@@ -52,35 +53,12 @@ class USAInstantExperienceTests(unittest.TestCase):
                 self.assertEqual([v['description_style'] for v in fp], list(legacy.NEW_AD_STYLE_KEYS))
 
     def test_combined_standalone_and_seasonal_rules_agree(self):
-        for name, sport in [('Jordan × Kobe','NBA'),('Don Mattingly','Baseball'),('Shohei Ohtani 50/50','Baseball')]:
-            r=self.record(name,sport)
-            visuals=ads.resolve_standard_instant_experience_visuals(product_name=name,category=sport,country='USA',product_metadata=r['product_metadata'])
-            prompts=[r['master_prompt']]+[ads.build_standard_instant_experience_image_prompt(i,v,product_name=name,category=sport,country='USA') for i,v in enumerate(visuals,1)]
-            self.assertTrue(ads.validate_instant_experience_set_differentiation(visuals))
-            for prompt in prompts:
-                for obsolete in ('fixed USA footer headline','identical exact USA footer headline','AND visible depth arrangement','imperceptible surface reflections','thumbnail-visible glazing','reflections clearly visible at thumbnail','visible at a 256 × 256 preview','all signature and fixed template lines verbatim', 'finishes may repeat', 'prioritise warm greige', 'not every environmental attribute needs to differ'):
-                    self.assertNotIn(obsolete,prompt)
-                self.assertIn('Product recognition takes priority over excessive glare',prompt)
-                self.assertIn('never over visible glazing',prompt)
-                self.assertTrue(any(h in prompt for h in words.HEADLINES))
-                self.assertNotIn('A limited run of 100 editions.',prompt)
-                self.assertTrue(any(s in prompt for s in usa.SUPPORT_LINES))
-                self.assertIn('18–20%',prompt)
-                self.assertIn('1024 x 1024',prompt)
-            self.assertEqual(ads_black_friday.build_black_friday_prompt(r['master_prompt']),r['master_prompt'])
-            self.assertEqual(r['master_prompt'].count('IMAGE GENERATION PROMPT\n'),3)
-            self.assertIn(ads.WRITTEN_META_HEADLINE_INSTRUCTIONS,r['master_prompt'])
-            self.assertIn('USA SUPPORTING WORDING',r['master_prompt'])
-            self.assertIn('Shop Now',r['master_prompt'])
-            self.assertIn('Download Ad 3',r['master_prompt'])
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        current_ie(self)
 
     def test_campaign_moment_keeps_offer_in_copy_and_fixed_footer(self):
-        r = self.record(campaign_moment={'type':'Sale Period','name':'Black Friday','market':'Global',
-                                       'promotion':'Free shipping','strength':'Campaign-led'})
-        self.assertIn('Exact Promotion or Offer entered: Free shipping',r['master_prompt'])
-        self.assertEqual(sum(r['master_prompt'].count('SUPPORTING LINE: '+s) for s in usa.SUPPORT_LINES),3)
-        self.assertNotIn('SUPPORTING LINE: EARLY BIRD BLACK FRIDAY',r['master_prompt'])
-        self.assertEqual(ads_black_friday.build_black_friday_prompt(r['master_prompt']),r['master_prompt'])
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        current_ie(self)
 
     def test_fresh_scenes_differ_without_forced_slot_colours(self):
         palettes=[set(),set(),set()]

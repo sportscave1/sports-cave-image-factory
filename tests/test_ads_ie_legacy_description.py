@@ -19,11 +19,11 @@ class LegacyDescriptionTests(unittest.TestCase):
         text = result["master_prompt"]
         self.assertEqual(text, result["generated_ad_output"])
         self.assertNotIn(legacy.VERSION, text)
-        self.assertIn("Create THREE refreshed creatives", text)
-        self.assertIn("ONE copy pair per permanent slot, variation=1, output_mode=winner_refinement", text)
+        self.assertIn("THREE CORRESPONDING WRITTEN COPY SETS", text)
+        self.assertIn("IE uses variation=1 and output_mode=winner_refinement", text)
         self.assertIn("This isn't wall art.\nA collector's memory.", text)
         self.assertIn("Remember The Winning Moment", text)
-        self.assertIn("retaining the winner's underlying emotional/collector appeal", text)
+        self.assertIn("Preserve winning message, emotional appeal, collector identity", text)
         for framework in ('Framed Greatness:', 'Choose a Side:', 'A two-line ownership challenge.'):
             self.assertNotIn(framework, text)
         self.assertNotIn("Description 2 —", text)

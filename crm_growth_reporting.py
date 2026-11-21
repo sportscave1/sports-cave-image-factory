@@ -118,7 +118,14 @@ def growth_report(day):
 def published_sports_edition(day):
     edition = get_app_setting(SETTING_KEY, ensure_schema_first=False)
     if not edition or edition.get("date") != day.isoformat():
-        return {"date": day.isoformat(), "status": "pending"}
+        from home_brief_calendar import HISTORY_PREFIX
+        edition = get_app_setting(HISTORY_PREFIX + day.isoformat(), ensure_schema_first=False)
+    if not edition or edition.get("date") != day.isoformat():
+        edition = {"date": day.isoformat(), "status": "pending"}
+    from sports_sales_calendar import sydney_date
+    if day == sydney_date():
+        from home_brief_opportunities import opportunity_context
+        edition = {**edition, "opportunity_context": opportunity_context(day)}
     return edition
 
 

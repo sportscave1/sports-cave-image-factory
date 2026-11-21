@@ -131,20 +131,10 @@ class CarouselDetailPromptTests(unittest.TestCase):
                 else:
                     prompt = ads_page.build_ads_prompt(**kwargs, campaign_type=kind)
                 if kind.startswith("refresh_"):
-                    self.assertIn("WINNER LED REFRESH V3", prompt)
-                    if kind == 'refresh_Carousel':
-                        self.assertIn('CANONICAL_PRODUCT', prompt)
-                        self.assertIn('COLLECTIVE WINNER CAROUSEL V1', prompt)
-                    else:
-                        self.assertIn('CANONICAL_PRODUCT', prompt)
+                    self.assertIn("WINNER DIRECTION THREE DISTINCT REFRESHES V2", prompt)
+                    self.assertIn('CANONICAL_PRODUCT', prompt)
                 if kind.startswith('card_'):
-                    # Only the reviewed visual glazing instruction changed in these cards.
-                    baseline_prompt = prompt.replace(
-                        'premium clear glass reflections on existing glazing, preserving verified construction',
-                        'clear transparent acrylic/Perspex or glass, matching the verified product').replace(
-                        'a premium clear glass reflection look, visible restrained reflections',
-                        'clear acrylic/glass, restrained reflections')
-                    self.assertEqual(hashlib.sha256(baseline_prompt.encode()).hexdigest(), row["sha256"])
+                    self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(), row["sha256"])
                 else:
                     self.assertEqual(contract_shape(prompt), structures['detail/'+row['category']+'/'+kind])
 
@@ -169,12 +159,14 @@ class CarouselDetailPromptTests(unittest.TestCase):
             for country in ads_page.COUNTRY_OPTIONS[1:]:
                 current = carousel_prompt_card_sections(visual_contract(final_prompt(category, country)))
                 refresh = final_prompt(category, country, creative_refresh_context=winner)
-                self.assertIn("WINNER LED REFRESH V3", refresh)
+                self.assertIn("WINNER DIRECTION THREE DISTINCT REFRESHES V2", refresh)
+                self.assertIn('Campaign format: Single Image / Video', refresh)
+                self.assertIn('WINNER_AD', refresh)
                 self.assertNotIn("RESOLVED CAROUSEL SCENE", refresh)
                 for index in (2, 3, 4):
                     with self.subTest(category=category, country=country, card=index):
                         self.assertIn("RESOLVED CAROUSEL SCENE", current[index])
-                        self.assertIn(f"WINNER_CARD_{index}", refresh)
+                        self.assertIn('CANONICAL_PRODUCT', refresh)
 
     def test_visual_contract_upgrade_replaces_old_version_once(self):
         kwargs = dict(product_name="Collector Detail Test", category="Cricket", country="Australia", campaign_type="Carousel")

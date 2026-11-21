@@ -39,13 +39,22 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v3";
+  const CONTROLLER_VERSION = "companion-header-v7-order-status-recovery";
   const TEMPORARY_TOAST_MS = 3000;
-  const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
+  let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
     doc.getElementById(ROOT_ID)?.dataset.navigationEpoch || 0,
   );
-  if (liveNavigationEpoch > incomingNavigationEpoch) return;
+  if (liveNavigationEpoch > incomingNavigationEpoch) {
+    // A reconnect/deploy can reset Python's session epoch while the persistent
+    // header remains mounted. Refresh its credentials/status on the settled
+    // current page, without accepting a late response for another navigation.
+    const liveRoot = doc.getElementById(ROOT_ID);
+    const documentRoute = new URL(parentWindow.location.href).searchParams.get('page') || 'dashboard';
+    if (config.currentRouteKey !== documentRoute || liveRoot?.dataset.currentRouteKey !== documentRoute
+        || liveRoot?.dataset.pendingRouteKey || doc.body.classList.contains('sc-navigation-pending')) return;
+    config.navigationEpoch = incomingNavigationEpoch = liveNavigationEpoch;
+  }
 
   const icon = (name) => {
     const paths = {
@@ -391,6 +400,12 @@
     section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button span.sc-orders-action-badge,
     section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-social-"] button span.sc-orders-action-badge {
       right: 34px;
+    }
+    #sc-os-notifications { position: relative; }
+    #sc-os-orders-notification-count {
+      position: absolute; right: -3px; top: -2px; min-width: 17px;
+      padding: 1px 3px; border-radius: 999px; background: #c9a23b;
+      color: #171610; font: 700 10px/15px sans-serif; pointer-events: none;
     }
     #sc-os-order-toast-region {
       position: fixed;
@@ -980,15 +995,22 @@
     .sc-companion-popup {padding:8px!important;width:min(380px,calc(100vw - 20px));}
     .sc-companion-popup article:first-child {padding-right:18px;}
     .sc-ad-actions {display:inline-flex;gap:4px;float:right;margin-left:5px;}
-    .sc-ad-actions button {width:26px;height:26px;padding:2px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
+    .sc-ad-actions button {width:36px;height:36px;touch-action:manipulation;padding:2px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
+    @media(pointer:coarse){.sc-ad-actions button{width:44px;height:44px;}}
     .sc-ad-actions button:disabled {opacity:.4;cursor:default;}
+    .sc-design-actions {display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;}
+    .sc-design-actions button {min-height:30px;padding:4px 8px;border:1px solid #6f5a2e;border-radius:5px;background:#252017;color:#f3ce7e;font:13px Arial;cursor:pointer;}
+    .sc-design-actions button:disabled {opacity:.4;cursor:default;}
     .sc-ad-quick {border-top:1px solid #63512d;margin-top:6px;padding-top:6px;}
-    .sc-ad-quick summary {border:0!important;padding:4px!important;font:600 12px Arial!important;color:#f3ce7e!important;cursor:pointer;}
+    .sc-ad-quick summary {border:1px solid #6f5a2e!important;border-radius:6px;min-height:32px;box-sizing:border-box;display:flex;align-items:center;padding:6px 8px!important;font:600 12px Arial!important;color:#f3ce7e!important;cursor:pointer;}
     .sc-ad-quick form {display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:5px;margin-top:6px;}
     .sc-ad-quick label {font:11px Arial!important;color:#e7ddc7!important;display:grid;gap:3px;min-width:0;}
-    .sc-ad-quick label:first-child {grid-column:1/-1;}
+    .sc-ad-quick label:first-child {grid-column:1/-1;position:relative;}
     .sc-ad-quick select,.sc-ad-quick input,.sc-ad-quick button {width:100%;box-sizing:border-box;min-width:0;background:#252017;color:#f8edcf;border:1px solid #6f5a2e;border-radius:4px;padding:6px;font:12px Arial;}
-    .sc-ad-quick button {grid-column:1/-1;cursor:pointer;color:#17140e;background:#d1a444;}
+    #sc-ad-products {position:absolute;top:100%;left:0;right:0;z-index:5;max-height:220px;overflow-y:auto;background:#fff;color:#272727;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px #0003;}
+    #sc-ad-products [role="option"] {padding:11px 8px;touch-action:manipulation;cursor:pointer;font:12px/1.4 Arial;overflow-wrap:anywhere;}
+    #sc-ad-products [aria-selected="true"] {background:#f0eee7;}
+    .sc-ad-quick button {grid-column:1/-1;min-height:36px;touch-action:manipulation;cursor:pointer;color:#17140e;background:#d1a444;}
     #sc-ad-message {font:11px/1.3 Arial!important;color:#f3ce7e!important;white-space:normal;}
     .sc-companion-popup a {color:#f3ce7e;display:inline-block;margin:4px 12px 4px 0;}
     .sc-companion-close {position:absolute;right:4px;top:4px;color:inherit;background:transparent;border:0;font:20px Arial;cursor:pointer;}
@@ -1080,7 +1102,7 @@
       <div id="sc-os-ads-card" class="sc-companion-card" hidden>
         <details id="sc-os-ads-status" class="sc-companion-details">
           <summary><span class="sc-companion-name">Ads</span><span id="sc-os-ads-title" class="sc-companion-title"></span><span id="sc-os-ads-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-ads-meter" max="100" aria-label="Ads stage progress"></progress></summary>
-          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" list="sc-ad-products" placeholder="Search products" required autocomplete="off"><datalist id="sc-ad-products"></datalist></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status" aria-live="polite"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" role="combobox" aria-autocomplete="list" aria-controls="sc-ad-products" aria-expanded="false" placeholder="Search products" required autocomplete="off"><div id="sc-ad-products" role="listbox" aria-label="Edition Ops products" hidden></div></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-reload" type="button">Reload products</button><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
         </details>
       </div>
     </div>
@@ -1200,102 +1222,290 @@
       meter:root.querySelector(`#sc-os-${name}-meter`),
       list:root.querySelector(`#sc-os-${name}-list`),
     }]));
+    let designRotation = 0, designRunningKey = '', lastCompanionStatus = null;
+    const renderCompanionSummary = (name, elements, control, status) => {
+      const jobs = control.jobs;
+      const running = jobs.filter(item => item.state === 'running');
+      if (name === 'design') {
+        const key = running.map(item => item.id).join('|');
+        if (key !== designRunningKey) {designRunningKey = key; designRotation = 0;}
+      }
+      const rotating = name === 'design' && running.length > 1;
+      const job = (rotating ? running[designRotation % running.length] : running[0]) || jobs.find(item => item.state === 'waiting') || jobs[0];
+      const online = name === 'ads' ? control.online : status.online;
+      const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
+      let label = job ? job.label : idle;
+      if (rotating) label = `${running.length} working · ${designRotation % running.length + 1}/${running.length} · ${label}`;
+      if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
+      if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
+      if (control.waiting) label += ` · ${control.waiting} waiting`;
+      const changed = elements.title.dataset.jobId && elements.title.dataset.jobId !== job?.id;
+      elements.title.dataset.jobId = job?.id || '';
+      elements.title.textContent = job?.title || 'No current job';
+      elements.stage.textContent = label;
+      elements.panel.title = '';
+      elements.panel.dataset.state = job?.state || 'idle';
+      elements.panel.dataset.stale = 'false';
+      elements.meter.value = job?.percent || 0;
+      elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
+      if (rotating && changed && !parentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        elements.title.animate([{opacity:0},{opacity:1}], {duration:250});
+      }
+    };
+    timers.add(parentWindow.setInterval(() => {
+      const elements = companionPanels.design, control = queues.design;
+      if (doc.hidden || elements.card.hidden || !Array.isArray(control?.jobs) || !lastCompanionStatus) return;
+      if (control.jobs.filter(item => item.state === 'running').length < 2) return;
+      designRotation++;
+      renderCompanionSummary('design', elements, control, lastCompanionStatus);
+    }, 5000));
+    const companionFetch = async (url, options = {}) => {
+      if(listenerController.signal.aborted)throw Error('This panel was closed. Reopen it to retry.');
+      const controller = new parentWindow.AbortController();
+      const abort = () => controller.abort();
+      listenerController.signal.addEventListener('abort', abort, {once:true});
+      const timeout = parentWindow.setTimeout(abort, 15000);
+      try {
+        const response=await parentWindow.fetch(url, {...options, signal:controller.signal});
+        const body=await response.json();
+        return {ok:response.ok,json:async()=>body};
+      }
+      catch(error) { if(controller.signal.aborted && !listenerController.signal.aborted) throw Error('Request timed out. Please retry.'); throw error; }
+      finally {parentWindow.clearTimeout(timeout);listenerController.signal.removeEventListener('abort',abort);}
+    };
+    const adRows = new Map(), adControlReceipts = new Map();
+    // A new controller must rebind buttons retained by Streamlit's parent shell.
+    root.querySelector('#sc-os-ads-list').dataset.signature='';
+    const reconcileRows = (list, rows) => {
+      for(const child of [...list.children]) if(!rows.includes(child)) child.remove();
+      rows.forEach((row,index)=>{if(list.children[index]!==row) list.insertBefore(row,list.children[index]||null);});
+    };
+    const adDisplayJob = job => ({...job,
+      state:['waiting','complete','failed','cancelled'].includes(job.stage)?job.stage:'running',
+      percent:({waiting:0,preparing:10,opening:20,generating:40,posting:80,complete:100,failed:0,cancelled:0})[job.stage]||0});
+    const pendingDesignActions = new Set();
+    const pendingAdActions = new Set(), deletedAdJobs = new Set();
+    // Controller state is initialized below. Bind the scope on first render,
+    // after install supplies the account configuration.
+    let adActionScope;
     const renderCompanions = status => {
-      if(adQuickScope && (adQuickScope!==state.config.uploadScope || !queues.ads?.jobs)) {
+      if(adActionScope!==state.config.uploadScope) {
+        pendingAdActions.clear();deletedAdJobs.clear();adRows.clear();adControlReceipts.clear();adActionScope=state.config.uploadScope;
+      }
+      lastCompanionStatus = status;
+      if(adQuickScope && adQuickScope!==state.config.uploadScope) {
         adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
         root.querySelector('#sc-ad-products').replaceChildren();
       }
       for (const [name, elements] of Object.entries(companionPanels)) {
-        const control = queues[name];
+        const rawControl = queues[name];
+        const control = name==='ads' && Array.isArray(rawControl?.jobs)
+          ? {...rawControl, jobs:rawControl.jobs.filter(item=>!deletedAdJobs.has(item.id)).map(item=>{
+              const receipt=adControlReceipts.get(item.id);
+              if(!receipt)return item;
+              const confirmed=!pendingAdActions.has(item.id) && (receipt.action==='cancel'
+                ? item.control_action==='cancel'
+                : !item.control_action && item.updated_at && receipt.job.updated_at && item.updated_at>=receipt.job.updated_at);
+              if(confirmed){adControlReceipts.delete(item.id);return item;}
+              return {...item,...receipt.job};
+            }),
+             waiting:Math.max(0,(rawControl.waiting || 0)-rawControl.jobs.filter(item=>item.state==='waiting' && (deletedAdJobs.has(item.id) || adControlReceipts.get(item.id)?.action==='cancel')).length)}
+          : rawControl;
         elements.card.hidden = !Array.isArray(control?.jobs);
         if (elements.card.hidden) {elements.panel.open=false;continue;}
         const jobs = control.jobs;
-        const job = jobs.find(item => item.state === 'running') || jobs.find(item => item.state === 'waiting') || jobs[0];
-        const online = name === 'ads' ? control.online : status.online;
-        const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
-        let label = job ? job.label : idle;
-        if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
-        if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
-        if (control.waiting) label += ` · ${control.waiting} waiting`;
-        elements.title.textContent = job?.title || 'No current job';
-        elements.stage.textContent = label;
-        elements.panel.title = '';
-        elements.panel.dataset.state = job?.state || 'idle';
-        elements.panel.dataset.stale = 'false';
-        elements.meter.value = job?.percent || 0;
-        elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
-        elements.list.replaceChildren(...jobs.slice(0,10).map(item => {
-          const article=doc.createElement('article'), title=doc.createElement('strong'), detail=doc.createElement('p');
+        renderCompanionSummary(name, elements, control, status);
+        // Status timestamps change while the user is pressing a control.
+        // Keep unchanged ad buttons mounted so polling cannot swallow the click.
+        if(name==='ads') {
+          const signature=JSON.stringify([state.config.uploadScope,jobs.slice(0,10).map(({updated_at,...visible})=>visible),[...pendingAdActions]]);
+          if(elements.list.dataset.signature===signature)continue;
+          elements.list.dataset.signature=signature;
+        }
+        const rendered=jobs.slice(0,10).map(item => {
+          const article=(name==='ads' && adRows.get(item.id)) || doc.createElement('article');
+          const fresh=!article._parts;
+          const [title,detail]=article._parts || [doc.createElement('strong'),doc.createElement('p')];
+          article._parts=[title,detail];
+          if(name==='ads')adRows.set(item.id,article);
+          let designActions;
           title.textContent=item.title;
           detail.textContent=item.label + (item.detail ? ' · '+item.detail : '');
           detail.title=detail.textContent;
-          if(name==='ads') {
-            const actions=doc.createElement('span');actions.className='sc-ad-actions';
-            for(const [action,glyph,label,allowed] of [['play','▶','Play / resume job',item.can_play],['cancel','■','Cancel job',item.can_cancel],['delete','🗑','Delete from queue',true]]) {
-              const button=doc.createElement('button');button.type='button';button.textContent=glyph;button.title=label;button.setAttribute('aria-label',label+' · '+item.title);
-              button.disabled=!allowed;button.onclick=async()=>{
-                button.disabled=true;const scope=state.config.uploadScope;
+          if(name==='design') {
+            const actions=doc.createElement('span');actions.className='sc-design-actions';
+            for(const [action,label,allowed] of [['defer','Move to pending',item.can_defer],['cancel','Cancel design',item.can_cancel]]) {
+              if(!allowed)continue;
+              const button=doc.createElement('button');button.type='button';button.textContent=label;
+              button.setAttribute('aria-label',label+' · '+item.title);
+              button.disabled=pendingDesignActions.has(item.id);
+              button.onclick=async()=>{
+                if(pendingDesignActions.has(item.id))return;
+                pendingDesignActions.add(item.id);button.disabled=true;
                 try {
-                  const response=await parentWindow.fetch('/api/staff-product-uploads/ad-control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,action})});
-                  const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update job');
-                  if(scope!==state.config.uploadScope)return;
-                  root.querySelector('#sc-ad-message').textContent=action==='play'?'Resuming saved job':action==='cancel'?'Job cancelled':'Removed from queue';
-                  await refreshStaffProgress(false);
-                }catch(error){if(scope===state.config.uploadScope)root.querySelector('#sc-ad-message').textContent=error.message;}
-                finally{button.disabled=!allowed;}
+                  const response=await parentWindow.fetch('/api/morning-designs/control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,updated_at:item.updated_at,action})});
+                  const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update design');
+                  pendingDesignActions.delete(item.id);
+                  doc.dispatchEvent(new parentWindow.CustomEvent('sc-design-edit-queued'));
+                  lastStaffStatus='';await refreshStaffProgress(false);
+                }catch(error){showUploadNotice({id:'design-'+item.id+'-'+Date.now(),kind:'error',text:error.message});}
+                finally{pendingDesignActions.delete(item.id);button.disabled=false;}
               };actions.append(button);
-            }article.append(actions);
+            }designActions=actions;
           }
-          article.append(title,detail);
+          if(name==='ads') {
+            const actions=article._actions || doc.createElement('span');article._actions=actions;actions.className='sc-ad-actions';
+            for(const [action,glyph,label,allowed] of [['play','▶','Play / resume job',item.can_play],['cancel','■','Cancel job',item.can_cancel],['delete','🗑','Delete from queue',true]]) {
+              const button=actions.children[['play','cancel','delete'].indexOf(action)] || doc.createElement('button');button.type='button';button.textContent=pendingAdActions.has(item.id)?'…':glyph;button.title=label;button.setAttribute('aria-label',label+' · '+item.title);
+              button.disabled=!allowed || pendingAdActions.has(item.id);button.onclick=async()=>{
+                if(pendingAdActions.has(item.id))return;
+                const priorReceipt=adControlReceipts.get(item.id);
+                pendingAdActions.add(item.id);
+                if(action==='cancel')adControlReceipts.set(item.id,{action,job:{...item,stage:'cancelled',state:'cancelled',label:'Stopping…',can_cancel:false,can_play:false}});
+                renderCompanions(lastCompanionStatus);
+                button.disabled=true;const scope=state.config.uploadScope;
+                if(action==='delete') {
+                  deletedAdJobs.add(item.id);
+                  renderCompanions(lastCompanionStatus);
+                  renderQueueButtons();
+                }
+                try {
+                  const response=await companionFetch('/api/staff-product-uploads/ad-control',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,action})});
+                  const result=await response.json();if(!response.ok)throw Error(result.error||'Could not update job');
+                  if(listenerController.signal.aborted || scope!==state.config.uploadScope)return;
+                  if(result.action==='delete'){deletedAdJobs.add(item.id);adControlReceipts.delete(item.id);}
+                  else adControlReceipts.set(item.id,{action,job:result.job ? adDisplayJob(result.job) : {...item,stage:action==='cancel'?'cancelled':'waiting',state:action==='cancel'?'cancelled':'waiting',label:action==='cancel'?'Cancelled':'Resuming saved job',can_cancel:action!=='cancel',can_play:action==='cancel'}});
+                  renderCompanions(lastCompanionStatus);
+                  root.querySelector('#sc-ad-message').textContent=action==='play'?'Resuming saved job':action==='cancel'?(result.job?.stage==='complete'?'Job already completed':'Job cancelled'):'Removed from queue';
+                  lastStaffStatus='';
+                  void refreshStaffProgress(false);
+                }catch(error){if(!listenerController.signal.aborted && scope===state.config.uploadScope){
+                  deletedAdJobs.delete(item.id);if(priorReceipt)adControlReceipts.set(item.id,priorReceipt);else adControlReceipts.delete(item.id);
+                  root.querySelector('#sc-ad-message').textContent=error.message;
+                }}
+                finally{if(!listenerController.signal.aborted && scope===state.config.uploadScope){
+                  pendingAdActions.delete(item.id);
+                  renderCompanions(lastCompanionStatus);
+                  renderQueueButtons();
+                }}
+              };if(![...actions.children].includes(button))actions.append(button);
+            }if(fresh)article.append(actions);
+          }
+          if(fresh)article.append(title,detail);
+          if(designActions)article.append(designActions);
           if (/^https:\/\/chatgpt\.com\//.test(item.chat_url || '')) {
-            const chat=doc.createElement('a');chat.href=item.chat_url;chat.target='_blank';chat.rel='noopener';chat.textContent='Open chat';article.append(chat);
-          }
+            const chat=article._chat || doc.createElement('a');article._chat=chat;chat.href=item.chat_url;chat.target='_blank';chat.rel='noopener';chat.textContent='Open chat';if(![...article.children].includes(chat))article.append(chat);
+          }else if(article._chat){article._chat.remove();article._chat=null;}
           if (/^[a-f0-9-]{36}$/.test(item.posting_id || '')) {
-            const link=doc.createElement('a');link.href='/?'+new URLSearchParams({page:'ads_posting',meta_posting_job:item.posting_id});link.textContent='See in Posting';article.append(link);
-          }
+            const link=article._posting || doc.createElement('a');article._posting=link;link.href='/?'+new URLSearchParams({page:'ads_posting',meta_posting_job:item.posting_id});link.textContent='See in Posting';if(![...article.children].includes(link))article.append(link);
+          }else if(article._posting){article._posting.remove();article._posting=null;}
           return article;
-        }));
-        const queueLink=doc.createElement('a');queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';elements.list.append(queueLink);
+        });
+        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';
+        if(name==='ads'){
+          const retained=new Set(jobs.slice(0,10).map(item=>item.id));
+          for(const id of adRows.keys())if(!retained.has(id))adRows.delete(id);
+          reconcileRows(elements.list,[...rendered,queueLink]);
+        }else elements.list.replaceChildren(...rendered,queueLink);
       }
     };
-    let adProducts=[],adQuickScope='',adRequest='';
+    let adProducts=[],adQuickScope='',adRequest='',adSelected='',adOptions=[],adActive=-1;
+    let adCatalogRead=null,adCatalogError='',adCatalogLoaded=false,adCatalogScope='';
     const adMessage=root.querySelector('#sc-ad-message'),adProduct=root.querySelector('#sc-ad-product');
+    adSelected=adProduct.dataset.selectedProduct||'';adCatalogScope=adProduct.dataset.pickerScope||'';
     const quick=root.querySelector('#sc-ad-quick');
-    quick.addEventListener('toggle',async()=>{
-      if(!quick.open || adQuickScope===state.config.uploadScope)return;
-      const scope=state.config.uploadScope;adProducts=[];adProduct.value='';
-      try {
-        const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{credentials:'same-origin',signal:listenerController.signal});
-        const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load products');
-        if(scope!==state.config.uploadScope)return;
-        adProducts=data.products;adQuickScope=scope;
-        const list=root.querySelector('#sc-ad-products');list.replaceChildren();
-        for(const product of adProducts){const option=doc.createElement('option');option.value=product.name;list.append(option);}
-        for(const [name,values] of [['sport',data.sports],['country',data.countries]]) {
-          const select=root.querySelector('#sc-ad-'+name);select.replaceChildren();
-          for(const value of values){const option=doc.createElement('option');option.value=value;option.textContent=value;select.append(option);}
-        }
-        adMessage.textContent='Choose a product and check its market.';
-      }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
+    const adList=root.querySelector('#sc-ad-products'),adReload=root.querySelector('#sc-ad-reload');
+    const normaliseProduct=value=>String(value||'').normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+    const closeProducts=()=>{adList.hidden=true;adProduct.setAttribute('aria-expanded','false');adProduct.removeAttribute('aria-activedescendant');};
+    const activateProduct=index=>{
+      adActive=index;
+      [...adList.children].forEach((node,i)=>node.setAttribute('aria-selected',String(i===index)));
+      if(adList.children[index]){adProduct.setAttribute('aria-activedescendant',adList.children[index].id);adList.children[index].scrollIntoView({block:'nearest'});}
+    };
+    const chooseProduct=product=>{
+      adSelected=product.id;adProduct.dataset.selectedProduct=product.id;adProduct.value=product.name;adRequest='';closeProducts();
+      root.querySelector('#sc-ad-sport').value=product.sport;
+      root.querySelector('#sc-ad-country').value=product.country;
+    };
+    const showProducts=()=>{
+      const query=adSelected?'':normaliseProduct(adProduct.value),terms=query.split(' ').filter(Boolean);
+      const matches=adProducts.filter(p=>terms.every(term=>p.search.includes(term)));
+      if(query)matches.sort((a,b)=>Number(b.nameSearch.includes(query))-Number(a.nameSearch.includes(query)));
+      adOptions=matches.slice(0,80); // Keep typing and opening cheap even for large catalogs.
+      adList.replaceChildren();adActive=-1;
+      adProduct.removeAttribute('aria-activedescendant');
+      for(const [index,product] of adOptions.entries()){
+        const option=doc.createElement('div');option.id='sc-ad-option-'+index;option.setAttribute('role','option');
+        option.setAttribute('aria-selected','false');option.textContent=product.name;
+        option.addEventListener('mousedown',event=>event.preventDefault());
+        option.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();chooseProduct(product);adProduct.focus();closeProducts();});
+        adList.append(option);
+      }
+      let message=adCatalogRead?'Loading products…':adCatalogError;
+      if(!message && !adOptions.length)message=adCatalogLoaded?'No matching products. Try fewer words or Reload products.':'Click Reload products to try again.';
+      if(!message && matches.length>adOptions.length)message='Showing '+adOptions.length+' of '+matches.length+' · type to narrow the list';
+      if(message){const note=doc.createElement('div');note.textContent=message;note.setAttribute('role','status');adList.append(note);}
+      adList.hidden=false;adList.scrollTop=0;adProduct.setAttribute('aria-expanded','true');
+    };
+    const loadAdProducts=(force=false)=>{
+      const scope=state.config.uploadScope;
+      if(adCatalogScope!==scope){adCatalogScope=scope;adProduct.dataset.pickerScope=scope;adProduct.dataset.selectedProduct='';adProducts=[];adSelected='';adProduct.value='';adRequest='';adCatalogLoaded=false;adCatalogRead=null;adCatalogError='';}
+      if(adCatalogRead)return adCatalogRead;
+      if(adCatalogLoaded&&!force)return Promise.resolve();
+      adCatalogError='';adReload.disabled=true;adReload.textContent='Loading products…';
+      const read=(async()=>{
+        try {
+          const response=await companionFetch('/api/staff-product-uploads/ad-quick-add'+(force?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'});
+          const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load products. Use Reload products to retry.');
+          if(listenerController.signal.aborted || scope!==state.config.uploadScope)return;
+          if(!Array.isArray(data.products)||!data.products.length)throw Error('No products loaded. Use Reload products to retry.');
+          adProducts=data.products.map(p=>({...p,nameSearch:normaliseProduct(p.name),search:normaliseProduct([p.name,p.sport,p.country].join(' '))})).sort((a,b)=>a.name.localeCompare(b.name));
+          adQuickScope=scope;adCatalogLoaded=true;
+          for(const [name,values] of [['sport',data.sports],['country',data.countries]]) {
+            const select=root.querySelector('#sc-ad-'+name),previous=select.value;select.replaceChildren();
+            for(const value of values){const option=doc.createElement('option');option.value=value;option.textContent=value;select.append(option);}
+            if(values.includes(previous))select.value=previous;
+          }
+          adMessage.textContent='Choose a product and check its market.';
+        }catch(error){if(!listenerController.signal.aborted && scope===state.config.uploadScope){adCatalogError=error.message;adMessage.textContent=error.message;}}
+        finally{if(!listenerController.signal.aborted && scope===state.config.uploadScope && adCatalogRead===read){adCatalogRead=null;adReload.disabled=false;adReload.textContent='Reload products';if(doc.activeElement===adProduct)showProducts();}}
+      })();
+      adCatalogRead=read;
+      return read;
+    };
+    const openProducts=()=>{void loadAdProducts();showProducts();};
+    adProduct.addEventListener('focus',openProducts,listenerOptions);
+    adProduct.addEventListener('click',openProducts,listenerOptions);
+    adProduct.addEventListener('blur',event=>{if(!adList.contains(event.relatedTarget))closeProducts();},listenerOptions);
+    root.querySelector('#sc-ad-form').addEventListener('click',event=>{if(event.target!==adProduct&&!adList.contains(event.target))closeProducts();},listenerOptions);
+    adProduct.addEventListener('keydown',event=>{
+      if(event.key==='Escape'&&!adList.hidden){event.preventDefault();event.stopPropagation();closeProducts();return;}
+      if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();if(adList.hidden)openProducts();
+        if(adOptions.length)activateProduct(Math.max(0,Math.min(adOptions.length-1,adActive+(event.key==='ArrowDown'?1:-1))));
+      }else if(event.key==='Enter'&&!adList.hidden){
+        event.preventDefault();if(adOptions.length)chooseProduct(adOptions[Math.max(0,adActive)]);
+      }
     },listenerOptions);
-    adProduct.addEventListener('input',()=>{
-      const product=adProducts.find(p=>p.name===adProduct.value);adRequest='';
-      if(product){root.querySelector('#sc-ad-sport').value=product.sport;root.querySelector('#sc-ad-country').value=product.country;}
-    },listenerOptions);
+    quick.addEventListener('toggle',()=>{if(quick.open)void loadAdProducts();else closeProducts();},listenerOptions);
+    adReload.addEventListener('click',()=>{void loadAdProducts(true);},listenerOptions);
+    adProduct.addEventListener('input',()=>{adSelected='';adProduct.dataset.selectedProduct='';adRequest='';void loadAdProducts();showProducts();},listenerOptions);
     for(const name of ['sport','country','type'])root.querySelector('#sc-ad-'+name).addEventListener('change',()=>{adRequest='';},listenerOptions);
     root.querySelector('#sc-ad-form').addEventListener('submit',async event=>{
       event.preventDefault();const scope=state.config.uploadScope;
-      const matches=adProducts.filter(p=>p.name===adProduct.value);
-      if(matches.length!==1){adMessage.textContent='Select one product from the list.';return;}
+      const matches=adProducts.filter(p=>adSelected ? p.id===adSelected&&p.name===adProduct.value : normaliseProduct(p.name)===normaliseProduct(adProduct.value));
+      if(matches.length!==1){adMessage.textContent=adCatalogRead?'Products are loading. Choose a product when the list appears.':'Select one product from the list.';openProducts();return;}
       const button=root.querySelector('#sc-ad-submit');if(button.disabled)return;button.disabled=true;
-      adRequest=adRequest||parentWindow.crypto.randomUUID();
+      closeProducts();adMessage.textContent='Adding to Ads queue…';button.textContent='Adding…';
+      const requestId=adRequest=adRequest||parentWindow.crypto.randomUUID();
       try {
-        const response=await parentWindow.fetch('/api/staff-product-uploads/ad-quick-add',{method:'POST',credentials:'same-origin',signal:listenerController.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({product:matches[0].id,country:root.querySelector('#sc-ad-country').value,sport:root.querySelector('#sc-ad-sport').value,type:root.querySelector('#sc-ad-type').value,request_id:adRequest})});
-        const data=await response.json();if(!response.ok)throw Error(data.error||'Could not add ad');
-        if(scope!==state.config.uploadScope)return;
-        adMessage.textContent='Added to Ads queue';await refreshStaffProgress(false);
-      }catch(error){if(scope===state.config.uploadScope)adMessage.textContent=error.message;}
-      finally{button.disabled=false;}
+        const response=await companionFetch('/api/staff-product-uploads/ad-quick-add',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:matches[0].id,country:root.querySelector('#sc-ad-country').value,sport:root.querySelector('#sc-ad-sport').value,type:root.querySelector('#sc-ad-type').value,request_id:requestId})});
+        const data=await response.json();if(!response.ok)throw Error(data.error||'Could not add ad. Retry to confirm the same request.');
+        if(listenerController.signal.aborted || scope!==state.config.uploadScope)return;
+        if(adRequest===requestId)adRequest='';
+        adMessage.textContent='Added to Ads queue';lastStaffStatus='';void refreshStaffProgress(false);
+      }catch(error){if(!listenerController.signal.aborted && scope===state.config.uploadScope)adMessage.textContent=error.message;}
+      finally{if(!listenerController.signal.aborted && scope===state.config.uploadScope){button.disabled=false;button.textContent='Add to queue';}}
     },listenerOptions);
     let queueRevision = 0;
     const pendingQueues = new Set();
@@ -1307,19 +1517,20 @@
       button.onclick = async event => {
         event?.preventDefault(); event?.stopPropagation();
         if (pendingCancels.has(item.id)) return;
-        pendingCancels.add(item.id); button.disabled = true;
+        pendingCancels.add(item.id); button.disabled = true; button.textContent = 'Cancelling…';
         const scope = state.config.uploadScope;
         try {
           const response = await parentWindow.fetch('/api/staff-product-uploads/cancel', {
             method:'POST', credentials:'same-origin', signal:listenerController.signal,
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({id:item.id, updated_at:item.updated_at}),
+            body:JSON.stringify({id:item.id, updated_at:item.updated_at, dispatch_id:item.dispatch_id}),
           });
           if (!response.ok) {
             const result = await response.json();
             throw new Error(result.error || 'Could not cancel this upload. Refresh its status and try again.');
           }
           if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
+          requestedUploadId = item.id;
           lastStaffStatus = '';
           await refreshStaffProgress(false);
         } catch (error) {
@@ -1327,7 +1538,7 @@
             showUploadNotice({id:`cancel-${item.id}-${item.updated_at}`,kind:'error',text:error.message});
           }
         } finally {
-          pendingCancels.delete(item.id); button.disabled = false;
+          pendingCancels.delete(item.id); button.disabled = false; button.textContent = 'Cancel';
         }
       };
     };
@@ -1335,6 +1546,9 @@
     const bindRestart = (button, item) => {
       button.hidden = item?.stage !== 7 || item?.restartable === false;
       button.disabled = pendingRestarts.has(item?.id);
+      button.title = item?.detail?.startsWith('Destination conflict:')
+        ? 'Retry the saved PSD mapping; retain the published image package'
+        : 'Restart from the original PSD and regenerate mockups';
       button.onclick = async event => {
         event?.preventDefault();
         event?.stopPropagation();
@@ -1350,6 +1564,7 @@
           });
           if (!response.ok) throw new Error("Restart failed");
           if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
+          requestedUploadId = item.id;
           lastStaffStatus = "";
           await refreshStaffProgress(false);
         } catch (_error) {
@@ -1369,6 +1584,7 @@
       staffProgress.open = false;
       for (const {panel} of Object.values(companionPanels)) panel.open=false;
       uploadNotices.replaceChildren();
+      quick.open=false;closeProducts();
     };
     // The shell can outlive its controller during Streamlit reruns.
     dismissUploadOverlays();
@@ -1406,11 +1622,16 @@
         if (button.hidden) continue;
         const name = queue === "design" ? "Design" : queue === "ads" ? "Ads" : "Upload";
         const action = control.enabled ? "Pause" : "Play";
-        const label = `${action} ${queue} queue (${control.waiting} waiting)`;
-        button.innerHTML = icon(action.toLowerCase()) + `<span>${name} (${Number(control.waiting)})</span>`;
+        const count = queue==='ads' && Array.isArray(control.jobs)
+          ? Math.max(0,(control.waiting || 0)-control.jobs.filter(item=>item.state==='waiting' && (deletedAdJobs.has(item.id) || adControlReceipts.get(item.id)?.action==='cancel')).length)
+          : control.waiting;
+        const knownCount = typeof count === 'number' && Number.isFinite(count) && count >= 0;
+        const label = `${action} ${queue} queue` + (knownCount ? ` (${count} waiting)` : '');
+        if(button.dataset.label!==label){button.innerHTML = icon(action.toLowerCase()) + `<span>${name}` + (knownCount ? ` (${count})` : '') + `</span>`;button.dataset.label=label;}
         button.title = label;
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-busy", String(pendingQueues.has(queue)));
+        button.disabled = pendingQueues.has(queue);
       }
       companionStatus.hidden = staffProgress.hidden && Object.values(queueButtons).every(button => button.hidden) && Object.values(companionPanels).every(item=>item.card.hidden);
       root.classList.toggle("sc-has-staff-upload", !companionStatus.hidden);
@@ -1424,7 +1645,7 @@
         queueRevision++;
         renderQueueButtons();
         try {
-          const response = await parentWindow.fetch("/api/staff-product-uploads/queue-control", {
+          const response = await companionFetch("/api/staff-product-uploads/queue-control", {
             method:"POST", credentials:"same-origin", signal:listenerController.signal,
             headers:{"Content-Type":"application/json"},
             body:JSON.stringify({queue, enabled:!queues[queue].enabled}),
@@ -1484,6 +1705,28 @@
         }
       }
     };
+    let requestedUploadId = '', uploadInteraction = '', pendingUploadReveal = false;
+    const revealRequestedUpload = notice => {
+      if (!notice?.open_upload || !notice.job_id || !state.config.staffUploadProgress) return;
+      const interaction = notice.interaction_id || notice.id;
+      if (interaction === uploadInteraction) return;
+      uploadInteraction = interaction;
+      requestedUploadId = notice.job_id;
+      pendingUploadReveal = true;
+      staffProgress.hidden = false;
+      root.querySelector('#sc-os-upload-card').hidden = false;
+      companionStatus.hidden = false;
+      root.querySelector('#sc-os-staff-upload-title').textContent = notice.title || 'Upload request saved';
+      root.querySelector('#sc-os-staff-upload-stage').textContent = 'Checking this upload…';
+      for (const {panel} of Object.values(companionPanels)) panel.open = false;
+      staffProgress.open = true;
+      lastStaffStatus = '';
+      void refreshStaffProgress(false);
+    };
+    doc.addEventListener('sc-design-edit-queued', () => {
+      lastStaffStatus = '';
+      void refreshStaffProgress(false);
+    }, listenerOptions);
     doc.addEventListener('visibilitychange', () => {
       if (!doc.hidden && state.config.staffUploadProgress) void refreshStaffProgress();
     }, listenerOptions);
@@ -1496,13 +1739,14 @@
       listenerController.signal.addEventListener('abort', abort, {once:true});
       const timeout = parentWindow.setTimeout(abort, 8000);
       try {
-        const response = await parentWindow.fetch("/api/staff-product-uploads/status", {
+        const response = await parentWindow.fetch("/api/staff-product-uploads/status?display=1" + (requestedUploadId ? "&job_id=" + encodeURIComponent(requestedUploadId) : ""), {
           credentials:"same-origin", cache:"no-store", signal:controller.signal,
         });
         if (listenerController.signal.aborted) return;
-        if (!response.ok) throw new Error('Companion status unavailable');
+        if (!response.ok) throw new Error([401,403].includes(response.status) ? 'Session needs refreshing' : 'Companion status unavailable');
         const status = await response.json();
         if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
+        if (status.display_state && !["ready", "stale"].includes(status.display_state)) throw new Error("Status refreshing");
         const jobs = status.jobs || [];
         staffFailures = 0;
         const active = jobs.some(item => item.stage > 0 && item.stage < 6
@@ -1515,11 +1759,20 @@
         if (serialized === lastStaffStatus) return;
         if (revision === queueRevision && !pendingQueues.size) queues = status.queues || {};
         renderCompanions(status);
-        staffProgress.hidden = !jobs.length && !queues.upload?.display;
+        staffProgress.hidden = !jobs.length && !queues.upload?.display && !pendingUploadReveal;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
-        staffProgress.dataset.stale='false';
+        staffProgress.dataset.stale=String(status.display_state === 'stale');
+        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale');
         renderQueueButtons();
         lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
+        if (pendingUploadReveal) {
+          if (!jobs.some(item=>item.id===requestedUploadId)) {
+            staffDelay = 1000;
+            return; // An older in-flight status read must not hide this receipt.
+          }
+          staffProgress.open = true;
+          pendingUploadReveal = false;
+        }
         if (!jobs.length) {
           staffProgress.open = false;
           summaryReset.hidden = true;
@@ -1530,13 +1783,16 @@
           root.querySelector('#sc-os-staff-upload-list').replaceChildren();
           return;
         }
-        const label = job => job.stage > 0 && job.stage < 6 && !status.online
+        const label = job => job.stage === 0 && queues.upload?.enabled === false
+          ? 'Queued · uploads paused' : job.stage > 0 && job.stage < 6 && !status.online
           ? job.label + " · desktop offline" : job.label;
         const adLabel = job => "Ad · " + job.ad.label;
-        const job = jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || jobs[0];
+        const newestCompleted = jobs.filter(item=>item.stage===6)
+          .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))[0];
+        const job = jobs.find(item=>item.id===requestedUploadId && !item.cancelled) || jobs.find(item=>item.stage>0 && item.stage<6) || jobs.find(item=>item.stage===0) || newestCompleted || jobs[0];
         bindRestart(summaryReset, job);
         staffProgress.dataset.stage = job.stage;
-        const currentLabel = (job.ad && !Array.isArray(queues.ads?.jobs) ? label(job) + " · " + adLabel(job) : label(job))
+        const currentLabel = label(job)
           + (queues.upload?.waiting ? ` · ${queues.upload.waiting} waiting` : '');
         uploadSummary.title = job.title + " · " + currentLabel;
         root.querySelector("#sc-os-staff-upload-title").textContent = job.title;
@@ -1611,12 +1867,13 @@
       } catch (_error) {
         if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
         lastStaffStatus='';
-        staffDelay = Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
+        for (const button of Object.values(queueButtons)) button.disabled=true;
+        staffDelay = _error.message === 'Status refreshing' ? 1000 : Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
         for (const {panel,stage} of Object.values(companionPanels)) {
-          panel.dataset.stale='true';stage.textContent='Status unavailable · retrying';
+          panel.dataset.stale='true';stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
         }
         staffProgress.dataset.stale='true';
-        root.querySelector('#sc-os-staff-upload-stage').textContent='Status unavailable · retrying';
+        root.querySelector('#sc-os-staff-upload-stage').textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
       } finally {
         parentWindow.clearTimeout(timeout);
         listenerController.signal.removeEventListener('abort', abort);
@@ -1637,6 +1894,8 @@
       recordingStream: null,
       recordingChunks: [],
       orderStatusStarted: false,
+      orderStatusPending: false,
+      orderStatusTimer: null,
       plannerStatusStarted: false,
       plannerCountdownStarted: false,
       shownPlannerEvents: new Set(),
@@ -1677,7 +1936,7 @@
         }));
       } catch (_error) {}
     };
-    const ORDER_STATUS_REFRESH_MS = 60000;
+    const ORDER_STATUS_REFRESH_MS = 30000;
     const EMAIL_HEARTBEAT_MS = 30000;
     const PLANNER_STATUS_REFRESH_MS = 30000;
     const statusRefreshDelay = (
@@ -2004,23 +2263,28 @@
       });
     };
     let sidebarPresentationObserver = null;
+    let observedSidebar = null;
     let sidebarPresentationTimer = null;
     const restoreSidebarPresentation = () => {
+      watchSidebarPresentation();
       bindPersistentSidebarRoutes();
       const orders = readStatusCache("orders").payload;
       if (Number.isInteger(orders?.action_required_count)) {
-        updateSidebarBadge("orders", orders.action_required_count, orders.badge_label || "");
+        updateOrdersBadge(orders.action_required_count, orders.badge_label || "");
       }
       const email = readStatusCache("email").payload;
       if (Number.isInteger(email?.unread_count)) updateSidebarBadge("email", email.unread_count, "");
     };
     const watchSidebarPresentation = () => {
-      if (sidebarPresentationObserver || !parentWindow.MutationObserver) return;
+      if (!parentWindow.MutationObserver) return;
       const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
-      if (!sidebar) return;
+      if (!sidebar || sidebar === observedSidebar) return;
+      sidebarPresentationObserver?.disconnect();
+      observedSidebar = sidebar;
       sidebarPresentationObserver = new parentWindow.MutationObserver((records) => {
         // Ignore our own badge/text changes, avoiding observer feedback loops.
         const rowsChanged = records.some((record) =>
+          [...record.removedNodes].some((node) => node.nodeType === 1 && node.matches?.('.sc-orders-action-badge')) ||
           [...record.addedNodes, ...record.removedNodes].some((node) =>
             node.nodeType === 1 && (node.matches?.("button") || node.querySelector?.("button"))
           )
@@ -2032,6 +2296,7 @@
         }, 0);
       });
       sidebarPresentationObserver.observe(sidebar, {childList: true, subtree: true});
+      if (sidebar.parentElement) sidebarPresentationObserver.observe(sidebar.parentElement, {childList: true});
     };
     const reconcileAcceptedNavigation = () => {
       const pending = readPendingNavigation();
@@ -2262,6 +2527,7 @@
       if (method === "GET" && pendingReads.has(key)) return pendingReads.get(key).promise;
       const controller = new AbortController();
       const entry = {controller};
+      const deadline = method === "GET" ? parentWindow.setTimeout(() => controller.abort(), 8000) : null;
       const headers = {Authorization: `Bearer ${state.config.authToken || ""}`};
       if (options.body !== undefined) headers["Content-Type"] = "application/json";
       entry.promise = (async () => {
@@ -2280,6 +2546,7 @@
       if (!response.ok) throw new Error(payload.error || "Request failed");
       return payload;
       })().finally(() => {
+        if (deadline !== null) parentWindow.clearTimeout(deadline);
         if (pendingReads.get(key) === entry) pendingReads.delete(key);
       });
       if (method === "GET") pendingReads.set(key, entry);
@@ -2322,7 +2589,21 @@
       button.dataset.actionRequiredCount = String(numericCount);
       button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `${routeLabel}, ${numericCount} unread`);
     };
-    const updateOrdersBadge = (count, label) => updateSidebarBadge("orders", count, label);
+    const updateOrdersBadge = (count, label) => {
+      updateSidebarBadge("orders", count, label);
+      root.dataset.ordersCount = String(count);
+      let badge = notificationsButton.querySelector('#sc-os-orders-notification-count');
+      if (count > 0 && state.config.ordersEnabled) {
+        if (!badge) {
+          badge = doc.createElement('span'); badge.id = 'sc-os-orders-notification-count';
+          badge.setAttribute('aria-hidden', 'true'); notificationsButton.appendChild(badge);
+        }
+        badge.textContent = count > 99 ? '99+' : String(count);
+        notificationsButton.setAttribute('aria-label', `Open notifications, ${count} orders require action`);
+      } else {
+        badge?.remove(); notificationsButton.setAttribute('aria-label', 'Open notifications');
+      }
+    };
     const applyEmailStatus = (payload) => {
       if (!state.config.emailEnabled) return;
       const previous = readStatusCache("email").payload || {};
@@ -2600,27 +2881,40 @@
         repairToastRegion.replaceChildren(toast);
       }, {remember: true});
     };
-    const refreshOrderStatus = async () => {
+    const scheduleOrderStatus = (delay) => {
+      if (state.orderStatusTimer) {
+        parentWindow.clearTimeout(state.orderStatusTimer); timers.delete(state.orderStatusTimer);
+      }
+      state.orderStatusTimer = later(() => { state.orderStatusTimer = null; void refreshOrderStatus(); }, delay);
+    };
+    const refreshOrderStatus = async ({force = false} = {}) => {
+      if (state.destroyed || state.orderStatusPending) return;
+      if (doc.hidden) { scheduleOrderStatus(ORDER_STATUS_REFRESH_MS); return; }
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
-        if (state.config.emailEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
+        if (state.config.emailEnabled) scheduleOrderStatus(EMAIL_HEARTBEAT_MS);
         return;
       }
-      // One timer, with Orders retaining its existing 60-second request cadence.
-      const remaining = statusRefreshDelay("orders", ORDER_STATUS_REFRESH_MS);
+      // One request/timer per controller. Focus/open can refresh, but never flood.
+      const remaining = statusRefreshDelay("orders", force ? 5000 : ORDER_STATUS_REFRESH_MS);
       if (remaining > 0) {
-        later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
+        scheduleOrderStatus(remaining);
         return;
       }
       const previousOrders = readStatusCache("orders");
       const confirmedAt = Number(previousOrders.payload?.confirmed_at || previousOrders.checked_at || 0);
       const expireOrdersBadge = () => {
-        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) updateOrdersBadge(0, "");
+        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) {
+          root.dataset.ordersState = 'delayed';
+          const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
+          if (badge) { badge.title = "Last known count · status delayed"; badge.dataset.stale = "true"; }
+        }
       };
       expireOrdersBadge();
       writeStatusCache("orders", {...(previousOrders.payload || {}), confirmed_at: confirmedAt});
+      state.orderStatusPending = true;
       try {
         const payload = await requestJson(state.config.orderStatusUrl);
         if (Number.isInteger(payload.action_required_count)) {
@@ -2630,16 +2924,26 @@
             confirmed_at: Date.now(),
           });
           updateOrdersBadge(payload.action_required_count, payload.badge_label);
+          root.dataset.ordersState = 'ready';
+          const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
+          if (badge) { badge.title = "Orders requiring action"; badge.dataset.stale = "false"; }
         }
         else expireOrdersBadge();
         showOrderToast(payload.notification);
+        if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
       } catch (_error) {
         // A temporary failure cannot keep an unverified count visible indefinitely.
-        expireOrdersBadge();
+        if (!state.destroyed) {
+          expireOrdersBadge();
+          if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
+        }
       } finally {
-        later(refreshOrderStatus, (state.config.emailEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
+        state.orderStatusPending = false;
+        scheduleOrderStatus(ORDER_STATUS_REFRESH_MS);
       }
     };
+    parentWindow.addEventListener('focus', () => { void refreshOrderStatus({force:true}); }, listenerOptions);
+    doc.addEventListener('visibilitychange', () => { if (!doc.hidden) void refreshOrderStatus({force:true}); }, listenerOptions);
     const compactTimerLabel = (seconds) => {
       const remaining = Math.max(Number(seconds) || 0, 0);
       if (!remaining) return "0m";
@@ -2795,7 +3099,8 @@
     };
     const schedulePlannerStatus = (delay=PLANNER_STATUS_REFRESH_MS) => {
       if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
-      state.plannerStatusTimer = parentWindow.setTimeout(() => refreshPlannerStatus(), delay);
+      if (state.destroyed) return;
+      state.plannerStatusTimer = later(() => refreshPlannerStatus(), delay);
     };
     const refreshPlannerStatus = async ({immediate=false} = {}) => {
       if (!state.config.dailyPlannerEnabled || !state.config.dailyPlannerStatusUrl) {
@@ -2803,11 +3108,14 @@
         if (plannerTimerPill) plannerTimerPill.hidden = true;
         return;
       }
+      if (state.destroyed) return;
+      if (doc.hidden) { schedulePlannerStatus(); return; }
       if (state.plannerStatusPending) return;
       state.plannerStatusPending = true;
       writeStatusCache("planner");
       try {
         const payload = await requestJson(state.config.dailyPlannerStatusUrl);
+        if (payload.available === false) throw new Error("Planner status delayed");
         writeStatusCache("planner");
         const rolloverTimerIds = (payload.rollover?.cleared_timer_ids || []).map((value) => String(value || "")).filter(Boolean);
         rolloverTimerIds.forEach((timerId) => state.terminalPlannerTimerIds.add(timerId));
@@ -3288,6 +3596,16 @@
     };
     const renderNotifications = (items) => {
       if (state.destroyed) return;
+      const orders = readStatusCache('orders').payload || {};
+      if (state.config.ordersEnabled && Number.isInteger(orders.action_required_count) && orders.action_required_count > 0) {
+        const count = orders.action_required_count;
+        const delayed = Date.now() - Number(orders.confirmed_at || 0) > 2 * ORDER_STATUS_REFRESH_MS;
+        items = [{title: `${count} ${count === 1 ? 'order requires' : 'orders require'} action`,
+          subtitle: delayed ? 'Last known count · refreshing' : 'Review unfinished orders', route_key:'orders'}, ...items];
+      } else if (state.config.ordersEnabled && (root.dataset.ordersState === 'delayed' || !Number.isInteger(orders.action_required_count))) {
+        items = [{title: root.dataset.ordersState === 'delayed' ? 'Orders status delayed' : 'Checking Orders',
+          subtitle:'Open Orders to review · status will retry automatically', route_key:'orders'}, ...items];
+      }
       notificationsPanel.innerHTML = '<div class="sc-os-topbar-panel-title">Notifications</div>';
       if (!items.length) {
         notificationsPanel.innerHTML += '<div class="sc-os-topbar-state">No new notifications</div>';
@@ -3510,6 +3828,7 @@
     }, listenerOptions);
     notificationsButton.addEventListener("click", async () => {
       if (!openPanel("notifications")) return;
+      void refreshOrderStatus({force:true});
       notificationsPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
       renderNotifications(await loadNotifications());
       notificationsPanel.querySelector("button")?.focus({preventScroll: true});
@@ -3676,13 +3995,23 @@
         root.dataset.installStage = "config";
         const previousNavigationEpoch = Number(root.dataset.navigationEpoch || 0);
         const revisionChanged = state.config.revision !== nextConfig.revision;
-        if (state.config.uploadScope !== nextConfig.uploadScope) {
+        if (root.dataset.uploadScope !== nextConfig.uploadScope) {
+          clearStaffTimer();staffProgressStarted=false;
           dismissUploadOverlays();queues={};lastStaffStatus='';
           staffProgress.hidden=true;summaryReset.hidden=true;
+          uploadSummary.title='';
+          root.querySelector('#sc-os-staff-upload-meter').value=0;
+          root.querySelector('#sc-os-staff-upload-title').textContent='';
+          root.querySelector('#sc-os-staff-upload-stage').textContent='';
+          root.querySelector('#sc-os-staff-upload-list').replaceChildren();
+          for (const {title,stage,list,meter} of Object.values(companionPanels)) {
+            title.textContent='';stage.textContent='';list.replaceChildren();meter.value=0;
+          }
           renderCompanions({});renderQueueButtons();
         }
         if (state.config.currentRouteKey !== nextConfig.currentRouteKey) dismissUploadOverlays();
         state.config = {...nextConfig};
+        root.dataset.uploadScope = nextConfig.uploadScope || "";
         state.searchIndex = prepareSearchIndex(state.config.searchIndex);
         root.dataset.configRevision = state.config.revision || "none";
         root.dataset.currentRouteKey = state.config.currentRouteKey || "dashboard";
@@ -3706,6 +4035,21 @@
         showUploadNotice(state.config.uploadNotice);
         if (state.config.staffUploadProgress && !staffProgressStarted) {
           staffProgressStarted = true;
+          // Reserve visible cards before any network response. Unknown is not idle.
+          staffProgress.hidden = false;
+          root.querySelector('#sc-os-upload-card').hidden = false;
+          if (!root.querySelector('#sc-os-staff-upload-title').textContent) {
+            root.querySelector('#sc-os-staff-upload-title').textContent = 'Checking uploads';
+            root.querySelector('#sc-os-staff-upload-stage').textContent = 'Connecting…';
+          }
+          for (const {card,title,stage} of Object.values(companionPanels)) {
+            if (state.config.companionQueuesEnabled) {
+              card.hidden = false;
+              if (!title.textContent) { title.textContent = 'Checking queue'; stage.textContent = 'Connecting…'; }
+            }
+          }
+          companionStatus.hidden = false;
+          root.classList.add('sc-has-staff-upload');
           void refreshStaffProgress();
         } else if (!state.config.staffUploadProgress) {
           clearStaffTimer();
@@ -3717,6 +4061,12 @@
           renderCompanions({});
           renderQueueButtons();
         }
+        if (revisionChanged) {
+          requestedUploadId = '';
+          pendingUploadReveal = false;
+          uploadInteraction = '';
+        }
+        revealRequestedUpload(state.config.uploadNotice);
         if (revisionChanged) {
           cancelPendingReads();
           state.notifications = null;
@@ -3770,6 +4120,7 @@
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
           const cachedOrders = readStatusCache("orders");
+          root.dataset.ordersState = 'checking';
           if (cachedOrders.payload && Date.now() - Number(cachedOrders.payload.confirmed_at || cachedOrders.checked_at || 0) <= 2 * ORDER_STATUS_REFRESH_MS) {
             updateOrdersBadge(
               cachedOrders.payload.action_required_count,

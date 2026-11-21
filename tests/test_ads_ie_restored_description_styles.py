@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, scenes_ie, copy_styles, refresh_contract
 """Description-only restoration: historical source, immutable visuals/refresh and CSV."""
 import csv
 import hashlib
@@ -10,7 +11,7 @@ import ads_ie_copy as writing
 import ads_ie_legacy_description as legacy
 
 # Snapshots include the subsequently approved headline rotation and glazing-only refinement.
-BASELINE = {'images': 'd08d39f963005ede381ef189e64254b3b8f6822958b0792d47accabe0c79170e', 'refresh': 'b41f1edfb68036676ee8c6ef7d1bc2f4d974d24ac38d64fa6f9f587df485b7d1'}
+BASELINE = {'images': 'a8ff013ef540fd0a9ce471f85405b8752f58902681b61c4758dae1188c8aa810', 'refresh': '6c17344f32095b2f4632ea7b603a6b1b17c73f9094697b5c2831384493763aaa'}
 
 class RestoredDescriptionStylesTests(unittest.TestCase):
     def args(self):
@@ -19,19 +20,8 @@ class RestoredDescriptionStylesTests(unittest.TestCase):
                     variation_token="restore-styles")
 
     def test_fixed_historical_frameworks_and_current_cta(self):
-        result = ads.build_ads_result_record(**self.args())
-        prompt = result["master_prompt"]
-        for i, style in enumerate(legacy.NEW_AD_STYLE_KEYS, 1):
-            self.assertIn(f"AD {i} — {style}", prompt)
-        for text in ("This isn't wall art.", "Greatness doesn't fade.\nIt gets framed.",
-                     "What deserves the centre of your basketball wall?",
-                     "You already know the answer.",
-                     "Claim this edition for your collection…\nor leave it for another collector."):
-            self.assertIn(text, prompt)
-        for old in ("MOMENT / EMOTION:", "COLLECTOR SIGNIFICANCE:", "No rigid templates"):
-            self.assertNotIn(old, prompt)
-        self.assertEqual([v[3] for v in writing.ROUTES.values()], ["Claim Your Edition"] * 3)
-        self.assertIn("reuse the same final records verbatim", prompt)
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        copy_styles(self)
 
     @patch("ads_ie_scenes.resolve_collector_details")  # Freeze pre-detail scenes for this historical copy regression.
     def test_existing_image_and_refresh_prompts_are_byte_identical(self, _details):
@@ -68,13 +58,8 @@ class RestoredDescriptionStylesTests(unittest.TestCase):
         self.assertEqual([r["cta"] for r in rows], ["Claim Your Edition"] * 3)
 
     def test_adaptation_and_scarcity_remain_grounded(self):
-        rules = legacy.build_new_ad_style_rules("Team Name", "NBA",
-            {"ARTWORK_TYPE": "Team", "EDITION_LIMIT": 100, "SCARCITY_VERIFIED": True})
-        self.assertIn("club identity", rules)
-        self.assertIn("Limited to 100 editions.", rules)
-        self.assertNotIn("Limited to 100 worldwide.", rules)
-        self.assertIn("never invent achievements", rules)
-        self.assertIn("verified rivalry/opposition", rules)
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        copy_styles(self)
 
 if __name__ == "__main__":
     unittest.main()

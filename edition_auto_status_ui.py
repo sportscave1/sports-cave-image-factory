@@ -38,7 +38,7 @@ def link(row,values):
     pid=psd_directory.product_id(row)
     value=values.get(pid,status.unavailable(pid))
     label=(value.get('review_operation') or {}).get('label') or (chr(9989)+' ' if value['status']=='Cloud Ready' else '')+('Needs Review' if value['status']=='Review' else value['status'])
-    return '/auto-editions/status?product_gid='+quote(pid,safe='')+'#'+label if pid else ''
+    return '/auto-editions/status?product_gid='+quote(pid,safe='')+('&repair=1' if value['status']=='Repair' else '')+'#'+label if pid else ''
 
 
 def live(ui,rows,values):

@@ -24,6 +24,7 @@
 .sc-brief-body {padding:.55rem .9rem .8rem;font-size:.875rem;line-height:1.5;overflow-wrap:anywhere;border-top:1px solid #d6cdbb}
 .sc-full-brief {margin:.45rem 0;padding:.3rem .55rem;border:1px solid #b8aa8a;border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:.85rem;font-weight:600}
 .sc-full-brief-text {margin:.65rem 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.875rem;line-height:1.55}
+.sc-daily-summary {font-size:.875rem;line-height:1.55;margin:.5rem 0;overflow-wrap:anywhere}
 .sc-brief-copy {column-width:32rem;column-gap:1.8rem}
 .sc-brief-copy p {break-inside:avoid}
 .sc-cal-wrap td a {color:inherit;text-decoration-color:#a58847;text-underline-offset:.13rem}
@@ -144,8 +145,8 @@
           });
           const result = await response.json();
           if (!response.ok) throw Error(result.error || 'Could not add this design.');
-          enqueue.title = 'Already queued or made';
-          toast.textContent = result.added ? 'Added to the Design Companion queue.' : 'This design is already queued or made.';
+          enqueue.title = 'Add this design to the Design Companion queue';
+          toast.textContent = result.added ? 'Added to the Design Companion queue.' : 'This design is already queued or running.';
           if (result.added) {
             const label = enqueue.closest('.sc-brief-row').querySelector('.sc-brief-status');
             if (label) {
@@ -157,6 +158,7 @@
           // A lost response may follow a successful enqueue. Refresh before retrying.
           toast.textContent = (error.name === 'TimeoutError' ? 'Queue request timed out.' : error.message) + ' Refresh Home to check its status.';
         }
+        enqueue.disabled = false;
         toast.hidden = false;
         clearTimeout(hideToast);
         hideToast = setTimeout(() => { toast.hidden = true; }, 6000);

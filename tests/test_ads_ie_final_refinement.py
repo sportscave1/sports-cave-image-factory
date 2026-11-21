@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, rotated_ie, scenes_ie
 """Final scene/typography contracts; no generated-image inspection is implied."""
 import copy
 import json
@@ -34,59 +35,16 @@ class FinalRefinementTests(unittest.TestCase):
         self.assertTrue(scenes._history_conflict(pack[0], old))
 
     def test_each_call_has_one_resolved_scene_without_sibling_leakage(self):
-        result = self.record()
-        prompts = re.findall(r"\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", result["master_prompt"], re.S)
-        self.assertEqual(len(prompts), 3)
-        rows = result["instant_experience_fingerprints"]
-        for i, prompt in enumerate(prompts):
-            self.assertEqual(len(re.findall(r"^SCENE:", prompt, re.M)), 1)
-            self.assertIn(rows[i]["architecture_style"], prompt)
-            for j, row in enumerate(rows):
-                if i != j:
-                    self.assertNotIn(row["architecture_style"], prompt)
-                    self.assertNotIn("Headline: " + row["headline_text"], prompt)
-            for phrase in ("CTA: CLAIM YOUR EDITION",):
-                self.assertIn(phrase, prompt)
-            self.assertNotIn("Montserrat SemiBold", prompt)
-        # Combined calls inherit one shared template; individual copy actions
-        # include the same contract directly, with only their own resolved copy.
-        for phrase in ("STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS", "Montserrat Medium", "Thickness is approximately 1 px"):
-            self.assertIn(phrase, result["master_prompt"])
-            for i, row in enumerate(ads.resolve_standard_instant_experience_visuals(
-                    product_name=result["product_name"], category="MMA", country="Australia",
-                    product_metadata=result["product_metadata"], variation_token=result["variation_token"])):
-                standalone = ads.build_instant_experience_canonical_prompt_v4(i + 1, row,
-                    product_name=result["product_name"], category="MMA", country="Australia")
-                self.assertEqual(standalone.count(phrase), 1)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        scenes_ie(self)
 
-    def test_visual_review_without_replacement_and_reference_contract(self):
-        prompt = self.record()["master_prompt"]
-        for phrase in ("Do these look like three different properties, or the same wall-and-opening composition restyled?",
-                       "Inspection must not trigger another image generation", "exactly three final covers",
-                       "never reduce a previous generation again", "Do not compound percentage reductions"):
-            self.assertIn(phrase, prompt)
-        self.assertIn("no deterministic Ads footer renderer", prompt)
+    def test_visual_review_with_improvement_and_reference_contract(self):
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
     def test_exactly_three_successes_retry_and_stable_asset_delivery(self):
-        result = self.record()
-        prompt = result["master_prompt"]
-        for phrase in ("make exactly three successful image-generation calls, one image per ad, in order",
-                       "generate each requested image in its own call", "Keep Ad 1 as the collector hallway",
-                       "Retry only a missing output when its call failed without producing an image", "never repeat a successful call",
-                       "Recover or redisplay an existing asset if display fails", "Never restart the set",
-                       "Keep three distinct assets associated with their own ad labels, copy and CSV routes", "Then stop."):
-            self.assertIn(phrase, prompt)
-        for forbidden in ("at most one correction call", "existing correction allowance", "Replacement for Image",
-                          "Reject and regenerate", "regenerate or correct", "Revise every hard failure"):
-            self.assertNotIn(forbidden, prompt)
-            self.assertNotIn(forbidden, ads.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2)
-        briefs = re.findall(r"\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", prompt, re.S)
-        routes = ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left")
-        for i, (brief, row, route) in enumerate(zip(briefs, result["instant_experience_fingerprints"], routes), 1):
-            name = "Collector Hallway" if i == 1 else row["room_type"]
-            self.assertIn(f"Output label: Ad {i} — {name}\n", brief)
-            self.assertIn(f"Route key: {route}", brief)
-        self.assertEqual(len(briefs), 3)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
     def test_saved_scenes_two_and_three_remain_unchanged(self):
         result = self.record()

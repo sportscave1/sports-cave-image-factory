@@ -76,7 +76,7 @@ class CollectorCopyTests(unittest.TestCase):
         for phrase in ['Use the authoritative confirmed edition limit','never an assumed default of 100',
                        'Omit scarcity when edition facts are unavailable','An image alone does not prove',
                        'INTERNAL QUALITY PASS','Revise failures','Do not repeat the subject',
-                       'Media Update Mode still preserves both','Preserve a strong approved']:
+                       'Media Update Mode still preserves both','Preserve the original approved edition/design name']:
             self.assertIn(phrase,RULES)
 
     def test_saved_overrides_are_superseded_and_idempotent(self):

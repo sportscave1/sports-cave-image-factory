@@ -1,0 +1,32 @@
+const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];
+ const initial=fs.existsSync('output/companion-phases/fixture-reads.json')?JSON.parse(fs.readFileSync('output/companion-phases/fixture-reads.json','utf8')):{};
+ page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:18892/');
+ await page.getByText('Fixture design',{exact:true}).waitFor();
+ const reads=()=>JSON.parse(fs.readFileSync('output/companion-phases/fixture-reads.json','utf8'));
+ for(const key of ['upload','ads','catalog'])assert.equal(reads()[key]||0,initial[key]||0);
+ await page.getByRole('button',{name:'Simulate outage',exact:true}).click();
+ await page.getByText('Status is refreshing.',{exact:false}).first().waitFor();
+ assert(await page.getByText('Fixture design',{exact:true}).isVisible());
+ await page.getByRole('button',{name:'Recover backend',exact:true}).click();
+ await page.getByRole('tab',{name:'Ads queue',exact:true}).click();
+ await page.getByText('No ad running.',{exact:true}).waitFor().catch(async e=>{console.log(await page.locator('body').innerText());await page.screenshot({path:'output/companion-phases/browser-failure.png'});throw e;});
+ assert.equal(reads().catalog||0,initial.catalog||0);
+ await page.getByText('Add to queue',{exact:true}).click();
+ await page.getByText('No eligible Edition Ops products found.',{exact:true}).waitFor();
+ assert(reads().catalog>(initial.catalog||0));
+ await page.getByRole('tab',{name:'Upload queue',exact:true}).click();
+ await page.getByText('Add uploads from Design Studio',{exact:true}).waitFor();
+ const frame=page.frames().find(f=>f.url().includes('companion_visibility'));
+ assert(frame,'Visibility component attached');
+ await frame.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});
+ await page.waitForTimeout(1000);const before=reads().upload;await page.waitForTimeout(4500);
+ assert.equal(reads().upload,before,'Hidden browser stops queue polling');
+ await frame.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'));});
+ await page.waitForTimeout(3000);assert(reads().upload>before,'Visible browser resumes polling');
+ for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.waitForTimeout(200);
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'No horizontal overflow');
+ await page.screenshot({path:`output/companion-phases/queues-${width}.png`});}
+ assert.deepEqual(errors,[]);console.log('Companion browser: lazy tabs/composer, retained stale content, hidden/visible polling, desktop/mobile passed.');
+ }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

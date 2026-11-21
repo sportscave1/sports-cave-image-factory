@@ -1,8 +1,16 @@
-"""Deterministic queue targeting using smart candidates and verified membership."""
+"""Deterministic queue targeting by sport, independent of featured-item membership."""
 import re
 from urllib.parse import urlsplit
 
 from ads_target_relevance import rank_relevant_meta_options, tokens, extract_relevance_terms
+
+
+class CatalogPending(ValueError):
+    """Catalogue data is not available yet; retain the generated package for retry."""
+
+
+FORMULA_ONE_PRODUCT_SET = 'FORMULA 1 WALL ART POPULAR'
+NBA_PRODUCT_SET = 'NBA WALL ART POPULAR BLACK FRAMES'
 
 
 def contains_product(products, result):
@@ -21,38 +29,34 @@ def contains_product(products, result):
 
 def select(refs, result, *, client, saved=None):
     import ads_posting_page as posting
-    from meta_ads_client import MetaAdsApiError
     from posting_import_csv import canonical_posting_country
 
     explicit = saved or result.get('posting_settings') or {}
     product_sets = sorted(refs.get('product_sets') or [], key=lambda row: str(row.get('id','')))
-    selected_set = str(explicit.get('product_set_id') or '')
-    ranked = rank_relevant_meta_options(product_sets, product_title=result['product_name'],
-        sport=result['category'], show_all=True)['all_options']
-    sport_terms, title_terms = extract_relevance_terms(result['product_name'], result['category'])
-    identity_terms = set(title_terms)-sport_terms
-    ranked.sort(key=lambda row: -len(identity_terms & set(tokens(row.get('name')))))
-    if selected_set:
-        ranked = [row for row in ranked if str(row['id']) == selected_set]
-        if not ranked:
-            raise ValueError('The selected product set is no longer in the configured catalog.')
-    chosen = None
-    for row in ranked:
-        try:
-            products = client.product_set_members(str(row['id']))
-        except MetaAdsApiError as error:
-            if str(error.error_code) in ('3', '10', '190', '200') and not error.is_transient:
-                raise ValueError(
-                    'Meta denied product-set membership verification '
-                    f'(code {error.error_code}). All imported files are saved. '
-                    'Check the Meta app and catalogue access, then Resume import.'
-                ) from error
-            raise
-        if contains_product(products, result):
-            chosen = row
-            break
-    if not chosen:
-        raise ValueError('No eligible product set contains this product. Files are saved; correct the catalog membership and Resume import.')
+    from sports_categories import normalize_sport_category
+    sport = normalize_sport_category(result['category'])
+    # Collection labels, not athlete/team relevance, determine the catalogue.
+    # Prefer the canonical wall-art title, accepting exact taxonomy aliases.
+    ranked = [row for row in product_sets
+              if sport and normalize_sport_category(row.get('name')) == sport]
+    canonical_name = ' '.join(tokens(sport + ' Wall Art'))
+    ranked.sort(key=lambda row: (
+        ' '.join(tokens(row.get('name'))) != canonical_name,
+        not ' '.join(tokens(row.get('name'))).endswith('wall art'),
+    ))
+    required_name = f'{sport or result["category"]} Wall Art'
+    preferred_name = {'Formula One': FORMULA_ONE_PRODUCT_SET, 'NBA': NBA_PRODUCT_SET}.get(sport)
+    if preferred_name:
+        required_name = preferred_name
+        ranked = [row for row in product_sets
+                  if ' '.join(str(row.get('name') or '').split()).casefold()
+                  == preferred_name.casefold()]
+    if not ranked:
+        raise CatalogPending(f'Meta has not yet confirmed the {required_name} collection.')
+    # The cover and CTA promote the featured product; the Collection tiles use
+    # the selected sport/curated set. A new product need not be in that set.
+    # Posting still validates set/catalogue access and verifies every paused ad.
+    chosen = ranked[0]
     country = posting.COUNTRY_META_CODES[canonical_posting_country(result['country'])]
     audiences = posting._audience_options(refs)
     saved_geo = {str(row['id']): (row.get('targeting') or {}).get('geo_locations') or {}

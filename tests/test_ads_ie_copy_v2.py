@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, scenes_ie, copy_styles, refresh_contract
 import csv
 import io
 import unittest
@@ -5,7 +6,7 @@ import unittest
 import ads_page as ads
 import ads_ie_copy as copy
 import posting_import_csv as posting
-from tests.test_ads_page import run_ads_page, set_product_name, select_option, set_product_url, button_by_label, instant_experience_csv_notes, uploader_by_label
+from tests.test_ads_page import run_ads_page, set_product_name, select_option, set_product_url, seed_saved_result, instant_experience_csv_notes, uploader_by_label
 
 
 class CopyV2Tests(unittest.TestCase):
@@ -19,40 +20,12 @@ class CopyV2Tests(unittest.TestCase):
         return notes
 
     def test_public_prompt_product_market_and_fact_contracts(self):
-        for name, sport, market, metadata in (
-            ("Don Mattingly October 4 1995", "Baseball", "USA", {"edition_limit": 100}),
-            ("Peter Brock Historic Motorsport", "Motorsport", "Australia", {"product_era": "historic", "edition_limit": 100}),
-            ("Current Cricket Athlete", "Cricket", "Australia", {}),
-            ("Verified Rivalry", "Football", "UK", {"relationship_type": "rivalry"}),
-        ):
-            with self.subTest(name=name):
-                r = self.record(name, sport, market, product_metadata=metadata)
-                text = r["master_prompt"]
-                for marker in (copy.VERSION, name, "INTERNAL DESCRIPTION PLAN", "Empty ATHLETE_NAMES", "Product truth", "verified rivalry/opposition", "Shop Now", ads.META_AD_URL_PARAMETERS):
-                    self.assertIn(marker, text)
-                for stale in ("exactly nine", "three-row", "COPY VARIATIONS"):
-                    self.assertNotIn(stale, text)
-                grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES")[1]
-                self.assertEqual(grouped.count("\nAD COPY\n"), 3)
-                for cta in ("Claim Your Edition",):
-                    self.assertIn("CTA:\n" + cta, grouped)
-                if metadata.get("edition_limit"):
-                    self.assertIn("Limited to 100 editions.", text)
-                else:
-                    self.assertIn("omit quantity and geographic scarcity", text)
-                if not metadata:
-                    self.assertNotIn("LIMITED TO 100", grouped)
-                    visuals = ads.resolve_standard_instant_experience_visuals(product_name=name, category=sport, product_metadata=metadata, variation_token="copy-v2")
-                    self.assertTrue(all(v["edition_limit_used"] != "100" for v in visuals))
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        copy_styles(self)
 
     def test_styles_remain_fixed_across_products_tokens_and_history(self):
-        for sport in ("NBA", "NFL", "Cricket", "Motorsport", "Other"):
-            for token in ("first", "second"):
-                result = copy.cues("Collector Subject", sport, "USA", token, {})
-                self.assertEqual([c["description_role"] for c in result],
-                                 list(copy.ROLES))
-                self.assertEqual(result, copy.cues("Collector Subject", sport, "USA", token, {}))
-                self.assertEqual(len({c["opening_hook_family"] for c in result}), 3)
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        copy_styles(self)
 
     def test_copy_history_accepts_old_and_current_visual_identities(self):
         args = ("Single Athlete", "Baseball", "USA", "seed", {})
@@ -111,7 +84,7 @@ class CopyV2Tests(unittest.TestCase):
         select_option(app, "Country", "USA")
         select_option(app, "Campaign type", "Instant Experience")
         set_product_url(app)
-        button_by_label(app, "Submit").click().run(timeout=20)
+        seed_saved_result(app)
         self.assertEqual(len(app.exception), 0)
         fields = [x for x in app.text_area if str(x.key).startswith("ads-ie-concept-copy-field::")]
         self.assertEqual(len(fields), 9)
@@ -119,7 +92,7 @@ class CopyV2Tests(unittest.TestCase):
         self.assertEqual([x.label for x in fields].count("Headline"), 3)
         self.assertEqual([x.label for x in fields].count("CTA"), 3)
         text = "\n".join(x.value for x in list(app.markdown) + list(app.caption))
-        for value in ("PREMIUM SCARCITY — RIGHT ANGLE", "PREMIUM SCARCITY — STRAIGHT ON", "PREMIUM SCARCITY — LEFT ANGLE"):
+        for value in (concept['scene_name'] for concept in ads.INSTANT_EXPERIENCE_CONCEPTS):
             self.assertIn(value, text)
         for stale in ("SMART HYBRID", "PRIVATE GALLERY", "GROUP 3 — THE CAVE", "Description 1", "0 of 3 copy pairs"):
             self.assertNotIn(stale, text)

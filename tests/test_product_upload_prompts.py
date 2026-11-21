@@ -401,7 +401,7 @@ Preserve every other price and product field.
                 )
                 saved = current + "\n\n" + appendix
                 updated = app.apply_product_upload_pricing_update(saved)
-                self.assertEqual(updated, current + "\n\n" + expected_appendix)
+                self.assertEqual(updated, app.apply_product_upload_pricing_update(current) + "\n\n" + expected_appendix)
                 self.assertEqual(app.apply_product_upload_pricing_update(updated), updated)
                 rendered = app.apply_product_upload_prompt_updates(
                     saved, source_context(), update_existing=existing, publication_mode=mode,
@@ -470,7 +470,7 @@ Preserve every other price and product field.
                     self.assertEqual(updated.count(new), 2)
                 for unframed in EXPECTED_UNFRAMED_PRICING_LINES:
                     self.assertEqual(updated.count(unframed), 1)
-                self.assertEqual(app.apply_product_upload_pricing_update(updated), updated)
+                self.assertEqual(app.apply_product_upload_prompt_updates(updated, source_context(), update_existing=existing, publication_mode=mode), updated)
 
     def test_runtime_saved_override_update_preserves_media_reliability_patch(self):
         legacy_saved_prompt = (
@@ -838,21 +838,21 @@ Preserve every other price and product field.
         ui=(ROOT/'product_upload_mockups_ui.py').read_text(encoding='utf-8')
         self.assertIn("section='upload'",ui)
         self.assertIn("section='handoff'",ui)
-        self.assertIn('render_generation_result(result)',ui)
+        self.assertIn('render_outputs(app,result,row,user,name)',ui)
         self.assertNotIn('Customer-facing Product Title',ui)
 
     def test_compact_markup_and_saved_prompts_have_the_new_input_contract(self):
         from product_upload_prompts import build
         markup=(ROOT/'components/product_uploads/index.html').read_text(encoding='utf-8')
         self.assertIn('id="return" hidden',markup)
-        self.assertEqual(markup.count('type="text"'),1)
+        self.assertEqual(markup.count('type="search"'),1)
         self.assertNotIn('maxlength=',markup)
-        for text in ('Generate Core Shopify Images','Use manual workflow','Shopify product name','How to'):
+        for text in ('Generate mockups','Use manual workflow','Choose PSD','How to'):
             self.assertIn(text,markup)
         for selected in ('DRAFT','LIVE','UPDATE'):
             text=build(selected,load=lambda key,default,**kw:default)
             self.assertNotIn('[ENTER PRODUCT NAME ABOVE]',text)
-            self.assertIn('RETURN TO PRODUCT UPLOADS',text)
+            self.assertIn('8. COMPLETION CHECK',text)
 
 
 

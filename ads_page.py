@@ -32,7 +32,9 @@ import ads_package_paths
 from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 from ads_footer import COMPACT_FOOTER_RULES, FOOTER_VERSION, apply_footer_contract
+import ads_ie_two_line as ie_two
 from ads_final_delivery import VERSION as FINAL_DELIVERY_VERSION, apply_final_delivery
+from ads_generation_review import VERSION as GENERATION_REVIEW_VERSION, apply_generation_review
 import ads_carousel_winner as carousel_winner
 import ads_google_demand_gen as google_ads
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
@@ -909,7 +911,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "on_image_message_type": "Exact three-line bottom collector strip.",
         "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
-        "cover_composition": "Full-width upper lifestyle/product image region approximately 80-82% of the square canvas, with a fixed opaque matte-black footer across the bottom approximately 18-20%.",
+        "cover_composition": "Full-width upper lifestyle/product image region exactly 84.375% of the square canvas, with a fixed opaque satin-black footer across the bottom exactly 15.625%.",
         "panel_treatment": "Deep matte-black bottom strip with a thin restrained metallic-gold divider across its top edge.",
         "product_prominence": "Frame occupies approximately 74-82% of usable canvas width inside the upper image region.",
         "room_family": "Current premium collector-room control.",
@@ -3318,361 +3320,7 @@ INSTANT_EXPERIENCE_REFERENCE_IMAGE_INSTRUCTION = (
 )
 
 
-INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE = """06 — INSTANT EXPERIENCE COVER — 1:1 SOCIAL
-
-Use the product information and uploaded reference image already supplied through the Sports Cave Ads section:
-
-Product name: {{PRODUCT_NAME}}
-Sport category: {{SPORT_CATEGORY}}
-Target market: {{TARGET_MARKET}}
-Reference image: {{UPLOADED_FRAMED_PRODUCT_IMAGE}}
-
-Do not ask for these details again.
-
-OBJECTIVE
-
-Using the uploaded Sports Cave product image as the exact product reference, create one ultra-realistic 1024 × 1024 Meta Instant Experience cover.
-
-The output must always be:
-
-* Exactly 1024 × 1024 pixels.
-* Exactly 1:1 square.
-* Designed for mobile viewing.
-* Suitable for the top of a Meta Instant Experience, with the product catalogue appearing underneath.
-
-Never generate a landscape or portrait canvas. If the result is not exactly 1:1, regenerate it before returning the final image.
-
-The cover must instantly communicate:
-
-* Premium collector value.
-* Authentic limited-edition scarcity.
-* Emotional fan ownership.
-* The feeling that this artwork belongs in a real home.
-* A clear reason to claim an edition before all 100 are gone.
-
-The artwork must remain the unmistakable hero.
-
-APPROVED COMPOSITION
-
-Use a stacked full-width square composition with two precisely separated sections:
-
-Upper lifestyle/product image region: approximately 80-82% of the square canvas.
-Fixed black footer: approximately 18-20% of the square canvas.
-
-Do not create a left/right split, right sidebar, vertical scarcity panel or any copy beside the product image.
-Do not allow the bottom strip to overpower the product.
-
-The framed artwork must be the largest and most immediately recognizable element in the image.
-
-TOP LIFESTYLE SECTION
-
-Place the exact uploaded framed artwork prominently on the wall of a genuine premium residential interior.
-
-The setting must resemble a real house photographed by a professional interior photographer—not a showroom, retail display, studio set or AI-generated luxury room.
-
-Select one believable residential area appropriate to the product and target market, such as:
-
-* A refined living-room feature wall.
-* An intimate home office.
-* A renovated gallery landing.
-* A premium hallway or stair landing.
-* A collector’s reading room.
-* A restrained media or entertainment room.
-* A sophisticated man cave without sports-themed clutter.
-
-Use only one setting. Do not combine multiple room concepts.
-
-The room should feel premium, masculine, minimal and lived-in without becoming cold, clichéd or excessively luxurious.
-
-Use a restrained residential palette such as:
-
-* Warm off-white.
-* Muted taupe.
-* Soft concrete.
-* Natural plaster.
-* Warm grey.
-* Charcoal.
-* Lightly textured beige.
-* Subtle timber and neutral architectural finishes.
-
-REAL-HOUSE PHOTOGRAPHY REQUIREMENTS
-
-The environment must include believable residential architecture:
-
-* Correct room dimensions and ceiling height.
-* Straight vertical walls and doorways.
-* Accurate floor-to-wall joins.
-* Natural furniture scale.
-* Realistic frame size relative to the wall.
-* Plausible mounting height.
-* Correct perspective and viewing distance.
-* Natural space around the artwork.
-* Genuinely textured plaster, timber, fabric, leather or concrete.
-* Subtle signs that somebody lives in the house.
-* Controlled imperfection rather than artificial symmetry.
-
-Use a limited number of carefully placed residential details, such as one bench, console, chair, book or ceramic object.
-
-Do not fill the room with decorative clutter.
-
-Do not use sports props to explain the sport. The supplied artwork must carry the sporting identity.
-
-ARTWORK PROMINENCE
-
-The framed artwork must dominate the upper lifestyle/product image region.
-
-It should occupy approximately 74-82% of the usable canvas width inside the upper region, depending on the room and camera angle.
-
-It must remain:
-
-* Large at thumbnail size.
-* Fully visible.
-* Instantly recognizable.
-* Clearly separated from surrounding furniture.
-* The primary focal point.
-* More visually important than the architecture.
-
-Do not place the artwork far away on a large empty wall.
-
-Do not make the room more prominent than the product.
-
-Do not crop any part of the artwork or frame.
-
-PRODUCT LOCK — NON-NEGOTIABLE
-
-Treat the uploaded Sports Cave framed product image as a locked photographic product asset.
-
-Keep the uploaded artwork and frame exactly the same.
-
-Do not:
-
-* Redesign, repaint or redraw the artwork.
-* Regenerate or reinterpret the artwork.
-* Create a similar or lookalike version.
-* Change the athlete, subject or identity.
-* Change faces, bodies, uniforms or equipment.
-* Change any colours.
-* Change the composition or layout.
-* Change any wording inside the artwork.
-* Change the badge, seal, plaque or edition plate.
-* Add fake signatures.
-* Add fake logos.
-* Add fake edition numbers.
-* Add invented artwork details.
-* Crop the artwork.
-* Blur or soften the artwork.
-* Mirror the artwork.
-* Stretch, warp, bend, squash or distort it.
-* Change its landscape proportions.
-* Change the frame colour, shape or design.
-* Replace the supplied product with newly generated artwork.
-
-The artwork must remain sharp, rectangular, correctly aligned and completely visible inside the frame.
-
-FRAME AND GLASS REALISM
-
-The frame must look like a genuine physical product mounted on a real wall.
-
-Preserve the supplied frame colour and design.
-
-Show:
-
-* Premium timber construction.
-* Believable frame depth.
-* Sharp square corners.
-* Clean frame joins.
-* Subtle material texture.
-* Correct landscape proportions.
-* Accurate perspective.
-* A natural gap or shadow between the frame and wall.
-* Realistic weight and mounting.
-
-Add physically believable glass over the artwork.
-
-The glass should show:
-
-* Soft environmental reflections.
-* Subtle premium glare.
-* Restrained highlight streaks.
-* Reflections consistent with the room’s windows and lighting.
-* Controlled transparency that keeps the entire artwork readable.
-
-Glass reflections must enhance the realism without obscuring, changing or washing out the artwork.
-
-The frame must look mounted—not pasted, floating or digitally overlaid.
-
-LIGHTING AND CAMERA
-
-Use authentic residential lighting.
-
-Combine:
-
-* Soft natural light entering from one believable direction.
-* Restrained warm practical or architectural lighting.
-* Natural shadows behind and beneath the frame.
-* Subtle shadow falloff across the wall.
-* Controlled contrast.
-* Realistic highlights on timber, plaster and glass.
-
-Avoid bright orange lighting, extreme spotlights, artificial glow and overprocessed HDR.
-
-Use a natural interior-photography camera position.
-
-A subtle three-quarter angle is allowed, but the frame must remain geometrically correct and easy to see.
-
-Avoid:
-
-* Extreme wide-angle lenses.
-* Distorted walls.
-* Dramatic Dutch angles.
-* Excessive perspective.
-* Bent architecture.
-* Perfect front-facing artificial symmetry.
-* Camera positions that make the artwork appear small.
-
-FIXED BLACK FOOTER
-
-Add an integrated collector-grade full-width matte-black footer across the bottom 18-20% of the square canvas.
-
-The strip must feel like part of a premium Sports Cave campaign--not a separate cheap promotional banner.
-
-Strip styling:
-
-* Deep matte black.
-* Subtle black material texture.
-* Refined dark tonal variation.
-* Very subtle metallic-gold detailing.
-* Clean spacing.
-* No excessive shine.
-* No gradient, transparency, feathering, vignette or fade.
-* No neon effects.
-* No discount-store styling.
-
-Separate the upper lifestyle/product image region and bottom strip with one thin restrained metallic-gold divider across the top edge of the black strip.
-
-Do not use a large artificial lens flare.
-
-SCARCITY COPY
-
-Use only these three lines:
-
-LIMITED TO 100 WORLDWIDE
-
-Once it sells out, it’s gone.
-
-CLAIM YOUR EDITION
-
-Do not add any other overlay copy.
-
-Do not add:
-
-* Product names.
-* Prices.
-* Discounts.
-* Percentage savings.
-* Shipping claims.
-* Product features.
-* Paragraphs.
-* Countdown timers.
-* “Shop Now” buttons.
-* Fake clickable UI.
-* Additional scarcity claims.
-
-TEXT HIERARCHY
-
-Line one:
-
-“LIMITED TO 100 WORLDWIDE”
-
-* Largest line.
-* Uppercase.
-* Premium collector-style serif or refined high-end display typeface.
-* Soft metallic gold, warm ivory or premium white.
-* Strong enough to stop the scroll.
-* Fully readable on mobile.
-
-Line two:
-
-“Once it sells out, it’s gone.”
-
-* Smaller.
-* Clean and understated.
-* White or warm ivory.
-* Use the apostrophes exactly as written.
-* Give the line breathing room within the existing compact footer.
-
-Line three:
-
-“CLAIM YOUR EDITION”
-
-* Uppercase.
-* Refined metallic gold or warm gold.
-* Clearly readable.
-* Slightly smaller than the main scarcity headline.
-* Styled as a premium campaign command, not a fake website button.
-
-Use the full width of the bottom strip so the wording never looks squeezed.
-Centre the complete text hierarchy horizontally and vertically inside the strip.
-Keep "LIMITED TO 100 WORLDWIDE" together as one unified single-line headline.
-Do not isolate or unnaturally enlarge "100".
-Keep all text centred, correctly spelled and safely inside the mobile margins.
-Do not compress, squash, stretch or use excessively narrow typography.
-Do not break individual words.
-
-The strip must feel urgent through restraint, spacing and hierarchy--not through oversized graphics or aggressive sales styling.
-
-SPORT AND MARKET ADAPTATION
-
-Use the supplied sport category and target market only to guide the architectural atmosphere and emotional tone.
-
-The setting should feel appropriate for a serious fan and collector in that market without using stereotypes.
-
-Do not introduce:
-
-* Sports equipment.
-* Balls.
-* Bats.
-* Helmets.
-* Jerseys.
-* Trophies.
-* Figurines.
-* Team flags.
-* Novelty signs.
-* Team-coloured rooms.
-* Extra athlete photographs.
-* Extra sports artwork.
-* Fake memorabilia.
-* Retail fixtures.
-* Neon signs.
-
-The framed artwork alone must communicate the sport, athlete, team, rivalry or moment.
-
-FINAL REALISM CHECK
-
-Before returning the image, confirm that:
-
-* The canvas is exactly 1024 × 1024.
-* The output is a true 1:1 square.
-* The framed artwork is completely visible.
-* The artwork remains the dominant visual element.
-* The original artwork has not been altered.
-* The frame has correct landscape proportions.
-* The room resembles a genuine lived-in house.
-* The frame appears physically mounted.
-* Glass reflections are realistic and controlled.
-* Wall, floor, ceiling and furniture geometry are believable.
-* The three approved text lines are spelled correctly.
-* No additional text or claims have been introduced.
-* The bottom scarcity strip feels premium rather than promotional.
-* The overall image remains clear and persuasive at mobile size.
-
-Avoid warped walls, impossible windows, crooked ceilings, bent furniture, floating objects, duplicate objects, plastic materials, fake luxury, excessive blur, overprocessed HDR, unrealistic reflections, malformed lighting, perfect artificial symmetry and any obvious AI-showroom appearance.
-
-FINAL RESULT
-
-Create a photorealistic, premium 1024 × 1024 Sports Cave Instant Experience cover featuring the exact uploaded framed artwork displayed prominently in a genuine high-end residential interior.
-
-The final image must make the artwork feel like a real limited-edition collector piece already hanging in a desirable home, then use the restrained full-width black-and-gold bottom scarcity strip to make the viewer feel they should claim one of the 100 editions before it is gone."""
+INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE = '06 — INSTANT EXPERIENCE COVER — 1:1 SOCIAL\n\nUse the product information and uploaded reference image already supplied through the Sports Cave Ads section:\n\nProduct name: {{PRODUCT_NAME}}\nSport category: {{SPORT_CATEGORY}}\nTarget market: {{TARGET_MARKET}}\nReference image: {{UPLOADED_FRAMED_PRODUCT_IMAGE}}\n\nDo not ask for these details again.\n\nOBJECTIVE\n\nUsing the uploaded Sports Cave product image as the exact product reference, create one ultra-realistic 1024 × 1024 Meta Instant Experience cover.\n\nThe output must always be:\n\n* Exactly 1024 × 1024 pixels.\n* Exactly 1:1 square.\n* Designed for mobile viewing.\n* Suitable for the top of a Meta Instant Experience, with the product catalogue appearing underneath.\n\nNever generate a landscape or portrait canvas. If the result is not exactly 1:1, regenerate it before returning the final image.\n\nThe cover must instantly communicate:\n\n* Premium collector value.\n* Authentic limited-edition scarcity.\n* Emotional fan ownership.\n* The feeling that this artwork belongs in a real home.\n* A clear reason to claim an edition before all 100 are gone.\n\nThe artwork must remain the unmistakable hero.\n\nAPPROVED COMPOSITION\n\nUse a stacked full-width square composition with two precisely separated sections:\n\nUpper lifestyle/product image region: exactly 84.375% of the square canvas.\nFixed black footer: exactly 15.625% of the square canvas.\n\nDo not create a left/right split, right sidebar, vertical scarcity panel or any copy beside the product image.\nDo not allow the bottom strip to overpower the product.\n\nThe framed artwork must be the largest and most immediately recognizable element in the image.\n\nTOP LIFESTYLE SECTION\n\nPlace the exact uploaded framed artwork prominently on the wall of a genuine premium residential interior.\n\nThe setting must resemble a real house photographed by a professional interior photographer—not a showroom, retail display, studio set or AI-generated luxury room.\n\nSelect one believable residential area appropriate to the product and target market, such as:\n\n* A refined living-room feature wall.\n* An intimate home office.\n* A renovated gallery landing.\n* A premium hallway or stair landing.\n* A collector’s reading room.\n* A restrained media or entertainment room.\n* A sophisticated man cave without sports-themed clutter.\n\nUse only one setting. Do not combine multiple room concepts.\n\nThe room should feel premium, masculine, minimal and lived-in without becoming cold, clichéd or excessively luxurious.\n\nUse a restrained residential palette such as:\n\n* Warm off-white.\n* Muted taupe.\n* Soft concrete.\n* Natural plaster.\n* Warm grey.\n* Charcoal.\n* Lightly textured beige.\n* Subtle timber and neutral architectural finishes.\n\nREAL-HOUSE PHOTOGRAPHY REQUIREMENTS\n\nThe environment must include believable residential architecture:\n\n* Correct room dimensions and ceiling height.\n* Straight vertical walls and doorways.\n* Accurate floor-to-wall joins.\n* Natural furniture scale.\n* Realistic frame size relative to the wall.\n* Plausible mounting height.\n* Correct perspective and viewing distance.\n* Natural space around the artwork.\n* Genuinely textured plaster, timber, fabric, leather or concrete.\n* Subtle signs that somebody lives in the house.\n* Controlled imperfection rather than artificial symmetry.\n\nUse a limited number of carefully placed residential details, such as one bench, console, chair, book or ceramic object.\n\nDo not fill the room with decorative clutter.\n\nDo not use sports props to explain the sport. The supplied artwork must carry the sporting identity.\n\nARTWORK PROMINENCE\n\nThe framed artwork must dominate the upper lifestyle/product image region.\n\nIt should occupy approximately 74-82% of the usable canvas width inside the upper region, depending on the room and camera angle.\n\nIt must remain:\n\n* Large at thumbnail size.\n* Fully visible.\n* Instantly recognizable.\n* Clearly separated from surrounding furniture.\n* The primary focal point.\n* More visually important than the architecture.\n\nDo not place the artwork far away on a large empty wall.\n\nDo not make the room more prominent than the product.\n\nDo not crop any part of the artwork or frame.\n\nPRODUCT LOCK — NON-NEGOTIABLE\n\nTreat the uploaded Sports Cave framed product image as a locked photographic product asset.\n\nKeep the uploaded artwork and frame exactly the same.\n\nDo not:\n\n* Redesign, repaint or redraw the artwork.\n* Regenerate or reinterpret the artwork.\n* Create a similar or lookalike version.\n* Change the athlete, subject or identity.\n* Change faces, bodies, uniforms or equipment.\n* Change any colours.\n* Change the composition or layout.\n* Change any wording inside the artwork.\n* Change the badge, seal, plaque or edition plate.\n* Add fake signatures.\n* Add fake logos.\n* Add fake edition numbers.\n* Add invented artwork details.\n* Crop the artwork.\n* Blur or soften the artwork.\n* Mirror the artwork.\n* Stretch, warp, bend, squash or distort it.\n* Change its landscape proportions.\n* Change the frame colour, shape or design.\n* Replace the supplied product with newly generated artwork.\n\nThe artwork must remain sharp, rectangular, correctly aligned and completely visible inside the frame.\n\nFRAME AND GLASS REALISM\n\nThe frame must look like a genuine physical product mounted on a real wall.\n\nPreserve the supplied frame colour and design.\n\nShow:\n\n* Premium timber construction.\n* Believable frame depth.\n* Sharp square corners.\n* Clean frame joins.\n* Subtle material texture.\n* Correct landscape proportions.\n* Accurate perspective.\n* A natural gap or shadow between the frame and wall.\n* Realistic weight and mounting.\n\nAdd physically believable glass over the artwork.\n\nThe glass should show:\n\n* Soft environmental reflections.\n* Subtle premium glare.\n* Restrained highlight streaks.\n* Reflections consistent with the room’s windows and lighting.\n* Controlled transparency that keeps the entire artwork readable.\n\nGlass reflections must enhance the realism without obscuring, changing or washing out the artwork.\n\nThe frame must look mounted—not pasted, floating or digitally overlaid.\n\nLIGHTING AND CAMERA\n\nUse authentic residential lighting.\n\nCombine:\n\n* Soft natural light entering from one believable direction.\n* Restrained warm practical or architectural lighting.\n* Natural shadows behind and beneath the frame.\n* Subtle shadow falloff across the wall.\n* Controlled contrast.\n* Realistic highlights on timber, plaster and glass.\n\nAvoid bright orange lighting, extreme spotlights, artificial glow and overprocessed HDR.\n\nUse a natural interior-photography camera position.\n\nA subtle three-quarter angle is allowed, but the frame must remain geometrically correct and easy to see.\n\nAvoid:\n\n* Extreme wide-angle lenses.\n* Distorted walls.\n* Dramatic Dutch angles.\n* Excessive perspective.\n* Bent architecture.\n* Perfect front-facing artificial symmetry.\n* Camera positions that make the artwork appear small.\n\nFIXED BLACK FOOTER\n\nAdd an integrated collector-grade full-width matte-black footer across the bottom 15.625% of the square canvas.\n\nThe strip must feel like part of a premium Sports Cave campaign--not a separate cheap promotional banner.\n\nStrip styling:\n\n* Deep matte black.\n* Subtle black material texture.\n* Refined dark tonal variation.\n* Very subtle metallic-gold detailing.\n* Clean spacing.\n* No excessive shine.\n* No gradient, transparency, feathering, vignette or fade.\n* No neon effects.\n* No discount-store styling.\n\nSeparate the upper lifestyle/product image region and bottom strip with one thin restrained metallic-gold shimmer replacing the original divider in place across the top edge of the black strip; preserve its background, height, typography and layout.\n\nDo not use a large artificial lens flare.\n\nSCARCITY COPY\n\nUse only these three lines:\n\nLIMITED TO 100 WORLDWIDE\n\nOnce it sells out, it’s gone.\n\nCLAIM YOUR EDITION\n\nDo not add any other overlay copy.\n\nDo not add:\n\n* Product names.\n* Prices.\n* Discounts.\n* Percentage savings.\n* Shipping claims.\n* Product features.\n* Paragraphs.\n* Countdown timers.\n* “Shop Now” buttons.\n* Fake clickable UI.\n* Additional scarcity claims.\n\nTEXT HIERARCHY\n\nLine one:\n\n“LIMITED TO 100 WORLDWIDE”\n\n* Largest line.\n* Uppercase.\n* Premium collector-style serif or refined high-end display typeface.\n* Soft metallic gold, warm ivory or premium white.\n* Strong enough to stop the scroll.\n* Fully readable on mobile.\n\nLine two:\n\n“Once it sells out, it’s gone.”\n\n* Smaller.\n* Clean and understated.\n* White or warm ivory.\n* Use the apostrophes exactly as written.\n* Give the line breathing room within the existing compact footer.\n\nLine three:\n\n“CLAIM YOUR EDITION”\n\n* Uppercase.\n* Refined metallic gold or warm gold.\n* Clearly readable.\n* Slightly smaller than the main scarcity headline.\n* Styled as a premium campaign command, not a fake website button.\n\nUse the full width of the bottom strip so the wording never looks squeezed.\nCentre the complete text hierarchy horizontally and vertically inside the strip.\nKeep "LIMITED TO 100 WORLDWIDE" together as one unified single-line headline.\nDo not isolate or unnaturally enlarge "100".\nKeep all text centred, correctly spelled and safely inside the mobile margins.\nDo not compress, squash, stretch or use excessively narrow typography.\nDo not break individual words.\n\nThe strip must feel urgent through restraint, spacing and hierarchy--not through oversized graphics or aggressive sales styling.\n\nSPORT AND MARKET ADAPTATION\n\nUse the supplied sport category and target market only to guide the architectural atmosphere and emotional tone.\n\nThe setting should feel appropriate for a serious fan and collector in that market without using stereotypes.\n\nDo not introduce:\n\n* Sports equipment.\n* Balls.\n* Bats.\n* Helmets.\n* Jerseys.\n* Trophies.\n* Figurines.\n* Team flags.\n* Novelty signs.\n* Team-coloured rooms.\n* Extra athlete photographs.\n* Extra sports artwork.\n* Fake memorabilia.\n* Retail fixtures.\n* Neon signs.\n\nThe framed artwork alone must communicate the sport, athlete, team, rivalry or moment.\n\nFINAL REALISM CHECK\n\nBefore returning the image, confirm that:\n\n* The canvas is exactly 1024 × 1024.\n* The output is a true 1:1 square.\n* The framed artwork is completely visible.\n* The artwork remains the dominant visual element.\n* The original artwork has not been altered.\n* The frame has correct landscape proportions.\n* The room resembles a genuine lived-in house.\n* The frame appears physically mounted.\n* Glass reflections are realistic and controlled.\n* Wall, floor, ceiling and furniture geometry are believable.\n* The three approved text lines are spelled correctly.\n* No additional text or claims have been introduced.\n* The bottom scarcity strip feels premium rather than promotional.\n* The overall image remains clear and persuasive at mobile size.\n\nAvoid warped walls, impossible windows, crooked ceilings, bent furniture, floating objects, duplicate objects, plastic materials, fake luxury, excessive blur, overprocessed HDR, unrealistic reflections, malformed lighting, perfect artificial symmetry and any obvious AI-showroom appearance.\n\nFINAL RESULT\n\nCreate a photorealistic, premium 1024 × 1024 Sports Cave Instant Experience cover featuring the exact uploaded framed artwork displayed prominently in a genuine high-end residential interior.\n\nThe final image must make the artwork feel like a real limited-edition collector piece already hanging in a desirable home, then use the restrained full-width black-and-gold bottom scarcity strip to make the viewer feel they should claim one of the 100 editions before it is gone.'
 
 
 def build_default_instant_experience_cover_prompt_requirements(product_name, category, country):
@@ -3802,103 +3450,14 @@ SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1 = "SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1"
 
 
 def build_instant_experience_creative_cta_rules(concept_id=None):
-    approved_ctas = ", ".join(INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
-    approved_endings = "; ".join(
-        f'{cta} -> "{ending}"'
-        for cta, ending in INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS.items()
-    )
-    shared_rules = f"""{SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1}
-INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
-
-- Every customer-facing Instant Experience creative CTA must be exactly one of: {approved_ctas}.
-- The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
-- Every displayed creative CTA and CSV CTA field uses Claim Your Edition. All three images and future packs intentionally repeat CLAIM YOUR EDITION; exclude the CTA from repetition checks.
-- The long description text does not have to end with the CTA field; it must end according to its description archetype.
-- Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
-- The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
-- Headlines remain route-specific and emotional; do not force CTA wording into every Headline.
-- Silently correct any CTA outside this contract before returning the response. Do not expose rejected wording or reasoning."""
-
-    if concept_id in {
-        "premium_scarcity_right",
-        "premium_scarcity_front",
-        "premium_scarcity_left",
-    }:
-        route_rules = """PREMIUM SCARCITY ROOM CTA APPLICATION
-
-- All three images use the on-image CTA CLAIM YOUR EDITION.
-- Every route uses Claim Your Edition in copy/CSV and CLAIM YOUR EDITION on the image.
-- Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
-- Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim."""
-    else:
-        route_rules = """COPY-SET APPLICATION
-
-- Generate only Premium Scarcity Right Angle, Premium Scarcity — Straight On and Premium Scarcity — Left Angle.
-- Preserve the copy-table CTA contract; the three images share the same bottom-banner layout with a different assigned headline per image and a different assigned supporting line.
-- Description 1 uses Claim Your Edition; each image retains its assigned headline, with its assigned supporting wording.
-- Validate all completed rows before returning them. If a CTA is non-compliant, correct that route and description option only."""
-    return f"{shared_rules}\n\n{route_rules}"
+    return "INSTANT EXPERIENCE CTA: The displayed ad-copy and CSV CTA remain Claim Your Edition. The native Meta/Instant Experience button remains Shop Now. In the image footer, Claim Your Edition appears only when its resolved second-line kind is CTA; when kind is FOMO, Claim Your Edition is the written Meta headline instead. No separate on-image CTA row."
 
 
-SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1 = """SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
-FIXED BLACK FOOTER — ABSOLUTE
 
-Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
-
-The panel must:
-- span the complete image width from the left edge to the right edge
-- occupy approximately the bottom 18–20% of the canvas
-- begin at one precise horizontal boundary
-- have a perfectly straight, hard top edge
-- be fully opaque
-- use solid premium near-black or matte black
-- completely conceal the room photograph behind it
-- include the existing thin restrained gold separator along its top boundary
-- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy
-
-The footer must never:
-- fade upward or blend into the room
-- use a black gradient, transparency, feathering, vignette or soft edge
-- reveal furniture, flooring, walls or any part of the room through the panel
-- become a floating text overlay
-- become a curved, angled or irregular shape
-- extend inconsistently behind only part of the wording
-
-A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
-
-COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
-
-Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
-
-Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area."""
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1 = 'SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1\nFIXED BLACK FOOTER — ABSOLUTE\n\nCreate one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.\n\nThe panel must:\n- span the complete image width from the left edge to the right edge\n- occupy exactly the bottom 15.625% of the canvas\n- begin at one precise horizontal boundary\n- have a perfectly straight, hard top edge\n- be fully opaque\n- use solid premium near-black or matte black\n- completely conceal the room photograph behind it\n- include the one thin continuous restrained gold shimmer replacing the existing top separator in place; use the shared footer height, typography and spacing along its top boundary\n- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy\n\nThe footer must never:\n- fade upward or blend into the room\n- use a black gradient, transparency, feathering, vignette or soft edge\n- reveal furniture, flooring, walls or any part of the room through the panel\n- become a floating text overlay\n- become a curved, angled or irregular shape\n- extend inconsistently behind only part of the wording\n\nA very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.\n\nCOUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE\n\nCountry selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.\n\nDo not describe or render the footer as an overlay, fade, gradient, vignette or blended text area.'
 
 
-SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1 = """SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
-INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
-
-These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
-
-HEADLINE
-- Assess rendered glyph width, not character or word count: all eligible approved headline options are recognised, including the longer options.
-- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
-- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
-- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
-- Use only the exact selected approved headline, supporting line and CTA; never add a product name or short product reference.
-- Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.
-- Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
-- Check readability at 256 x 256. Validate the already resolved approved option before image calls; never substitute its wording for fit. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
-
-SUPPORTING LINE
-- Use no more than 12 words and no more than 70 characters including spaces and punctuation.
-- Express one clean supporting thought on exactly one line at the shared secondary supporting-copy target below.
-- Never wrap or compress the supporting typography.
-
-CTA
-- Use no more than four words and no more than 24 characters including spaces and punctuation.
-- Keep the CTA on exactly one line: CLAIM YOUR EDITION. This fixed CTA is exempt from repetition checks.
-- Do not use a longer explanatory CTA.
-
-Before resolution, the three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned."""
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1 = 'SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1\nINSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE\n\nThese limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.\n\nHEADLINE\n- Assess rendered glyph width, not character or word count: all eligible approved headline options are recognised, including the longer options.\n- Keep the headline on exactly one line, centred inside the existing 64 px horizontal margins and at the shared refined collector typography target below.\n- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.\n- Never let the headline touch or approach the side edges; it must remain readable at mobile size.\n- Use only the exact selected approved headline, supporting line and CTA; never add a product name or short product reference.\n- Before generation, check the selected premium serif headline within the existing 64 px horizontal margins (896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.\n- Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Use the shared 50 px title target with 0.03 em tracking; never exceed it, use cramped tracking, stretching, distortion or an excessively small font.\n- Check readability at 256 x 256. Validate the already resolved approved option before image calls; never substitute its wording for fit. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.\n\nSUPPORTING LINE\n- Use no more than 12 words and no more than 70 characters including spaces and punctuation.\n- Express one clean supporting thought on exactly one line at the shared secondary supporting-copy target below.\n- Never wrap or compress the supporting typography.\n\nCTA\n- Use no more than four words and no more than 24 characters including spaces and punctuation.\n- Keep the CTA on exactly one line: CLAIM YOUR EDITION. This fixed CTA is exempt from repetition checks.\n- Do not use a longer explanatory CTA.\n\nBefore resolution, the three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned.'
 
 
 def _normalise_instant_experience_on_image_line(value):
@@ -3994,66 +3553,21 @@ def resolve_instant_experience_on_image_copy(headline, supporting_line, cta):
 
 
 def build_instant_experience_fixed_opaque_footer_rules():
-    return SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1 + "\n\n" + COMPACT_FOOTER_RULES
+    return SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0] + "\n\n" + ie_two.FOOTER_RULES
+
 
 
 def build_instant_experience_on_image_copy_fit_rules():
-    return SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+    return "TWO-LINE FOOTER FIT: Keep the assigned title and second line on one line each, inside 64 px horizontal margins. Preserve exact text, Baseline 2.0 typography and the 160 px footer. Check at full size and mobile size; correct defects in the existing creative review."
 
 
-SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V3_REGULAR_SERIF"
-IE_COLLECTOR_FOOTER_TYPE_TARGETS = {
-    "headline_px": "42–48", "support_px": "24–26", "cta_px": "26–28",
-    "cta_tracking_em": "0.04–0.06", "underline_px": 1,
-}
+
+SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V5_REFERENCE_ITALIC_SERIF"
+
 SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2 = "SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2"
 
 
-SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2 = """SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2
-MANDATORY FINAL INSPECTION — NO ADDITIONAL IMAGE GENERATIONS
-
-Inspect the composed image before returning it and briefly report unresolved defects. Inspection must not trigger another image-generation call. Check for failures when:
-- the artwork or frame changed, looks regenerated or loses any outside frame edge
-- the frame is warped, incorrectly proportioned, missing black timber depth or not rigid
-- the product misses its assigned route-specific canvas width or complete-frame visibility
-- the room does not match every resolved scene variable or looks like generic AI staging
-- architecture, furniture, lighting direction, shadows or reflections are physically inconsistent
-- glass is missing, unrealistic, crosses onto the frame or wall, or hides artwork details
-- reflections obscure faces, wording, signatures, plaques, badges or edition details
-- mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing
-- frame and wall shadows conflict with the room lighting direction
-- the frame floats, intersects objects, sits flush without believable 6-10 mm mounting depth, looks flat or looks digitally pasted on
-- the overall result does not look like premium professional interior photography
-- on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
-- the on-image CTA is not exactly CLAIM YOUR EDITION
-- a CTA field is outside the approved direct edition-acquisition family
-- a sibling headline or supporting line is repeated; only the CLAIM YOUR EDITION CTA and banner styling are shared
-- typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as a deterministic flat post-production layer inside the fixed footer
-- mobile readability, safe margins, visual hierarchy or product dominance is weak
-- essential wording is not immediately readable in an approximately 256 x 256 preview
-- any essential wording sits within 64 pixels of a canvas edge or touches the product, furniture or an architectural line
-- scarcity quantity, numbering, certificate inclusion or another proof claim is not verified by supplied product data or a visible immutable source detail
-- a secondary prop competes with the product
-- the gold underline is missing, fails to highlight the full 100 (or key word), floats away from its glyph bounds or becomes an arbitrary decorative dash
-- the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands
-- the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it
-- the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold separator
-- the fixed black footer falls outside approximately 18–20% of the canvas height
-- the on-image headline exceeds the measured safe width, fails mobile readability, wraps, is squeezed, is stretched or is abnormally reduced
-- the supporting line exceeds 12 words or 70 characters, wraps or becomes too small
-- the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family
-- any footer wording approaches or crosses the 64–72 px safe margins
-- Australia or another country changes the established country-invariant Instant Experience footer template
-- the three room scenes are indistinguishable at thumbnail size
-- any route mirrors the artwork
-- the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby
-- the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
-
-If native generation returns another square size and deterministic resizing is available, resize the existing square asset to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image or generate another image to repair it; report unresolved dimensions accurately.
-
-Resolve footer copy fit before generation. After generation, report footer defects without generating a correction or replacement. Never shrink, condense or stretch the existing typography to force it into the footer.
-
-Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Do not print the score or internal reasoning. Briefly report unresolved defects; never claim the checks passed without inspection. Retry only a missing output after a provider-identified retryable technical failure with no image; never retry a safety-blocked or unexplained failure, reword to evade a block, or repeat a successful image call."""
+SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2 = 'SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2\nMANDATORY FINAL INSPECTION — NO ADDITIONAL IMAGE GENERATIONS\n\nInspect the composed image before returning it and briefly report unresolved defects. Inspection must not trigger another image-generation call. Check for failures when:\n- the artwork or frame changed, looks regenerated or loses any outside frame edge\n- the frame is warped, incorrectly proportioned, missing black timber depth or not rigid\n- the product misses its assigned route-specific canvas width or complete-frame visibility\n- the room does not match every resolved scene variable or looks like generic AI staging\n- architecture, furniture, lighting direction, shadows or reflections are physically inconsistent\n- glass is missing, unrealistic, crosses onto the frame or wall, or hides artwork details\n- reflections obscure faces, wording, signatures, plaques, badges or edition details\n- mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing\n- frame and wall shadows conflict with the room lighting direction\n- the frame floats, intersects objects, sits flush without believable 6-10 mm mounting depth, looks flat or looks digitally pasted on\n- the overall result does not look like premium professional interior photography\n- on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text\n- the on-image CTA is not exactly CLAIM YOUR EDITION\n- a CTA field is outside the approved direct edition-acquisition family\n- a sibling headline or supporting line is repeated; only the CLAIM YOUR EDITION CTA and banner styling are shared\n- typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of flat graphic lettering inside the fixed footer\n- mobile readability, safe margins, visual hierarchy or product dominance is weak\n- essential wording is not immediately readable in an approximately 256 x 256 preview\n- footer text violates the shared horizontal margins or 16 px vertical padding, or any essential wording touches the product, furniture or an architectural line\n- scarcity quantity, numbering, certificate inclusion or another proof claim is not verified by supplied product data or a visible immutable source detail\n- a secondary prop competes with the product\n- the gold underline is missing, fails to highlight the full 100 (or key word), floats away from its glyph bounds or becomes an arbitrary decorative dash\n- the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands\n- the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it\n- the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold shimmer replacing the original separator in place\n- the fixed black footer falls outside the shared 160 px height at 1024 px width\n- the on-image headline exceeds the measured safe width, fails mobile readability, wraps, is squeezed, is stretched or is abnormally reduced\n- the assigned supporting/FOMO line is missing, differs from the resolved text, exceeds 12 words or 70 characters, wraps or becomes too small\n- the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family\n- any footer wording crosses the shared 64 px horizontal margins or 16 px vertical padding\n- Australia or another country changes the established country-invariant Instant Experience footer template\n- the three room scenes are indistinguishable at thumbnail size\n- any route mirrors the artwork\n- the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby\n- the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels\n\nIf native generation returns another square size and deterministic resizing is available, resize the existing square asset to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image or generate another image to repair it; report unresolved dimensions accurately.\n\nResolve footer copy fit before generation. After generation, report footer defects without generating a correction or replacement. Never shrink, condense or stretch the existing typography to force it into the footer.\n\nSilently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Do not print the score or internal reasoning. Briefly report unresolved defects; never claim the checks passed without inspection. Retry only a missing output after a provider-identified retryable technical failure with no image; never retry a safety-blocked or unexplained failure, reword to evade a block, or repeat a successful image call.'
 
 
 
@@ -4082,10 +3596,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft side daylight from camera-left with restrained ambient fill",
         "time_of_day": "quiet late morning",
-        "overlay_position": "fixed opaque footer across the bottom 18–20% only",
-        "product_position": "dominant and centred in the upper 80–82% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 15.625% only",
+        "product_position": "dominant and centred in the upper 84.375% room scene",
         "architectural_cue": "architectural doorway near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 80–82%, fixed opaque black footer approximately 18–20%",
+        "composition": "1024 x 1024 square, upper photographed room scene exactly 84.375%, fixed opaque black footer exactly 15.625%",
         "typography_mode": "premium_room_panel",
     },
     {
@@ -4096,7 +3610,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "route": "Premium Scarcity — Straight On",
         "supporting_label": "Straight-on product photograph",
         "copy_row": "Premium Scarcity — Straight On Copy Variation 1",
-        "purpose": "Create CENTRE / straight-on Room 2 in a refined home office with the shared bottom banner.",
+        "purpose": "Create CENTRE / straight-on Room 2 in a premium collector hallway in a different home with the shared bottom banner.",
         "camera_role": "front",
         "camera_side": "predominantly straight-on camera with maximum 0-2 degree natural offset",
         "camera_instruction": "Use a predominantly straight-on view with a maximum natural offset of 0-2 degrees. Keep the complete product geometrically balanced. Avoid artificial showroom symmetry by placing the room cue primarily toward one outer edge. This must be the clearest and most direct scarcity hero of the three.",
@@ -4112,10 +3626,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "75mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with slightly brighter room falloff",
         "time_of_day": "clean midday daylight",
-        "overlay_position": "fixed opaque footer across the bottom 18–20% only",
-        "product_position": "dominant and centred in the upper 80–82% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 15.625% only",
+        "product_position": "dominant and centred in the upper 84.375% room scene",
         "architectural_cue": "partial bookcase near one outer edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 80–82%, fixed opaque black footer approximately 18–20%",
+        "composition": "1024 x 1024 square, upper photographed room scene exactly 84.375%, fixed opaque black footer exactly 15.625%",
         "typography_mode": "premium_room_panel",
     },
     {
@@ -4142,10 +3656,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with quieter peripheral furniture",
         "time_of_day": "soft afternoon daylight",
-        "overlay_position": "fixed opaque footer across the bottom 18–20% only",
-        "product_position": "dominant and centred in the upper 80–82% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 15.625% only",
+        "product_position": "dominant and centred in the upper 84.375% room scene",
         "architectural_cue": "window edge with natural curtains near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 80–82%, fixed opaque black footer approximately 18–20%",
+        "composition": "1024 x 1024 square, upper photographed room scene exactly 84.375%, fixed opaque black footer exactly 15.625%",
         "typography_mode": "premium_room_panel",
     },
 )
@@ -5148,6 +4662,7 @@ def resolve_standard_instant_experience_visuals(
     }, recent_fingerprints=recent_fingerprints or (), selections=(
         (product_metadata or {}).get("instant_experience_scene_selections") or ()
     ))
+    ie_two.assign(resolved, (product_metadata or {}).get("instant_experience_footer_selections") or ())
     sibling_summaries = [
         {
             "route": visual["route"],
@@ -5221,54 +4736,13 @@ def build_instant_experience_image_quality_contract(visual):
 
 
 def build_instant_experience_typography_quality_rules(visual=None, *, shared=False):
-    visual = visual or {}
-    targets = IE_COLLECTOR_FOOTER_TYPE_TARGETS
-    resolved_wording = (
-        "- Use the active image brief's exact HEADLINE, SUPPORTING LINE and CTA fields."
-        if shared else (
-            f"- Exact resolved headline: {visual.get('headline_text')}.\n"
-            f"- Exact resolved supporting line: {visual.get('supporting_line')}.\n"
-            f"- Exact resolved CTA: {visual.get('cta_text')}."
-        )
-    )
-    return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
-INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
+    return SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 + "\n" + ie_two.FOOTER_RULES
 
-- Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
-- Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
-- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined vintage collector serif in Regular weight; supporting line {targets['support_px']} px, Montserrat Regular; CTA {targets['cta_px']} px, clean Montserrat sans serif in Medium weight. Design targets, not measured-rendering claims.
-- These fixed targets are the sole typography specification for every image and pack; never reduce a previous generation again. Do not compound percentage reductions or rescale from a reference. Uppercase wording is casing only, never permission for oversized heavy block capitals or bold promotional-banner styling. Never enlarge text to fill empty panel space.
-- Keep the headline elegant and comfortably within the margins; never use heavy, bold, blocky or condensed promotional lettering, heavy slab-like forms or edge-to-edge wording. Supporting text is clearly secondary in softer warm off-white. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
-- Use a compact 18–20% opaque panel with existing safe margins and compact clear gaps between the three lines, with the supporting line directly below the headline. Centre and balance all three lines within the existing panel; no empty rows. A style reference controls typography only, never the selected headline or footer geometry: do not copy excess black space, add blank rows or unnecessary padding, enlarge the footer or enlarge type to fill the panel. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
-- Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. CTA is muted antique gold.
-{resolved_wording}
-- Keep the headline, supporting line and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
-- Ensure all essential wording is clearly readable in a 256 x 256 preview.
-
-MEANINGFUL SPORTS CAVE GOLD UNDERLINE
-
-- If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
-- Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately {targets['underline_px']} px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
-- Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
-- Always highlight all three digits of 100 in antique gold and underline their measured glyph bounds. This emphasis is mandatory for every approved headline, wherever 100 occurs in the line.
-- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; underline only the approved important scarcity word, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
-- No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text."""
 
 
 def _instant_experience_route_wording_rules(visual):
-    return f"""ROUTE WORDING LOCK - RESOLVE BEFORE RETURNING
+    return "ROUTE WORDING LOCK — EXACTLY TWO IMAGE LINES\n" + ie_two.image_copy(visual) + "\nOnly these two fields belong in this image's footer. Keep the unused line out of the image. Preserve all text already printed inside the original edition."
 
-Route identity: {visual["route"]}
-Route key: {visual["route_key"]}
-
-Permitted on-image words for this cover:
-- Headline: {visual.get("headline_text")}
-- Supporting line: {visual.get("supporting_line")}
-- CTA: {visual.get("cta_text")}
-
-These are the only permitted advertising words for this cover. Never change already-resolved wording for fit; never pass alternatives or sibling copy to an individual image call. Never place Primary Text on the image.
-
-Use the resolved supporting line exactly; preserve the exact resolved headline. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
 
 
 def build_three_environment_diversity_rules():
@@ -5322,11 +4796,11 @@ Resolved sibling fingerprints supplied for comparison:
 
 Within one three-image package:
 - Preserve the same immutable product and shared realism in three distinct premium rooms.
-- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 18–20% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 18–20% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 18–20% black/gold banner.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 15.625% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 collector hallway in a different home with the same fixed bottom 15.625% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 15.625% black/gold banner.
 - Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
-- Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned headline, supporting line and the fixed CTA.
+- Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned headline and the fixed CTA.
 
 {_instant_experience_route_wording_rules(visual)}"""
 
@@ -5435,7 +4909,7 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 minimal artwork-first residential wall, LEFT-angle Room 3 distinctive restrained collector interior. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
+Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 collector hallway in a different home, LEFT-angle Room 3 distinctive restrained collector interior. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
@@ -5474,11 +4948,11 @@ def build_instant_experience_canonical_prompt_v4(
         else ""
     )
     scarcity_note = (
-        "The edition limit is verified. Use the resolved headline exactly; use the resolved supporting line exactly."
+        "The edition limit is verified. Use the resolved headline and supporting line exactly."
         if visual.get("scarcity_verified")
         else (
             "No verified edition limit is available in the supplied metadata. Use the resolved safe fallback headline "
-            "exactly. Do not use the route FOMO line or invent a number."
+            "and supporting line exactly. Do not invent a number."
         )
     )
     prompt = f"""{visual["prompt_heading"]}
@@ -5522,11 +4996,11 @@ The final image must be:
 - clear and readable at a 256 x 256 preview
 
 Composition is locked:
-- Upper photographed residential room scene: approximately 80–82% of the canvas.
-- Fixed opaque black footer: approximately the bottom 18–20% of the canvas.
+- Upper photographed residential room scene: exactly 84.375% of the canvas.
+- Fixed opaque black footer: exactly the bottom 15.625% of the canvas.
 - Framed product width: approximately {visual["product_width"]} of the canvas.
 - Complete frame visible with no cropped outer frame edges.
-- Safe margins: 64-72 pixels.
+- Footer safe areas: 64 px horizontally and 16 px vertically at 1024 px width.
 - The supplied framed product is the largest and most important visual element.
 
 {SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0]}
@@ -5534,20 +5008,13 @@ Composition is locked:
 
 FIXED BLACK FOOTER AND EXACT TYPOGRAPHY
 
-Use the centralized fixed opaque footer and on-image copy-fit contracts below without altering the existing typography hierarchy:
-- deep matte charcoal near #101112 or #121314
-- extremely subtle premium paper or fine-grain texture
-- one 1-pixel muted-gold boundary line across the scene transition
-- no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
-
-Keep all collector typography flat inside the footer, never inside the photographed room. Use a real font compositor if available; this generator supplies instructions, not a deterministic footer-rendering backend. Verify the actual wording, geometry and glyph alignment; report unresolved defects.
+Use the centralized fixed opaque footer and on-image copy-fit contracts below as the sole footer style authority. Preserve the Baseline matte-black background and assigned title/second-line typography; replace only the top separator with the thin gold shimmer as part of the finished ad.
+Keep all collector typography flat inside the footer, never inside the photographed room. Inspect actual wording, geometry and alignment; report unresolved defects.
 
 Resolved on-image copy:
-HEADLINE: {visual.get("headline_text")}
-SUPPORTING LINE: {visual.get("supporting_line")}
-CTA: {visual.get("cta_text")}
+{ie_two.image_copy(visual)}
 
-Keep the exact selected headline per route. Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
+Keep the exact selected headline per route. Keep the three distinct assigned 100-variation image titles. Use only the assigned second line. Never copy description text onto the image.
 
 INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 
@@ -5563,7 +5030,7 @@ FINAL ROUTE CHECK
 - Wall colour and cues differ from the other routes.
 - Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.
 - The room never becomes a themed sports bar.
-- The fixed black footer remains within approximately 18–20% of the canvas height.
+- The fixed black footer remains at the shared 160 px height at 1024 px width.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
     prompt = ie_usa.adapt_prompt(prompt) if usa else prompt
@@ -5933,8 +5400,8 @@ Use these exact cover lines:
 {overlay_lines}
 
 Cover:
-- Full-width upper lifestyle/product image region across approximately 80-82% of the square canvas.
-- Fixed full-width opaque matte-black footer across the bottom approximately 18-20% of the square canvas.
+- Full-width upper lifestyle/product image region across exactly 84.375% of the square canvas.
+- Fixed full-width opaque satin-black footer across the bottom exactly 15.625% of the square canvas.
 - Thin restrained metallic-gold divider across the top edge of the black strip.
 - No left/right split, no right sidebar and no vertical scarcity panel.
 - Current black-and-gold visual treatment.
@@ -6235,10 +5702,10 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
-- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 18–20% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 18–20% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 18–20% black/gold banner.
-- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glazing realism, physical mounting, realistically textured quiet walls, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 18–20% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 15.625% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 collector hallway in a different home with the same fixed bottom 15.625% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 15.625% black/gold banner.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glazing realism, physical mounting, realistically textured quiet walls, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 15.625% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -8530,26 +7997,14 @@ def get_instant_experience_setting(category):
 
 
 ADS_IE_COMBINED_EXECUTION_VERSION = "ADS_IE_COMBINED_EXECUTION_V1"
-IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as the straight-on architectural product wall with a small residential glimpse, and Ad 3 as the premium residential man cave setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
+IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as a front-view collector hallway in a different home with clear passage depth, and Ad 3 as the premium residential man cave setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating the initial image for each ad, then use the existing final creative review before export.
 Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 
-IE_FOOTER_TEXT_CLARIFICATION = 'Read the entire prompt before generating. For each image, reproduce ONLY that ad’s exact resolved footer headline, supporting line and CLAIM YOUR EDITION. Never add, omit, rewrite or substitute wording, or use Meta copy in the footer. Restore the assigned supporting sentence directly below the headline; apply the compact footer layout and unchanged headline/CTA typography, then check the generated footer against the supplied text.'
+IE_FOOTER_TEXT_CLARIFICATION = 'Use exactly the assigned HEADLINE and FOOTER SECOND LINE in each image. The omitted FOMO/Claim Your Edition line is the written Meta headline, not a third image line. Preserve the 100-variation title, original artwork, Baseline 2.0 black footer and shimmer.'
 
 
-IE_EXECUTION_CHECKLIST = """EXECUTION CHECKLIST
-- Read the entire brief and ORIGINAL product reference before starting.
-- Generate exactly three separate images, one per ad, in order.
-- Use the original product image for every call.
-- Preserve the product, plausible physical scale and assigned camera angles.
-- Follow the three resolved, visibly different home settings.
-- Apply the specified opaque footer, subtle collector typography and exact selected wording.
-- Keep CLAIM YOUR EDITION unchanged.
-- Complete matching copy, the populated CSV and supplied setup.
-- Review the outputs and report unresolved defects.
-GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.
-
-Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification."""
+IE_EXECUTION_CHECKLIST = 'EXECUTION CHECKLIST\n- Read the entire brief and ORIGINAL product reference before starting.\n- Generate exactly three separate images, one per ad, in order.\n- Use the original product image for every call.\n- Preserve the product, plausible physical scale and assigned camera angles.\n- Follow the three resolved, visibly different home settings.\n- Apply the specified opaque footer, subtle collector typography and exact selected wording.\n- Keep CLAIM YOUR EDITION unchanged.\n- Complete matching copy, the populated CSV and supplied setup.\n- Review the outputs and report unresolved defects.\nGLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.\n\nRead the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification.'
 
 
 def build_instant_experience_shared_template(physical_product=None, *, usa=False, controlled_glazing=False):
@@ -8557,8 +8012,8 @@ def build_instant_experience_shared_template(physical_product=None, *, usa=False
     prompt = "\n\n".join((
         "SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call\n"
         f"{ie_visuals.SCENE_VERSION}\n"  # Required saved-prompt recognition, not a variation token.
-        "1024 x 1024, 1:1, sRGB; upper photograph 80–82%. Near-black charcoal #101112/#121314 "
-        "footer with subtle paper grain. Keep architectural verticals straight. "
+        "1024 x 1024, 1:1, sRGB; upper photograph 84.375%. Baseline matte-black "
+        "footer with the Baseline 2.0 two-line typography and thin top gold shimmer. Keep architectural verticals straight. "
         "Never place the long description or Meta headline inside the image.",
         "PACK COMPOSITION: each pair must differ in architectural "
         "structure AND visible depth arrangement, wall family AND treatment, lighting character/direction, and "
@@ -8599,11 +8054,11 @@ Camera: {visual['camera_side']}.
 SCENE: {scene}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}.
 Resolved on-image copy — use exactly:
-HEADLINE: {visual['headline_text']}
-SUPPORTING LINE: {visual['supporting_line']}
-CTA: {visual['cta_text']}
+{ie_two.image_copy(visual)}
+Footer baseline map: HEADLINE on line 1; assigned FOOTER SECOND LINE on line 2. No third line.
 
-{ie_copy.ad_copy(visual['route'])}"""
+{ie_copy.ad_copy(visual['route']).replace('[one final product-specific headline]', visual['meta_headline_text'])}
+META HEADLINE — copy/display/CSV only, never inside the image: {visual['meta_headline_text']}"""
 
 
 def build_instant_experience_completed_csv_contract():
@@ -8672,7 +8127,7 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and distinct supporting lines in every set; preserve the assigned selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description per route and use its supplied unused-line Meta Headline; retain these final records for display and CSV. Confirm three different approved footer headlines in every set; preserve the assigned selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
@@ -8681,7 +8136,7 @@ AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
 For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 OUTPUT REVIEW AND DELIVERY
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline and supporting-line wording, with maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and the exact assigned 100-variation title and assigned second line only; verify the omitted line is the matching written/CSV headline. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
 Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
 If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
@@ -8689,9 +8144,10 @@ If any image is missing, the three-cover delivery requirement is incomplete: app
 
 {build_instant_experience_shared_template(visuals[0].get('physical_product'), usa=usa, controlled_glazing=ie_glazing.active(visuals[0]))}
 
-{ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
+{ie_two.copy_rules(ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or []))}
 
-{WRITTEN_META_HEADLINE_INSTRUCTIONS}
+{ie_two.HEADLINE_RULES}
+{RACING_WRITTEN_COPY_INSTRUCTIONS}
 Exact Promotion or Offer entered: {_standard_instant_experience_exact_offer(campaign_moment) or 'None supplied'}. Preserve a supported supplied offer in ad copy only; never invent one or replace edition scarcity.
 {build_country_campaign_localisation_note(category, country, campaign_type='Instant Experience')}
 {'' if usa else build_campaign_moment_visual_context(campaign_moment, selected_country=country)}
@@ -9079,8 +8535,8 @@ def build_ads_prompt(
             compose_final_ads_prompt(prompt, **prompt_kwargs),
             creative_refresh_context,
         )
-    return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(
-        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata)))
+    return apply_final_delivery(apply_generation_review(apply_footer_contract(physical_realism.apply_context(
+        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata))))
 
 
 def render_insufficient_winner_data():
@@ -9490,7 +8946,10 @@ def ads_prompt_contract_version_for_campaign(
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
     if campaign_type == "Instant Experience":
         version += '; ' + ie_visuals.VERSION + '; ' + SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
-    return version + '; OWNER CONFIRMED PHYSICAL AND WORLDWIDE DEFAULTS V1; ' + FOOTER_VERSION + '; ' + FINAL_DELIVERY_VERSION
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        version += '; ' + GENERATION_REVIEW_VERSION
+    footer_version = ie_two.VERSION if campaign_type == 'Instant Experience' and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW else FOOTER_VERSION
+    return version + '; OWNER CONFIRMED PHYSICAL AND WORLDWIDE DEFAULTS V1; ' + footer_version + '; ' + FINAL_DELIVERY_VERSION
 
 
 def _instant_experience_visual_contract_is_current(prompt):
@@ -9498,6 +8957,9 @@ def _instant_experience_visual_contract_is_current(prompt):
                 "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
                 "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
                 "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE")
+    if ie_usa.VERSION in prompt:
+        required = (ie_visuals.VERSION, SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2,
+                    "GROUP 1 — COLLECTOR HALLWAY", "GROUP 2 — COLLECTOR HALLWAY FRONT VIEW", "GROUP 3 — MAN CAVE")
     return (any(version in prompt for version in (ie_copy.VERSION, ie_copy.LEGACY_VERSION))
             and all(marker in prompt for marker in required)
             and prompt.count(SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]) == (1 if ADS_IE_COMBINED_EXECUTION_VERSION in prompt else 3)
@@ -9512,6 +8974,8 @@ def ensure_current_ads_result_prompt(result):
         return result
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         return result  # Saved refresh contracts and outputs are immutable on reopen.
+    if result.get("campaign_type") == "Instant Experience" and not ie_two.active(result["master_prompt"]):
+        return result  # Keep submitted earlier releases immutable; this is a fresh-generation change.
     if result.get("campaign_type") == "Instant Experience" and normalize_country_language_key(result.get("country")) in {"USA", "Australia"}:
         return result  # Supporting-line updates are generation-only, never a saved-record migration.
     workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
@@ -9520,7 +8984,11 @@ def ensure_current_ads_result_prompt(result):
         workflow_mode=workflow_mode,
     )
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
-    content_current = COMPACT_FOOTER_RULES in str(result["master_prompt"]) and (not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"])))
+    content_current = (ie_two.active(result["master_prompt"]) or COMPACT_FOOTER_RULES in str(result["master_prompt"])) and (not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"])))
+    if result.get('campaign_type') == 'Carousel':
+        content_current = ADS_CAROUSEL_DETAIL_CONTRACT_VERSION in str(result['master_prompt'])
+        if result.get('prompt_contract_version') == expected_version and content_current:
+            return result  # Current saved carousels need no rebuild or copy-boundary rewrite.
     if is_standard_ie and content_current and ADS_IE_COMBINED_EXECUTION_VERSION not in str(result["master_prompt"]):
         return result  # New description defaults apply only to a fresh pack, never saved copy.
     if result.get("prompt_contract_version") == expected_version and content_current:
@@ -14316,7 +13784,8 @@ def creative_refresh_quality_issues(result, workflow):
         issues += ads_refresh_generation.plan.preserve.copy_issues(rows, records, originals)
         return issues + _creative_refresh_asset_issues(result, workflow)
     if plan.get("version") != ads_refresh_generation.plan.VERSION:
-        return []  # Historical saved packages keep their existing compatibility contract.
+        # Historical notes remain optional, but uploaded assets must still be distinct.
+        return _creative_refresh_asset_issues(result, workflow)
     if result.get("campaign_type") == "Carousel":
         carousel = _carousel_copy_notes_from_workflow(result, workflow)
         if not all(str(v or '').strip() for field in ("primary_texts", "headlines", "descriptions") for v in carousel[field]) or not all(
@@ -14350,7 +13819,8 @@ def _creative_refresh_asset_issues(result, workflow):
     plan = context.get("refresh_plan") or {}
     if ads_refresh_generation.plan.preserve.active(plan):
         records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
-        issues, edited = [], []
+        issues, edited, duplicate_candidates = [], [], []
+        reused_originals = set()
         refs = plan.get('references') or []
         for i, expected in enumerate(_result_image_slots(result)):
             slot = (workflow.get('slots') or {}).get(expected['id']) or {}
@@ -14359,12 +13829,22 @@ def _creative_refresh_asset_issues(result, workflow):
             execution = records[i] if i < len(records) and isinstance(records[i], dict) else {}
             reference = refs[i] if result.get('campaign_type') == 'Carousel' and i < len(refs) else (refs[0] if refs else {})
             digest = hashlib.sha256(slot['data']).hexdigest()
+            verified_reuse = (execution.get('image_action') == 'reuse_original'
+                              and digest == reference.get('image_sha256'))
+            # Historical copy-only IE variants may share their verified source.
+            # Edited outputs and separate Carousel cards still need distinct bytes.
+            if not (verified_reuse and result.get('campaign_type') != 'Carousel' and digest in reused_originals):
+                duplicate_candidates.append(slot)
+            if verified_reuse:
+                reused_originals.add(digest)
             if execution.get('image_action') == 'reuse_original':
                 if not reference.get('image_sha256') or digest != reference['image_sha256']:
                     issues.append(f'Refresh {i+1}: copy-only image must match the original winner bytes.')
             else:
                 edited.append(slot)
-        return issues + ads_refresh_generation.plan.asset_issues(edited, [r.get('image_sha256') for r in refs if r.get('image_sha256')])
+        issues += ads_refresh_generation.plan.asset_issues(duplicate_candidates)
+        issues += ads_refresh_generation.plan.asset_issues(edited, [r.get('image_sha256') for r in refs if r.get('image_sha256')])
+        return list(dict.fromkeys(issues))
     source_hashes = [r.get("image_sha256") for r in plan.get("references", []) if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:
@@ -14401,7 +13881,7 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
             if _ads_image_valid_slots(result, workflow):
                 with st.expander("Final visual verification — required before POST NOW",
                                  expanded=bool(_creative_refresh_visual_review_issues(result, workflow))):
-                    st.caption("Inspect all three new images against the canonical product and winner: same room type, distinct scene and camera treatments, visible glass, assigned headlines and no supporting sentence. Verify complete copy and CSV. This is manual visual review." if ads_refresh_generation.plan.distinct.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each result with its original winner and exact canonical variant. Verify the declared single change and that all other scene, copy and footer components remain preserved. Check any product or offer conflicts. This is manual review, not automated pixel recognition." if ads_refresh_generation.plan.preserve.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
+                    st.caption("Inspect all three new images against the canonical product and winner: same room type, distinct scene and camera treatments, visible glass, assigned headlines, exact supporting sentences and CTA. Verify complete copy and CSV. This is manual visual review." if ads_refresh_generation.plan.distinct.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each result with its original winner and exact canonical variant. Verify the declared single change and that all other scene, copy and footer components remain preserved. Check any product or offer conflicts. This is manual review, not automated pixel recognition." if ads_refresh_generation.plan.preserve.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
                     review_key = _creative_refresh_visual_review_key(result, workflow)
                     reviewed = st.checkbox(
                         "I checked every refreshed image against its product and winner references",
@@ -14423,8 +13903,6 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
                                  source_matches=source_matches, quality_issues=issues)
     else:
         import ads_auto_post
-        if _is_instant_experience_result(result):
-            _render_final_ad_review(result, workflow)
         ads_auto_post.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
 
 
@@ -14699,11 +14177,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             else:
                 st.markdown(
                     "1. Enter the product and select the sport, country and campaign type.\n"
-                    "2. Select Submit.\n"
-                    "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
-                    "4. Copy and paste the generated master prompt.\n"
-                    "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
-                    "6. Generate and upload the images in the displayed order."
+                    "2. Select Add to queue for Instant Experience.\n"
+                    "3. The companion runs generation automatically when online and the queue is playing.\n"
+                    "4. Images and copy receive a final creative review before the CSV and downloads are prepared.\n"
+                    "5. The companion completes the existing handoff and creates paused Meta ads for review."
                 )
             st.warning(
                 "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
@@ -14776,7 +14253,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             render_product_image_link(st)
     elif not is_google:
         render_product_artwork_reference(product_selection, product_url)
-    campaign_moment = render_campaign_moment_section()
+    campaign_moment = render_campaign_moment_section() if is_google or is_creative_refresh else None
     creative_refresh_context = None
     if is_creative_refresh:
         with st.container(border=True, key="ads-creative-refresh-winning-ad"):
@@ -14829,15 +14306,15 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         and isinstance(result, dict) and result.get("campaign_type") == "Instant Experience" and result.get("master_prompt")
         and st.button("Fresh pack", key="ads-ie-fresh-pack")
     )
-    submit_area, queue_area = st.columns(2) if not is_google and not is_creative_refresh else (st, None)
-    submitted = submit_area.button(
+    submitted = st.button(
         "Submit",
         type="primary",
         use_container_width=True,
-    ) or fresh_ie_pack or (bool(creative_refresh_context) and deliberate_new)
+    ) if is_google or is_creative_refresh else False
+    submitted = submitted or fresh_ie_pack or (bool(creative_refresh_context) and deliberate_new)
     queued = False
-    if queue_area is not None:
-        queued = queue_area.button(
+    if not is_google and not is_creative_refresh:
+        queued = st.button(
             "Add to queue", key="ads-add-to-queue", use_container_width=True,
             disabled=campaign_type != "Instant Experience",
             help="Automatically generate and save three covers and ad copy, then create paused Meta ads for review. Instant Experience only.",
