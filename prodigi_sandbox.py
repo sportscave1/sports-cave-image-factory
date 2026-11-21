@@ -93,7 +93,7 @@ def request(user, allocation_id, *, synthetic_recipient=False):
     source = resolve(int(allocation_id))
     if type(synthetic_recipient) is not bool:raise ValueError('Select a sandbox test mode explicitly.')
     if synthetic_recipient:
-        recipient={'name':'Sports Cave Synthetic QA','address':{'line1':'1 Example Street','line2':'',
+        recipient={'name':'Sports Cave Synthetic QA','address':{'line1':'1 Example Test Street',
             'townOrCity':'Sydney','stateOrCounty':'NSW','postalOrZipCode':'2000','countryCode':'AU'},
             'state_aliases':['NSW','New South Wales']}
         return _queue_test(user,allocation_id,source,recipient,source['shipping'],synthetic=True)

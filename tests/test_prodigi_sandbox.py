@@ -67,6 +67,7 @@ def test_synthetic_recipient_test_never_reads_or_copies_live_customer_details(st
     assert result['snapshot']['output']==original['output'] and original==before
     assert result['source_order_id']==result['source_item_id']==''
     assert not {'email','phoneNumber'}&result['snapshot']['recipient'].keys()
+    assert 'line2' not in sandbox.payload(result['snapshot'])['recipient']['address']
 
 
 def test_real_customer_mode_still_blocks_mismatched_supplier_address(store,monkeypatch):
