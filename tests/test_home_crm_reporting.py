@@ -205,3 +205,40 @@ def test_snapshot_request_nonblocking_and_manual_refresh_throttled(monkeypatch):
         assert snapshots.rows[crm.key(START,END)] is row
     finally:
         release.set();snapshots.close()
+
+
+def test_primary_reconciler_starts_once_and_retries_after_failure(monkeypatch):
+    thread=Mock()
+    thread.is_alive.return_value=True
+    factory=Mock(return_value=thread)
+    monkeypatch.setattr(crm,"_APP_THREAD",None)
+    monkeypatch.setattr(crm,"Thread",factory)
+    assert crm.start_app_reconciler() and crm.start_app_reconciler()
+    factory.assert_called_once()
+    thread.start.assert_called_once()
+    stop=Mock()
+    stop.is_set.side_effect=[False,False,True]
+    tick=Mock(side_effect=[RuntimeError("synthetic"),None])
+    monkeypatch.setattr(crm,"tick",tick)
+    crm._loop(stop)
+    assert tick.call_count==2 and stop.wait.call_count==2
+
+
+def test_initial_html_is_useful_without_javascript_and_escapes_payload():
+    import home_crm_ui as ui
+    from html.parser import HTMLParser
+    class Markup(HTMLParser):
+        def __init__(self):
+            super().__init__(); self.tags=[]
+        def handle_starttag(self,tag,attrs):
+            self.tags.append((tag,dict(attrs)))
+    value={"state":"saved","data":{"ledger":{"rows":[{"channel":"Facebook paid","mobile":2,"desktop":0,"other":0,"total":2}]},
+        "roas":{"facebook":6.25,"google":None},"basis":'" onmouseover="bad() </section><script>bad()</script>'}}
+    markup=ui.html(date(2026,11,21),value)
+    parsed=Markup(); parsed.feed(markup)
+    assert 'data-roas="facebook">6.25×</b>' in markup
+    assert 'data-roas="google">—</b>' in markup
+    assert 'data-device="mobile">2</td>' in markup
+    initial=next(attrs["data-initial"] for tag,attrs in parsed.tags if tag=="section")
+    assert json.loads(initial)==value
+    assert not any(tag=="script" or "onmouseover" in attrs for tag,attrs in parsed.tags)

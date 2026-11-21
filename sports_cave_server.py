@@ -167,6 +167,8 @@ if __name__ == "__main__":
     from product_quiz_worker import start_app_reconciler
     start_app_reconciler()
     if os.getenv('RENDER'):
+        from home_crm_reporting import start_app_reconciler as start_home_crm
+        start_home_crm()
         from crm_thumbnail_cache import warm_renderer
         warm_renderer()
         from auto_editions_runtime import start_worker

@@ -293,11 +293,6 @@ def main():
         signal.signal(sig, lambda *_: stop.set())
     while not stop.is_set():
         try:
-            import home_crm_reporting
-            home_crm_reporting.tick()
-        except Exception as error:
-            LOG.warning("home_crm_refresh_failed type=%s", type(error).__name__)
-        try:
             reconcile_morning()
         except Exception as error:
             LOG.warning("daily_brief_reconciliation_failed type=%s", type(error).__name__)

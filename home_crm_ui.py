@@ -2,6 +2,7 @@
 from html import escape
 import json
 from datetime import timedelta
+import math
 
 CHANNELS = ("Facebook paid", "Google paid", "Organic", "Other", "Unresolved")
 
@@ -10,18 +11,27 @@ def html(today, initial=None):
     day = str(today - timedelta(days=1))
     # Only aggregate data is passed to the client. The backend never returns order IDs.
     initial = initial or {"state": "loading", "data": None}
+    data = initial.get("data") or {}
+    ledger = data.get("ledger") or {}
+    indexed = {row["channel"]: row for row in ledger.get("rows", [])}
+    def count(name, key):
+        value = indexed.get(name, {}).get(key)
+        return f"{value:,}" if type(value) is int and value >= 0 else "—"
+    def ratio(name):
+        value = data.get("roas", {}).get(name)
+        return f"{value:.2f}×" if type(value) in (float, int) and math.isfinite(value) else "—"
     rows = "".join('<tr data-channel="' + escape(name) + '"><th scope="row">' +
-        escape(name) + '</th>' + ''.join('<td data-device="' + key + '">—</td>'
+        escape(name) + '</th>' + ''.join('<td data-device="' + key + '">' + count(name, key) + '</td>'
             for key in ("mobile", "desktop", "other", "total")) + '</tr>' for name in CHANNELS)
     options = "".join('<option value="' + key + '">' + label + '</option>' for key, label in (
         ("yesterday", "Yesterday"), ("week", "Last 7 days"), ("month", "Last 30 days"),
         ("quarter", "Last 3 months"), ("today", "Today")))
     payload = json.dumps(initial).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f"""<section class="sc-home-crm" aria-label="CRM source and device snapshot">
+    return f"""<section class="sc-home-crm" aria-label="CRM source and device snapshot" data-initial="{escape(payload, quote=True)}">
       <div class="sc-crm-controls"><label>Results <select aria-label="CRM reporting period">{options}</select></label>
         <button type="button" class="sc-crm-refresh">Refresh</button><small class="sc-crm-dates">{day}</small></div>
-      <div class="sc-crm-paid"><span>Facebook / Instagram ROAS <b data-roas="facebook">—</b></span>
-        <span>Google ROAS <b data-roas="google">—</b></span></div>
+      <div class="sc-crm-paid"><span>Facebook / Instagram ROAS <b data-roas="facebook">{ratio("facebook")}</b></span>
+        <span>Google ROAS <b data-roas="google">{ratio("google")}</b></span></div>
       <div class="sc-crm-table-wrap"><table><caption>Shopify orders · GA4 source and device</caption>
         <thead><tr><th scope="col">Source</th><th scope="col">Mobile</th><th scope="col">Desktop</th>
         <th scope="col">Other /<br>unknown</th><th scope="col">Total</th></tr></thead><tbody>{rows}</tbody></table></div>
@@ -31,7 +41,6 @@ def html(today, initial=None):
         Tablets and unknown devices stay in Other / unknown. Organic has no advertising ROAS.</p>
         <p class="sc-crm-sources"></p><p>Paid-platform ROAS can overlap and is separate from the order table.
         Facebook includes Instagram. Google covers PM021126. Values can change as conversions arrive.</p></details>
-      <script type="application/json" class="sc-crm-initial">{payload}</script>
     </section>"""
 
 
@@ -95,7 +104,7 @@ if(panel&&!panel.dataset.ready){
   }catch{if(own===version){status.textContent="Refresh unavailable · saved values remain dated; retry with Refresh";}}
   finally{clearTimeout(deadline);}
  }
- if(select.value==="yesterday")paint(JSON.parse(panel.querySelector(".sc-crm-initial").textContent));
+ if(select.value==="yesterday")paint(JSON.parse(panel.dataset.initial));
  select.addEventListener("change",()=>{attempts=0;try{sessionStorage.setItem("homeCRMPeriod",select.value);}catch{}for(const cell of panel.querySelectorAll("tbody td,[data-roas]"))cell.textContent="—";status.textContent="Loading selected period…";panel.querySelector(".sc-crm-dates").textContent="";load();});
  panel.querySelector(".sc-crm-refresh").addEventListener("click",()=>{attempts=0;load(true);});
  load(); // Refresh yesterday too; never leave a missing saved ROAS frozen.
