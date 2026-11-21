@@ -117,3 +117,10 @@ def test_browser_receipts_are_bound_to_the_paired_desktop(monkeypatch):
     assert client.post('/qa/finish',json={}).status_code!=200 and not calls
     response=client.post('/qa/finish',headers={'Authorization':'Bearer '+'a'*43},json=dict(key='prodigi_prepare:1',token='b'*43,evidence={},error='Incomplete'))
     assert response.status_code==200 and calls==['authenticated']
+
+
+def test_shipping_intent_reads_only_the_service_not_the_appended_recipient():
+    assert qa.intent('Standard Tracked Shipping | Synthetic Recipient | Fixture')=='standard'
+    assert qa.intent('Express Shipping | Synthetic Recipient')=='express'
+    assert qa.intent('Standard | Express Street')=='standard'
+    with pytest.raises(ValueError):qa.intent('Unknown service | Express Street')

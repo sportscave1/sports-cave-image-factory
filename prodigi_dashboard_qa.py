@@ -15,9 +15,10 @@ CHECKS={'product_option':'Product and variant SKU','frame':'Frame colour','size'
 
 
 def intent(value):
-    value=clean(value)
-    if 'express' in value:return 'express'
-    if value in ('standard','standard shipping','budget','economy','australia post'):return 'standard'
+    # Fulfilment may append recipient details after a pipe; those are not a service.
+    value=clean(value).split('|',1)[0].strip()
+    if __import__('re').search(r'\bexpress\b',value):return 'express'
+    if __import__('re').match(r'^standard(?:\s|$)',value) or value in ('budget','economy','australia post'):return 'standard'
     raise ValueError('The customer shipping service is unknown; review it before changing shipping.')
 
 
