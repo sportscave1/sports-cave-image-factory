@@ -39,6 +39,9 @@ async def tick(request):
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         await run_in_threadpool(desktop, auth[7:])
         value = await run_in_threadpool(queue.tick)
+        if value is None:
+            from prodigi_sandbox import tick as sandbox_tick
+            value = await run_in_threadpool(sandbox_tick)
         return JSONResponse({'enabled': queue.enabled(), 'job':
             {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None}, headers=HEADERS)
     except Exception as error:

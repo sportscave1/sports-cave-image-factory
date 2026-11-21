@@ -23,7 +23,7 @@ class Client:
     def __init__(self, key=None, transport=None, *, mode='live'):
         if mode not in ('live', 'sandbox'):
             raise ProdigiError('Select live or sandbox explicitly.')
-        self.key = key or os.getenv('PRODIGI_API_KEY', '')
+        self.key = key or os.getenv('PRODIGI_SANDBOX_API_KEY' if mode == 'sandbox' else 'PRODIGI_API_KEY', '')
         if not self.key:
             raise ProdigiError('The server Prodigi API key is not configured.')
         if self.key.startswith(('live_', 'sandbox_')) and not self.key.startswith(mode + '_'):

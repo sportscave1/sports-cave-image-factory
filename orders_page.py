@@ -2443,11 +2443,24 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
             _open_prodigi_for_row(selected_rows[0])
             st.rerun()
         _render_manual_edition_entry(selected_rows, backend)
+        import prodigi_preparation
+        actor = st.session_state.get('sports_cave_current_user') or {}
+        if prodigi_preparation.enabled() and os_accounts.is_admin(actor):
+            eligible = selected_count == 1 and str(selected_rows[0].get('edition_order_id') or '').isdigit()
+            if st.button('Prepare for Prodigi', key='orders-prepare-prodigi', disabled=not eligible,
+                         help='Select one numbered unit. Attach artwork to its existing draft; payment stays manual.'):
+                _prodigi_prepare_dialog(selected_rows[0], actor)
         st.caption(f"{selected_count} selected")
     if not backend:
         st.caption("Orders are temporarily unavailable.")
     if selected_rows and not can_generate and not any(order_refunds.blocked(row) for row in selected_rows):
         st.caption("Assign edition number before certificate generation.")
+
+
+@st.dialog('Prepare for Prodigi · manual payment')
+def _prodigi_prepare_dialog(row, actor):
+    from prodigi_preparation_ui import render
+    render(row, actor)
 
 
 def _render_sync_diagnostics(result):
@@ -2966,6 +2979,8 @@ def _render_orders_data_area():
 
     _responsive_orders_mode()
     _render_top_actions(visible_rows, None)
+    from prodigi_sandbox_ui import render as render_prodigi_sandbox
+    render_prodigi_sandbox(_selected_rows_from_state(visible_rows), st.session_state.get('sports_cave_current_user') or {})
 
     _render_orders_table(visible_rows)
 
