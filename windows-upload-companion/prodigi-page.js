@@ -63,9 +63,13 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,
   async function uploadCertificate(plan) {
     let stage='row';
     try {
-      const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));
-      if(rows.length!==1)throw Error('The exact certificate product/frame row is ambiguous.');
-      button(document.querySelector('main'),'Add packing slip').click();
+      const addSlip=await wait(()=>{
+        const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));
+        if(rows.length>1)throw Error('The exact certificate product/frame row is ambiguous.');
+        if(rows.length!==1)return null;
+        try{return button(document.querySelector('main'),'Add packing slip');}catch{return null;}
+      });
+      addSlip.click();
       stage='picker';
       const input=await filePickerInput();
       stage='transfer';
