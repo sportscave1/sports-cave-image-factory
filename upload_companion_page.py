@@ -9,7 +9,7 @@ def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js', 'orders-queue.js', 'prodigi-browser.js', 'prodigi-page.js'):
+        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js', 'orders-queue.js', 'prodigi-browser.js', 'prodigi-page.js', 'prodigi-dashboard-qa.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 

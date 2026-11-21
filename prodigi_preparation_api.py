@@ -42,7 +42,10 @@ async def tick(request):
         from prodigi_browser import claim
         browser = (await run_in_threadpool(claim)
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
-        if browser is None and request.headers.get('x-sports-cave-orders-documents')=='1':
+        if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
+            from prodigi_dashboard_qa import claim as qa_claim
+            browser=await run_in_threadpool(qa_claim)
+        if browser is None and request.headers.get('x-sports-cave-orders-documents')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_LEGACY_DOCUMENT_UPLOAD','').lower()=='true':
             from prodigi_document_browser import claim as document_claim
             browser=await run_in_threadpool(document_claim)
         return JSONResponse({'enabled': queue.enabled(), 'job':
@@ -89,7 +92,30 @@ async def browser_action(request):
         return failure(error)
 
 
-ROUTES = (('/api/orders-companion/tick', tick, ('POST',)),
+async def dashboard_qa_action(request):
+    from product_upload_api import HEADERS,failure
+    try:
+        import json
+        auth=request.headers.get('authorization','')
+        if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}',auth):raise PermissionError('A paired desktop credential is required.')
+        await run_in_threadpool(desktop,auth[7:])
+        raw=bytearray()
+        async for block in request.stream():
+            raw.extend(block)
+            if len(raw)>8192:raise ValueError('QA receipt is too large.')
+        body=json.loads(raw)
+        if (not isinstance(body,dict) or set(body) not in ({'key','token','evidence'},{'key','token','evidence','error'})
+            or not isinstance(body['key'],str) or not isinstance(body['token'],str)
+            or not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])
+            or not isinstance(body.get('error',''),str) or len(body.get('error',''))>240):raise ValueError('Invalid QA receipt.')
+        from prodigi_dashboard_qa import permit,finish
+        result=await run_in_threadpool(permit,body['key'],body['token'],body['evidence']) if request.url.path.endswith('/permit') else await run_in_threadpool(finish,body['key'],body['token'],body['evidence'],body.get('error',''))
+        return JSONResponse(result,headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+ROUTES = (('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+          ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),
           ('/api/prodigi-artwork/{token}', serve_artwork, ('GET', 'HEAD')),

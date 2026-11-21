@@ -11,6 +11,7 @@ from test_prodigi_preparation import store,snapshot,order
 
 @pytest.fixture
 def handoff(store,monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_LEGACY_DOCUMENT_UPLOAD','true')
     snap=snapshot();supplier=order();supplier['items'][0]['assets']=[{'url':'https://fixture/art'}]
     key=prep.PREFIX+'1';v=dict(allocation_id=1,snapshot=snap,order_id='99',item_id='88',
         status=docs.WAITING,browser={'verified':True},url_hash=prep.digest('https://fixture/art'),

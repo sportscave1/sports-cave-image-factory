@@ -4,7 +4,7 @@ import re,hashlib,json
 from urllib.parse import urljoin
 
 ORIGIN='https://sports-cave-image-factory.onrender.com'
-ACTIVE={'Queued','Uploading','Creating sandbox draft','Awaiting browser upload','Browser uploading','Checking QA','Preparing JPG','Preparing certificate','Awaiting certificate browser','Certificate browser uploading'}
+ACTIVE={'Queued','Uploading','Creating sandbox draft','Awaiting browser upload','Browser uploading','Checking QA','Preparing JPG','Preparing certificate','Awaiting certificate browser','Certificate browser uploading','Awaiting dashboard QA','Checking dashboard QA'}
 
 
 def supplier_link(order_id):
@@ -23,7 +23,8 @@ def action_state(saved, fulfilment=""):
             and not any(saved.get(k) for k in ('browser','write_intent','document_write_intent'))):
         return dict(label='Send',tone='plain',action='send',url='',detail='Attach artwork now. Print quality is checked in the later QA stage; payment stays manual.')
     if state=='Ready for manual payment':
-        return dict(label='✓ Ready',tone='success',action='',url=supplier_link(saved.get('order_id')),detail='All QA passed. Open this exact order to review and submit manually.')
+        return dict(label='Ready in Prodigi',tone='success',action='',url=supplier_link(saved.get('order_id')),detail='All QA passed. Open this exact order to review and submit manually.')
+    if state in ('Awaiting dashboard QA','Checking dashboard QA'):return dict(label='Checking QA…',tone='pending',action='',url='',detail=saved.get('message',''))
     if state in ACTIVE:return dict(label='Preparing…',tone='pending',action='',url='',detail=saved.get('message',''))
     return dict(label='⚠ Review',tone='warning',action='review',url='',detail=saved.get('message','Review the saved QA checks.'))
 

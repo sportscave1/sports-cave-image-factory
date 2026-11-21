@@ -115,6 +115,9 @@ def run(value,provider,resolver,persist):
     from prodigi_browser import checked
     sandbox=value.get('environment')=='sandbox'
     if not enabled() or (not sandbox and not live_enabled()):raise ValueError('Automatic QA is paused; no supplier document was changed.')
+    if not sandbox:
+        from prodigi_dashboard_qa import enqueue
+        return enqueue(value,provider,resolver,persist)
     snap,order,item=checked(value,provider,resolver,sandbox)
     receipt=value.get('browser') or {}
     if not receipt.get('verified') or not receipt.get('full_image_fit_verified'):
