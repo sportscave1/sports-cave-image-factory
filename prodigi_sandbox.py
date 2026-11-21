@@ -85,12 +85,18 @@ def payload(snapshot):
                    'quantity': 1, 'sizing': 'fitPrintArea', 'attributes': attributes}]}
 
 
-def request(user, allocation_id):
+def request(user, allocation_id, *, synthetic_recipient=False):
     prep.require_user(user)
     if not prep.enabled():
         raise ValueError('Enable Orders preparation first.')
     SandboxClient()  # Reject missing/cross-environment credentials before storing anything.
     source = resolve(int(allocation_id))
+    if type(synthetic_recipient) is not bool:raise ValueError('Select a sandbox test mode explicitly.')
+    if synthetic_recipient:
+        recipient={'name':'Sports Cave Synthetic QA','address':{'line1':'1 Example Street','line2':'',
+            'townOrCity':'Sydney','stateOrCounty':'NSW','postalOrZipCode':'2000','countryCode':'AU'},
+            'state_aliases':['NSW','New South Wales']}
+        return _queue_test(user,allocation_id,source,recipient,source['shipping'],synthetic=True)
     live = Client()
     order_id, item_id = prep.discover(source, live)
     order = live.order(order_id)  # Read only, including completed/production source orders.
@@ -103,19 +109,23 @@ def request(user, allocation_id):
     if (source['mapping']['frame'] != 'Unframed' and str((item.get('attributes') or {}).get('color','')).casefold()
             != source['mapping']['prodigi_frame_colour'].casefold()):
         raise ValueError('Source frame differs from the selected numbered unit.')
-    key = str(uuid.uuid4())
-    reference = 'SC-SANDBOX-' + key
     recipient = deepcopy(order['recipient'])
     recipient['state_aliases'] = source['recipient'].get('state_aliases', [])
     shipping = order.get('shippingMethod')
     if shipping not in ('Budget','Standard','Express','Overnight'):
         raise ValueError('The supplier shipping service could not be copied safely.')
+    return _queue_test(user,allocation_id,source,recipient,shipping,order_id,item_id)
+
+
+def _queue_test(user,allocation_id,source,recipient,shipping,order_id='',item_id='',*,synthetic=False):
+    key = str(uuid.uuid4())
+    reference = 'SC-SANDBOX-' + key
     snap = adapted(source, reference, recipient, shipping)
     value = dict(id=key, environment='sandbox', allocation_id=int(allocation_id),
         source_order_id=order_id, source_item_id=item_id, source_snapshot=source,
         snapshot=snap, fingerprint=prep.digest(snap), order_id='', item_id='',
         status='Queued', checks={}, history=[], message='Sandbox only; waiting for Orders companion.',
-        requester=str(user['id']), hidden=False,browser_requested=True)
+        requester=str(user['id']), hidden=False,browser_requested=True,synthetic_recipient=synthetic)
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         cur.execute('SELECT value FROM app_settings WHERE key LIKE %s', (PREFIX+'%',))

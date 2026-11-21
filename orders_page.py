@@ -2077,14 +2077,19 @@ def _render_ledger_diagnostics():
 def _order_display_resources(rows):
     """Overlap independent stored link reads; keep Streamlit calls on its thread."""
     from orders_display_reads import download_links
+    from supabase_backend import DatabaseReadError
     links = _ORDERS_LOAD_EXECUTOR.submit(download_links, rows or [])
     mapping = psd_directory.page_directory(st)
     try:
-        cloud_links = links.result()
-    except ReadQueueFull:
-        # A loaded page must keep accurate link states even under queue pressure.
-        # This still uses the same bounded database pool and read watchdog.
-        cloud_links = download_links(rows or [])
+        try:
+            cloud_links = links.result()
+        except ReadQueueFull:
+            # Keep the same bounded database pool and read watchdog.
+            cloud_links = download_links(rows or [])
+    except DatabaseReadError:
+        st.warning('Edition JPG status is temporarily unavailable. Refresh to check it again.')
+        cloud_links = {str(row.get('edition_order_id') or row.get('id')):'Status unavailable'
+            for row in rows or [] if row.get('edition_order_id') or row.get('id')}
     return mapping, cloud_links
 
 

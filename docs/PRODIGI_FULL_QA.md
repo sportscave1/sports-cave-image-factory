@@ -34,6 +34,10 @@ After the single-use Save permit and artwork readback, one background pass:
 Existing different packing slips and orders with multiple numbered items stop
 for document review. No certificate is silently replaced. Sandbox does not
 publish certificates to Shopify or alter live allocations/orders.
+The optional synthetic-recipient sandbox mode tests transport and QA machinery
+without reading or copying a live supplier recipient. It is labelled in Orders
+and never approves the real customer's address. Normal customer-copy tests keep
+their exact address-match guard; a street mismatch still blocks them.
 
 ## Honest print approval
 

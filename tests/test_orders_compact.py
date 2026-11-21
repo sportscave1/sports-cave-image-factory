@@ -6,6 +6,19 @@ import orders_page as orders
 
 
 class CompactOrdersTests(unittest.TestCase):
+    def test_jpg_status_deadline_keeps_the_order_visible_without_claiming_repair(self):
+        from concurrent.futures import Future
+        from supabase_backend import DatabaseReadError
+        future=Future();future.set_exception(DatabaseReadError('deadline exceeded',{}))
+        warnings=[];rows=[{'edition_order_id':952,'order':'#SC3522'}]
+        with patch.object(orders,'st',SimpleNamespace(warning=warnings.append)), \
+             patch.object(orders._ORDERS_LOAD_EXECUTOR,'submit',return_value=future), \
+             patch.object(orders.psd_directory,'page_directory',return_value={}):
+            resources=orders._order_display_resources(rows)
+        assert resources==({}, {'952':'Status unavailable'}) and len(warnings)==1
+        display=orders._display_rows(rows,resources=resources)
+        assert display[0]['print_jpg']=='Status unavailable'
+
     def test_initial_layout_waits_for_client_instead_of_exposing_wrong_actions(self):
         class WaitingForClient(Exception): pass
         fake=SimpleNamespace(__name__='streamlit',session_state={},caption=lambda *a:None,

@@ -16,9 +16,11 @@ def render(selected, user):
         if not ready:
             st.info('The separate Prodigi sandbox API key is required on the server.')
         eligible = len(selected) == 1 and str(selected[0].get('edition_order_id') or '').isdigit()
+        synthetic=st.checkbox('Use a synthetic recipient for technical sandbox QA',value=False,key='orders-sandbox-synthetic')
+        if synthetic:st.caption('Tests artwork, certificate and QA machinery with made-up contact details. It does not validate the real customer’s supplier address.')
         if st.button('Create sandbox test from selected unit', disabled=not ready or not eligible, key='orders-sandbox-create'):
             try:
-                sandbox.request(user, int(selected[0]['edition_order_id']))
+                sandbox.request(user, int(selected[0]['edition_order_id']),synthetic_recipient=synthetic)
             except Exception as error:
                 st.error(str(error) if isinstance(error, ValueError) else 'The sandbox test could not be created.')
             else:
@@ -34,6 +36,7 @@ def render(selected, user):
             st.caption('No sandbox orders in the app.')
         for row in rows:
             snap = row['snapshot']
+            if row.get('synthetic_recipient'):st.caption('Synthetic recipient · technical sandbox test only; real customer matching is not approved by this test.')
             st.dataframe([{'Order': 'SANDBOX · '+row['id'][:8], 'Source': row['source_snapshot']['order_reference'],
                 'Customer': snap['recipient']['name'], 'Product': snap['product'],
                 'Edition': f"{snap['number']:03}/{snap['total']}", 'Status': row['status']}], hide_index=True)
