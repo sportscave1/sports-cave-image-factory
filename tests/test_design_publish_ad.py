@@ -233,7 +233,7 @@ def test_companion_shows_selected_ads_queue(monkeypatch):
         "import upload_companion_page as page; page.render_page({'id': 'fixture'})"
     ).run()
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == ['Design queue', 'Upload queue', 'Ads queue']
+    assert [tab.label for tab in app.tabs] == ['Design queue', 'Upload queue', 'Ads queue', 'Orders queue']
     assert not app.button  # Hidden queues no longer execute.
     app.session_state['companion-queue-tabs'] = 'Ads queue'
     app.run()

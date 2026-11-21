@@ -8,21 +8,21 @@ const chat='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+id;
 function fixture(records=new Map()) {
   const calls=[],opens=[],messages=[],reloads=[];
   const job={id,receipt:'a'.repeat(64),chat_url:chat,missing:['ad_copy.csv']};
-  let downloads=[],valid=true,downloadError='',claim=null,staged=false,library=null,libraryReady=true,libraryDelay=0;
+  let downloads=[],valid=true,downloadError='',claim=null,staged=false,library=null,libraryReady=true,libraryDelay=0,libraryBytes=null;
   let now=Date.now();
   const ClockDate=class extends Date {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}};
   const chrome={runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{onAlarm:{addListener(){}}},
     tabs:{get:async id=>({id,url:opens[id-1]?.url||chat}),query:async()=>[],create:async options=>{opens.push(options);return {id:opens.length,...options};},
-      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);if(message.type==='project:ad-library')now+=libraryDelay;return message.type==='project:ad-download-status'?{error:downloadError}:message.type==='project:ad-repair-status'?{ready:true,found:false,staged}:{clicked:message.type==='project:ad-library'?libraryReady:true,response:'response-1',chat,library};}},
+      update:async()=>{},reload:async tab=>reloads.push(tab),sendMessage:async(tab,message)=>{messages.push(message);if(message.type==='project:ad-library'){now+=libraryDelay;if(libraryBytes)return {data:libraryBytes};}return message.type==='project:ad-download-status'?{error:downloadError}:message.type==='project:ad-repair-status'?{ready:true,found:false,staged}:{clicked:message.type==='project:ad-library'?libraryReady:true,response:'response-1',chat,library};}},
     downloads:{search:async()=>downloads}};
-  const context=vm.createContext({chrome,setTimeout,clearTimeout,URL,URLSearchParams,AbortSignal,Uint8Array,Date:ClockDate,
+  const context=vm.createContext({chrome,setTimeout,clearTimeout,URL,URLSearchParams,AbortSignal,Uint8Array,Date:ClockDate,atob,
     queueId:/^[a-f0-9-]{36}$/,suppliedReceipt:/^[a-f0-9]{64}$/,staffAlarm:'alarm',osOrigin:'https://os.test',
     staffRead:async key=>records.get(key),staffWrite:async(key,value)=>records.set(key,value),
     fetch:async(url,options)=>{
       calls.push({url,options});
       if(url.endsWith('/ad-tick') && claim)return claim();
-      if(url.startsWith('https://os.test'))return {ok:true,json:async()=>({received:'ad_copy.csv'})};
+      if(url.startsWith('https://os.test'))return {ok:true,json:async()=>({received:new URL(url).searchParams.get('name')})};
       return {ok:valid,url,body:new ReadableStream({start(c){c.enqueue(new Uint8Array([1,2,3]));c.close();}})};
     }});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../windows-upload-companion/message-deadline.js'),'utf8'),context);
@@ -30,7 +30,7 @@ function fixture(records=new Map()) {
   context.job=job;
   return {records,calls,opens,messages,reloads,job,run:()=>vm.runInContext("collectAd(job,'paired-token')",context),
     downloads:value=>downloads=value,valid:value=>valid=value,downloadError:value=>downloadError=value,claim:value=>claim=value,
-    staged:value=>staged=value,library:value=>library=value,libraryReady:value=>libraryReady=value,libraryDelay:value=>libraryDelay=value,now:()=>now};
+    staged:value=>staged=value,library:value=>library=value,libraryReady:value=>libraryReady=value,libraryDelay:value=>libraryDelay=value,libraryBytes:value=>libraryBytes=value,now:()=>now};
 }
 
 test('a Library viewer without a Download button exhausts the same retry budget',async()=>{
@@ -178,4 +178,18 @@ test('Library receipt search begins before a fast download click, not after its 
   const clickedAt=f.now();f.libraryDelay(5000);await f.run();
   assert.equal(Date.parse(f.records.get('publishAdJob').transfer.started),clickedAt);
   assert.equal(f.records.get('publishAdJob').transfer.librarySent,true);
+});
+
+
+test('a readable Library original without a Download button uses the same verified file receipt',async()=>{
+  const f=fixture();f.job.missing=['man-cave.jpg'];await f.run();
+  f.library('https://chatgpt.com/library?file_id=libfile_123abc');await f.run();
+  f.records.get('publishAdJob').transfer.started='2000-01-01T00:00:00Z';await f.run();
+  f.libraryBytes(Buffer.from([255,216,255,1,2,3]).toString('base64'));
+  assert.equal(await f.run(),'received');
+  assert.equal(f.calls.length,1);
+  const upload=f.calls[0];assert.equal(new URL(upload.url).searchParams.get('name'),'man-cave.jpg');
+  assert.equal(new URL(upload.url).searchParams.get('response'),'response-1');
+  assert.deepEqual(Array.from(upload.options.body),[255,216,255,1,2,3]);
+  assert.equal(f.records.get('publishAdJob').transfer,null);
 });

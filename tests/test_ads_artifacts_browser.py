@@ -105,6 +105,10 @@ def test_work_pasted_brief_requires_bound_chat_and_finished_original_files(toast
         assert not request(chat=url).get('library')
         page.evaluate("document.querySelector('tr').lastChild.remove()")
         first=request(chat=url)
+        page.evaluate("""() => document.body.insertAdjacentHTML('beforeend','<li role="status">Failed to download man-cave.jpg. Please try again later.</li>')""")
+        wrong_toast=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
+            dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))
+        assert not wrong_toast['error']
         page.evaluate("""name => document.body.insertAdjacentHTML('beforeend','<ol><li role="status">Failed to download '+name+'. Please try again later.</li></ol>')""", toast_name)
         status=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
             dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))

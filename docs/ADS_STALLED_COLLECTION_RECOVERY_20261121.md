@@ -17,6 +17,13 @@ after the click acknowledgement; a download starting before that reply was
 excluded. The latter is a reproduced protocol race, not a claim that browser
 download history proves it happened on this particular click.
 
+Live inspection additionally confirmed that the Library viewer for man-cave.jpg
+renders its original 1024x1024 JPEG without any Download button. Its exact image
+source is the selected Library file's same-origin content URL. The companion
+now retrieves that displayed original when no Download action exists, requiring
+the exact file ID, matching filename, full-resolution dimensions, same-origin
+response, JPEG signature and existing server verification before accepting it.
+
 Repeated status writes also refreshed updated_at, making some dependency and
 posting timeouts ineffective. A native download remaining in_progress had no
 deadline. These are independently regression-tested failure paths.
@@ -55,4 +62,4 @@ Production providers are blocked by tests/ads_offline_guard.py.
 
 Run python scripts/validate_render_topology.py before release. Deploy using the
 existing main auto-deploy; do not sync or change the Blueprint or create services.
-The installed companion must also be updated to 1.7.9 and reloaded in Edge.
+The installed companion must also be updated to 1.7.10 and reloaded in Edge.
