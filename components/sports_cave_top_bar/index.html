@@ -2904,7 +2904,8 @@
         return;
       }
       const previousOrders = readStatusCache("orders");
-      const confirmedAt = Number(previousOrders.payload?.confirmed_at || previousOrders.checked_at || 0);
+      const confirmedAt = Number(previousOrders.payload?.confirmed_at ||
+        (Number.isInteger(previousOrders.payload?.action_required_count) ? previousOrders.checked_at : 0) || 0);
       const expireOrdersBadge = () => {
         if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) {
           root.dataset.ordersState = 'delayed';
@@ -2913,7 +2914,13 @@
         }
       };
       expireOrdersBadge();
-      writeStatusCache("orders", {...(previousOrders.payload || {}), confirmed_at: confirmedAt});
+      const orderStatusUnavailable = () => {
+        // An attempt is not a confirmed result. Cache only completed failures
+        // for backoff; a remount must restart an interrupted initial read.
+        writeStatusCache('orders', {...(previousOrders.payload || {}), confirmed_at:confirmedAt, available:false});
+        root.dataset.ordersState = 'delayed';
+        expireOrdersBadge();
+      };
       state.orderStatusPending = true;
       try {
         const payload = await requestJson(state.config.orderStatusUrl);
@@ -2928,13 +2935,13 @@
           const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
           if (badge) { badge.title = "Orders requiring action"; badge.dataset.stale = "false"; }
         }
-        else expireOrdersBadge();
+        else orderStatusUnavailable();
         showOrderToast(payload.notification);
         if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
       } catch (_error) {
         // A temporary failure cannot keep an unverified count visible indefinitely.
         if (!state.destroyed) {
-          expireOrdersBadge();
+          orderStatusUnavailable();
           if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
         }
       } finally {
@@ -3599,7 +3606,7 @@
       const orders = readStatusCache('orders').payload || {};
       if (state.config.ordersEnabled && Number.isInteger(orders.action_required_count) && orders.action_required_count > 0) {
         const count = orders.action_required_count;
-        const delayed = Date.now() - Number(orders.confirmed_at || 0) > 2 * ORDER_STATUS_REFRESH_MS;
+        const delayed = orders.available === false || Date.now() - Number(orders.confirmed_at || 0) > 2 * ORDER_STATUS_REFRESH_MS;
         items = [{title: `${count} ${count === 1 ? 'order requires' : 'orders require'} action`,
           subtitle: delayed ? 'Last known count · refreshing' : 'Review unfinished orders', route_key:'orders'}, ...items];
       } else if (state.config.ordersEnabled && (root.dataset.ordersState === 'delayed' || !Number.isInteger(orders.action_required_count))) {
@@ -4120,8 +4127,8 @@
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
           const cachedOrders = readStatusCache("orders");
-          root.dataset.ordersState = 'checking';
-          if (cachedOrders.payload && Date.now() - Number(cachedOrders.payload.confirmed_at || cachedOrders.checked_at || 0) <= 2 * ORDER_STATUS_REFRESH_MS) {
+          root.dataset.ordersState = cachedOrders.payload?.available === false ? 'delayed' : 'checking';
+          if (Number.isInteger(cachedOrders.payload?.action_required_count) && Date.now() - Number(cachedOrders.payload.confirmed_at || cachedOrders.checked_at || 0) <= 2 * ORDER_STATUS_REFRESH_MS) {
             updateOrdersBadge(
               cachedOrders.payload.action_required_count,
               cachedOrders.payload.badge_label,
