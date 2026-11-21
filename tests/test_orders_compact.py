@@ -6,6 +6,15 @@ import orders_page as orders
 
 
 class CompactOrdersTests(unittest.TestCase):
+    def test_bulk_selection_only_loads_one_stably_identified_detail_panel(self):
+        rows=[{'edition_order_id':i,'order':f'#SC{i}'} for i in range(1,51)]
+        before=deepcopy(rows);seen=[]
+        def choose(label,options,**kwargs):seen.extend(options);return 'allocation:50'
+        with patch.object(orders,'st',SimpleNamespace(selectbox=choose)):
+            assert orders._selected_detail_rows(rows)==[rows[-1]]
+        assert len(seen)==50 and rows==before
+        assert orders._selected_detail_rows([rows[0]])==[rows[0]]
+
     def test_jpg_status_deadline_keeps_the_order_visible_without_claiming_repair(self):
         from concurrent.futures import Future
         from supabase_backend import DatabaseReadError
