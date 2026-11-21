@@ -6,17 +6,25 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/orders-queue.js'),'utf8');
 
 function context(token, request) {
-  const writes=[];
+  const writes=[],alarms=[];
   const chrome={
     storage:{local:{get:async()=>({staffQueueCredential:token}),set:async value=>writes.push(value)}},
-    alarms:{get:async()=>null,create:async()=>{},onAlarm:{addListener() {}}},
+    alarms:{get:async()=>null,create:async (...args)=>alarms.push(args),onAlarm:{addListener() {}}},
     runtime:{onStartup:{addListener() {}},onInstalled:{addListener() {}}},
   };
   const scope=vm.createContext({chrome,fetch:request,AbortSignal,Date,setInterval,clearInterval,
     osOrigin:'https://sports-cave-image-factory.onrender.com'});
   vm.runInContext(source,scope);
-  return {scope,writes};
+  return {scope,writes,alarms};
 }
+
+test('reload restores a paired alarm without requiring a browser startup event',async()=>{
+  const {alarms}=context('fixture',()=>assert.fail('Alarm setup must not send artwork'));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(alarms.length,1);
+  assert.equal(alarms[0][0],'sports-cave-orders-queue');
+  assert.equal(alarms[0][1].periodInMinutes,0.5);
+});
 
 test('unpaired extension never contacts a service',async()=>{
   const {scope}=context(null,()=>assert.fail('No HTTP expected'));

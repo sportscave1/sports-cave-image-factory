@@ -132,6 +132,13 @@ regressions. Sandbox credentials were cleared from the temporary diagnostic
 shell and clipboard after acceptance; no dashboard password was saved or
 changed by this workflow.
 
+Companion 1.7.10 also restores the Orders alarm when the MV3 worker loads,
+including unpacked-extension reloads, and wakes it after pairing/reconnection.
+Its health panel distinguishes an unpaired profile from an Orders worker that
+has contacted the server. Follow-up verification passed 50 focused Python tests
+and 22 Node worker regressions, including reload alarm recovery, existing
+design/ad queues, message deadlines and handoff lifetime.
+
 ## Review prompt for an authorised visual companion
 
 Use this scope when a verified visual adapter is added, substituting saved IDs

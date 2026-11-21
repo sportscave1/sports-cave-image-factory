@@ -97,16 +97,31 @@ async function collectAd(job, token) {
       response:transfer.response,chat:job.chat_url},{frameId:0}).catch(()=>null);
     if(status?.error || Date.now()-Date.parse(transfer.started)>120000) {
       if(adLibrary.test(transfer.library||'') && !transfer.librarySent) {
+        // A Library viewer can load without a usable Download button.
+        // Bound that wait so this branch also spends its retry budget.
+        if(transfer.libraryTab && Date.now()-Date.parse(transfer.libraryOpenedAt||transfer.started)>120000) {
+          await failedAdDownload(local,tab,'Library original did not become downloadable');return;
+        }
         let original=transfer.libraryTab?await chrome.tabs.get(transfer.libraryTab).catch(()=>null):null;
         if(!original) {
           original=await chrome.tabs.create({url:transfer.library,active:false});
-          await staffWrite(adStorage,{...local,transfer:{...transfer,libraryTab:original.id}});return;
+          await staffWrite(adStorage,{...local,transfer:{...transfer,libraryTab:original.id,libraryOpenedAt:new Date().toISOString()}});return;
         }
         if(original.url!==transfer.library){await failedAdDownload(local,tab,'Library original changed');return;}
+        // Record before clicking: a fast native download can start before the
+        // content-script reply. Recording after it loses that exact receipt.
+        const libraryStarted=new Date().toISOString();
         const restored=await companionMessage(original.id,{type:'project:ad-library',job:job.id,name,url:transfer.library},{frameId:0}).catch(()=>null);
-        if(restored?.clicked) {
-          await staffWrite(adStorage,{...local,transfer:{...transfer,started:new Date().toISOString(),librarySent:true}});return 'download-started';
+        if(restored?.data) {
+          if(restored.data.length>Math.ceil(maxBytes/3)*4)throw Error('Ad file exceeds transfer limit');
+          const bytes=Uint8Array.from(atob(restored.data),char=>char.charCodeAt(0));
+          if(bytes.length>maxBytes)throw Error('Ad file exceeds transfer limit');
+          return receiveAdFile(job,token,local,name,transfer.response,bytes);
         }
+        if(restored?.clicked) {
+          await staffWrite(adStorage,{...local,transfer:{...transfer,started:libraryStarted,librarySent:true}});return 'download-started';
+        }
+        return; // Let this viewer finish loading within its bounded wait.
       }
       await failedAdDownload(local,tab,status?.error||'No browser download receipt');
     }
@@ -114,7 +129,10 @@ async function collectAd(job, token) {
   }
   const item=candidates[0];
   if(item.state==='interrupted'){await failedAdDownload(local,tab,'Attachment download interrupted');return;}
-  if(item.state!=='complete')return;
+  if(item.state!=='complete') {
+    if(Date.now()-Date.parse(transfer.started)>120000)await failedAdDownload(local,tab,'Attachment download did not finish');
+    return;
+  }
   const url=new URL(item.finalUrl||item.url);
   let data;
   if(url.protocol==='blob:' && url.origin==='https://chatgpt.com') {
@@ -142,7 +160,11 @@ async function collectAd(job, token) {
       if(size>maxBytes){await reader.cancel();throw Error('Ad file exceeds transfer limit');}chunks.push(value);}
     data=new Uint8Array(size);let offset=0;for(const chunk of chunks){data.set(chunk,offset);offset+=chunk.length;}
   }
-  const query=new URLSearchParams({job:job.id,name,chat:job.chat_url,response:transfer.response});
+  return receiveAdFile(job,token,local,name,transfer.response,data);
+}
+
+async function receiveAdFile(job,token,local,name,responseId,data) {
+  const query=new URLSearchParams({job:job.id,name,chat:job.chat_url,response:responseId});
   const response=await fetch(osOrigin+'/api/staff-product-uploads/ad-file?'+query,{
     method:'POST',credentials:'omit',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},
     body:data,signal:AbortSignal.timeout(60000)});

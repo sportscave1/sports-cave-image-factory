@@ -56,7 +56,8 @@ def test_edge_attachment_matching_waits_and_isolates_the_original_turn():
         browser.close()
 
 
-def test_work_pasted_brief_requires_bound_chat_and_finished_original_files():
+@pytest.mark.parametrize('toast_name', ['file', 'ad_copy.csv'])
+def test_work_pasted_brief_requires_bound_chat_and_finished_original_files(toast_name):
     job='00000000-0000-0000-0000-000000000001'
     url='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+job
     script=Path(__file__).resolve().parents[1]/'windows-upload-companion/ad-artifacts.js'
@@ -104,7 +105,11 @@ def test_work_pasted_brief_requires_bound_chat_and_finished_original_files():
         assert not request(chat=url).get('library')
         page.evaluate("document.querySelector('tr').lastChild.remove()")
         first=request(chat=url)
-        page.evaluate("""() => document.body.insertAdjacentHTML('beforeend','<ol><li role="status">Failed to download file. Please try again later.</li></ol>')""")
+        page.evaluate("""() => document.body.insertAdjacentHTML('beforeend','<li role="status">Failed to download man-cave.jpg. Please try again later.</li>')""")
+        wrong_toast=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
+            dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))
+        assert not wrong_toast['error']
+        page.evaluate("""name => document.body.insertAdjacentHTML('beforeend','<ol><li role="status">Failed to download '+name+'. Please try again later.</li></ol>')""", toast_name)
         status=page.evaluate("m=>new Promise(resolve=>listener(m,{id:'fixture'},resolve))",
             dict(type='project:ad-download-status',job=job,name='ad_copy.csv',chat=url,response=first['response']))
         assert status['error']=='ChatGPT could not download ad_copy.csv'

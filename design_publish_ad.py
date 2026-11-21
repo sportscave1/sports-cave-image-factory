@@ -83,7 +83,9 @@ def public(value):
     generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
     return dict(label=('Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
                        'ChatGPT is thinking / generating' if generating else
-                       'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else LABELS[value['stage']]), detail=('ChatGPT is still generating; waiting for finished attachments' if generating else value.get('detail', '')),
+                       'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else
+                       'Restoring missing ad attachments' if value.get('attachment_repair', {}).get('state') in ('ready','sending','submitted') and value['stage']=='generating' else
+                       f"Collecting ad files · {sum(name in value['artifacts'] for name in COVERS.values())} of 3 covers" if value.get('artifacts') and value['stage']=='generating' else LABELS[value['stage']]), detail=('ChatGPT is still generating; waiting for finished attachments' if generating else value.get('detail', '')),
                 active=value['stage'] not in ('complete', 'failed', 'cancelled'),
                 posting_id=value.get('posting_id'))
 
@@ -362,6 +364,15 @@ def _step(key, value, job, event, age):
     from meta_posting_service import PostingBusyError
 
     stage = value['stage']
+    # Polling writes cannot renew a stage deadline. Bootstrap old checkpoints
+    # from saved handoff/activity evidence once, then retain the start time.
+    if value.get('timed_stage') != stage:
+        started = time.time() - age
+        if stage == 'generating':
+            started = value.get('generation_started_at') or value.get('handoff_started_at') or value.get('last_chat_activity_at') or started
+        value.update(timed_stage=stage, stage_started_at=started)
+        write(key, value)
+    stage_age = time.time() - value['stage_started_at']
     if stage == 'waiting' and job['stage'] == 7:
         raise ValueError('Product publication or Edition Ops mapping needs attention.')
     if stage == 'preparing' and job['stage'] == 6:
@@ -378,6 +389,7 @@ def _step(key, value, job, event, age):
         stage, age = 'generating', 0
         value['stage'] = stage
         value['last_chat_activity_at'] = time.time()
+        value.update(generation_started_at=time.time(), timed_stage=stage, stage_started_at=time.time())
         value.pop('handoff_pending', None)
         value['detail'] = 'ChatGPT accepted the prompt; waiting for the finished covers and copy.'
         write(key, value)
@@ -403,12 +415,24 @@ def _step(key, value, job, event, age):
             elif not value.get('last_chat_activity_at'):
                 value['last_chat_activity_at'] = now - age
             value.update(chat_generating=event['generating'], chat_observed_at=now, chat_activity=event.get('activity'))
+            if event.get('finished') is True and not event['generating']:
+                value.setdefault('chat_finished_at', now)
             write(key, value)
         if float((value.get('catalog_retry') or {}).get('next_at', 0)) > time.time():
             return {}
         transfer_detail = str(event.get('transfer_detail') or '')[:600]
         from ads_attachment_repair import advance as advance_repair
-        repair_send = advance_repair(value, event)
+        # A desktop can wait forever without reporting a failed download.
+        # Restore originals only, in the saved chat, without regenerating art.
+        last_progress = max(value.get('last_artifact_at', 0), value.get('last_chat_activity_at', 0),
+                            value.get('chat_finished_at', 0))
+        idle = time.time() - (last_progress or value['stage_started_at'])
+        repair_event = event
+        if (idle > 300 and value.get('chat_generating') is False and
+                (value.get('chat_finished_at') or value.get('artifacts')) and
+                not value.get('attachment_repair') and CHAT.fullmatch(value.get('chat_url', ''))):
+            repair_event = {**event, 'transfer_failed': True}
+        repair_send = advance_repair(value, repair_event)
         if value.get('attachment_repair'):
             write(key, value)
             if value['attachment_repair']['state'] in ('ready', 'sending'):
@@ -441,16 +465,20 @@ def _step(key, value, job, event, age):
             value.pop('catalog_retry', None)
             value['detail'] = 'Files verified - creating ads paused for review'
             stage, age = 'posting', 0
+            stage_age = 0
             value['stage'] = stage
+            value.update(timed_stage=stage, stage_started_at=time.time())
             write(key, value)
-        elif time.time() - value.get('last_chat_activity_at', time.time() - age) > 7200:
+        elif stage_age > 21600:
+            raise ValueError('Ad generation exceeded six hours. Saved files and the original chat are preserved; review the incomplete files before resuming.')
+        elif time.time() - value.get('last_chat_activity_at', value['stage_started_at']) > 7200:
             raise ValueError('The three covers and ad copy did not arrive in Dropbox. Check the Meta Ads conversation.')
     if stage == 'posting':
         row = JOBS.snapshot(value['posting_id'])
         if row.get('status') == 'COMPLETE' and confirmed_ads(row) == (3, 3):
             value.update(stage='complete', detail='')
             write(key, value)
-        elif row.get('status') in TERMINAL or (age > 1800 and not row.get('running_here') and not row.get('lease_active')):
+        elif row.get('status') in TERMINAL or (stage_age > 1800 and not row.get('running_here') and not row.get('lease_active')):
             raise ValueError('Meta Posting needs review. Open the saved posting job to check its receipts.')
         return {}
     if stage == 'generating':
@@ -534,7 +562,10 @@ def tick(token, event):
         if not requester or not all(can_access_page(requester, page) for page in ('Ads', 'Posting', 'Files')):
             raise ValueError('The requesting account no longer has Ads, Posting and Files access.')
         delivered = event if event.get('id') == value['upload'] else {}
-        return {'job': _step(key, value, job, delivered, age)}
+        response = {'job': _step(key, value, job, delivered, age)}
+        if value.pop('dependency_failed_at', None) is not None:
+            write(key, value)
+        return response
     except ValueError as error:
         value.pop('prompt', None)
         value.update(stage='failed', detail=str(error)[:600])
@@ -542,11 +573,13 @@ def tick(token, event):
         return {}
     except Exception:
         LOG.warning('Publish + ad could not advance; retaining the saved checkpoint', exc_info=True)
-        if age > 7200:
+        first_failure = value.setdefault('dependency_failed_at', time.time() - age)
+        if time.time() - first_failure > 7200:
             value.pop('prompt', None)
             value.update(stage='failed', detail='A dependency did not respond. Review the saved ad job.')
             write(key, value)
             return {}
+        write(key, value)
         return {'busy': True}
     finally:
         with connect() as conn, conn.cursor() as cur:
