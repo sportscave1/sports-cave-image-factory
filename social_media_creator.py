@@ -1699,7 +1699,8 @@ def build_tracked_url(url, *, platform, series, product_handle, market, content_
     selected_date = value or date.today()
     if isinstance(selected_date, str):
         selected_date = date.fromisoformat(selected_date)
-    parsed = urlsplit(clean_url)
+    from attribution_urls import clean_destination
+    parsed = urlsplit(clean_destination(clean_url))
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query.update(
         {

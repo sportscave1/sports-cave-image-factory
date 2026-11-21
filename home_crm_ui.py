@@ -34,6 +34,9 @@ def html(today, initial=None):
         stamp = datetime.fromisoformat(data["checked_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Australia/Sydney")).strftime("%d %b %H:%M")
         status = (f"{ledger['orders']} Shopify orders · {ledger['matched']} exact GA4 matches · {ledger['unmatched']} unmatched"
                   if ledger else "Shopify count unavailable")
+        differences = sum(row["orders"] for row in ledger.get("source_reconciliation", [])) if ledger else 0
+        if differences:
+            status += f" · {differences} source-model differences"
         if data.get("partial_day"):
             status += " · Today is partial"
         if any(row["status"] not in ("verified", "no_delivery") for row in data.get("coverage", {}).values()):
@@ -48,13 +51,14 @@ def html(today, initial=None):
       <small class="sc-crm-dates">{escape(dates)}</small>
       <div class="sc-crm-paid"><span>Facebook / Instagram ROAS <b data-roas="facebook">{ratio("facebook")}</b></span>
         <span>Google ROAS <b data-roas="google">{ratio("google")}</b></span></div>
-      <div class="sc-crm-table-wrap"><table><caption>Shopify orders · GA4 source and device</caption>
+      <div class="sc-crm-table-wrap"><table><caption>Shopify last-visit source · GA4 matched device</caption>
         <thead><tr><th scope="col">Source</th><th scope="col">Mobile</th><th scope="col">Desktop</th>
         <th scope="col">Other /<br>unknown</th><th scope="col">Total</th></tr></thead><tbody>{rows}</tbody></table></div>
       <small class="sc-crm-status" role="status" aria-live="polite">{escape(status)}</small>
       <details class="sc-crm-coverage"><summary>Coverage &amp; attribution</summary><p class="sc-crm-basis">{escape(data.get("basis", ""))}</p>
         <p>Other includes direct, email and other referrals. Unresolved includes missing or conflicting source evidence.
         Tablets and unknown devices stay in Other / unknown. Organic has no advertising ROAS.</p>
+        <p>Source-model differences: {escape("; ".join(f"{r['ga4_channel']} → {r['shopify_channel']}: {r['orders']}" for r in ledger.get("source_reconciliation", [])) or "None recorded")}</p>
         <p class="sc-crm-sources">{coverage_line()}</p><p>Paid-platform ROAS can overlap and is separate from the order table.
         Facebook includes Instagram. Google covers PM021126. Values can change as conversions arrive.</p></details>
     </section>"""
