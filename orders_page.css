@@ -1,4 +1,8 @@
 <style>
+/* Keep focus/scrollIntoView inside the actual main/table scroll containers.
+   Unlike hidden, clip cannot silently scroll the outer application viewport. */
+[data-testid="stAppViewContainer"]:has(.st-key-orders_search_text) { overflow:clip !important; }
+
 [data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) {
   padding-top: calc(var(--sc-topbar-height, 64px) + 8px) !important;
   padding-bottom: 0;
