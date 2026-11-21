@@ -105,10 +105,15 @@ async def host(request):
             row=await run_in_threadpool(private,store,key,owner,host_hash)
             store.live(row)
             if row['shop_origin']!=str(request.base_url).rstrip('/'):raise PermissionError('Upload belongs to another application/shop origin.')
-            completed=await run_in_threadpool(current,row)
+            # Pending status is an authenticated read of acknowledged progress.
+            # Keep expensive fresh mapping/provider fences on every write and
+            # on completion; pending reads cannot publish or acknowledge success.
+            pending_status=action=='status' and row['state'] in ('Receiving','Queued')
+            if pending_status:validate(row['descriptor'],row['context'])
+            completed=None if pending_status else await run_in_threadpool(current,row)
             if completed:
                 result={**store.public(row),'state':'Complete','result':completed}
-            elif action=='status':result=await run_in_threadpool(store.status,key,owner,host_hash)
+            elif action=='status':result=store.public(row)
             elif action=='finalize':
                 result=await run_in_threadpool(store.finalize,key,owner,host_hash)
                 runtime._wake.set() # Durable row is already queued; wake is optional.

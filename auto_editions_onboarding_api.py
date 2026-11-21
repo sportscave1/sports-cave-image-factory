@@ -388,11 +388,19 @@ async def claim(request):
         user=await preparation_actor(request)
         body=await files._json_body(request)
         transfer_settings=await run_in_threadpool(host_health,request,body.pop('health',None))
+        pipeline=body.pop('pipeline',None)
         if body!={}:raise ValueError('Preparation reads authoritative product identities.')
+        if pipeline is not None:
+            if (not request.headers.get('x-sports-cave-preparation-host') or not isinstance(pipeline,dict)
+                    or set(pipeline)!={'product_gid','lease_token'}):
+                raise ValueError('Registered host and exact upload lease required.')
+            pipeline={**pipeline,'host_hash':hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest()}
+            if __import__('companion_package_api').capability()!=1:
+                return JSONResponse(dict(grant=None,transfer_settings=transfer_settings),headers=api.HEADERS)
         from auto_editions_priority import refresh
         store=queue()
         import os
-        if os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true' and not __import__('auto_editions_recovery').enabled():
+        if pipeline is None and os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true' and not __import__('auto_editions_recovery').enabled():
             from auto_editions_colour_recovery import recover
             # A bad/missing optional policy must never prevent other eligible jobs.
             def colour_recover():
@@ -407,7 +415,7 @@ async def claim(request):
         from auto_editions_discovery import enabled
         if not enabled():
             await run_in_threadpool(refresh,store,str(user['id']),limit=100 if __import__('auto_editions_v17').enabled() else None)
-        row=await run_in_threadpool(store.claim,str(user['id']))
+        row=await run_in_threadpool(store.claim,str(user['id']),pipeline) if pipeline else await run_in_threadpool(store.claim,str(user['id']))
         if not row:
             from product_upload_services import enabled as uploads_enabled
             return JSONResponse(dict(grant=None,product_mockup_renders=uploads_enabled(),transfer_settings=transfer_settings),headers=api.HEADERS)

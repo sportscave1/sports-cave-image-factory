@@ -47,5 +47,5 @@ def test_archived_order_listing_does_not_scan_dropbox():
     jobs=Mock();jobs.summaries.return_value={'7':{'id':'a'*64,'status':'Ready'}}
     with patch.object(runtime,'enabled',return_value=True),patch.object(runtime,'stores',return_value=(registry,jobs)),patch.object(runtime,'storage') as storage:
         links=runtime.download_links([dict(edition_order_id=7,shopify_product_id=123,variant_id=456)])
-        assert links['7'].endswith('#Open')
+        assert links['7'].endswith('#Open JPG') and 'inline=1' in links['7']
         storage.assert_not_called()

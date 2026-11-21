@@ -99,6 +99,10 @@ def _loop():
     while enabled():
         try:
             _,jobs=stores()
+            # Drain already accepted packets before optional diagnosis/provider
+            # work. A passive repair must not strand a completed bulk upload.
+            from companion_package_api import run_one as run_package
+            if run_package():continue
             if time.monotonic()-last_cleanup>60:
                 expired=jobs.expired()
                 if expired:
@@ -113,7 +117,6 @@ def _loop():
                     admit(jobs.connect)
                 except Exception:LOG.warning('ORDERS automatic JPG admission temporarily unavailable')
                 last_orders=time.monotonic()
-            from companion_package_api import run_one as run_package
             from auto_editions_repair import run_one as run_repair,admit as admit_repairs
             try:
                 admit_repairs(jobs.connect)
@@ -121,7 +124,6 @@ def _loop():
             except Exception:LOG.warning('AUTO_EDITIONS repair diagnosis temporarily unavailable')
             from companion_acceptance import run_one as run_acceptance
             if run_acceptance():continue
-            if run_package():continue
             if run_one(jobs):continue
         except Exception:
             LOG.warning('AUTO_EDITIONS queue temporarily unavailable')
