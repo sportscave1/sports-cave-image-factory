@@ -317,25 +317,18 @@ def period_window(period, today):
     return today - timedelta(days={"yesterday": 1, "week": 7, "month": 30}[period]), end
 
 
-def period_results(period, today):
+def period_results(period, today, *, force=False):
+    import home_crm_reporting as crm
     start, end = period_window(period, today)
-
-    def read(source, call):
-        try:
-            return RESULTS_CACHE.read((source, period, start.isoformat(), end.isoformat()),
-                                      180 if period == "today" else 900, call)
-        except Exception as error:
-            LOG.warning("home_period_unavailable source=%s type=%s", source, type(error).__name__)
-            return None
-
-    meta = RESULTS_POOL.submit(read, "meta", lambda: account_roas(start, end))
-    google = RESULTS_POOL.submit(read, "ga4", lambda: device_orders(start, end, include_today=period == "today"))
-    ga4 = google.result() or {}
-    if ga4.get("timezone") != "Australia/Sydney":
-        ga4 = {}
-    roas = meta.result()
-    return {"roas": f"{Decimal(str(roas)):.2f}×" if roas is not None else None,
-            "desktop": ga4.get("desktop"), "mobile": ga4.get("mobile")}
+    result = crm.request(start, end, force=force)
+    data = result.get("data") or {}
+    rows = (data.get("ledger") or {}).get("rows", [])
+    # Preserve response keys for already-open pages during deployment.
+    ratio = data.get("roas", {}).get("facebook")
+    result.update(roas=f"{ratio:.2f}×" if ratio is not None else "Unavailable",
+                  desktop=sum(r["desktop"] for r in rows) if rows else None,
+                  mobile=sum(r["mobile"] for r in rows) if rows else None)
+    return result
 
 
 def publish(raw, user):
@@ -348,16 +341,9 @@ def publish(raw, user):
     if "ad_recommendations" in edition:
         from home_brief_opportunities import validate_ad_products
         validate_ad_products(edition['ad_recommendations'], today, require_all=edition.get('ad_format_version') == 3)
-    try:
-        edition["roas"] = account_roas(_day(edition["report_date"]))
-    except (meta_ads_client.MetaAdsApiError, TimeoutError, OSError, ValueError, ZoneInfoNotFoundError) as error:
-        LOG.warning("home_meta_account_roas_unavailable type=%s", type(error).__name__)
-        edition["roas"] = None
-    try:
-        edition["ga4_orders"] = device_orders(_day(edition["report_date"]))
-    except Exception as error:
-        LOG.warning("home_ga4_device_orders_unavailable type=%s", type(error).__name__)
-        edition["ga4_orders"] = None
+    # Authoritative CRM statistics refresh independently; model publication never waits on providers.
+    edition["roas"] = None
+    edition["ga4_orders"] = None
     with connect() as conn, conn.cursor() as cursor:
         cursor.execute(
             """
@@ -377,7 +363,9 @@ def publish(raw, user):
 def render(st, user, today, *, snapshot=None):
     if not can_view(user):
         return
-    st.subheader("Meta CRM — Morning Brief")
+    st.subheader("CRM — Morning Brief")
+    import home_crm_ui
+    home_crm_ui.render(st, today, (snapshot or {}).get("crm"))
     try:
         saved = snapshot['saved'] if snapshot is not None else get_app_setting(SETTING_KEY, ensure_schema_first=False)
         if not saved:
@@ -392,28 +380,12 @@ def render(st, user, today, *, snapshot=None):
         return
     if day != today:
         st.caption("Today's recommendations are pending.")
-    yesterday_saved = bool(edition and _day(edition["report_date"]) == today - timedelta(days=1))
-    roas = edition["roas"] if yesterday_saved else None
-    ga4 = (edition.get("ga4_orders") or {}) if yesterday_saved else {}
-    if ga4.get("timezone") != "Australia/Sydney":
-        ga4 = {}
-    device_tiles = ""
-    for device in ("desktop", "mobile"):
-        count = ga4.get(device)
-        value = f"{count:,}" if count is not None else "Unavailable"
-        device_tiles += f'<div><dt>{device.title()} orders</dt><dd>{value}</dd><small>GA4</small></div>'
-    roas_value = f"{Decimal(str(roas)):.2f}×" if roas is not None else "Unavailable"
-    periods = (
-        '<label class="sc-meta-period">Results <select aria-label="Reporting period">'
-        + "".join(f'<option value="{key}">{label}</option>' for key, label in PERIODS.items())
-        + '</select></label><small class="sc-meta-source" role="status"></small>'
-    )
     review = ""
     if edition and edition.get("summary"):
         review = (
             '<section class="sc-meta-review" aria-label="Daily ad review">'
             f'<p>{escape(edition["summary"])}</p>'
-            f'<h4>Ad recommendations</h4>{ad_rows_html(edition, today, compact=True)}</section>'
+            f'<details><summary>Ad recommendations</summary>{ad_rows_html(edition, today, compact=True)}</details></section>'
         )
     insights = (edition or {}).get("insights", {})
     insight_cards = "".join(
@@ -473,9 +445,7 @@ def render(st, user, today, *, snapshot=None):
         .sc-meta-insight ul {padding-left:1.1rem}
         .sc-meta-insight li+li {margin-top:.35rem}
         </style>"""
-        f'<section class="sc-meta-brief" aria-label="CRM snapshot" data-saved="{int(yesterday_saved)}">{periods}'
-        f'<dl><div><dt>Meta ROAS</dt><dd>{roas_value}</dd></div>'
-        f'{device_tiles}</dl>'
+        '<section class="sc-meta-brief" aria-label="CRM daily review">'
         + review + insight_cards + refresh + '</section>'
         + """<script>{
           const panel = [...document.querySelectorAll(".sc-meta-brief")].at(-1);
@@ -483,42 +453,6 @@ def render(st, user, today, *, snapshot=None):
           if (button && !button.dataset.ready) {
             button.dataset.ready = "true";
             button.addEventListener("click", () => panel.querySelector(".sc-meta-full").showModal());
-          }
-          const select = panel?.querySelector("select");
-          if (select && !select.dataset.ready) {
-            select.dataset.ready = "true";
-            const values = [...panel.querySelectorAll("dl dd")];
-            const status = panel.querySelector(".sc-meta-source");
-            const saved = values.map(tile => tile.textContent);
-            let request;
-            const render = (items, note) => {
-              values.forEach((tile, index) => { tile.textContent = items[index] ?? "Unavailable"; });
-              status.textContent = note;
-            };
-            async function load() {
-              request?.abort();
-              const period = select.value;
-              if (period === "yesterday" && panel.dataset.saved === "1") {
-                render(saved, "");
-                return;
-              }
-              const controller = new AbortController();
-              request = controller;
-              const deadline = setTimeout(() => controller.abort(), 8000);
-              render(["…", "…", "…"], "Loading results");
-              try {
-                const response = await fetch("/ops/meta-morning-brief/results?period=" + encodeURIComponent(period),
-                                             {signal: controller.signal});
-                if (!response.ok) throw new Error();
-                const data = await response.json();
-                if (!controller.signal.aborted) render([data.roas, data.desktop, data.mobile],
-                  period === "today" ? "Today is partial. Reporting may lag." : "");
-              } catch {
-                if (request === controller) render([], "Results temporarily unavailable · retry by selecting a period");
-              } finally { clearTimeout(deadline); }
-            }
-            select.addEventListener("change", load);
-            // Saved Home data paints first. Provider reads are requested only on selection.
           }
         }</script>""",
         unsafe_allow_javascript=True,

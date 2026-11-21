@@ -372,9 +372,9 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     previous = {**data, "date": "2026-11-12"}
     assert client.post(meta.PATH, data={"brief": json.dumps(previous)}, headers=headers).status_code == 400
     assert db.get_app_setting(meta.SETTING_KEY, ensure_schema_first=False) == {
-        **data, "roas": 2.75, "ga4_orders": devices,
+        **data, "roas": None, "ga4_orders": None,
     }
-    live_roas.assert_called_once_with(date(2026, 11, 12))
+    live_roas.assert_not_called()
 
     st = Mock()
     st.fragment.side_effect = lambda **kwargs: lambda fn: fn
@@ -385,10 +385,10 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     assert "Today's recommendations are pending." in st.caption.call_args.args[0]
     meta.render(st, get_user.return_value, TODAY)
     markup = st.html.call_args.args[0]
-    assert "<dt>Desktop orders</dt><dd>2</dd><small>GA4</small>" in markup
-    assert "<dt>Mobile orders</dt><dd>0</dd><small>GA4</small>" in markup
-    assert "<dt>Shopify orders</dt>" not in markup
-    assert "<dt>Meta ROAS</dt><dd>2.75×</dd>" in markup
+    crm_markup = next(c.args[0] for c in st.html.call_args_list if 'class="sc-home-crm"' in c.args[0])
+    assert 'Facebook / Instagram ROAS' in crm_markup and 'Google ROAS' in crm_markup
+    assert 'Shopify orders · GA4 source and device' in crm_markup
+    assert '2.75×' not in crm_markup  # Written brief cannot supply financial metrics.
     assert "Review creatives for a refresh" not in markup
 
     review = {
