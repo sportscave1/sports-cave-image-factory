@@ -132,7 +132,7 @@ class _WallPreviewAccessLogFilter(logging.Filter):
         # The established binary-body contract carries customer identity in the
         # query. Keep it out of HTTP access logs; ingest logs use safe record IDs.
         message=record.getMessage()
-        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message
+        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message and '/api/prodigi-artwork/' not in message
 
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())

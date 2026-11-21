@@ -1,9 +1,10 @@
 # Prodigi preparation and Orders companion
 
-Task 20261121-e81437dc; owner codex-prodigi-prep-20261121. Local implementation,
-not a production release. Base 7f9f617e is the Studio-approved development base.
-Integrate with the current release in a separate approved release checkout;
-do not replace the newer live companion or Auto Editions repair changes.
+Task 20261121-e81437dc; owner codex-prodigi-prep-20261121. The user authorised
+sandbox setup, completion and production release on 21 November 2026. Current
+production changes were merged into the isolated task branch, preserving the
+Auto Editions repair, Marketplace, Speed and companion changes. Release only
+the tested combined revision to the existing canonical Render services.
 
 ## User workflow
 
@@ -19,10 +20,11 @@ do not replace the newer live companion or Auto Editions repair changes.
    SKU/size/frame and existing editable draft item before attaching anything.
    No new Render service, order, item, variant mapping or production action is
    created. The Prodigi key and signed artwork URL never reach the extension.
-4. The queue shows Needs QA after artwork readback. In the existing Fulfilment
-   checklist, review the full supplier preview, crop/orientation, numbered
-   artwork, address/shipping, certificate, packing slip and final errors. Save
-   QA → ready for manual payment records readiness only. It does not use the
+4. Automatic QA evaluates every Fulfilment question using the production
+   artwork approval and supplier readback. Complete evidence shows Ready for
+   manual payment. Missing evidence shows Needs QA with specific blockers.
+   Human review can record the existing checklist through Save QA → ready for
+   manual payment. Both routes record readiness only. Neither uses the
    legacy fulfilment completion action or change dispatch/submission status.
    The panel opens the exact existing Prodigi order and includes a scoped QA
    prompt. Missing product selections and uncertain item matches are retained
@@ -35,18 +37,21 @@ do not replace the newer live companion or Auto Editions repair changes.
 The worker automatically checks API draft capability, exact order and line
 references, SKU, frame colour, per-item quantity of one, immutable JPG bytes,
 edition identity, production approval, archive retention and supplier asset
-download status. SKU and frame mapping use the existing Fulfilment reference.
+attachment and download status separately. SKU and frame mapping use the existing Fulfilment reference.
 Oak maps to Natural through that reference, not a second mapping table.
 
-It does not assert visual perfection from a successful API call. Shipping and
-address, crop/preview, certificate/packing slip and final visual checks remain
-explicit human QA. An autonomous Edge visual checker is not implemented: no
-verified Prodigi DOM/preview fixture or visual-review receipt contract exists
-in this checkout. Unsubmitted Shopify imports are not documented to be API
-drafts, and item merchant references are not guaranteed to contain Shopify
-line IDs. Unsupported or ambiguous imports stop; SKU/title similarity is never
-used to infer a line or a numbered unit. Quantity-grouped items stop rather
-than assigning the same numbered JPG to multiple copies.
+QA uses exact archived bytes from an independently production-approved numbered
+export, approved supplier dimensions and print geometry, frame/SKU readback,
+full structured address comparison (including unit/address line 2), shipping,
+the exact certificate URL, ready packing slip and supplier issues. It does not
+infer visual perfection from API success or add a paid AI call per order.
+Missing or changed evidence requires human review. The live imported order's
+draft status and exact Shopify order/line references were verified with a
+read-only v5 request. Unsupported or ambiguous imports stop; SKU/title
+similarity never establishes identity. Quantity-grouped items and duplicate
+line references stop rather than receiving the same numbered JPG twice.
+Existing artwork is also blocked because hidden editor metadata cannot be
+preserved from the API response. No item or order is replaced to bypass this.
 
 ## Crash, concurrency and reconciliation
 
@@ -59,6 +64,14 @@ URL hash. If that evidence is absent, it stops for manual reconciliation.
 Changes in allocation, JPG, mapping or supplier order stop the job. All print
 areas other than the single default area are rejected to avoid deleting them.
 
+The supplier URL is an unguessable capability for one retained JPG, valid for
+30 days and flagged for review after 29. Only its hash is stored. Each fetch
+checks the current allocation, archive identity, byte count and SHA-256; it
+rechecks after transfer to catch cancellation. It shares the existing bounded
+256 MiB verified JPG cache. Secret URLs are excluded from access logging.
+Draft assets can remain NotYetDownloaded until manual release, so a four-hour
+Dropbox temporary URL is not used and pending downloads are labelled honestly.
+
 Read-only dashboard verification after login recovered confirmed the Captains
 order remains a pending sales-channel draft showing Choose product. The
 worker must stop if the supplier item has no selected SKU; it must not create
@@ -66,16 +79,19 @@ or replace an item to bypass that missing selection. The actual detail-link
 route was verified as `/orders/{orderId}/detail`. No product, asset, address,
 shipping, insert or submission was changed during this inspection.
 
-## Enablement and acceptance still required
+## Enablement and acceptance
 
-Default: disabled. Existing key alone does not enable uploads.
+Default: disabled in code. Enabling it requires the two explicit server flags;
+the key alone never starts processing or submits an order.
 
-- `PRODIGI_API_KEY`: server-only v5 account key. Nothing reads local credentials
+- `PRODIGI_API_KEY`: server-only account key; raw dashboard keys receive the
+  documented live_ prefix for v5. Explicitly mismatched mode prefixes fail.
+  Nothing reads local credentials
   or copies the Render key into a development preview.
 - `SPORTS_CAVE_PRODIGI_PREPARE=true`: exposes the preparation UI and permits
   read-only matching/queue processing.
-- `SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED=true`: permits the artwork PATCH only
-  after imported-order and editor-data preservation acceptance below.
+- `SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED=true`: permits artwork PATCH on an
+  exact matched draft item with no existing artwork/editor data.
   Both feature flags are also enforced at the HTTP adapter boundary, so a
   direct adapter call cannot bypass the disabled write mode.
 
@@ -84,27 +100,37 @@ was retrieved and read on 21 November 2026. Draft item assets replace the entire
 artwork set; editor data and MD5 are write-only. The MD5 check is enabled account
 by account, so accepted MD5 alone is not proof of downloaded pixels.
 
-Before enabling writes, prove in a non-production Shopify import fixture:
+Acceptance evidence is recorded in
+`PRODIGI_SANDBOX_ACCEPTANCE_20261121.json`:
 
-1. The existing live account can read an existing imported order by its actual
-   ID and the references prove the exact Shopify line. Use the read-only
-   `scripts/check_prodigi_existing_order.py` in the already configured server
-   environment, outside development previews. This check has not been run here:
-   Render's connected management tools do not expose shell/secret reads and no
-   Prodigi credential exists in this local process.
-2. In a sandbox imported-order equivalent, replace one unit's artwork, prove
-   editor/crop data preservation (or prove there is none), download/preview the
-   exact numbered JPG, and verify the draft stays unpaid/unsubmitted.
-3. Check two separate numbered copies, unsupported grouped quantity, wrong
+1. The configured live key read the existing Shopify-imported draft and its
+   exact order/line references. No live order write or login change occurred.
+2. A separate sandbox key could not read that live order (404). It created one
+   idempotent synthetic two-item draft (202), attached a distinct artwork URL
+   to each exact item (200), and read both back while the order stayed draft,
+   unpaid and unsubmitted. No account-level assets, branding, channel
+   connection or billing settings were changed. This fixture is API-created;
+   imported-order identity was verified separately read-only, not fabricated.
+3. Offline tests cover exact numbered JPG identity, grouped quantity, wrong
    frame/size/line, concurrent workers, changed dashboard artwork, and lost
    acknowledgements. Inspect the paid packing slip and certificate in Prodigi.
-4. Review the combined release against current main; package the companion
-   including orders-queue.js, install/reload it using the normal companion
-   update flow, and obtain fresh explicit release authorization.
+4. The release package includes orders-queue.js and retains all newer companion
+   files. Hidden companion pages stop polling. Disabled workers make no
+   database or supplier calls. Active queue work is serial across processes;
+   there is no catalogue scan, new Render service, or background supplier poll.
 
-No production credentials, orders, Shopify writes, payment, email or live
-automation were used during local testing. Existing server-only app_settings
-storage is reused; no schema or grant/RLS changes are introduced.
+Offline tests use synthetic data and disposable PGlite, with provider network
+blocked. Separate remote checks used the existing server key read-only. Live
+app_settings RLS was verified enabled with no public policies; API roles are
+denied through RLS. Existing server-only storage is reused; no schema or grant
+changes are introduced. Live supplier orders were not modified during testing.
+
+Release verification: 151 focused Python tests and three Node companion tests
+passed, alongside the Render topology validator and whitespace checks. Tests
+include the current Orders, Auto Editions, Speed and companion package
+regressions. Sandbox credentials were cleared from the temporary diagnostic
+shell and clipboard after acceptance; no dashboard password was saved or
+changed by this workflow.
 
 ## Review prompt for an authorised visual companion
 

@@ -27,6 +27,11 @@ def render(row, user, *, answers=None, compact=False):
                 st.link_button('Open this existing Prodigi order', 'https://dashboard.prodigi.com/orders/'
                                + identifier(saved['order_id']) + '/detail')
             st.info(saved['message'])
+            if saved.get('artwork_expires_at'):
+                st.caption('Recheck before manual payment. Artwork link review date: ' + saved['artwork_expires_at'][:10])
+            if saved.get('qa'):
+                st.caption('Prodigi download: ' + ('confirmed' if saved['qa'].get('supplier_download_confirmed')
+                    else 'pending; the exact artwork is attached for manual release'))
             if saved.get('order_id') and saved.get('item_id'):
                 with st.expander('Companion QA review prompt'):
                     st.code(queue.review_prompt(saved), language=None)
@@ -73,7 +78,7 @@ def dashboard():
     if not queue.enabled():
         st.info('Orders preparation is disabled pending imported-order acceptance.')
         return
-    @st.fragment(run_every='10s')
+    @st.fragment(run_every='10s' if st.session_state.get('companion-visible-now', True) else None)
     def status():
         try:
             rows = queue.list_jobs()

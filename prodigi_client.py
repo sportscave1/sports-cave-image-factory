@@ -20,10 +20,18 @@ def identifier(value):
 
 
 class Client:
-    def __init__(self, key=None, transport=None):
+    def __init__(self, key=None, transport=None, *, mode='live'):
+        if mode not in ('live', 'sandbox'):
+            raise ProdigiError('Select live or sandbox explicitly.')
         self.key = key or os.getenv('PRODIGI_API_KEY', '')
         if not self.key:
             raise ProdigiError('The server Prodigi API key is not configured.')
+        if self.key.startswith(('live_', 'sandbox_')) and not self.key.startswith(mode + '_'):
+            raise ProdigiError('The API key belongs to a different environment.')
+        # Prodigi's dashboards display raw UUID keys; v5 requires a mode prefix.
+        if not self.key.startswith(mode + '_'):
+            self.key = mode + '_' + self.key
+        self.mode = mode
         self.transport = transport or requests.Session()
         # This is a server API client, independent of every person's browser
         # session. Do not retain/replay provider Set-Cookie responses either.
@@ -55,7 +63,8 @@ class Client:
         envelope = response.json()
         data = envelope.get('data')
         if listing:
-            if not isinstance(data, list) or envelope.get('total', len(data)) > len(data):
+            total = envelope.get('total')
+            if not isinstance(data, list) or (total is not None and total > len(data)):
                 raise ProdigiError('The Prodigi order lookup is incomplete or ambiguous.')
             return data
         if not isinstance(data, dict):

@@ -20,7 +20,10 @@ def snapshot():
     return dict(allocation_id=1, identity=dict(order_id='123', line_id='456', ordinal=1),
         order_reference='#SC123', job_id='f'*64, output=dict(sha256='a'*64, bytes=100),
         mapping=dict(prodigi_code='GLOBAL-CFP-A2', frame='Oak', prodigi_frame_colour='Natural'),
-        shipping='Standard', number=12, total=100, product='Synthetic artwork')
+        shipping='Standard', number=12, total=100, product='Synthetic artwork',
+        dimensions=[4200,5940],rendered_number=12,rendered_total=100,
+        production_evidence={'print_ready':True,'supplier_sku':'GLOBAL-CFP-A2',
+            'output':{'dimensions':[4200,5940],'printable_mm':[420,594]}})
 
 
 def order():
@@ -173,6 +176,25 @@ def test_adapter_itself_rejects_artwork_writes_until_both_flags_are_enabled(monk
         client.artwork('99','88','https://fixture.invalid/art.jpg','b'*32)
 
 
+def test_documented_mode_prefix_is_added_without_rotating_or_crossing_environments():
+    live=Client('synthetic-raw-key',SimpleNamespace())
+    sandbox=Client('synthetic-sandbox-key',SimpleNamespace(),mode='sandbox')
+    assert live.key=='live_synthetic-raw-key' and sandbox.key=='sandbox_synthetic-sandbox-key'
+    with pytest.raises(ValueError,match='different environment'):
+        Client('sandbox_fixture',SimpleNamespace(),mode='live')
+    with pytest.raises(ValueError,match='different environment'):
+        Client('live_fixture',SimpleNamespace(),mode='sandbox')
+
+
+def test_existing_artwork_with_hidden_editor_data_is_not_overwritten(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','true')
+    provider=Provider()
+    provider.data['items'][0]['assets']=[{'printArea':'default','url':'https://fixture.invalid/existing.jpg'}]
+    with pytest.raises(ValueError,match='editor data'):
+        queue.run(value(),provider,lambda _:snapshot(),lambda _:pytest.fail('No replacement'),lambda v:None)
+    assert not provider.writes
+
+
 @pytest.mark.parametrize('method,path', [
     ('GET','/auth/api/auth/refresh'), ('POST','/auth/api/auth/validate'),
     ('POST','/orders'), ('POST','/orders/99:submit'), ('POST','/orders/99:resume'),
@@ -213,7 +235,7 @@ def test_normal_dashboard_link_and_companion_login_isolation():
         assert 'orders-queue.js' in archive.namelist()
 
 
-def test_artwork_transfer_uses_verified_archived_revision_without_normalising_it(monkeypatch):
+def test_artwork_transfer_verifies_archived_bytes_before_issuing_durable_link(monkeypatch):
     from hashlib import sha256,md5
     import auto_editions_runtime
     import dropbox_integration
@@ -228,13 +250,15 @@ def test_artwork_transfer_uses_verified_archived_revision_without_normalising_it
         integration=SimpleNamespace(team_space_client=lambda _:sdk))
     monkeypatch.setattr(auto_editions_runtime,'storage',lambda:assets)
     snap=snapshot();snap['output']=dict(revision=revision,sha256=sha256(data).hexdigest(),bytes=len(data))
+    import prodigi_artwork
+    monkeypatch.setattr(prodigi_artwork,'issue',lambda saved:
+        (calls.append(saved) or 'https://fixture.invalid/revision.jpg'))
     assert queue.artwork_link(snap)==('https://fixture.invalid/revision.jpg',md5(data).hexdigest())
-    assert calls==['rev:'+revision]
-    from dropbox.files import GetTemporaryLinkArg
-    assert GetTemporaryLinkArg(path=calls[0]).path==calls[0]
+    assert calls==[snap]
 
 
 def test_desktop_route_requires_pairing_and_accepts_no_external_instructions(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_PREPARE','true')
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.testclient import TestClient

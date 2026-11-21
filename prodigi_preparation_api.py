@@ -27,10 +27,17 @@ async def tick(request):
         auth = request.headers.get('authorization', '')
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}', auth):
             raise PermissionError('A paired desktop credential is required.')
-        await run_in_threadpool(desktop, auth[7:])
         # No provider URLs, artwork, QA claims or production actions from Edge.
-        if await request.body() not in (b'', b'{}'):
+        body = bytearray()
+        async for block in request.stream():
+            body.extend(block)
+            if len(body) > 2:
+                raise ValueError('Orders tick accepts no job instructions.')
+        if bytes(body) not in (b'', b'{}'):
             raise ValueError('Orders tick accepts no job instructions.')
+        if not queue.enabled():
+            return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
+        await run_in_threadpool(desktop, auth[7:])
         value = await run_in_threadpool(queue.tick)
         return JSONResponse({'enabled': queue.enabled(), 'job':
             {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None}, headers=HEADERS)
@@ -38,4 +45,6 @@ async def tick(request):
         return failure(error)
 
 
-ROUTES = (('/api/orders-companion/tick', tick, ('POST',)),)
+from prodigi_artwork import serve as serve_artwork
+ROUTES = (('/api/orders-companion/tick', tick, ('POST',)),
+          ('/api/prodigi-artwork/{token}', serve_artwork, ('GET', 'HEAD')))

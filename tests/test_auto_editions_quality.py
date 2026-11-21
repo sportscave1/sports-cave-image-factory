@@ -179,7 +179,8 @@ def test_durable_reconciliation_restart_status_and_permissions(case,store,monkey
         sql.execute("SELECT jsonb_agg(to_jsonb(q) ORDER BY product_gid) AS rows FROM auto_edition_onboarding q WHERE priority=0")
         assert sql.fetchone()['rows']==deferred
         monkeypatch.delenv('AUTO_EDITIONS_V16_AUTO_APPROVAL_ENABLED')
-        assert batch(d.connect,[PID])['rows'][0]['status']=='Review'
+        # The deployed repair workflow presents review/repair cases as Repair.
+        assert batch(d.connect,[PID])['rows'][0]['status']=='Repair'
         assert Quality(d.connect).for_unit(unit) is None
 
 
