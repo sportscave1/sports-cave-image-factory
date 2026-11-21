@@ -61,3 +61,10 @@ messages, paragraph pastes, user drafts and response isolation.
 
 Companion 1.7.11 adds the completion message contract. Deployment uses the existing
 production main auto-deploy; no Blueprint sync or infrastructure changes are needed.
+
+The broad run passed 255 contracts and 56 subtests. Two existing Design-header
+assertions expect failed while the production header returns pending; both the
+test file and implementation were verified identical to production fa4dbdf6,
+and the same two failures reproduce in isolation. No Design behavior or tests
+were altered for this Ads release. The integrated retry/Meta-review checks also
+passed 24 contracts and two subtests.
