@@ -1,0 +1,11 @@
+{
+  "scenario": "Three independent synthetic saved-data reads, 200 ms each; not production page timings",
+  "sequential_baseline_ms": 600.956,
+  "cold_dispatch_ms": 0.951,
+  "all_snapshots_ready_ms": 202.801,
+  "warm_three_panel_p50_ms": 0.007,
+  "warm_three_panel_p95_ms": 0.009,
+  "blocked_refresh_read_p95_ms": 0.001,
+  "background_workers": 3,
+  "queued_backlog": 0
+}

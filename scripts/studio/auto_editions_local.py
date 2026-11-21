@@ -298,6 +298,13 @@ def host_loop():
             else:
                 retry_verified_cleanup()
                 sync_colour_configuration(config)
+                # Fallback diagnosis runs separately; the normal preparation
+                # queue and its native singleton remain authoritative.
+                try:
+                    from edition_repair_local import poll as repair_poll
+                    repair_poll(config,host_request)
+                except Exception:
+                    pass # Retain the durable repair outbox for next poll.
                 claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):

@@ -16,19 +16,30 @@ IDENTITY_OVERRIDES_CONTINUITY = (
 
 AUTHENTICITY_HEADING = "**MANDATORY PHOTOGRAPHIC AUTHENTICITY AND INTEGRATION CHECK**"
 _SOURCE_COMPARISON = (
-    "Compare side by side with the verified originals at 100% and thumbnail size: eyes and gaze, "
-    "eyelids, eyebrows, nose, mouth and teeth, jaw, ears, hairline, natural skin and proportions. "
-    "Check anatomy, uniform, legible logos, equipment and AI warping. Treat unverified identity "
-    "as unresolved.\n\n"
+    "At 100% zoom, compare the final assembled PSD directly and side by side with the actual "
+    "verified full-resolution photographs. Inspect the story-carrying areas first: every visible "
+    "face and expression, eyes and gaze, eyelids, eyebrows, nose, mouth and teeth, jaw, ears, "
+    "hairline, natural skin and proportions; both hands with their contact points, limb connections, "
+    "jersey numbers, equipment markings, ball seams and lettering, and any background figure "
+    "prominent enough to distract. Look for invented lettering, warped features, artificial skin "
+    "marks, doubled edges and mismatched sharpness. Compare a real grip, equipment geometry, "
+    "camera perspective and natural motion blur together; do not sharpen individual letters or "
+    "redraw fingers to make uncertain detail look convincing. Treat unverified identity as unresolved.\n\n"
 )
 _SOURCE_FINISH = (
-    "Restore visible discrepancies with original photograph pixels and a precise mask. Use the "
-    "smallest coherent source region that resolves the defect. Include head, helmet or neck where "
-    "needed. Clean the silhouette and internal gaps, removing source backgrounds, halos and double "
-    "edges. Check against temporary light and dark backgrounds where useful, then remove them. "
-    "Match perspective, exposure, colour, texture, shadows and sharpness. Recheck the whole artwork. "
-    "If the repair blends poorly, refine the mask or change source or crop while preserving facial fidelity. "
-    "Keep grunge and artificial sharpening off skin.\n\n"
+    "When generation changes a recognisable feature, restore the affected area with original "
+    "source pixels on separate editable masked layers. Use a coherent source area, including "
+    "enough surrounding photograph to keep anatomy, light, texture and edges continuous. If "
+    "several connected details drift, restore the whole photographic interaction together, "
+    "including both hands and ball or both interacting bodies and their spacing. Include head, "
+    "helmet and neck where needed for identity continuity. Never guess obscured anatomy or "
+    "equipment lettering. Preserve natural hair and fabric edges and internal gaps; clean peripheral source backgrounds, halos and double edges without "
+    "erasing contact points, genuine overlap or natural motion blur. Match perspective, exposure, "
+    "colour, texture, shadows and sharpness with non-destructive adjustments; keep grunge and "
+    "artificial sharpening off skin. After each repair, inspect that area again against the "
+    "original in the finished composition at 100% and 250 px wide, without blurring the silhouette, repainting skin or fading anatomy. Refine the mask or use a "
+    "clearer verified source or crop within the existing allowance when necessary; preserve "
+    "successful surrounding generated artwork.\n\n"
 )
 _REVIEW_STATUS = (
     "Record unresolved identity or integration in REVIEW NOTES and needs_attention metadata. "
@@ -40,21 +51,21 @@ AUTHENTICITY_CHECK = f"{AUTHENTICITY_HEADING}\n\n{_SOURCE_COMPARISON}{_SOURCE_FI
 
 CREATE_DESIGN_AUTHENTICITY_CHECK = (
     f"{AUTHENTICITY_HEADING}\n\n"
-    "Build every visible athlete and sporting object from the verified original photographs, "
-    "on separate editable PSD layers. Preserve the original face, expression, hair, body, hands, "
-    "pose, uniform, lettering, equipment, vehicle and ball. Use precise masking, proportional "
-    "scaling, local colour matching and edge integration; never redraw missing detail. Choose a "
-    "clearer source or reduce its placed size when source detail is insufficient. Completely "
-    "cover generated renditions and remove their exposed outlines, limbs and objects. Clean "
-    "halos and source-background remnants without obscuring photographic details or covering successful surrounding artwork.\n\n"
-    + _SOURCE_COMPARISON
-    + "Inspect the rendered PSD beside the sources at 100%, then at 250 px wide. Verify original "
-      "photographic detail throughout the visible subjects, not just facial resemblance. For "
-      "action, apply contact shadows only at actual points of contact and keep an airborne "
-      "subject visibly separated from the ground. Match directional lighting and depth. "
-      "Correct source integration during the existing finishing pass.\n\n"
+    "Verify every visible athlete and sporting object against the full-resolution originals. "
+    "Preserve successful generated integration when facial features, expression, hair, body, "
+    "hands, pose, uniform, lettering, equipment, vehicle and ball remain faithful. A rough "
+    "pre-generation cutout is a layout guide, not a required final layer. Do not automatically "
+    "cover a faithful integrated subject with a whole source cutout. Choose a clearer source "
+    "or reduce its placed size when source detail is insufficient; never invent missing detail "
+    "or accept a lookalike.\n\n"
+    + _SOURCE_COMPARISON + _SOURCE_FINISH
+    + "Reject pixelation, compression, waxy skin, edge halos, mismatched sharpness and pasted-on "
+      "lighting. Apply contact shadows only at actual contact points and keep an airborne "
+      "subject visibly separated from the ground. Correct source integration during the "
+      "existing finishing pass.\n\n"
     + _REVIEW_STATUS
 )
+
 
 
 REVIEW_SUBJECT_PRESERVATION = (

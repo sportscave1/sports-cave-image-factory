@@ -160,6 +160,7 @@ def seed(sql,count,total=100):
 
 def test_continuous_285_and_live_filter_reconciliation_without_duplicates(operations):
     d,sql=operations;seed(sql,285);service=health.Health(d.connect);cursor='';seen=[];start=time.perf_counter()
+    wait_for_display(service)
     first=queue.page(service);first_ms=(time.perf_counter()-start)*1000
     while True:
         value=queue.page(service,cursor=cursor);assert len(value['jobs'])<=50;seen.extend(j['id'] for j in value['jobs'])
@@ -168,6 +169,7 @@ def test_continuous_285_and_live_filter_reconciliation_without_duplicates(operat
     assert len(seen)==len(set(seen))==285
     failed_page=queue.page(service,'Failed');known={j['id']:j['version'] for j in failed_page['jobs']}
     pid=failed_page['jobs'][0]['id'];queue.submit(d.connect,pid,'admin',str(uuid.uuid4()));invalidate(d.connect)
+    wait_for_display(service)
     changes=queue.changes(service,'Failed',known,failed_page['scanned_to']);assert pid in changes['removed']
     again=queue.page(service,'Queued');assert again['jobs'][0]['status']=='Pending'
     report=dict(jobs=285,first_50_ms=round(first_ms,2),first_page_rows=len(first['jobs']),total_http_batches=6,scope='Actual read model and cursor batches; disposable SQL; no network latency')
@@ -257,3 +259,15 @@ def test_actual_http_desktop_queue_with_285_jobs_and_recovery(operations,tmp_pat
             assert state['requests'].get('/api/worker-health/jobs',0)>=6
             for t,before in protected.items():assert rows(sql,t)==before
         finally:server.should_exit=True;thread.join(timeout=10);sock.close()
+
+
+def wait_for_display(service):
+    from worker_health_cache import index
+    deadline=time.monotonic()+10
+    while time.monotonic()<deadline:
+        try:
+            _,freshness=index(service)
+            if freshness['state']=='ready':return
+        except TimeoutError:pass
+        time.sleep(.01)
+    raise AssertionError('Display did not refresh')

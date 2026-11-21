@@ -24,6 +24,35 @@ def submit(actor, revision='A'):
     return queue.enqueue({'id': actor}, {'id': 'id:original', 'rev': revision}, 'Design', 'NFL Wall Art')
 
 
+def test_header_display_does_not_reconcile_or_write_stalled_jobs(store):
+    key = submit('staff-one')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=4,updated_at=now()-interval '40 minutes' WHERE id=%s", (key,))
+    queue.list_jobs('staff-one', display_only=True)
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s', (key,))
+        assert cur.fetchone()['stage'] == 4
+
+
+def test_upload_order_ignores_pending_ads_and_prefers_latest_completion(store):
+    import design_publish_ad
+    old=submit('staff','old');recent=submit('staff','recent');failed=submit('staff','failed')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=6,updated_at=now()-interval '1 day' WHERE id=%s",(old,))
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=6,updated_at=now()-interval '1 hour' WHERE id=%s",(recent,))
+        cur.execute("UPDATE product_upload_staff_jobs SET stage=7 WHERE id=%s",(failed,))
+        cur.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',
+            (design_publish_ad.PREFIX+str(old),json.dumps(dict(upload=str(old),stage='generating'))))
+    for actor in (None,'staff'):
+        rows=queue.list_jobs(actor,display_only=True)['jobs']
+        assert [r['id'] for r in rows]==[str(recent),str(old),str(failed)]
+        assert rows[1]['ad']['active']
+    current=submit('staff','current')
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=2 WHERE id=%s',(current,))
+    assert queue.list_jobs(display_only=True)['jobs'][0]['id']==str(current)
+
+
 def test_offline_requests_are_durable_private_and_claimed_once(store, monkeypatch):
     first = submit('staff-one')
     assert submit('staff-two') == first
@@ -179,8 +208,6 @@ def test_manual_reset_preserves_upload_and_rejects_old_events(store, monkeypatch
     queue.advance(key, 'desktop', 7, 'Generation failed', allowed=[1])
     stopped = queue.list_jobs('staff')['jobs'][0]
     assert stopped['restartable']
-    # Polling and re-enqueue do not reset a failed job.
-    assert submit('staff') == key
     assert queue.tick(token, {}) == {}
     with pytest.raises(PermissionError):
         queue.restart(key, {'id': 'unrelated'}, stopped['updated_at'])
@@ -307,9 +334,11 @@ def test_cancel_blocks_persisted_intake_writes_and_explicit_restart_clears_it(st
         assert not row['data'].get('staff_upload_cancelled')
 
 
-def test_stall_visible_without_desktop_and_expires_without_false_success(store):
+def test_slow_submitted_upload_remains_pending_without_false_failure(store, monkeypatch):
     key = submit('staff')
-    queue.pair({'id':'desktop'})
+    token = queue.pair({'id':'desktop'})
+    queue.tick(token, {})
+    monkeypatch.setattr(queue, 'verify', lambda job: None)
     with store() as conn, conn.cursor() as cur:
         cur.execute("UPDATE product_upload_staff_jobs SET stage=5,updated_at=now()-interval '11 minutes' WHERE id=%s", (key,))
     warning = queue.list_jobs('staff')['jobs'][0]
@@ -317,7 +346,11 @@ def test_stall_visible_without_desktop_and_expires_without_false_success(store):
     with store() as conn, conn.cursor() as cur:
         cur.execute("UPDATE product_upload_staff_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (key,))
     expired = queue.list_jobs('staff')['jobs'][0]
-    assert expired['stage'] == 7 and 'No verified progress' in expired['detail']
+    assert expired['stage'] == 5 and expired['stalled']
+    assert 'Waiting for verified progress' in expired['label']
+    assert not expired['restartable']
+    result = queue.tick(token, {'id': str(key), 'state': 'submitted'})
+    assert result['job']['stage'] == 5
 
 
 def test_verification_failure_is_visible_and_does_not_extend_timeout(store, monkeypatch):
@@ -337,6 +370,60 @@ def test_verification_failure_is_visible_and_does_not_extend_timeout(store, monk
     assert queue.list_jobs('staff')['jobs'][0]['stage'] == 6
 
 
+def test_uncertain_handoff_releases_slot_without_republishing_or_losing_source(store):
+    first = submit('staff', 'blocked')
+    second = submit('staff', 'next')
+    token = queue.pair({'id': 'desktop'})
+    assert queue.tick(token, {})['job']['id'] == str(first)
+    queue.advance(first, 'desktop', 4)
+    event = dict(id=str(first), state='uncertain')
+    queue.tick(token, event)
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_staff_jobs SET updated_at=now()-interval '31 minutes' WHERE id=%s", (first,))
+    assert queue.tick(token, event) == {'stop': {'id': str(first)}}
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT * FROM product_upload_staff_jobs WHERE id=%s', (first,))
+        row = cur.fetchone()
+        assert row['stage'] == 7
+        assert 'Queue slot released' in row['message']
+        assert row['source_id'] == 'id:original' and row['source_rev'] == 'blocked'
+    assert queue.tick(token, {})['job']['id'] == str(second)
+    assert queue.tick(token, event)['job']['id'] == str(second)  # Late old events cannot stop next job.
+
+
+def test_completed_blocker_after_uncertain_send_releases_upload_slot(store):
+    first = submit('staff', 'blocked')
+    second = submit('staff', 'next')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    queue.advance(first, 'desktop', 4)
+    result = queue.tick(token, dict(id=str(first), state='blocked',
+                                  reason='ChatGPT reported an upload failure: MODERATION'))
+    assert result == {'stop': {'id': str(first)}}
+    assert queue.tick(token, {})['job']['id'] == str(second)
+
+
+def test_uncertain_receipt_recovers_only_from_verified_published_package(store, monkeypatch):
+    import product_upload_staff_mapping as mapping
+    first = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    queue.advance(first, 'desktop', 4)
+    ready = []
+    monkeypatch.setattr(mapping, 'publication_ready', lambda connect, job: bool(ready))
+    verified = []
+    monkeypatch.setattr(queue, 'verify', lambda job: verified.append(job['id']))
+    event = dict(id=str(first), state='uncertain')
+    assert queue.tick(token, event)['job']['stage'] == 4
+    assert not verified
+    ready.append(True)
+    assert queue.tick(token, event)['job']['stage'] == 5
+    assert verified == [first]
+    monkeypatch.setattr(queue, 'verify', lambda job: queue.advance(job['id'], 'desktop', 6, allowed=[5]))
+    assert queue.tick(token, event) == {}
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 6
+
+
 def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
     from product_upload_jobs import Jobs
     jobs=Jobs()
@@ -350,3 +437,207 @@ def test_full_reset_clears_ready_mockups_once_without_automatic_retries():
         assert ready in jobs.jobs
     finally:
         jobs.pool.shutdown(wait=False)
+
+
+@pytest.mark.parametrize('stage', range(8))
+def test_add_to_queue_replaces_attempt_and_rejects_old_reports(store, stage, monkeypatch):
+    key = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=%s,worker_actor=%s WHERE id=%s', (stage, 'desktop', key))
+    queue.settings(False)
+    assert submit('staff') == key
+    row = queue.list_jobs('staff')['jobs'][0]
+    assert row['stage'] == 0
+    assert row['dispatch_id'] != str(key) if stage else row['dispatch_id'] == str(key)
+    assert queue.settings()['enabled'] is False
+    # Repeated clicks while waiting retain one delivery and queue position.
+    assert submit('staff') == key
+    assert queue.list_jobs('staff')['jobs'][0]['dispatch_id'] == row['dispatch_id']
+    if stage:
+        result = queue.tick(token, {'id': str(key), 'state': 'submitted'})
+        assert result == {'stop': {'id': str(key)}}
+        queue.advance(key, 'desktop', 7, 'Late old failure')
+        assert queue.list_jobs('staff')['jobs'][0]['stage'] == 0
+
+
+def test_cancel_uses_attempt_identity_despite_progress_and_rejects_retired_click(store):
+    key = submit('staff')
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    before = queue.list_jobs('staff')['jobs'][0]
+    queue.advance(key, 'desktop', 2, 'New progress')
+    assert queue.cancel(key, {'id':'staff'}, before['updated_at'], before['dispatch_id'])['cancelled']
+    assert submit('staff') == key
+    with pytest.raises(ValueError):
+        queue.cancel(key, {'id':'staff'}, before['updated_at'], before['dispatch_id'])
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 0
+
+
+def test_lightweight_desktop_heartbeat(store):
+    assert queue.desktop_online() is False
+    token = queue.pair({'id': 'desktop'})
+    assert queue.desktop_online() is False
+    queue.desktop_tick(token)
+    assert queue.desktop_online() is True
+    with store() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE product_upload_desktop SET seen_at=now()-interval '96 seconds'")
+    assert queue.desktop_online() is False
+
+
+def test_publish_now_resumes_paused_uploads_and_claims_exact_request_once(store, monkeypatch):
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: user['id'] == 'admin')
+    token = queue.pair({'id': 'desktop'})
+    queue.settings(False)
+    key = queue.enqueue({'id':'admin'}, {'id':'id:publish','rev':'R1'}, 'Publish now', 'NBA', start=True)
+    assert queue.settings() == {'enabled': True}
+    assert queue.tick(token, {})['job']['id'] == str(key)
+    assert queue.enqueue({'id':'admin'}, {'id':'id:publish','rev':'R1'}, 'Publish now', 'NBA', start=True) == key
+    assert queue.tick(token, {})['job']['id'] != str(key)
+    assert queue.worker_job(str(key), 'desktop') is None
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT count(*) AS n FROM product_upload_staff_jobs')
+        assert cur.fetchone()['n'] == 1
+
+
+def test_bulk_queue_and_nonadministrator_publish_preserve_admin_pause(store, monkeypatch):
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: user['id'] == 'admin')
+    token = queue.pair({'id':'desktop'})
+    queue.settings(False)
+    queue.enqueue({'id':'admin'}, {'id':'id:bulk','rev':'R1'}, 'Bulk request', 'NBA')
+    key = queue.enqueue({'id':'staff'}, {'id':'id:staff','rev':'R1'}, 'Staff request', 'NBA', start=True)
+    assert queue.settings() == {'enabled': False}
+    assert queue.tick(token, {}) == {}
+    assert queue.requested_status({'id':'staff'}, str(key))['job']['stage'] == 0
+
+
+def test_publish_queue_resume_rolls_back_with_failed_request(store, monkeypatch):
+    import design_publish_ad as ad
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: True)
+    monkeypatch.setattr(ad, 'check_request', lambda *args: ('NBA', 'AUS'))
+    def unavailable(*args):
+        raise RuntimeError('Synthetic request save failure')
+    monkeypatch.setattr(ad, 'enqueue', unavailable)
+    queue.settings(False)
+    with pytest.raises(RuntimeError, match='Synthetic'):
+        queue.enqueue({'id':'admin'}, {'id':'id:atomic','rev':'R1'}, 'Atomic request', 'NBA', ad_country='AUS', start=True)
+    assert queue.settings() == {'enabled': False}
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT count(*) AS n FROM product_upload_staff_jobs')
+        assert cur.fetchone()['n'] == 0
+
+
+def test_requested_upload_status_is_private_and_survives_header_history_limit(store, monkeypatch):
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: user['id'] == 'admin')
+    key = submit('owner')
+    for n in range(21):
+        submit('owner', str(n))
+    assert str(key) not in {job['id'] for job in queue.list_jobs('owner',display_only=True)['jobs']}
+    assert queue.requested_status({'id':'owner'}, key)['job']['id'] == str(key)
+    assert queue.requested_status({'id':'admin'}, key)['job']['id'] == str(key)
+    with pytest.raises(PermissionError):
+        queue.requested_status({'id':'other'}, key)
+
+
+def test_requested_status_route_bypasses_warming_history_without_leaking_requests(store, monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import files_upload_api
+    monkeypatch.setattr(queue, 'can_control_queues', lambda user: False)
+    key = submit('owner')
+    active = {'id':'owner'}
+    monkeypatch.setattr(files_upload_api, '_request_user', lambda *args, **kwargs: dict(active))
+    monkeypatch.setattr(queue, '_header_display', lambda _: dict(display_state='loading', jobs=[]))
+    app = Starlette(routes=[Route('/api/staff-product-uploads/status',queue.status_route)])
+    with TestClient(app) as client:
+        query = dict(display='1',job_id=str(key))
+        response = client.get('/api/staff-product-uploads/status',params=query)
+        assert response.status_code == 200, response.text
+        assert response.json()['display_state'] == 'ready'
+        assert response.json()['jobs'][0]['id'] == str(key)
+        assert response.json()['queues']['upload']['waiting'] is None
+        active['id'] = 'other'
+        assert client.get('/api/staff-product-uploads/status',params=query).status_code == 403
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT stage FROM product_upload_staff_jobs WHERE id=%s',(key,))
+        assert cur.fetchone()['stage'] == 0  # Status reads never start or publish work.
+
+
+def test_review_delete_stops_all_pending_revisions_but_keeps_completed_uploads(store, monkeypatch):
+    monkeypatch.setattr('os_accounts.can_delete_files', lambda user: user['id'] == 'deleter')
+    old, latest, done = (submit('owner', revision) for revision in ('old', 'latest', 'done'))
+    token = queue.pair({'id': 'desktop'})
+    queue.tick(token, {})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=6 WHERE id=%s', (done,))
+    with pytest.raises(PermissionError):
+        queue.cancel_for_deletion({'id': 'id:original'}, {'id': 'unrelated'})
+    queue.cancel_for_deletion({'id': 'id:original'}, {'id': 'deleter'})
+    rows = {job['id']: job for job in queue.list_jobs('owner')['jobs']}
+    assert rows[str(old)]['cancelled'] and rows[str(latest)]['cancelled']
+    assert rows[str(done)]['stage'] == 6
+    assert queue.tick(token, {}) == {}
+
+
+def test_late_worker_failure_does_not_revive_cancelled_work():
+    from threading import Event
+    from product_upload_jobs import Jobs
+    jobs = Jobs()
+    started, release = Event(), Event()
+    def work(progress):
+        started.set()
+        assert release.wait(5)
+        raise ValueError('Old provider request failed after cancellation')
+    try:
+        jobs.begin_staff_attempt('intake', 'desktop', 'old')
+        jobs.submit('intake', 'desktop', 'prepare', {}, work)
+        assert started.wait(5)
+        jobs.cancel('intake', 'desktop', attempt='old')
+        release.set()
+        jobs.jobs[('desktop','intake','prepare')]['future'].result(timeout=5)
+        assert jobs.snapshot('intake', 'desktop', 'prepare')['state'] == 'Cancelled'
+        jobs.begin_staff_attempt('intake', 'desktop', 'new', full=True)
+        jobs.submit('intake', 'desktop', 'prepare', {}, lambda progress: 'ready')
+        jobs.cancel('intake', 'desktop', attempt='old')
+        jobs.jobs[('desktop','intake','prepare')]['future'].result(timeout=5)
+        assert jobs.snapshot('intake', 'desktop', 'prepare')['state'] == 'Ready'
+    finally:
+        release.set()
+        jobs.pool.shutdown(wait=True)
+
+
+def test_requeue_resets_cancelled_intake_and_only_retires_local_work_after_commit(store, monkeypatch):
+    import product_upload_jobs
+    import design_publish_ad
+    key = submit('staff')
+    token = queue.pair({'id':'desktop'})
+    queue.tick(token, {})
+    intake = uuid4()
+    data = dict(source={'id':'id:original','rev':'A'}, staff_upload_cancelled=str(key),
+                product_gid='gid://shopify/Product/42', mockup_saves={'old':True})
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('CREATE TABLE product_upload_intakes(id uuid PRIMARY KEY,data jsonb,updated_at timestamptz DEFAULT now())')
+        cur.execute('INSERT INTO product_upload_intakes(id,data) VALUES(%s,%s::jsonb)', (intake,json.dumps(data)))
+        cur.execute('UPDATE product_upload_staff_jobs SET stage=7,intake_id=%s WHERE id=%s', (intake,key))
+    retired=[]
+    monkeypatch.setattr(product_upload_jobs.JOBS,'begin_staff_attempt',lambda *args,**kwargs:retired.append((args,kwargs)))
+    monkeypatch.setattr(design_publish_ad,'check_request',lambda *args:('NBA','AUS'))
+    def fail(*args):
+        raise ValueError('Synthetic ad queue unavailable')
+    monkeypatch.setattr(design_publish_ad,'enqueue',fail)
+    with pytest.raises(ValueError):
+        queue.enqueue({'id':'staff'},{'id':'id:original','rev':'A'},'Design','NBA',ad_country='AUS')
+    assert retired == []
+    assert queue.list_jobs('staff')['jobs'][0]['stage'] == 7
+    assert submit('staff') == key
+    job=queue.list_jobs('staff')['jobs'][0]
+    assert retired == [((str(intake),'desktop',job['dispatch_id']),{'full':True})]
+    with store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT data FROM product_upload_intakes WHERE id=%s',(intake,))
+        saved=cur.fetchone()['data']
+    assert not saved.get('staff_upload_cancelled')
+    assert saved['product_gid'] == data['product_gid']
+    assert saved['staff_full_restart'] == job['dispatch_id']
+    assert 'mockup_saves' not in saved
+    assert saved['staff_upload_restarts'][0]['retired_outputs']['mockup_saves'] == {'old':True}

@@ -66,7 +66,7 @@ class DisplayReadTests(unittest.TestCase):
 
     def test_store_reused_in_session_and_recreated_on_permission_change(self):
         fake_st = Mock(session_state={})
-        with patch.object(analytics_page, "st", fake_st), patch.object(analytics_page.analytics_reporting, "PostgresAnalyticsStore") as cls:
+        with patch.object(analytics_page, "st", fake_st), patch.object(analytics_page, "DirectAnalyticsStore") as cls:
             first = analytics_page._session_report_store(self.user)
             self.assertIs(analytics_page._session_report_store(self.user), first)
             cls.assert_called_once()

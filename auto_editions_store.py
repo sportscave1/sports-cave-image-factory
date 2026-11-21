@@ -40,7 +40,8 @@ class Preparations:
             cur.execute("""SELECT {receipts} AS receipts_valid,m.shopify_product_gid AS product_gid,m.dropbox_file_id,
                 l.variant_id,l.preparation_hash,l.approval,p.manifest,
                 q.status AS preparation_status,q.reason AS preparation_reason,q.lease_until AS preparation_lease_until,q.updated_at AS preparation_updated_at,q.source AS current_source,
-                q.preparation_hash AS current_hash
+                q.preparation_hash AS current_hash,
+                (SELECT detail->>'state' FROM auto_edition_onboarding_audit WHERE product_gid=m.shopify_product_gid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1) AS repair_state
                 FROM product_psd_mappings m
                 LEFT JOIN auto_edition_layouts l ON l.product_gid=m.shopify_product_gid
                 LEFT JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
@@ -157,6 +158,8 @@ def resolve_layouts(rows):
             now=datetime.now(timezone.utc)
             result.reasons[product]=('Recovering' if not until or until<=now or (seen and (now-seen).total_seconds()>150)
                 else 'Uploading' if first.get('preparation_reason')=='Uploading' else 'Preparing')
+        if first.get('repair_state') in ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing'):
+            result.reasons[product]='Repairing'
         approved=[]
         for row in group:
             manifest=row.get('manifest')

@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import uuid
+from time import monotonic
 from datetime import timedelta
 from crm_logic import now,date,email,consent,eligibility,recipient_hash,LiveFacts,matches,safe_url
 from crm_resend import Config,Resend,MarketingDisabled
@@ -39,6 +40,7 @@ class Engine:
         self.hold_lease()
         self._delivery_checkpoint=at
         if self.config.enabled:
+            self.refresh_automation_capabilities()
             from crm_campaign_schedule import activate_due
             activate_due(self.store)
             self.advance_due()
@@ -55,6 +57,13 @@ class Engine:
         self.store.set_state('automation_delivery_health',{'checked_at':self.clock().isoformat(),
             'status':'ok',**worker_configuration(self.config)})
         self._delivery_checkpoint=self.clock()
+    def refresh_automation_capabilities(self):
+        """Renew real trigger evidence during long cycles, never extend stale evidence."""
+        from crm_automation_capabilities import verify,refresh_due
+        if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
+            try:verify(self.shop,self.store,include_pixel=False)
+            except Exception:
+                logging.getLogger(__name__).warning('automation_capability_check_unavailable')
     def complete_campaigns(self):
         # Persist confirmed completion at the delivery boundary. Source/analytics
         # maintenance can keep the surrounding worker cycle open for minutes.
@@ -98,6 +107,7 @@ class Engine:
                 from crm_automation_definition import qualifies
                 kind=frozen['trigger']
                 from crm_automation_capabilities import require as require_trigger
+                self.refresh_automation_capabilities()
                 require_trigger(self.store,kind)
                 identity_rules=[r for r in frozen['rules'] if r['field'] in ('market','customer_country')]
                 if not qualifies({'rules':identity_rules},c):return c,context,'automation_rules_changed'
@@ -267,7 +277,9 @@ class Engine:
             else:
                 optout=self.config.test_unsubscribe_url() if row['test_send'] else unsubscribe
                 message=render(content,context,optout,self.config.logo_url,row['idempotency_key'])
-            message['unsubscribe_one_click']=False  # Shopify documents navigation, not RFC 8058 POST.
+            from crm_unsubscribe_headers import headers as unsubscribe_headers
+            message['unsubscribe_headers']=unsubscribe_headers(self.config,row['id'],message['unsubscribe_url'],test=row['test_send'])
+            message['unsubscribe_one_click']='List-Unsubscribe-Post' in message['unsubscribe_headers']
             digest=hashlib.sha256(json.dumps({'to':address,**message},sort_keys=True).encode()).hexdigest()
             # Recheck local suppressions immediately before committing the submission claim.
             if self.store.suppressed(row['shopify_customer_id'],recipient_hash(address)):
@@ -304,9 +316,15 @@ class Engine:
                 self.store.set_state('checkout-send-error:'+str(row['id']),{'message':str(exc)})
         except Exception as exc:
             from email_service import EmailDeliveryError
+            from pathlib import Path
+            from traceback import extract_tb
+            # Code locations only: exception messages, source lines and local
+            # values can contain customer data or recovery URLs.
+            locations=[{'file':Path(f.filename).name,'line':f.lineno,'function':f.name}
+                       for f in extract_tb(exc.__traceback__)[-6:]]
             if enrollment:
                 message=exc.safe_message if isinstance(exc,EmailDeliveryError) else ('Verification failed: '+type(exc).__name__)
-                try:self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None)})
+                try:self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None),'locations':locations})
                 except Exception:logging.getLogger(__name__).warning('automation_error_detail_deferred send_id=%s',row['id'])
             if submitting:
                 # No automatic replay after potentially accepted submission, including process crashes.
@@ -318,7 +336,7 @@ class Engine:
                 if enrollment and enrollment.get('checkout_key'):
                     self.store.set_state('checkout-send-attempt:'+str(row['id'])+':'+str(row['attempts']),{'status':'REJECTED' if known_rejection else 'UNCERTAIN','at':self.clock().isoformat(),'enrollment_id':str(enrollment['id']),'http_status':getattr(exc,'status_code',None)})
             else:self.store.defer_send(row)
-            logging.getLogger(__name__).warning('crm_send_held phase=%s type=%s','submission' if submitting else 'revalidation',type(exc).__name__)
+            logging.getLogger(__name__).warning('crm_send_held phase=%s type=%s locations=%s','submission' if submitting else 'revalidation',type(exc).__name__,locations)
         return True
     def stop(self,enrollment,reason):
         status='RECOVERED' if reason=='recovered' else 'STOPPED'
@@ -420,6 +438,7 @@ class Engine:
             # Events merely expedite reconciliation; only abandonedCheckouts is eligibility authority.
             self.store.set_state('reconcile:abandoned',{})
     def reconcile(self,automation):
+        self.refresh_automation_capabilities()
         from crm_automation_definition import native
         if native(automation):
             from crm_automation_runtime import reconcile
@@ -445,9 +464,13 @@ class Engine:
         more=page['pageInfo'].get('hasNextPage')
         self.store.set_state(key,{'cursor':page['pageInfo'].get('endCursor') if more else None,'after_time':(self.clock()+timedelta(seconds=2 if more else 300)).isoformat()})
     def advance_due(self):
+        # Yield to queued delivery even with a backlog of slow Shopify checks.
+        # The next checkpoint continues from persisted eligibility/retry state.
+        deadline=monotonic()+45
         due=self.store.q("SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND (e.retry_after IS NULL OR e.retry_after<=now()) ORDER BY e.next_due_at LIMIT 20")
         logging.getLogger(__name__).info('crm_due_batch count=%s',len(due))
         for e in due:
+            if monotonic()>=deadline:break
             self.hold_lease()
             from crm_checkout_purchase_exit import stop_if_purchased
             if stop_if_purchased(self.store,e):continue
@@ -471,10 +494,7 @@ class Engine:
         logging.getLogger(__name__).info('crm_worker_run_start')
         try:
             self.hold_lease()
-            from crm_automation_capabilities import verify as verify_automation,refresh_due
-            if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
-                try:verify_automation(self.shop,self.store,include_pixel=False)
-                except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
+            self.refresh_automation_capabilities()
             # One durable publication per leased cycle, independent of mail gates.
             try:
                 from crm_automation_publication import tick as publication_tick

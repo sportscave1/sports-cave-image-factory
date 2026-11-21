@@ -8,6 +8,7 @@ from product_upload_dropbox import REVIEW, within
 from psd_directory import REVIEW_METADATA_FOLDER
 from sports_categories import (
     detect_sport_in_text, infer_sport_category, normalize_sport_category, sport_collection_handles,
+    MOTORSPORT_DISCIPLINES,
 )
 
 MAX_HANDOFF_BYTES = 32 * 1024
@@ -60,6 +61,9 @@ def _handoff_details(value, source):
         raise ValueError(mismatch)
     intent = value.get('upload_intent')
     target = _text(value.get('existing_shopify_product_id'))
+    refresh_origin = value.get('design_origin') == 'designs_to_refresh'
+    if refresh_origin and intent != 'existing_product_refresh':
+        raise ValueError('Designs to Refresh artwork must update its exact existing Shopify product, never create a new one.')
     if intent == 'existing_product_refresh':
         if re.fullmatch(r'[1-9][0-9]*', target):
             target = 'gid://shopify/Product/' + target
@@ -69,10 +73,7 @@ def _handoff_details(value, source):
         raise ValueError('The artwork metadata must identify a new product or an exact refresh target.')
     title = _text(value.get('design_title'))
     collections = _strings(value.get('intended_collections'))
-    sport = _text(value.get('sport'), 100) or infer_sport_category(
-        detect_sport_in_text(identifier) for identifier in collections
-        if not identifier.startswith('gid://')
-    )
+    sport = handoff_sport(value)
     checks_passed = bool(title and collections and value.get('review_status') == 'ready_for_review')
     ready = checks_passed and bool(sport)
     return dict(design_name=title, product_context=_text(value.get('design_story'), 3000),
@@ -87,7 +88,51 @@ def _handoff_details(value, source):
                              ' '.join(_strings(value.get('review_notes')))[:1000],
                 source_photographs=_strings(value.get('source_photographs')),
                 signature_assets=_strings(value.get('signature_assets')),
-                **({'sport_selection_pending': True} if checks_passed and not sport else {}))
+                **({'design_origin': 'designs_to_refresh', 'customer_facing_title': title}
+                   if refresh_origin else {}),
+                **({'sport_selection_pending': True} if checks_passed and not sport else {}),
+                **({'sport_normalization_pending': True} if sport and value.get('sport') != sport else {}))
+
+
+def handoff_sport(value):
+    """Resolve upload taxonomy from structured evidence, never an ambiguous filename."""
+    sport = normalize_sport_category(_text(value.get('sport'), 100))
+    league = normalize_sport_category(_text(value.get('league'), 100))
+    if sport == 'Other':
+        sport = ''
+    if sport == 'Motorsport' and league in MOTORSPORT_DISCIPLINES:
+        return league
+    if sport:
+        return sport
+    return infer_sport_category([
+        league, *(detect_sport_in_text(identifier) for identifier in
+                  _strings(value.get('intended_collections')) if not identifier.startswith('gid://'))
+    ])
+
+
+def save_review_sport(provider, source, selected=None, *, candidates=None):
+    """Persist only sport on the exact bound JSON, preserving all other review evidence."""
+    record = _find_handoff(provider, source, candidates)
+    if not record:
+        return None  # Legacy artwork has no verified JSON to update.
+    value, sidecar, details = record
+    resolved = resolve_review_sport(details, selected)
+    sport = resolved.get('sport')
+    if not sport or value.get('sport') == sport:
+        return resolved
+    current = provider.metadata_if_present(source['id'])
+    if not current or any(
+            current.get(k) != source.get(k)
+            for k in ('id', 'rev', 'path_display')):
+        raise ValueError('The PSD changed before its sport could be saved. Refresh Design Studio.')
+    from design_review_title import _write
+    updated = dict(value, sport=sport)
+    _write(provider, sidecar['path_display'], updated, existing=sidecar)
+    # The same PSD revision must still be current after the revision-aware write.
+    current = provider.metadata_if_present(source['id'])
+    if not current or any(current.get(k) != source.get(k) for k in ('id', 'rev', 'path_display')):
+        raise ValueError('The PSD changed while its sport was saved. Refresh Design Studio.')
+    return _handoff_details(updated, source)
 
 
 def _read_sidecar(provider, metadata, *, historical=False):
@@ -129,7 +174,8 @@ def _find_handoff(provider, source, candidates, *, allow_stale_sport=False):
                 if first_error is None:
                     first_error = error
                 if allow_stale_sport and isinstance(error, _StaleRevision):
-                    stale_refresh |= value.get('upload_intent') == 'existing_product_refresh'
+                    stale_refresh |= (value.get('upload_intent') == 'existing_product_refresh'
+                                      or value.get('design_origin') == 'designs_to_refresh')
                     if not stale_sport:
                         label = _text(value.get('sport'), 100)
                         # Match Product Uploads' separate Soccer destination.

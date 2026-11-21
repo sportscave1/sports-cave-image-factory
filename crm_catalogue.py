@@ -271,7 +271,7 @@ def collection_display_title(title):
     return cleaned or title
 
 
-def catalogue_html(section, *, campaign_key=''):
+def catalogue_html(section, *, campaign_key='', theme='dark'):
     """Snapshot-only pairs with shared field rows, including Word email clients.
 
     Each pair owns its table: the tallest cell sets only that pair's field height.
@@ -279,6 +279,14 @@ def catalogue_html(section, *, campaign_key=''):
     """
     if section['settings'].get('smart'):return ''  # Recipient hydration owns these cards.
     cfg=section['settings'];display=cfg['display']
+    if theme not in ('dark','light'):raise ValueError('Unknown catalogue theme.')
+    light=theme=='light'
+    outer='#FFFFFF' if light else '#111111'
+    card='#FFFFFF' if light else '#151515'
+    ink='#222222' if light else '#faf6eb'
+    muted='#555555' if light else '#d6d0c4'
+    accent='#555555' if light else '#d4b77d'
+    heading_ink='#222222' if light else '#eed9ad'
     products=[p for p in section['products'] if not product_issues(p,cfg)]
     if not products:return ''
     single=len(products)==1;e=lambda v:escape(str(v),quote=True)
@@ -292,22 +300,23 @@ def catalogue_html(section, *, campaign_key=''):
         if display['image']:
             result['image']='<a '+link+' style="display:block;text-decoration:none"><img src="'+e(p['image'])+'" alt="'+e(image_alt(p))+'" width="274" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></a>'
         if display['title']:
-            result['title']=paragraph('<a '+link+' style="color:#faf6eb;text-decoration:none">'+e(collection_display_title(p['title']))+'</a>',
-                'font-size:14px;line-height:19px;font-weight:700;word-wrap:break-word')
+            result['title']=paragraph('<a '+link+' style="color:'+ink+';text-decoration:none">'+e(collection_display_title(p['title']))+'</a>',
+                ('font-size:16px;line-height:24px;' if light else 'font-size:14px;line-height:19px;')+'font-weight:700;word-wrap:break-word')
         ed=p['edition']
         if ed:
-            if display['limit']:result['limit']=paragraph('LIMITED TO '+str(ed['limit'])+(' WORLDWIDE' if single else ''),'color:#d4b77d;font-size:11px;line-height:16px')
+            if display['limit']:result['limit']=paragraph('LIMITED TO '+str(ed['limit'])+(' WORLDWIDE' if single else ''),'color:'+accent+(';font-size:14px;line-height:20px' if light else ';font-size:11px;line-height:16px'))
             next_ok=display['next'] and edition_available(ed)
-            if next_ok:result['next']=paragraph('#'+format(ed['next'],'03d')+' / '+str(ed['limit']),'color:#faf6eb;font-size:16px;line-height:28px;font-weight:700')
+            if next_ok:result['next']=paragraph('#'+format(ed['next'],'03d')+' / '+str(ed['limit']),'color:'+ink+';font-size:16px;line-height:28px;font-weight:700')
             status=['NEXT AVAILABLE'] if next_ok and single else []
             if display['remaining'] and ed['remaining'] is not None:status.append(str(ed['remaining'])+' REMAINING' if ed['remaining'] else 'SOLD OUT')
-            if status:result['remaining']=paragraph(' · '.join(status),'color:#d6d0c4;font-size:11px;line-height:16px')
+            if status:result['remaining']=paragraph(' · '.join(status),'color:'+muted+(';font-size:14px;line-height:20px' if light else ';font-size:11px;line-height:16px'))
         if display['price']:
             price='From '+e(price_label(p))
             if amount(p['compare_at']) and Decimal(p['compare_at'])>Decimal(p['price']):price+=' <s>'+e(price_label({**p,'price':p['compare_at']}))+'</s>'
-            result['price']=paragraph(price,'color:#d6d0c4;font-size:13px;line-height:18px')
+            result['price']=paragraph(price,'color:'+muted+(';font-size:16px;line-height:24px' if light else ';font-size:13px;line-height:18px'))
         if display['cta']:
-            result['cta']=table+'<tr><td align="center" bgcolor="#151515" style="border:1px solid #d4b77d"><a '+link+' style="display:block;color:#eed9ad;padding:12px 4px;font-size:11px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">'+e(cfg['cta'])+'</a></td></tr></table>'
+            button=('bgcolor="#222222" style="background:#222222"><a '+link+' style="display:block;color:#FFFFFF;padding:12px 8px;font-size:16px;line-height:24px;' if light else 'bgcolor="#151515" style="border:1px solid #d4b77d"><a '+link+' style="display:block;color:#eed9ad;padding:12px 4px;font-size:11px;line-height:18px;')
+            result['cta']=table+'<tr><td align="center" '+button+'font-weight:700;text-decoration:none;'+('' if light else 'text-transform:uppercase;')+'word-wrap:break-word">'+e(cfg['cta'])+'</a></td></tr></table>'
         return result
     pairs=[]
     for start in range(0,len(products),2):
@@ -319,19 +328,19 @@ def catalogue_html(section, *, campaign_key=''):
             for index in range(2):
                 if index>=len(pair):
                     # Empty layout cell only; never a fabricated product or link.
-                    cells.append('<td width="50%" bgcolor="#111111"></td>');continue
+                    cells.append('<td width="50%" bgcolor="'+outer+'"></td>');continue
                 padding='0' if field=='image' else '8px 8px 0'
                 if field=='cta':padding='8px'
-                cells.append('<td width="50%" valign="top" bgcolor="#151515" style="padding:'+padding+';border-left:4px solid #111111;border-right:4px solid #111111;font-family:Arial,Helvetica,sans-serif;word-wrap:break-word">'+pair[index].get(field,'')+'</td>')
+                cells.append('<td width="50%" valign="top" bgcolor="'+card+'" style="padding:'+padding+';border-left:4px solid '+outer+';border-right:4px solid '+outer+';font-family:Arial,Helvetica,sans-serif;word-wrap:break-word">'+pair[index].get(field,'')+'</td>')
             rows.append('<tr>'+''.join(cells)+'</tr>')
         # A shared bottom edge also keeps cards equal when the CTA is disabled.
-        rows.append('<tr>'+''.join('<td width="50%" height="8" bgcolor="'+('#151515' if i<len(pair) else '#111111')+'" style="border-left:4px solid #111111;border-right:4px solid #111111;font-size:0;line-height:0"></td>' for i in range(2))+'</tr>')
+        rows.append('<tr>'+''.join('<td width="50%" height="8" bgcolor="'+(card if i<len(pair) else outer)+'" style="border-left:4px solid '+outer+';border-right:4px solid '+outer+';font-size:0;line-height:0"></td>' for i in range(2))+'</tr>')
         pairs.append('<tr><td style="padding:0 0 8px">'+table+''.join(rows)+'</table></td></tr>')
     heading=''
-    if cfg.get('headline'):heading+=paragraph(e(cfg['headline']),'margin-bottom:8px;color:#eed9ad;font-size:24px;line-height:29px;font-family:Georgia,serif')
-    if cfg.get('subtext'):heading+=paragraph(e(cfg['subtext']),'color:#d6d0c4;font-size:13px;line-height:19px')
+    if cfg.get('headline'):heading+=paragraph(e(cfg['headline']),'margin-bottom:8px;color:'+heading_ink+';font-size:24px;line-height:29px;font-family:Georgia,serif')
+    if cfg.get('subtext'):heading+=paragraph(e(cfg['subtext']),'color:'+muted+(';font-size:16px;line-height:24px' if light else ';font-size:13px;line-height:19px'))
     rows='<tr><td align="center" style="padding:16px 12px 8px">'+heading+'</td></tr>' if heading else ''
-    return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111111" style="background:#111111;border-collapse:collapse;table-layout:fixed">'+rows+'<tr><td style="padding:8px 4px 0">'+table+''.join(pairs)+'</table></td></tr></table>'
+    return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="'+outer+'" style="background:'+outer+';border-collapse:collapse;table-layout:fixed">'+rows+'<tr><td style="padding:8px 4px 0">'+table+''.join(pairs)+'</table></td></tr></table>'
 
 
 def refresh_catalogues(doc, catalogue, *, fresh=True):

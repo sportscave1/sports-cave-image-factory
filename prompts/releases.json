@@ -1,0 +1,234 @@
+{
+  "ebffbedac545beb011dc654c": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "86f38578b6651f3b2354d4f0223d8ee3cf2141dce0f6de2652e219882e23b346",
+    "path": "@category/Ads",
+    "symbol": ""
+  },
+  "e4c95a923482686ea19136c3": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "ef2ac927c94d43efa7e153b006f93cef31c676dae70592e92acc7634bfd4504e",
+    "path": "ads_footer.py",
+    "symbol": "COMPACT_FOOTER_RULES"
+  },
+  "3cb795b06730af64f234ddc9": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "3a873476cba5d38f13dfb17882b0c0e9e4c38b47454eec7a18d3c4c944859be7",
+    "path": "prompts/google_demand_gen_v1.txt",
+    "symbol": ""
+  },
+  "0df0799f598199ac309d066e": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "fdb0df973300ca4d4c6ba4402e817acd16ae0444dd206202649ccdef4deb40d2",
+    "path": "ads_page.py",
+    "symbol": "IE_EXECUTION_CHECKLIST"
+  },
+  "29739817000c06f922bc9c1b": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "256afe47ceea6148e736e4dfe5e6e01fcd5db34a06e678d90075005394575d1d",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2"
+  },
+  "3ee6646ef382cd48773bc7ae": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "91f220bec98c55a560609fe8b3287ed4bd0e85155e5797ab5c54b9b3f228f08e",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1"
+  },
+  "d9d02cb110b7f42fd61b3196": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "19fb8208465839bbb761b9ac6d7a9e165675873beb7aff5b33d7ac94b7573e18",
+    "path": "ads_page.py",
+    "symbol": "INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE"
+  },
+  "704462a5b422e7982db8880f": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "c014b1fa53778bbb0d027097c508bfb2b1bdb7005805e0b0eea1d41604971911",
+    "path": "ads_generation_review.py",
+    "symbol": "RULES"
+  },
+  "7c37c4b9ddc9337b4253c1cc": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "07f03e3a5e7740cdde9ea2e126ed84539c1b6689eb18b9dfe495ea1f22924892",
+    "path": "ads_page.py",
+    "symbol": "IE_FOOTER_TEXT_CLARIFICATION"
+  },
+  "6137aef6ef1b942197a3aa91": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "15b704ac98bd844864d045c15a0e5152906f76c8cd0887f90c03f92b1b43bc47",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1"
+  },
+  "efa0fc0971b49593dded8edd": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "f5c1f383bab59f772337962a2107c4190e430dd551d7b582f649e18c98d2f770",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1"
+  },
+  "cfcfe59a08413380217b1e93": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "144685cdbfc5594315ba6490cb375dfe246c85b51d35591d26d5c34eb43a91d3",
+    "path": "ads_carousel_winner.py",
+    "symbol": "CARD_FIVE"
+  },
+  "339261a70667ec5a840cfd42": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "525fa29b79bb3988ac6758485f9b26cd98b982c6325cd096a8a0d41b3b0a6928",
+    "path": "ads_page.py",
+    "symbol": "CAROUSEL_COPY_CSV_SUPPORT_INSTRUCTION"
+  },
+  "47d29145c267dba08275967d": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "57dbc441bd41a506f0ba60b0014af6798adeb358b5402c01cddcb6a34a8d0585",
+    "path": "ads_ie_legacy_description.py",
+    "symbol": "DESCRIPTION_WORDING_INSTRUCTIONS"
+  },
+  "1ba92c75f1d0ec42bedc1284": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "2611b52d614c9788835918b02f4371d53c0fa3d19a5c57c1f7f356bbc3a994d5",
+    "path": "ads_page.py",
+    "symbol": "FINAL_REVIEW_LANDING_PAGE_BLOCK_TEMPLATE"
+  },
+  "069d02a52be01c5134ce8e97": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "2421ed64bab76fed5469db8d76751197f189afbbb2e299f9ef5809ac35d53ea0",
+    "path": "ads_ie_legacy_description.py",
+    "symbol": "HISTORICAL_STYLES"
+  },
+  "1776e750294d64f257e3c18c": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "080273ce01e91e1146e4128cdf71cf636e9b017c1780b2fee14f354163fcc3b4",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2"
+  },
+  "22cc9062177176f35cf380df": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "4d645a6645ae99df55959a1c008ac3bab6f4812f4a77e9d78a74ea867f0da20c",
+    "path": "ads_page.py",
+    "symbol": "SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2"
+  },
+  "91a51d174a3108ab54cb4f97": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "610a6749ad7d093574d25e3e282875566ddcbffc2c7f2c2fd44ea36ca3891ec6",
+    "path": "ads_page.py",
+    "symbol": "IE_CREATIVE_VARIETY_AND_TYPOGRAPHY"
+  },
+  "ac9d844ecf17b89d0fec1518": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "5f3ff0e311a52e4a6949bdd730f39f6d5fb426f09dbf6b47b2351ace7f31936e",
+    "path": "ads_page.py",
+    "symbol": "INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION"
+  },
+  "248efab71e6ee82fc37db2ff": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "b901bca18f4f31117197dff8154c5e0fe2111c977c13db981ef8d4cb27bc2ea3",
+    "path": "ads_copy_optimisation.py",
+    "symbol": "INSTRUCTIONS"
+  },
+  "8c74c7a733cab9f9ae1543d3": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "82baa5aa58714b8d589f8766bc918d68ee7dd2bc004d2cb5cc8d667059946f33",
+    "path": "ads_page.py",
+    "symbol": "RACING_WRITTEN_COPY_INSTRUCTIONS"
+  },
+  "6b90b7332b494163e3f6e616": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "656863ac11da2e98231ad2adc1365fe08e6d5b5c0ad373c7ecac9a322d2994b9",
+    "path": "ads_final_delivery.py",
+    "symbol": "RULES"
+  },
+  "7ca8830571db316b90527e08": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "a00a9464b882355f117ab37bf81c10ef9b502f035ca66ab353812965d1b70a12",
+    "path": "prompts/sports_cave_universal_creative_system.txt",
+    "symbol": ""
+  },
+  "1c8d3ccf95140414febcbb52": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "06961ed6aa643657627b01bcb25dafdf39a410bea8c7f4a5966404ab786443d2",
+    "path": "ads_carousel_winner.py",
+    "symbol": "WINNER_QUALITY"
+  },
+  "3aee5dc48a99fb95a7048eb2": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "cd7ea833ef0a5d060d0a174df137f11a1aa65131f0906cd46d6cc67b725c86b9",
+    "path": "ads_ie_two_line.py",
+    "symbol": "FOOTER_RULES"
+  },
+  "bafd9995e458e40146647db5": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "bca636828f384f92928cf8eb6604f57926e522eefb5b1e9ab2dd9e273ecf074e",
+    "path": "ads_ie_two_line.py",
+    "symbol": "HEADLINE_RULES"
+  },
+  "4babd98536039130aa741554": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "1fd97943df3da6ce44b5b787dea626d760836b6bdfa3072a269130a73824f183",
+    "path": "ads_ie_two_line.py",
+    "symbol": "REVIEW"
+  },
+  "6acba0ee1a95257fffdc0dc6": {
+    "version": "2.0",
+    "id": "ads-baseline-2-0-two-reserves-20261120",
+    "label": "Baseline 2.0 - Two-line footer",
+    "hash": "89f11b1174b45ab404ee3a07e7bf741a839ddfb37e49bdc40ab365599ccad440",
+    "path": "ads_reserve_scenes.py",
+    "symbol": "RULES"
+  }
+}

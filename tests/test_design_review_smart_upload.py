@@ -43,7 +43,9 @@ def test_new_and_refresh_keep_the_existing_mode_rules():
     assert TARGET in update
     assert 'Set available quantity exactly 20' in create
     assert 'Set available quantity exactly 20' not in update
-    assert 'Similarity alone never authorises replacement.' in update
+    assert 'never create a new product for this item' in update
+    assert 'A different moment, title or collector concept is a new product' not in update
+    assert 'A different moment, title or collector concept is a new product' in create
 
 
 def test_stale_metadata_and_ambiguous_refresh_are_rejected():
@@ -208,3 +210,21 @@ def test_smart_revision_has_one_durable_intake_across_selection_and_mode_switch(
     assert store.read_review(review_key(source), ADMIN['id'], source)['id'] == original['id']
     with pytest.raises(ValueError, match='another reviewer'):
         select(store.connect, provider, str(uuid.uuid4()), 'different-reviewer', 'SMART', source['id'], source['rev'])
+
+
+def test_refresh_origin_binds_update_and_new_headline_without_creating_a_product():
+    details = parse_handoff(handoff(
+        design_title='The Final Over \u2013 Ben Stokes Wall Art', design_origin='designs_to_refresh',
+        upload_intent='existing_product_refresh', existing_shopify_product_id=TARGET,
+    ), SOURCE)
+    assert details['customer_facing_title'] == 'The Final Over \u2013 Ben Stokes Wall Art'
+    assert stored_mode('SMART', details) == 'UPDATE'
+    built = prompt('SMART', details)
+    assert TARGET in built and 'The Final Over \u2013 Ben Stokes Wall Art' in built
+    assert 'Update Existing' in built
+    assert 'never create a new product for this item' in built
+    with pytest.raises(ValueError, match='never create a new one'):
+        parse_handoff(handoff(design_origin='designs_to_refresh'), SOURCE)
+    with pytest.raises(ValueError, match='exact existing Shopify product ID'):
+        parse_handoff(handoff(design_origin='designs_to_refresh',
+                             upload_intent='existing_product_refresh'), SOURCE)

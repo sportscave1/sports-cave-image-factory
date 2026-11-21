@@ -15,6 +15,7 @@ from home_morning_brief_actions import article_html
 from home_sports_morning_brief import LOG, MAX_PAYLOAD, SETTING_KEY, archive_page, get_app_setting, parse_edition, publish
 from sports_categories import CANONICAL_SPORT_CATEGORIES
 import os_accounts
+from home_brief_opportunities import SPORTS_EDITORIAL_POLICY
 from sports_sales_calendar import sydney_date
 
 PATH = "/ops/morning-brief/publish"
@@ -30,13 +31,14 @@ def _page(message="", status=200, *, form=False, meta_brief=False, refresh_brief
     title = "Designs to Refresh" if refresh_brief else "Meta Morning Brief" if meta_brief else "Morning Brief"
     limit = refresh.MAX_PAYLOAD if refresh_brief else meta.MAX_PAYLOAD if meta_brief else MAX_PAYLOAD
     instructions = (
-        f"Include date, report_date, roas, orders and actions. Add a short qualitative summary and up to {meta.MAX_RECOMMENDATIONS} distinct recommendations for Home. Optional insights cover Shopify, GA4, SEO and sports."
+        "Include date, report_date, roas, orders, actions, summary, recommendations: [], ad_format_version: 3 and ad_recommendations for every Live sport. Include a main and secondary trial product with ad-coverage evidence, or explicit catalogue/review gaps. Optional insights cover Shopify, GA4, SEO and sports."
         if meta_brief else
         "Use the Sydney edition date and recommendations with title, recommendation, links, sport, "
         "markets, and confirmed start_date and end_date when available. Include the complete Sports Updates as full_brief. "
-        "Optional legends contains up to six ranked entries in the same format, two per primary_market "
-        "of AUS, USA or UK. Submit only date and legends "
-        "to add the section to today's published edition without changing Sports Updates."
+        "Include summary, up to three current rivalries and up to four design_recommendations ranked by sales potential, "
+        "with subject, sales_rationale and opportunity_status. No market quotas; exclude the preceding seven days. Legacy submissions may use date and legends "
+        "to add the section to today's published edition without changing Sports Updates. "
+        + SPORTS_EDITORIAL_POLICY
     )
     if refresh_brief:
         instructions = ("Enter today's Sydney date and up to three verified candidates. "
@@ -192,7 +194,10 @@ async def enqueue_design(request):
         return JSONResponse({'error': 'Queue unavailable. Try again.'}, status_code=503, headers=HEADERS)
 
 
-ROUTES = [(PATH, publication, ("GET", "POST")),
+from home_refresh_queue import api as refresh_queue_api
+
+ROUTES = [('/ops/design-refresh/queue', refresh_queue_api, ('GET', 'POST')),
+          (PATH, publication, ("GET", "POST")),
           ('/ops/morning-brief/designs/{key}/enqueue', enqueue_design, ('POST',)),
           (meta.PATH, publication, ("GET", "POST")),
           (refresh.PATH, publication, ("GET", "POST")),

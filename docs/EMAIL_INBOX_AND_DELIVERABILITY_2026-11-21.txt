@@ -1,0 +1,41 @@
+Sports Cave email inbox and deliverability review - 21 November 2026
+Task20261120-324fe274; owner codex-email-flows-review-20261121-01a1fad3.
+
+Completed content changes
+Reviewed all15 emails across the four merchant flows. Saved15 revised subject/preheader pairs with an all-or-none four-flow revision/content guard and previous-definition history. Subjects31-41 characters; rendered previews60-75 characters, within the PDF's30-45 and50-85 guidance. Each preview adds useful information. No fake urgency, reservations, reply prefixes or unsupported offer claims. Bodies, links, prices, discounts, stage identities, timing, purchase exits and audience policy are unchanged; the only other document change is copy_reviewed=true.
+Welcome v4, Abandoned Checkout v17 and Post Checkout v7 publication jobs SUCCEEDED. Win Back rev5 remains DRAFT with only its first two stages enabled. Its later two stages remain disabled. No old subscriber backfill or accepted-send replay was requested.
+
+Evidence for copy choices
+Historical collector-recognition subject:211 accepted,208 delivered,145 recorded opens and31 recorded clicks, including its earliest three-send version. The historical feedback email had119 delivered,59 recorded opens and9 recorded clicks. Checkout's simple Still thinking subject had40 delivered,16 recorded opens and2 recorded clicks across its earlier versions. Other old subjects had small samples or weak clicks. Recognition and useful help are reasonable directions, not proven causal winners. The newest light designs have too few sends for a reliable comparison. No verified flow-attributed sales establish an uplift. Privacy opens and provider clicks can include automated activity; use downstream clicks/orders and complaints alongside opens. Fifteen separate A/B tests would fragment this small list; evaluate one comparable variation at a time.
+
+Rendering and usability
+Strict definition validation and actual production renderer passed all15 revised documents, with fictitious recipients, mocked recommendations/discount facts/configuration and external HTTP forbidden. Images-on HTML10,987-17,263 bytes; images-off HTML10,516-16,716 bytes. Plain-text alternatives, unsubscribe links, checkout-specific recovery links and merge-field resolution passed. Visible copy remains31-68 words including headings/buttons. No see it on your wall phrase survives rendering.
+Live Edge preview measured email viewports321,375,415,481 and585px. Content width equalled viewport width at each size; no horizontal overflow or missing images. Recommendation CTAs use16px white text on charcoal,48px minimum height, growing to72px when the label wraps at321px. The fluid email has a600px maximum container, PNG logo, descriptive image alt text, table structure and inline critical styles. Browser viewport override was reset.
+This is browser/fixture QA, not certification of every device/client. Actual delivered Gmail iOS/Android/web, Apple Mail and classic/new Outlook/Yahoo, forced-dark-mode behavior and200% text enlargement remain unverified. Gmail connector reads failed twice, so delivered authentication headers were not inspected through that connector. No real test email was sent.
+
+Bounce and consent audit
+Last30days across all marketing:5,023 accepted messages,74 distinct messages with bounce events(1.47%),6 permanent-bounce messages(0.12%) and1 complaint(0.02% blended). These are provider event counts, not Gmail-specific Postmaster spam rates; event categories can overlap. Every permanent-bounce/complaint recipient was already actively suppressed locally; zero unsuppressed recipients in that group. Frequency limits, live consent checks, invalid-recipient checks and purchase/availability/discount holds remain enforced. Do not suppress transient bounces indiscriminately or disable guards to increase volume.
+Public DNS inspection found the shop-domain SPF resolution, Resend DKIM record and DMARC p=none policy. That alone does not prove alignment/pass in a received message or provider IP reputation. No DNS, sender identity, provider credentials or reputation settings were changed.
+
+Tested code change - release authorized21 November2026
+New crm_unsubscribe_headers.py generates RFC8058 List-Unsubscribe and List-Unsubscribe-Post headers using the existing signed /crm/unsubscribe endpoint when its signing configuration is present. Shopify's visible body unsubscribe link is retained. Test messages and missing/invalid configuration retain native navigation-only headers; unsupported one-click behavior is never advertised. Existing GET confirmation remains scanner-safe; POST uses the existing immediate local suppression plus Shopify synchronization handler.
+Automation headers are recipient-specific. New campaign batches freeze their headers with each recipient, so retries keep identical provider payloads even across config changes. Old batch manifests retain their original header payloads. Existing accepted/uncertain messages are never replayed or rewritten. Worker health reports only a one_click_configured boolean, never a key value.
+
+Production configuration plan - OWNER AUTHORIZED21 November2026
+Read-only Render Environment UI confirmed no CRM_UNSUBSCRIBE_SECRET on sports-cave-seo-worker or sports-cave-os-webhooks, and no CRM_PUBLIC_BASE_URL/SPORTS_CAVE_WEBHOOK_BASE_URL on the worker. Worker inherits only the displayed Dropbox environment group; the webhook service has no linked environment group. Secret values were not revealed.
+Use a newly generated strong shared signing secret on those two existing services only, stored only in Render. Set the worker's CRM_PUBLIC_BASE_URL=https://sports-cave-os-webhooks.onrender.com. Preserve other variables, existing webhook-base settings and the canonical sports-cave-os identity. No new service or schema is required. Use merge semantics(replace=false) for MCP env updates. The Blueprint-managed webhook omits these keys; Render's current docs say omitted service variables are preserved during Blueprint sync. Do not write secret values to source, render.yaml, reports, chat or logs. After authorized config/deploy, verify one_click_configured=true from real completed worker work and webhook health; verify a delivered message's DKIM covers both unsubscribe headers before claiming full RFC8058 inbox verification.
+The owner explicitly answered Yes - release and configure to the commit/integrate/push/deploy and shared-signing-key/base-URL request. Runtime release verification is recorded separately after deployment, so this source report does not claim an unobserved outcome.
+
+Validation
+129 tests passed with real disposable local PGlite PostgreSQL, zero failures/errors/skips, final run28.852seconds. Covers actual batch dispatch at1/99/100/101/1,095 recipients, recipient-specific valid token mapping,429 retries, provider-success/DB-failure retries, suppression, tampered tokens, scanner-safe GET, POST routing, opt-out outage handling, native body links, lifecycle publication and Smart recommendations. After optimizing a test-only receipt lookup, the1,095-recipient batch matrix was rerun successfully. Tests were then rerun together on the final code. No production credentials, customer data or external provider calls were used in these tests.
+Two pre-existing SQL-suite assertions were repaired: individually published emails in a disabled flow are PUBLISHED rather than LIVE; confirmation copy is a caption rather than Markdown. Neither changes application behavior. Static Studio Verify, Render topology validation and git diff checks passed before this report; reverify after saving evidence.
+
+Primary references
+Sports-Cave-Email-Growth-Plan-2026-2027.pdf pp8,13-15,18,22.
+https://support.google.com/mail/answer/81126
+https://www.rfc-editor.org/rfc/rfc8058
+https://resend.com/docs/dashboard/domains/introduction
+https://resend.com/changelog/custom-email-headers
+https://render.com/docs/configure-environment-variables
+
+No email setup can guarantee zero bounces, universal identical rendering or higher opens/clicks. These changes reduce avoidable friction and supply a measured baseline; inbox/client QA and post-release results remain necessary.

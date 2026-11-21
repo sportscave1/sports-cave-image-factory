@@ -795,8 +795,19 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn(ads_page.META_AD_URL_PARAMETERS, baseball_prompt)
         self.assertEqual(
             ads_page.META_AD_URL_PARAMETERS,
-            "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}",
+            "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}"
+            "&utm_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}&site_source={{site_source_name}}",
         )
+
+    def test_meta_tracking_guidance_keeps_paid_channel_and_stable_ids(self):
+        guidance = ads_page.build_meta_url_parameters_guidance()
+        for parameter in (
+            "utm_source=facebook", "utm_medium=paid_social",
+            "utm_id={{campaign.id}}", "adset_id={{adset.id}}",
+            "ad_id={{ad.id}}", "site_source={{site_source_name}}",
+        ):
+            with self.subTest(parameter=parameter):
+                self.assertIn(parameter, guidance)
 
     def test_football_instant_experience_works_for_every_supported_country(self):
         expected_terms = {

@@ -195,10 +195,10 @@ def sample_legacy_challengers():
 
 
 class CreativeRefreshNavigationTests(unittest.TestCase):
-    def test_ads_registry_has_one_top_level_parent_and_three_explicit_children(self):
+    def test_ads_registry_has_one_top_level_parent_and_four_explicit_children(self):
         self.assertEqual(
             ads_navigation.ADS_ROUTES,
-            ("Ads", "Creative Refresh", "Posting", "Meta Review"),
+            ("Ads", "Creative Refresh", "Posting", "Meta Review", "Google"),
         )
         parent = os_accounts.PAGE_BY_KEY[ads_navigation.ADS_PAGE_KEY]
         child = os_accounts.PAGE_BY_KEY[ads_navigation.CREATIVE_REFRESH_PAGE_KEY]
@@ -229,6 +229,7 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
                 ads_navigation.CREATIVE_REFRESH_ROUTE,
                 ads_navigation.POSTING_ROUTE,
                 ads_navigation.META_REVIEW_ROUTE,
+                ads_navigation.GOOGLE_ROUTE,
             ),
         )
         self.assertEqual(

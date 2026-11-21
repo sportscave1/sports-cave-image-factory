@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('components/sports_cave_top_bar/index.html','utf8');
 const state={config:{revision:'user-a-v1',authToken:'token-a'},destroyed:false},requests=[];
-const context={state,AbortController,parentWindow:{fetch:(url,options)=>new Promise(resolve=>requests.push({url,options,resolve}))}};
+const context={state,AbortController,parentWindow:{setTimeout,clearTimeout,fetch:(url,options)=>new Promise(resolve=>requests.push({url,options,resolve}))}};
 vm.createContext(context);
 vm.runInContext(source.slice(source.indexOf('    const pendingReads ='),source.indexOf('    const updateSidebarBadge ='))+'\nthis.read=requestJson;this.cancel=cancelPendingReads;',context);
 const accept=(request,payload={ok:true})=>request.resolve({ok:true,json:async()=>payload});

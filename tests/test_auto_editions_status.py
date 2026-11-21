@@ -77,13 +77,13 @@ def test_batched_query_fences_current_source_and_approval(store):
         (HASH,json.dumps({'source':SOURCE,'edition_total':100}),json.dumps([
             {'preparation_hash':HASH,'pixel_exact':True},{'preparation_hash':HASH,'outside_number_exact':True}])))
     sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',preparation_hash=%s,source=%s::jsonb WHERE product_gid=%s",(HASH,json.dumps(SOURCE),PID))
-    assert status.batch(d.connect,[PID])['rows'][0]['status']=='Review'
+    assert status.batch(d.connect,[PID])['rows'][0]['status']=='Repair'
     approval={'actor_id':'synthetic-admin','preparation_hash':HASH,'visual_approved':True,'pixel_exact':True,'test_only':True}
     sql.execute("INSERT INTO auto_edition_layouts VALUES(%s,'*',%s,%s::jsonb,now())",(PID,HASH,json.dumps(approval)))
     sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready'")
     assert status.batch(d.connect,[PID])['rows'][0]['status']=='Cloud Ready'
     sql.execute("UPDATE auto_edition_source_inventory SET metadata=jsonb_set(metadata,'{rev}','\"a2\"')")
-    assert status.batch(d.connect,[PID])['rows'][0]['status']=='Failed'
+    assert status.batch(d.connect,[PID])['rows'][0]['status']=='Repair'
     assert rows(sql,'edition_products')[0]['next_edition_number']==37
 
 

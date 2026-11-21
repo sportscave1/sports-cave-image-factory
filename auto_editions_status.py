@@ -23,13 +23,13 @@ ICONS.update(Uploading=chr(8593),Recovering=chr(8635))
 
 
 def labels():
-    if __import__('auto_editions_technical').enabled():return ('Not Mapped','Uploading','Cloud Ready','Failed')
+    if __import__('auto_editions_technical').enabled():return ('Not Mapped','Uploading','Cloud Ready','Repair','Repairing')
     from auto_editions_quality import enabled as quality_enabled
     from auto_editions_v17 import enabled as continuous
     hidden=('Review','Cloud Ready') if quality_enabled() else ('Review','Production Ready') if continuous() else ('Needs Review','Production Ready')
     from product_upload_services import enabled as intake_enabled
     if intake_enabled():hidden=tuple(label for label in hidden if label!='Cloud Ready')
-    return tuple(label for label in LABELS if label not in hidden)
+    return tuple(dict.fromkeys('Repair' if label in ('Review','Needs Review','Needs Repair','Failed') else label for label in LABELS if label not in hidden))+('Repairing',)
 
 
 CHECKPOINTS={'queued':'Queued','mapping_confirmed':'Mapping saved','claimed':'Companion claimed',
@@ -46,12 +46,13 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS reset_cancellation {quality_select} {visual_select} {technical_select}
+ {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS reset_cancellation,
+ (SELECT detail FROM auto_edition_onboarding_audit WHERE product_gid=w.pid AND event='edition_repair_request' ORDER BY id DESC LIMIT 1) AS repair_detail {quality_select} {visual_select} {technical_select}
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
- LEFT JOIN edition_products p ON p.shopify_product_gid=w.pid OR
-   (NULLIF(p.shopify_product_gid,'') IS NULL AND p.shopify_product_id IN(w.pid,regexp_replace(w.pid,'^gid://shopify/Product/','')))
+ LEFT JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),
+   CASE WHEN p.shopify_product_id ~ '^[0-9]+$' THEN 'gid://shopify/Product/'||p.shopify_product_id ELSE p.shopify_product_id END)=w.pid
  LEFT JOIN auto_edition_preparations prep ON prep.hash=q.preparation_hash
  LEFT JOIN LATERAL (SELECT
    bool_or((value->>'pixel_exact')='true') AS pixel_exact,
@@ -241,7 +242,10 @@ def batch(connect, ids, *, writable=False, evidence=False):
     with colour_snapshot(connect):
         for pid,rows in groups.items():
             if len(rows)!=1:result.append(unavailable(pid))
-            else:result.append(project(rows[0],writable=writable,evidence=evidence))
+            else:
+                from auto_editions_repair import display
+                view=project(rows[0],writable=writable,evidence=evidence)
+                result.append(view if evidence else display(view,rows[0].get('repair_detail'),writable=writable))
     return {'rows':result,'companion_connected':any(r.get('companion_connected') for r in raw),'query_count':1+int(technical_enabled() and os.getenv('AUTO_EDITIONS_COLOUR_POLICY_BACKEND')=='audit'),'duration_ms':round((time.perf_counter()-start)*1000,2)}
 
 

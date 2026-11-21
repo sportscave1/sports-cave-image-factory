@@ -60,7 +60,7 @@ class ContextTypographyTests(unittest.TestCase):
             prompt = record["master_prompt"]
             self.assertLess(prompt.index(ads.IE_CREATIVE_VARIETY_AND_TYPOGRAPHY), prompt.index("\nSCENE:"))
             for phrase in ("for OTHER products too", "small residential glimpse", "premium residential man cave setting",
-                           "exactly three successful image-generation calls", "not guaranteed cross-session memory"):
+                           "generate the three initial images, one image per ad", "not guaranteed cross-session memory"):
                 self.assertIn(phrase, prompt)
             shared = ads.build_instant_experience_typography_quality_rules(shared=True)
             self.assertEqual(prompt.count(shared), 1)

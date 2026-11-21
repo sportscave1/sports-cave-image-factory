@@ -12,7 +12,7 @@ import streamlit as st
 
 from design_review_metadata import (
     handoff_paths, is_refresh_staging, is_working_file, legacy_metadata, read_gallery_handoff, read_handoff,
-    resolve_review_sport, review_key,
+    resolve_review_sport, review_key, save_review_sport,
 )
 from product_upload_dropbox import REVIEW, approved, select, within
 from product_upload_intake import Intakes, action_mode, stored_mode
@@ -83,6 +83,8 @@ def _review(provider, user, entry, command, *, selected_sport=None):
         details = resolve_review_sport(original_details, saved_data.get('review_sport') or selected_sport)
         if not details.get('sport'):
             raise ValueError('The sport could not be resolved from this PSD or its metadata.')
+        if details != original_details or details.get('sport_normalization_pending'):
+            details = save_review_sport(provider, current, details['sport']) or details
         if details.get('refresh_target_pending'):
             raise ValueError('Verify the Shopify refresh target for this PSD revision in Design Studio.')
         if details.get('shopify_product_id'):
@@ -144,7 +146,7 @@ def _staged_replacement(user, source, key):
     with st.expander('Apply staged replacement'):
         st.caption('Use this when ChatGPT can stage the edit in Dropbox but cannot apply a revision-checked update.')
         stem = str(PurePosixPath(source['path_display']).with_suffix('')) + ' - EDIT-' + source['rev']
-        trial = st.text_input('Trial PSD path', value=stem + ' - TRIAL.psd', key=key+'-trial')
+        trial = st.text_input('Trial PSD path (optional, legacy edits only)', value='', key=key+'-trial')
         staged = st.text_input('Staged final PSD path', value=stem + ' - STAGING.psd', key=key+'-staged')
         title = st.text_input('New design title (optional)', key=key+'-new-title', max_chars=400)
         review_notes = st.text_area('Unresolved review notes (optional)', key=key+'-review-notes',
@@ -206,7 +208,7 @@ def _confirm_delete(user, selected):
     from os_accounts import can_delete_files
     from product_upload_api import Dropbox
 
-    st.write('Move the selected PSDs and their matching upload JSON files to Dropbox Deleted Files.')
+    st.write('Stop pending uploads and move the selected PSDs and their matching upload JSON files to Dropbox Deleted Files.')
     st.text('\n'.join(title for _, title in selected))
     cancel, confirm = st.columns(2)
     if cancel.button('Cancel', key='design-review-delete-cancel'):
@@ -227,7 +229,7 @@ def _confirm_delete(user, selected):
     with st.spinner('Removing selected designs from Dropbox'):
         for source, title in selected:
             try:
-                warnings.extend(delete_design(provider, source))
+                warnings.extend(delete_design(provider, source, user=user))
             except ValueError as error:
                 warnings.append(f'{title}: {error}')
             except Exception:
@@ -270,6 +272,15 @@ def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
     if pending:
         details = {key: value for key, value in details.items() if key != 'title_sync_pending'}
     title = details.get('design_name')
+    if (sidecars and not reason and not editing and not has_edit_files
+            and details.get('sport_normalization_pending') and not pending
+            and not is_refresh_staging(source['name']) and details.get('cleanup_status') != 'pending'):
+        try:
+            details = save_review_sport(provider, source, details['sport'], candidates=sidecars) or details
+            sidecars = tuple(provider.metadata_if_present(item['id']) for item in sidecars)
+        except Exception:
+            logging.getLogger(__name__).exception('Review sport JSON save failed')
+            reason = 'The sport could not be saved to the matching JSON. Refresh Design Studio to retry.'
     if (sidecars and title and not reason and not has_edit_files
             and not is_refresh_staging(source['name']) and details.get('cleanup_status') != 'pending'):
         from design_review_title import resume_review_title, sync_review_title, title_destination, unclaimed_artwork
@@ -287,6 +298,7 @@ def _synced_design(provider, actor, source, sidecars, editing, has_edit_files):
     return source, details, reason, editing
 
 
+@st.fragment
 def _card(app, user, source, details, reason, key, row, *, editing=False, eager=False,
           show_replacement=False, selectable=False):
     from product_upload_api import Dropbox
@@ -309,11 +321,13 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         chosen_sport = (row or {}).get('data', {}).get('review_sport')
         needs_sport = not (published or editing or staged or resumable or chosen_sport or details.get('sport'))
         if selectable and not staged:
-            check, name, edit_button, publish, publish_ad = st.columns((.5, 4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
+            check, name, edit_button, delete_button, publish, publish_ad = st.columns((.5, 4, .6, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
             check.checkbox(f'Select {title}', key=_selection_key(source), label_visibility='collapsed',
                            on_change=_selection_changed)
+            if st.session_state.get('_review_selection_only'):
+                st.rerun()
         else:
-            name, edit_button, publish, publish_ad = st.columns((4, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
+            name, edit_button, delete_button, publish, publish_ad = st.columns((4, .6, .6, 1.5, 1.5), vertical_alignment='center', gap='small')
         note = (job or {}).get('error') or reason or details.get('review_notes') or current
         label = 'Needs attention' if reason and current in ('In review', 'Ready to publish') else current
         if cleanup_pending:
@@ -328,6 +342,15 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 st.button('Edit', key=key+'-edit', disabled=True, help='Edit '+title)
             else:
                 _edit_link(source, title)
+        from os_accounts import can_delete_files
+        if selectable and not staged and can_delete_files(user):
+            with delete_button:
+                with st.container(key='design-review-delete-'+card_key):
+                    remove = st.button('Delete', key=card_key+'-delete', help='Delete '+title,
+                                       disabled=False)
+            if remove:
+                st.session_state['_review_delete_selection'] = [(source, title)]
+                st.rerun()
         sport_picker = st.empty() if needs_sport else None
         clicked = False
         ad_clicked = False
@@ -335,21 +358,27 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
         if published and row['data'].get('product_url'):
             publish.link_button('Open listing', row['data']['product_url'], key=key+'-shopify')
         else:
-            clicked = publish.button('Publish now', key=key+'-approved', type='primary',
-                                     disabled=published or editing or staged, help=f'Publish {title}')
+            clicked = publish.button('Add to queue', key=key+'-approved', type='primary',
+                                     disabled=published or editing or staged, help=f'Add {title} to the upload queue')
             from os_accounts import can_access_page
             if all(can_access_page(user, page) for page in ('Ads', 'Posting', 'Files')):
                 ad_clicked = publish_ad.button('Publish + ad', key=key+'-approved-ad',
                                              disabled=published or editing or staged,
-                                             help='Publish the design and create a paused Meta Instant Experience campaign.')
+                                             help='Add the design to the upload queue, then create a paused Meta Instant Experience campaign after publication.')
         if ad_clicked:
             st.session_state[ad_mode] = True
         if (clicked or ad_clicked) and needs_sport:
             st.session_state[key+'-needs-sport'] = True
+            if clicked:
+                st.session_state[key+'-pending-publish'] = True
         if sport_picker is not None and st.session_state.get(key+'-needs-sport'):
             from sports_categories import CANONICAL_SPORT_CATEGORIES
             chosen_sport = sport_picker.selectbox('Sport for ' + title, CANONICAL_SPORT_CATEGORIES,
                                                   index=None, placeholder='Choose a sport', key=key+'-sport')
+            if not chosen_sport:
+                st.info('Choose a sport below to finish adding this design to the upload queue.')
+        if chosen_sport and st.session_state.get(key+'-pending-publish'):
+            clicked = True
         ad_country = None
         if st.session_state.get(ad_mode) and not clicked and not (published or editing or staged):
             from design_publish_ad import COUNTRIES, primary_country
@@ -364,7 +393,12 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                 ad_clicked = st.button('Queue publish + ad', key=key+'-confirm-ad',
                                        disabled=not chosen_sport)
         if (clicked or (ad_clicked and ad_country)) and (not needs_sport or chosen_sport):
+            # Consume only once; a failed request needs an explicit retry.
+            st.session_state.pop(key+'-pending-publish', None)
             from product_upload_staff_queue import enqueue
+            # Consume the pending click even if the queue is unavailable. A later
+            # unrelated rerun must not silently retry a failed enqueue.
+            st.session_state.pop(key+'-needs-sport', None)
             try:
                 if clicked:
                     job_id = enqueue(user, source, title, chosen_sport or details.get('sport'))
@@ -373,16 +407,26 @@ def _card(app, user, source, details, reason, key, row, *, editing=False, eager=
                     job_id = enqueue(user, source, title, chosen_sport or details.get('sport'), ad_country=ad_country)
                     text = f'Added to upload and ad queue · {title}'
                 st.session_state.pop(ad_mode, None)
-                notice = dict(id=str(job_id), kind='success', text=text)
+                notice = dict(id=str(job_id), job_id=str(job_id), interaction_id=uuid.uuid4().hex,
+                              kind='success', text=text, title=title, open_upload=False)
             except ValueError as exc:
                 notice = dict(id=uuid.uuid4().hex, kind='error', text=str(exc))
             except Exception:
-                logging.getLogger(__name__).exception('Smart Upload could not start')
-                action = 'Publish now' if clicked else 'Publish + ad'
+                logging.getLogger(__name__).exception('Smart Upload could not queue the design')
+                action = 'Add to queue' if clicked else 'Publish + ad'
                 notice = dict(id=uuid.uuid4().hex, kind='error',
-                              text=f'Upload could not start. Your PSD is retained. Try {action} again.')
+                              text=f'Upload could not be queued. Your PSD is retained. Try {action} again.')
             st.session_state['_product_upload_notice'] = notice
-            st.rerun()
+            st.session_state[key+'-queue-notice'] = notice
+            if notice['kind'] == 'success':
+                st.session_state.pop(key+'-needs-sport', None)
+        notice = st.session_state.get(key+'-queue-notice')
+        if notice:
+            getattr(st, notice['kind'])(notice['text'] + (' — view the queue in Uploads.' if notice['kind'] == 'success' else ''))
+            if notice['kind'] == 'success':
+                from product_upload_gallery import render as render_upload_component
+                render_upload_component(key=key+'-queue-wake', mode='queue-wake',
+                                        handoff={'id': notice['id']})
         if show_replacement and editing and not resumable and not staged:
             _staged_replacement(user, source, key)
             _keep_original(user, source, key)
@@ -533,6 +577,12 @@ def _gallery(app, user):
     with st.container(key='design-review-header'):
         heading, sync, refresh = st.columns((5, 1.5, 1), vertical_alignment='center')
         heading.title('Design Studio')
+    publish_notice = st.session_state.pop('_review_publish_notice', None)
+    if publish_notice:
+        if publish_notice['kind'] == 'error':
+            st.error(publish_notice['text'])
+        else:
+            st.success(publish_notice['text'] + ' · Keep adding designs here; view the queue in Uploads above.')
     removed = st.session_state.pop('_review_delete_result', None)
     if removed:
         count, warnings = removed
@@ -565,11 +615,11 @@ def _gallery(app, user):
             st.success('Original kept and selected drafts removed: ' + name)
             st.session_state['design-review-view'] = 'Review'
     with st.container(key='design-review-toolbar'):
-        tabs, search, sport = st.columns((1, 1.5, 1))
+        tabs, create, sport = st.columns((1, 1.5, 1))
         view = tabs.segmented_control('Designs', ('Review', 'Editing', 'Published'), default='Review',
                                       key='design-review-view', label_visibility='collapsed') or 'Review'
-        query = search.text_input('Search designs', placeholder='Search designs…',
-                                  label_visibility='collapsed').strip().casefold()
+        create.html('<a class="sc-review-create" href="#create-design" data-design-create="true" role="button">Create design</a>')
+        query = ''
     if view == 'Published':
         _published(user, query)
         return
