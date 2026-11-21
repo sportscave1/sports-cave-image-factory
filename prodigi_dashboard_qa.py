@@ -132,7 +132,7 @@ def identity_proof(snapshot):
         and {1,snapshot['total']}<={p.get('number') for p in proofs if p.get('pixel_exact') is True})
 
 
-def insert_checks(evidence):
+def insert_checks(evidence,asset_resolver=None):
     if not isinstance(evidence,dict) or set(evidence)!={'set_name','saved','expected','available'}:return False,False
     def rows(items):
         if not isinstance(items,list) or len(items)!=2:return None
@@ -140,19 +140,32 @@ def insert_checks(evidence):
                not isinstance(i['asset'],str) or not __import__('re').fullmatch(r'[A-Za-z0-9-]{1,100}',i['asset']) for i in items):return None
         return {(i['name'],i['asset']) for i in items}
     saved,expected=rows(evidence['saved']),rows(evidence['expected'])
+    # Dashboard previews use library UUIDs; saved branding uses transform IDs.
+    # Resolve the provider's own canonical URL, never infer image equivalence.
+    if saved is not None and expected is not None and saved!=expected and asset_resolver:
+        from urllib.parse import urlparse
+        normalised=set()
+        for name,asset_id in expected:
+            asset=asset_resolver(asset_id)
+            parsed=urlparse(asset.get('url') or '')
+            match=__import__('re').fullmatch(r'/image-library/transform/([A-Za-z0-9-]+)/image',parsed.path)
+            if str(asset.get('id'))!=asset_id or parsed.scheme!='https' or parsed.hostname!='live-services.pwinty.com' or not match:
+                return False,False
+            normalised.add((name,match[1]))
+        expected=normalised
     selected=(evidence['set_name']==SET and saved is not None and expected is not None and len(saved)==len(expected)==2
               and {n for n,_ in expected}==TYPES and saved==expected)
     return selected,selected and evidence['available'] is True
 
 
-def evaluate(value,snapshot,order,item,evidence,*,identity_verified):
+def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolver=None):
     if not isinstance(evidence,dict) or set(evidence)!={'quality','sku','colour','shipping','inserts'}:raise ValueError('Dashboard QA evidence is incomplete.')
     receipt=value['dashboard_qa'];shipping=evidence['shipping']
     if not isinstance(shipping,dict) or set(shipping)!={'options','selected'}:raise ValueError('Shipping readback is incomplete.')
     planned=receipt['shipping']
     choice=shipping_choice(shipping['options'],intent(snapshot.get('shipping')),shipping['selected'])
     quote_ok=(shipping['options']==planned['options'] and choice==planned['target']==shipping['selected']==clean(order.get('shippingMethod')))
-    selected,available=insert_checks(evidence['inserts'])
+    selected,available=insert_checks(evidence['inserts'],asset_resolver)
     mapping=snapshot['mapping'];frame=mapping['frame']=='Unframed' or clean((item.get('attributes') or {}).get('color'))==clean(mapping['prodigi_frame_colour'])
     assets=item.get('assets') or []
     attached=(value.get('browser') or {}).get('verified') is True and len(assets)==1 and prep.digest(assets[0].get('url'))==value.get('url_hash')
@@ -187,7 +200,7 @@ def finish(key,token,evidence,error=''):
             if not receipt.get('started'):raise ValueError('QA stopped before the shipping permit; recheck this same order.')
             snap,order,item=current(value,provider,resolver)
             if pinned_order(receipt['before'])!=pinned_order(order):raise ValueError('Product, artwork, address or inserts changed during QA.')
-            result=evaluate(value,snap,order,item,evidence,identity_verified=identity_proof(snap))
+            result=evaluate(value,snap,order,item,evidence,identity_verified=identity_proof(snap),asset_resolver=getattr(provider,'asset',None))
             value.update(qa=result,checks=result['checks'],status='Ready for manual payment' if all(result['checks'].values()) else 'Needs QA',
                 message='All QA passed. Submission follows the owner’s Orders companion setting.' if all(result['checks'].values()) else ' '.join(result['blockers']))
             pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')

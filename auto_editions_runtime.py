@@ -115,6 +115,10 @@ def _loop():
                 try:
                     from orders_auto_jpg import admit
                     admit(jobs.connect)
+                    from orders_automatic import admit as admit_fulfilment
+                    admit_fulfilment()
+                    from prodigi_submission import kick
+                    kick()
                 except Exception:LOG.warning('ORDERS automatic JPG admission temporarily unavailable')
                 last_orders=time.monotonic()
             from auto_editions_repair import run_one as run_repair,admit as admit_repairs

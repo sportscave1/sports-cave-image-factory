@@ -119,6 +119,13 @@ async def download(request):
             await run_in_threadpool(jobs.retain,job['id'],str(user['id']))
         timings['retain_database_ms']=round((time.monotonic()-phase)*1000,3)
         result=row['result'];output=result['output']
+        preview=request.query_params.get('preview')=='1'
+        if preview:
+            from orders_preview import cached
+            small=cached(output['sha256'])
+            if small.is_file():
+                await run_in_threadpool(assets.verify_output,output)
+                return FileResponse(small,media_type='image/jpeg',headers=HEADERS)
         folder=tempfile.TemporaryDirectory(prefix='sc-edition-download-')
         path=Path(folder.name)/'output.jpg'
         def fetch():
@@ -153,6 +160,11 @@ async def download(request):
         # Permissions/source are rechecked after the potentially slow transfer.
         phase=time.monotonic()
         await stored_current(request,assets=assets)
+        if preview:
+            from orders_preview import create
+            small=await run_in_threadpool(create,path,output['sha256'])
+            folder.cleanup();folder=None
+            return FileResponse(small,media_type='image/jpeg',headers=HEADERS)
         timings['download_final_identity_ms']=round((time.monotonic()-phase)*1000,3)
         timings['download_prepare_ms']=round((time.monotonic()-started)*1000,3)
         logging.getLogger('uvicorn.error').info('AUTO_EDITIONS_DOWNLOAD_TIMINGS job=%s stages=%s',job['id'],timings)

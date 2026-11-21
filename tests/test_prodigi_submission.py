@@ -38,12 +38,15 @@ def test_authorisation_fresh_qa_and_unchanged_order_are_required():
 def test_exactly_one_submit_then_confirm_then_certificate():
     v,s,p,a=ready();v['submission']={'intent_at':prep.now()};events=[]
     def cert(value):
-        assert value['submission']['confirmed'] and p.data['status']=='paused'
+        assert value['submission']['confirmed'] and p.data['status']=='in_production'
         events.append('certificate');return 'https://cdn.shopify.com/certificate.pdf'
     result=submit.run(v,p,lambda _:s,lambda v:events.append(v['status']),cert,may_post=True,authorisation=a)
+    assert result['status']=='Submitted' and events==['Submitted']
+    p.data['status']='in_production';events.clear()
+    result=submit.run(v,p,lambda _:s,lambda v:events.append(v['status']),cert)
     assert p.submits==['99'] and result['status']=='Complete'
     assert events==['Certificate pending','certificate','Complete']
-    assert result['submission']['supplier_status']=='paused'
+    assert result['submission']['supplier_status']=='in_production'
 
 
 def test_timeout_after_acceptance_reads_back_without_resubmitting():
@@ -52,7 +55,9 @@ def test_timeout_after_acceptance_reads_back_without_resubmitting():
         p.submits.append(key);p.data['status']='paused';raise ValueError('Acknowledgement lost')
     p.submit=post
     def cert(_):raise ValueError('Certificate unavailable')
-    assert submit.run(v,p,lambda _:s,lambda _:None,cert,may_post=True,authorisation=a)['status']=='Certificate pending'
+    assert submit.run(v,p,lambda _:s,lambda _:None,cert,may_post=True,authorisation=a)['status']=='Submitted'
+    p.data['status']='in_production'
+    assert submit.run(v,p,lambda _:s,lambda _:None,cert)['status']=='Certificate pending'
     assert submit.run(v,p,lambda _:s,lambda _:None,lambda _:'https://cdn.shopify.com/cert.pdf')['status']=='Complete'
     assert p.submits==['99']
 

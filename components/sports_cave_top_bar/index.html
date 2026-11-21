@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v11-orders";
+  const CONTROLLER_VERSION = "companion-header-v12-orders-restart";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1305,6 +1305,7 @@
       if (rotating) label = `${running.length} working · ${designRotation % running.length + 1}/${running.length} · ${label}`;
       if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
       if (job && (name === 'editions' || ['waiting','running'].includes(job.state)) && !online) label += ' · companion offline';
+      if(name==='orders' && control.automation_enabled===false)label+=' · submit paused';
       if (control.waiting) label += ` · ${control.waiting} waiting`;
       const changed = elements.title.dataset.jobId && elements.title.dataset.jobId !== job?.id;
       elements.title.dataset.jobId = job?.id || '';
@@ -1496,6 +1497,16 @@
                 finally{pendingDesignActions.delete(item.id);button.disabled=false;}
               };actions.append(button);
             }designActions=actions;
+          }
+          if(name==='orders' && item.can_restart) {
+            const actions=doc.createElement('span');actions.className='sc-design-actions';
+            const restart=doc.createElement('button');restart.type='button';restart.textContent='Restart QA';
+            restart.onclick=async()=>{restart.disabled=true;try{
+              const response=await companionFetch('/api/orders-companion/restart',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({allocation_id:Number(item.id)})});
+              const result=await response.json();if(!response.ok)throw Error(result.error||'Restart failed');
+              detail.textContent='Restart queued';lastStaffStatus='';await refreshStaffProgress(false);
+            }catch(error){detail.textContent=error.message;}finally{restart.disabled=false;}};
+            actions.append(restart);designActions=actions;
           }
           if(name==='ads') {
             const actions=article._actions || doc.createElement('span');article._actions=actions;actions.className='sc-ad-actions';

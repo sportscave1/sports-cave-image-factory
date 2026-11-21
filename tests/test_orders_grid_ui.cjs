@@ -16,3 +16,9 @@ test('ready filter requires saved QA success rather than a missing-certificate l
  assert(core.filtered(rows,'complete').every(r=>r.cells.prodigi==='Complete'));
  assert.equal(core.filtered(rows,'all').length,103);
 });
+
+test('countdown stays Submitted and completion follows the worker rather than stale certificate data',()=>{
+ assert.equal(core.category({cells:{prodigi:'Complete'},review:{status:'Submitted'},state:{tone:'success'}}),'ready');
+ assert.equal(core.category({cells:{prodigi:'Needs certificate'},review:{status:'Complete'},state:{tone:'success'}}),'complete');
+ assert.equal(core.category({cells:{prodigi:'Needs certificate'},review:{status:'Queued',can_restart:false},state:{tone:'pending'}}),'progress');
+});

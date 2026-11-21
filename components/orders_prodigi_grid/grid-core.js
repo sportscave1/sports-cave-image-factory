@@ -1,7 +1,7 @@
 (function(root){
   'use strict';
   const PAGE_SIZE=50;
-  function category(row){if(String(row.cells?.prodigi||'').toLowerCase()==='complete')return 'complete';if(row.state?.tone==='success')return 'ready';return 'attention';}
+  function category(row){if(row.review?.status==='Submitted')return 'ready';if(row.review?.status==='Complete')return 'complete';if(String(row.cells?.prodigi||'').toLowerCase()==='complete')return 'complete';if(row.state?.tone==='success')return 'ready';if(row.review&&!row.review.can_restart)return 'progress';return 'attention';}
   function filtered(rows,filter){return filter==='all'?rows:rows.filter(r=>category(r)===filter);}
   function pageRows(rows,page){return rows.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);}
   function togglePage(ids,rows,checked){const next=new Set(ids);for(const r of rows)checked?next.add(r.id):next.delete(r.id);return next;}

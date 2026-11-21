@@ -4,7 +4,7 @@ import re,hashlib,json
 from urllib.parse import urljoin
 
 ORIGIN='https://sports-cave-image-factory.onrender.com'
-ACTIVE={'Queued','Uploading','Creating sandbox draft','Awaiting browser upload','Browser uploading','Checking QA','Preparing JPG','Preparing certificate','Awaiting certificate browser','Certificate browser uploading','Awaiting dashboard QA','Checking dashboard QA','Submitting','Certificate pending'}
+ACTIVE={'Queued','Uploading','Creating sandbox draft','Awaiting browser upload','Browser uploading','Checking QA','Preparing JPG','Preparing certificate','Awaiting certificate browser','Certificate browser uploading','Awaiting dashboard QA','Checking dashboard QA','Submitting','Certificate pending','Submitted'}
 
 
 def supplier_link(order_id):
@@ -71,6 +71,19 @@ def read_statuses(rows,actor):
         return {str(r.get('edition_order_id')):{'status':'Status unavailable','message':'Status could not be read. Review this unit before sending.'} for r in rows}
 
 
+
+def review(saved,row,jpg):
+    from prodigi_dashboard_qa import CHECKS
+    state=(saved or {}).get('status','Waiting')
+    checks=(saved or {}).get('checks') or {}
+    stopped=state in ('Needs QA','Needs review','Submission uncertain','Status unavailable')
+    items=[dict(label=label,state='pass' if checks.get(key) is True else 'fail' if stopped and (checks.get(key) is False or key=='final_check') else 'pending') for key,label in CHECKS.items()]
+    return dict(status=state,message=(saved or {}).get('message','Waiting for automatic artwork preparation.'),
+        items=items,can_restart=stopped,allocation_id=str(row.get('edition_order_id') or ''),
+        order_url=supplier_link((saved or {}).get('order_id')),
+        preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
+
+
 def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
     import streamlit as st
     import streamlit.components.v1 as components
@@ -90,6 +103,10 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
             jpg_label=str(d.get('print_jpg') or '').rsplit('#',1)[-1] if '#' in str(d.get('print_jpg') or '') else ('Open JPG' if safe_link(d.get('print_jpg')) else str(d.get('print_jpg') or '')),
             state=state,certificate=(ORIGIN+'/api/orders/certificate?allocation_id='+aid if aid.isdigit() and str(r.get('prodigi','')).lower()=='complete' else safe_link(r.get('certificate_pdf_url') or r.get('shopify_file_url'))),
             jpg_download=(safe_link(d.get('print_jpg')).replace('&inline=1','').split('#')[0] if '/api/auto-editions/file?' in str(d.get('print_jpg')) else '')))
+        payload[-1]['review']=review(statuses.get(aid),r,payload[-1]['jpg'])
+        if statuses.get(aid,{}).get('status')=='Complete' and statuses[aid].get('certificate_url'):
+            payload[-1]['cells']['prodigi']='Complete'
+            payload[-1]['certificate']=ORIGIN+'/api/orders/certificate?allocation_id='+aid
         if payload[-1]['jpg_label']=='Open':payload[-1]['jpg_label']='Open JPG'
         shipping=payload[-1]['cells']['shipping']
         if shipping.strip().lower() in ('standard','express'):payload[-1]['cells']['shipping']=shipping.strip()+' shipping'

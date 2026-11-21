@@ -4,7 +4,7 @@ import json
 
 JOB_FIELDS = frozenset(('id', 'title', 'label', 'stage', 'state', 'percent', 'detail',
     'chat_url', 'updated_at', 'estimated', 'cancelled', 'can_cancel', 'can_defer',
-    'can_play', 'control_action', 'posting_id'))
+    'can_play', 'control_action', 'posting_id','can_restart'))
 UPLOAD_FIELDS = JOB_FIELDS | {'dispatch_id', 'storefront', 'restartable', 'cancellable', 'stalled'}
 
 
@@ -27,7 +27,7 @@ def payload(result):
             if name not in result['queues']:
                 continue
             control = result['queues'][name]
-            queue = pick(control, {'online', 'enabled', 'waiting', 'display', 'unavailable'})
+            queue = pick(control, {'online', 'enabled', 'waiting', 'display', 'unavailable','automation_enabled'})
             if 'jobs' in control:
                 queue['jobs'] = [pick(row, JOB_FIELDS) for row in control['jobs']]
             value['queues'][name] = queue

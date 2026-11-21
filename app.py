@@ -7572,7 +7572,7 @@ def render_sidebar():
     )
 
     _sidebar_route_button("Dashboard", current_page, allowed_routes)
-    for route in ("Orders", "Prodigi", "Edition Ops"):
+    for route in ("Orders", "Edition Ops"):
         _sidebar_route_button(route, current_page, allowed_routes)
 
     with st.sidebar:
@@ -13945,7 +13945,11 @@ def render_selected_page(current_page):
     elif current_page == "Product Assets":
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
-        os_route_pages().render_prodigi_page()
+        if os_accounts.can_access_page(current_os_user(),"Orders"):
+            set_current_page("Orders",source="fulfilment-merge")
+            st.rerun()
+        else:
+            st.warning("Fulfilment is now in Orders. Ask an administrator for Orders access.")
     elif current_page == "Webhook Events":
         os_route_pages().render_webhook_events_page()
     elif current_page == "Sync Runs":

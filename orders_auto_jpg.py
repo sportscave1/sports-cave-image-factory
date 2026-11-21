@@ -25,7 +25,8 @@ def admit(connect,limit=3):
             AND COALESCE(to_jsonb(e)->>'duplicate_allocation_warning','') IN ('','false')
             AND COALESCE(NULLIF(to_jsonb(e)->>'assigned_at','')::timestamptz,
                          NULLIF(to_jsonb(e)->>'created_at','')::timestamptz)>=%s::timestamptz
-            AND COALESCE(a.value->>'status','')<>'Ready'
+            AND (COALESCE(a.value->>'status','')<>'Ready' OR NOT COALESCE((a.value->>'fulfilment_queued')::boolean,false))
+            AND COALESCE(a.value->>'status','') NOT IN ('Needs review','Repair')
             AND (a.updated_at IS NULL OR a.updated_at<now()-interval '30 seconds')
           ORDER BY a.updated_at NULLS FIRST,e.id LIMIT %s""",(PREFIX,since,max(1,min(limit,10))))
         rows=q.fetchall()
@@ -45,6 +46,16 @@ def admit(connect,limit=3):
         value=dict(allocation_id=row['id'],order_reference=row.get('shopify_order_name'),
             title=row.get('product_title') or 'Edition artwork',status=status,message=message,job_id=job_id,
             updated_at=datetime.now(timezone.utc).isoformat())
+        if status=='Ready':
+            from orders_automatic import owner
+            try:
+                actor=owner()
+                if actor:
+                    import prodigi_preparation as prep
+                    prep.request(actor,int(row['id']))
+                    value['fulfilment_queued']=True
+            except (ValueError,PermissionError) as error:
+                value.update(status='Needs review',message=str(error))
         with connect() as c,c.cursor() as q:
             q.execute('INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()',
                       (PREFIX+str(row['id']),json.dumps(value)))

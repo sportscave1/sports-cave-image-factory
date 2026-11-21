@@ -11,7 +11,10 @@ import prodigi_preparation as prep
 SETTING='orders_submit_after_qa'
 LOCK=19721129
 ACCEPTED={'submitted','paused','in_production','partially_shipped','shipped','completed'}
+FINALISED={'in_production','partially_shipped','shipped','completed'}
 _gate=threading.Lock()
+
+class StaleQA(ValueError):pass
 
 
 def setting():
@@ -39,7 +42,7 @@ def checked(value,provider,resolver,authorisation):
     stamp=datetime.fromisoformat(receipt['checked_at'])
     age=(datetime.now(timezone.utc)-stamp).total_seconds()
     if not -30<=age<=300 or receipt['checked_at']<authorisation['changed_at']:
-        raise ValueError('Run Check all QA again after enabling submission; QA must be less than five minutes old.')
+        raise StaleQA('Refreshing automatic QA before submission.')
     snap,order,_=current(value,provider,resolver)
     pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
     if prep.digest(pinned)!=receipt.get('validated_order_hash'):
@@ -90,20 +93,35 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
         if str(order.get('merchantReference'))!=str(before.get('merchantReference')):
             raise ValueError('Supplier order reference changed; review this exact order.')
         if state not in ACCEPTED:
+            receipt['lease_until']=prep.now()
             value.update(status='Submission uncertain',message='Submission not confirmed ('+str(state)+'). Open the same order for review; it will not be submitted again automatically.')
             persist(value);return value
         receipt.update(confirmed=True,confirmed_at=receipt.get('confirmed_at') or prep.now())
+        if state not in FINALISED:
+            receipt['lease_until']=prep.now()
+            value.update(status='Submitted',message='Submitted to Prodigi · awaiting payment/production under your supplier countdown.')
+            persist(value);return value
+        items=order.get('items') or []
+        mapping=value['snapshot']['mapping']
+        if (len(items)!=1 or str(items[0].get('id'))!=str(value['item_id']) or items[0].get('quantity')!=1
+            or items[0].get('sku')!=mapping['prodigi_code'] or len(items[0].get('assets') or [])!=1
+            or prep.digest(items[0]['assets'][0].get('url'))!=value.get('url_hash')):
+            raise ValueError('The finalised order artwork or product differs from its verified unit; review before certificate upload.')
+        receipt.update(finalised=True,finalised_at=receipt.get('finalised_at') or prep.now())
         value.update(status='Certificate pending',message='Prodigi accepted this order. Uploading the customer certificate; no repeat submission.')
         persist(value)
     except Exception as error:
+        receipt['lease_until']=prep.now()
         value.update(status='Submission uncertain',message=str(error) if isinstance(error,ValueError) else 'Supplier readback unavailable. The same order will be checked without resubmitting.')
         persist(value);return value
     try:
         value['certificate_url']=certificate(value)
+        value.pop('last_failure',None)
         value.update(status='Complete',message='Supplier submission and customer certificate upload confirmed.')
     except Exception as error:
         value.update(status='Certificate pending',message='Order already submitted. Certificate upload needs retry; submission will not repeat.')
         prep.record_failure(value,'certificate_after_submission',str(error) if isinstance(error,ValueError) else 'Certificate upload failed.')
+    receipt['lease_until']=prep.now()
     persist(value)
     return value
 
@@ -117,7 +135,7 @@ def tick():
         q.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
           AND NOT COALESCE((value->>'hidden')::boolean,false) AND (
            (value->>'status'='Ready for manual payment' AND %s AND NOT value ? 'submission') OR
-           (value->>'status' IN ('Submitting','Submission uncertain','Certificate pending') AND updated_at<now()-interval '90 seconds'
+           (value->>'status' IN ('Submitting','Submitted','Submission uncertain','Certificate pending') AND updated_at<now()-interval '30 seconds'
             AND COALESCE((value->'submission'->>'lease_until')::timestamptz,'epoch')<now()))
           ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED""",(bool(authorisation.get('enabled')),))
         row=q.fetchone()
@@ -125,6 +143,10 @@ def tick():
         value=row['value'];may_post=not bool(value.get('submission'))
         if may_post:
             try:checked(value,prep.Client(),prep.resolve,authorisation)
+            except StaleQA:
+                value.pop('dashboard_qa',None)
+                value.update(status='Checking QA',message='Refreshing automatic QA before submission.')
+                prep.save(q,value);return
             except ValueError as error:
                 value.update(status='Needs QA',message=str(error));prep.save(q,value);return
             # A supplier-wide unique fence also covers an accidental second OS

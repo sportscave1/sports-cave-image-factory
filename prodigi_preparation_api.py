@@ -38,6 +38,8 @@ async def tick(request):
         if not queue.enabled():
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         await run_in_threadpool(desktop, auth[7:])
+        from orders_automatic import kick as admit_orders
+        admit_orders()
         value = await run_in_threadpool(queue.tick)
         from prodigi_submission import kick
         kick()
@@ -118,7 +120,35 @@ async def dashboard_qa_action(request):
 
 from orders_certificate import open_certificate
 
-ROUTES = (('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+
+async def restart_order(request):
+    from files_upload_api import _request_user,_same_origin
+    from product_upload_api import HEADERS,failure
+    try:
+        if not request.headers.get('origin') or not _same_origin(request):raise PermissionError('Request origin rejected.')
+        user=await run_in_threadpool(_request_user,request,required_page='Orders')
+        queue.require_user(user)
+        body=await request.json()
+        if not isinstance(body,dict) or set(body)!={'allocation_id'} or type(body['allocation_id']) is not int or body['allocation_id']<=0:
+            raise ValueError('Choose an allocated order to restart.')
+        saved=await run_in_threadpool(queue.read,body['allocation_id'])
+        if not saved:result=await run_in_threadpool(queue.request,user,body['allocation_id'])
+        elif saved.get('submission'):
+            # Restart after submit means readback, never a second Submit.
+            from prodigi_submission import kick
+            kick();result=saved
+        elif saved.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA','Browser uploading','Awaiting browser upload'):result=saved
+        else:result=await run_in_threadpool(queue.reconcile,user,body['allocation_id'])
+        if result and result.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA'):
+            def clear_request_failure():
+                with queue.connect() as c,c.cursor() as q:
+                    q.execute("UPDATE app_settings SET value=value || %s::jsonb,updated_at=now() WHERE key=%s",
+                        (__import__('json').dumps(dict(active=False,resolved_at=queue.now())),queue.FAILURE_PREFIX+str(body['allocation_id'])))
+            await run_in_threadpool(clear_request_failure)
+        return JSONResponse({'status':(result or {}).get('status','Checking QA')},headers=HEADERS)
+    except Exception as error:return failure(error)
+
+ROUTES = (('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),

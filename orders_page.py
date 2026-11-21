@@ -2813,10 +2813,6 @@ def _selected_detail_rows(rows):
 def _render_orders_table(rows,selection_guard=None):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
-    if st.session_state.get('orders-narrow-view'):
-        _render_top_actions(rows,None)
-        _render_mobile_orders(rows)
-        return
     resources = _order_display_resources(rows)
     display_rows = _display_rows(rows,normalised=True,resources=resources)
     import orders_prodigi_grid as grid
@@ -2825,50 +2821,18 @@ def _render_orders_table(rows,selection_guard=None):
     @st.fragment
     def selection_workspace():
         if selection_guard and not selection_guard():return
-        _render_top_actions(rows,None)
         _render_orders_selection_workspace(rows,resources,display_rows,statuses)
     selection_workspace()
     _perf_log("render table", start, rows=len(rows))
 
 
 def _render_orders_selection_workspace(rows,resources,display_rows,statuses):
-    import auto_editions_runtime
-    _render_inline_prodigi_actions(rows)
+    # All daily review lives in the lightweight table/drawer component.
     with st.container(border=False, key="orders-table"):
         from orders_prodigi_grid import render
         render(rows,display_rows,grid_key=GRID_KEY,
             selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {},statuses=statuses)
         psd_directory.render_missing_link_guard(st)
-    selected_print_rows = _selected_rows_from_state(rows)
-    if selected_print_rows and not st.session_state.get('orders-prodigi-review'):
-        if st.button('Review selected edition details',key='orders-review-selected-details'):
-            st.session_state['orders-prodigi-review']=str(selected_print_rows[0].get('edition_order_id') or '')
-            st.rerun(scope='fragment')
-    if selected_print_rows and st.session_state.get('orders-prodigi-review'):
-        mapping, cloud_links = resources
-        with st.expander("Selected unit details / Print JPG", expanded=bool(st.session_state.get('orders-prodigi-review'))):
-            for selected in _selected_detail_rows(selected_print_rows):
-                status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
-                st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
-                st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
-                allocation_id=str(selected.get('edition_order_id') or '')
-                from prodigi_preparation_ui import render as render_prodigi_preparation
-                render_prodigi_preparation(selected, st.session_state.get('sports_cave_current_user') or {}, compact=True)
-                if allocation_id in cloud_links:
-                    if cloud_links[allocation_id].startswith(('/auto-editions/','/api/auto-editions/file')):
-                        with st.container(horizontal=True):
-                            st.link_button(('Open JPG' if auto_editions_runtime.link_label(cloud_links[allocation_id])=='Open' else auto_editions_runtime.link_label(cloud_links[allocation_id])),cloud_links[allocation_id])
-                            _render_send_artwork(selected, 'selected')
-                    else:
-                        st.caption('Edition JPG: '+cloud_links[allocation_id])
-                elif edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
-                    with st.container(horizontal=True):
-                        st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
-                        _render_send_artwork(selected, 'selected')
-                else:
-                    st.caption(f"Print JPG — {status['label']}: {status['reason']}")
-                if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
-                    st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
 
 
 def _mobile_unit_id(row):
@@ -2968,15 +2932,14 @@ def _responsive_orders_mode():
 def _render_orders_search_form():
     if hasattr(st, "form") and hasattr(st, "form_submit_button"):
         with st.form("orders-search-form", clear_on_submit=False, border=False):
-            search_cols = st.columns([6, 1, 1], vertical_alignment="center")
+            search_cols = st.columns([8, 1], vertical_alignment="center")
             query = search_cols[0].text_input(
                 "Search orders",
                 key=SEARCH_KEY,
                 label_visibility="collapsed",
                 placeholder="Order, customer, product, variant, edition",
             )
-            search_cols[1].caption("Latest 75")
-            with search_cols[2]:
+            with search_cols[1]:
                 submitted = st.form_submit_button("Search", use_container_width=True)
         return str(query or "").strip(), bool(submitted)
 
@@ -3041,7 +3004,6 @@ def _render_orders_data_area(selection_guard=None):
     # those orders so a quantity-2 line can never lose its second allocation here.
     visible_rows = rows
 
-    _responsive_orders_mode()
     if st.session_state.get('orders-prodigi-feedback'):
         st.warning(st.session_state.pop('orders-prodigi-feedback'))
     if selection_guard is None:_render_orders_table(visible_rows)
@@ -3076,11 +3038,6 @@ def render_page(selection_guard=None):
     print("PERF Orders page entry", flush=True)
     _render_orders_styles()
     st.title("Orders")
-    actor=st.session_state.get('sports_cave_current_user') or {}
-    import os_accounts,prodigi_preparation
-    if prodigi_preparation.enabled() and os_accounts.is_admin(actor) and os_accounts.can_access_page(actor,'Prodigi'):
-        from prodigi_submission import controls
-        controls(actor)
     search_text, search_submitted = _render_orders_search_form()
     if _async_orders_load_supported():
         if search_submitted:
