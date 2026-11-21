@@ -140,6 +140,11 @@ def run_one(connect):
             checkpoint(connect,record,'Waiting','Companion preparation and technical validation are running.');return True
         if row.get('technical_state') in ('Pending','Processing'):
             checkpoint(connect,record,'Waiting','Verifying the retained PSD package.');return True
+        if (row.get('preparation_hash') and row['status']=='Blocked' and row.get('priority',0)>0
+                and row.get('technical_state') is None and d.get('technical_seed_hash')!=row['preparation_hash']):
+            from auto_editions_technical import Technical
+            Technical(connect).seed()
+            checkpoint(connect,record,'Waiting','Uploaded package is queued for technical validation.',technical_seed_hash=row['preparation_hash']);return True
         if d['state']=='Waiting':
             handoff(connect,record,row,'Automatic repair needs PSD diagnosis. Queued for the Edition Companion.');return True
         # Repair is explicit authority to resume this one deferred product only.

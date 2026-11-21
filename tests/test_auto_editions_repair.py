@@ -101,3 +101,14 @@ def test_ready_jpg_is_required_before_repair_completion(broken):
     with patch('auto_editions_runtime.job_for',return_value=(dict(identity=dict(source=dict(product_gid=PID))),None)),patch('auto_editions_runtime.stores',return_value=(None,jobs)),patch('auto_editions_runtime.start_worker'):
         repair.run_one(d.connect)
     with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
+
+def test_newly_uploaded_package_waits_for_technical_seed_instead_of_codex(broken):
+    d,sql=broken;repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Waiting','Native preparation running')
+    row=dict(product_gid=PID,dropbox_file_id='id:original',status='Blocked',priority=10,
+        preparation_hash='b'*64,technical_state=None,replacement=None)
+    with patch.object(repair,'snapshot',return_value=row),patch('auto_editions_technical.Technical.seed') as seed:
+        repair.run_one(d.connect);seed.assert_called_once()
+    assert repair.claim(d.connect) is None
+    with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
