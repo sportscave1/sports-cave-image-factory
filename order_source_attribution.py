@@ -1,5 +1,6 @@
 """Observed Shopify last-visit attribution; never infer paid traffic from a referrer."""
 from urllib.parse import urlsplit, parse_qsl
+from google_tracking_contract import paid_term
 
 META = {"facebook", "instagram", "meta", "fb", "ig"}
 PAID = {"cpc", "ppc", "paid", "paid_social", "paid-social", "paidsocial", "paid_search", "paidsearch", "paid_shopping"}
@@ -35,7 +36,21 @@ def last_visit(journey):
     query = {}
     for k,v in pairs:
         query.setdefault(k.lower(),set()).add(v.strip().lower())
-    for name in ("source","medium","campaign"):
+    term_values = query.get("utm_term", set())
+    marker = utm.get("term") or (next(iter(term_values)) if len(term_values) == 1 else "")
+    if paid_term(marker):
+        origin = platform(utm.get("source") or visit.get("source"))
+        mediums = query.get("utm_medium", set()) | {utm.get("medium", "")}
+        # A paid-only term survives Shopify's supported UTM fields even when
+        # the shared Merchant link also contributes product_sync defaults.
+        # Explicit organic/other-channel or conflicting marker evidence wins.
+        if (origin != "google" or visit.get("sourceType") == "SEO"
+                or not mediums <= (PAID | {"", "product_sync"})
+                or query.get("utm_source", {"google"}) != {"google"}
+                or (term_values and term_values != {marker})):
+            return {"channel":"Unresolved", "reason":"conflicting_paid_marker"}
+        return {"channel":"Google paid", "reason":"google_paid_utm_marker"}
+    for name in ("source","medium","campaign","term"):
         values = query.get("utm_"+name, set())
         if len(values)>1 or (utm.get(name) and values and values!={utm[name]}):
             return {"channel":"Unresolved", "reason":"conflicting_tags"}

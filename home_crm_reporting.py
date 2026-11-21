@@ -13,8 +13,8 @@ from display_snapshot import Snapshots
 from google_direct_reporting import GoogleReports, MemoryReports
 
 SYDNEY = ZoneInfo("Australia/Sydney")
-VERSION = 3
-PREFIX = "home_crm_v3:"
+VERSION = 4
+PREFIX = "home_crm_v4:"
 CHANNELS = ("Facebook paid", "Google paid", "Organic", "Other", "Unresolved")
 DEVICES = ("mobile", "desktop", "other")
 SNAPSHOTS = Snapshots(workers=2, limit=24, ttl=900, retry=60, max_age=21600, byte_limit=2_000_000)
@@ -29,7 +29,7 @@ ORDERS_QUERY = """query HomeCRMOrders($query: String!, $after: String) {
   orders(first: 250, after: $after, query: $query, sortKey: CREATED_AT) {
     nodes { id createdAt cancelledAt test
       customerJourneySummary { ready lastVisit { source sourceType landingPage
-        utmParameters { source medium campaign } } }
+        utmParameters { source medium campaign term } } }
     }
     pageInfo { hasNextPage endCursor }
   }
@@ -114,6 +114,7 @@ def ga4(start, end):
 
 def ledger(order_ids, rows, journeys=None):
     matches = {}
+    google_sessions = {}
     for row in rows:
         if float(row["metrics"].get("ecommercePurchases", 0)) <= 0:
             continue
@@ -124,11 +125,17 @@ def ledger(order_ids, rows, journeys=None):
         device = dims.get("deviceCategory")
         matches.setdefault(identity, set()).add((
             channel(dims.get("sessionSourceMedium")), device if device in ("mobile", "desktop") else "other"))
+        # Keep exact source evidence transient. A non-Google, missing or
+        # contradictory observation prevents a Google feed-only resolution.
+        raw_source = str(dims.get("sessionSourceMedium") or "").strip().lower()
+        google_sessions.setdefault(identity, set()).add(raw_source)
     table = {name: dict(channel=name, mobile=0, desktop=0, other=0, total=0) for name in CHANNELS}
     conflicted = 0
     ga4_counts = {name: 0 for name in CHANNELS}
     paid_organic_differences = 0
     reconciliations, reasons = {}, {}
+    resolutions = {"paid": 0, "organic": 0}
+    raw_shopify_counts = {name: 0 for name in CHANNELS}
     for identity in order_ids:
         observations = matches.get(identity, set())
         sources = {s for s, _ in observations}
@@ -140,6 +147,7 @@ def ledger(order_ids, rows, journeys=None):
         if journeys is not None:
             evidence = journeys.get(identity, {"channel":"Unresolved", "reason":"journey_pending_or_missing"})
             chosen = evidence["channel"]
+            raw_shopify_counts[chosen] += 1
             paid_organic_differences += (
                 source in ("Facebook paid", "Google paid") and chosen == "Organic"
                 or chosen in ("Facebook paid", "Google paid") and source == "Organic")
@@ -148,6 +156,16 @@ def ledger(order_ids, rows, journeys=None):
                 reconciliations[pair] = reconciliations.get(pair, 0) + 1
             source = chosen
             reason = evidence["reason"]
+            if reason == "google_listing_paid_status_unknown":
+                raw = google_sessions.get(identity, set())
+                if len(raw) == 1:
+                    observed = next(iter(raw))
+                    if observed in ("google / cpc", "google / ppc", "google / paid_search", "google / paidsearch", "google / paid_shopping"):
+                        source, reason = "Google paid", "google_listing_ga4_paid"
+                        resolutions["paid"] += 1
+                    elif observed == "google / organic":
+                        source, reason = "Organic", "google_listing_ga4_organic"
+                        resolutions["organic"] += 1
             reasons[reason] = reasons.get(reason, 0) + 1
         device = next(iter(devices)) if len(devices) == 1 else "other"
         conflicted += len(sources) > 1 or len(devices) > 1
@@ -157,6 +175,8 @@ def ledger(order_ids, rows, journeys=None):
             "matched": len(matches), "unmatched": len(order_ids)-len(matches), "conflicted": conflicted,
             "source_reconciliation": [{"ga4_channel":a,"shopify_channel":b,"orders":n} for (a,b),n in sorted(reconciliations.items())],
             "source_reasons": reasons, "ga4_channel_orders": ga4_counts,
+            "shopify_channel_orders": raw_shopify_counts,
+            "google_listing_resolutions": resolutions,
             "paid_organic_differences": paid_organic_differences}
 
 
@@ -201,7 +221,7 @@ def google(start, end):
     if end >= datetime.now(SYDNEY).date():
         return {"status": "partial_day", "roas": None, "note": "Google Ads appears after the reporting day completes."}
     totals = {"spend": Decimal(0), "value": Decimal(0), "purchases": Decimal(0)}
-    current, chunks = start, []
+    current, chunks, tracking_health = start, [], None
     while current <= end:
         last = min(end, current+timedelta(days=30))
         report = ads.report(current, last)
@@ -210,10 +230,12 @@ def google(start, end):
         for key in totals:
             totals[key] += Decimal(str(report["totals"][key]))
         chunks.append(report["fetched_at"])
+        tracking_health = report.get("tracking_health")
         current = last + timedelta(days=1)
     return {"status": "verified", "roas": float(totals["value"]/totals["spend"]) if totals["spend"] else None,
             "purchases": float(totals["purchases"]),
             "spend": float(totals["spend"]), "value": float(totals["value"]),
+            "tracking_health": tracking_health,
             "note": "PM021126 primary purchase value / spend by ad interaction date. Budget remains A$20/day.",
             "fetched_at": max(chunks)}
 
@@ -239,7 +261,7 @@ def build(start, end, *, readers=None):
             "checked_at": datetime.now(timezone.utc).isoformat(), "partial_day": end >= datetime.now(SYDNEY).date(),
             "ledger": cohort, "coverage": coverage,
             "roas": {name: sources[name].get("roas") for name in ("facebook", "google")},
-            "basis": "One non-test, non-cancelled Shopify order per row, by creation date. Source is Shopify last recorded visit, using explicit paid/organic evidence; Google product-feed tags alone do not prove paid or organic and stay unresolved. Device is from exact GA4 purchase transaction-ID matches. GA4 purchase-session source is a separate model for the same order cohort, not added to this table. Organic last visit does not rule out an earlier ad interaction. Google Ads purchases and ROAS use ad interaction dates, can include later purchases, and cannot identify individual Shopify orders from this aggregate report. Paid platforms can claim overlapping credit."}
+            "basis": "One non-test, non-cancelled Shopify order per row, by creation date. Source uses Shopify last recorded visit. Only ambiguous Google feed-only visits can be resolved by a single consistent Google paid or organic session on the exact GA4 transaction ID; missing or conflicting evidence stays unresolved. Raw Shopify and GA4 counts remain separate. Device is from exact GA4 purchase transaction-ID matches. GA4 purchase-session comparison is a separate model for the same order cohort, never additional orders. Organic last visit does not rule out an earlier ad interaction. Google Ads purchases and ROAS use ad interaction dates, can include later purchases, and cannot identify individual Shopify orders from this aggregate report. Paid platforms can claim overlapping credit."}
 
 
 def key(start, end):
