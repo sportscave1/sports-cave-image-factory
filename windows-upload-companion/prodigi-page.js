@@ -3,7 +3,15 @@ function prodigiExactRow(row,sku,colour) {
   return Array.from(row.querySelectorAll('*')).some(e=>clean(e)===sku) &&
     (!colour||Array.from(row.querySelectorAll('strong')).some(e=>clean(e).toLowerCase()===colour.toLowerCase()));
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow};
+function prodigiControls(scope,selector) {
+  // Prodigi's placement tools are open-shadow web components inside the dialog.
+  const found=Array.from(scope.querySelectorAll(selector));
+  for(const host of scope.querySelectorAll('*')) {
+    if(host.shadowRoot) found.push(...prodigiControls(host.shadowRoot,selector));
+  }
+  return found;
+}
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -14,7 +22,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow};
   const dialog=name=>dialogs().find(e=>Array.from(e.querySelectorAll('h1,h2')).some(h=>text(h)===name));
   const button=(scope,label)=>{
     const name=e=>e.getAttribute('aria-label')||text(e)||Array.from(e.querySelectorAll('img')).map(i=>i.alt).join(' ');
-    const found=Array.from(scope.querySelectorAll('button')).filter(e=>visible(e)&&name(e)===label&&!e.disabled);
+    const found=prodigiControls(scope,'button').filter(e=>visible(e)&&name(e)===label&&!e.disabled);
     if(found.length!==1) throw Error('A unique '+label+' control is required.');
     return found[0];
   };

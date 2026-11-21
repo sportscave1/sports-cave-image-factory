@@ -9,7 +9,8 @@ draft; payment and production release remain manual in Prodigi.
 On 21 November 2026, sandbox v5 item artwork PATCH returned success while clearing
 the selected SKU. Resending SKU/catalogueVariantId did not preserve it. Live item
 PATCH is therefore blocked in the adapter regardless of legacy acceptance flags.
-The browser opens the exact existing draft, uploads the JPG, chooses its
+The browser opens the exact existing draft, uploads the JPG, reaches the editor's
+open-shadow placement controls, chooses its
 orientation and full-image fit, and saves only the image editor. It has no Submit,
 payment, login or production-release operation.
 
@@ -21,7 +22,7 @@ and performs the upload/editor actions. Render retains provider keys, serializes
 handoffs, checks the allocation and draft before Save, and performs supplier
 readback/QA. No supplier API key, customer address or password goes into a handoff.
 
-Versions 1.7.13–1.7.17 add content scripts only on exact Prodigi order detail pages.
+Versions 1.7.13–1.7.18 add content scripts only on exact Prodigi order detail pages.
 It requests no cookie/network interception permissions and never accesses login
 pages. New supplier-site access requires the owner's approval and extension reload.
 

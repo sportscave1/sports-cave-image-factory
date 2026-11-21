@@ -5,7 +5,16 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-browser.js'),'utf8');
-const {prodigiExactRow}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiExactRow,prodigiControls}=require('../windows-upload-companion/prodigi-page.js');
+
+test('placement controls include nested open shadow components within this editor only',()=>{
+  const fit={id:'fit'},save={id:'save'},other={id:'other-editor'};
+  const root=(buttons,hosts=[])=>({querySelectorAll:s=>s==='button'?buttons:hosts});
+  const nested={shadowRoot:root([fit])};
+  const editor=root([save],[{shadowRoot:root([],[nested])}]);
+  assert.deepEqual(prodigiControls(editor,'button'),[save,fit]);
+  assert(!prodigiControls(editor,'button').includes(other));
+});
 test('the supplier row matches exact SKU elements even when the row text is concatenated',()=>{
   function row(sku,colour) {
     const code={textContent:sku},frame={textContent:colour};
