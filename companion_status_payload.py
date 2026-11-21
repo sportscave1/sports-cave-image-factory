@@ -23,11 +23,11 @@ def payload(result):
         value['jobs'].append(job)
     if 'queues' in result:
         value['queues'] = {}
-        for name in ('upload', 'design', 'ads'):
+        for name in ('upload', 'design', 'ads', 'editions'):
             if name not in result['queues']:
                 continue
             control = result['queues'][name]
-            queue = pick(control, {'online', 'enabled', 'waiting', 'display'})
+            queue = pick(control, {'online', 'enabled', 'waiting', 'display', 'unavailable'})
             if 'jobs' in control:
                 queue['jobs'] = [pick(row, JOB_FIELDS) for row in control['jobs']]
             value['queues'][name] = queue

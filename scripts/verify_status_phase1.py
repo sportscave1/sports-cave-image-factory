@@ -19,7 +19,7 @@ TESTS = ['companion_header', 'companion_display_resilience', 'companion_backlog_
          'design_deletion_status', 'product_upload_generation_status', 'meta_posting_progress',
          'ads_companion_controls', 'ads_companion_transfer', 'companion_phase5', 'companion_phase4',
          'product_upload_jobs', 'product_upload_staff_queue', 'morning_design_queue',
-         'companion_header_browser', 'status_phase1_history', 'companion_status_payload']
+         'companion_header_browser', 'status_phase1_history', 'companion_status_payload', 'auto_editions_header']
 
 
 def call(args, **kwargs):
@@ -44,7 +44,7 @@ def main():
             'tests/status_phase1_queue_baseline.py', 'tests/status_phase2_browser.py',
             'companion_status_payload.py', 'product_upload_staff_queue.py',
             'components/sports_cave_top_bar/index.html', 'windows-upload-companion/composer.js',
-            'tests/status_phase3_browser.py']
+            'tests/status_phase3_browser.py', 'windows-upload-companion/manifest.json', 'scripts/soak_companion_display.py']
         for file in files:
             value = (ROOT / file).read_bytes()
             hashes[file] = hashlib.sha256(value).hexdigest()
@@ -89,7 +89,7 @@ def main():
                 ('phase2-browser.json', ['python', '-B', 'tests/status_phase2_browser.py'])]
         if args.phase3_only:
             commands = []
-        commands.append(('phase3-browser.json', ['python', '-B', 'tests/status_phase3_browser.py']))
+        commands.append(('phase3-browser.json', ['python', '-B', 'tests/status_phase3_browser.py', 'windows-upload-companion/manifest.json', 'scripts/soak_companion_display.py']))
         for filename, command_args in commands:
             result = subprocess.run(command + command_args, capture_output=True, cwd=ROOT, timeout=180)
             (output / filename).write_bytes(result.stdout)
