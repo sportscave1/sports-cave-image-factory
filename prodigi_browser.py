@@ -297,6 +297,9 @@ def _finish(key,read_receipt,stage):
             value['browser'].update(verified=True,verified_at=prep.now(),
                 original_sha256=snap['output']['sha256'],original_asset_id=asset_id,
                 supplier_original_bytes_verified=raw_verified,full_image_fit_verified=True)
+            from prodigi_full_qa import enabled,live_enabled
+            if enabled() and (sandbox or live_enabled()):
+                value.update(status='Checking QA',message='Artwork saved. Checking production evidence, certificate and packing slip.')
             if sandbox:
                 value.update(sandbox_unpaid_verified=True,artwork_readback_verified=True)
         except Exception as error:

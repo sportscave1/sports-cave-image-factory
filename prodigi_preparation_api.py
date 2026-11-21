@@ -53,6 +53,7 @@ async def tick(request):
 
 
 from prodigi_artwork import serve as serve_artwork
+from prodigi_documents import serve as serve_document
 
 
 async def browser_action(request):
@@ -85,4 +86,5 @@ async def browser_action(request):
 ROUTES = (('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),
-          ('/api/prodigi-artwork/{token}', serve_artwork, ('GET', 'HEAD')))
+          ('/api/prodigi-artwork/{token}', serve_artwork, ('GET', 'HEAD')),
+          ('/api/prodigi-document/{token}', serve_document, ('GET','HEAD')))

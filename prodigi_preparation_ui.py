@@ -29,25 +29,37 @@ def render(row, user, *, answers=None, compact=False):
                 from prodigi_client import identifier
                 st.link_button('Open this existing Prodigi order', 'https://dashboard.prodigi.com/orders/'
                                + identifier(saved['order_id']) + '/detail')
-            st.info(saved['message'])
+            if saved['status']=='Ready for manual payment':st.success(saved['message'])
+            elif saved['status'] in ('Needs QA','Needs review'):st.warning(saved['message'])
+            else:st.info(saved['message'])
             if saved.get('artwork_expires_at'):
                 st.caption('Recheck before manual payment. Artwork link review date: ' + saved['artwork_expires_at'][:10])
             if saved.get('qa'):
+                if saved['qa'].get('checked_at'):st.caption('Last full QA check: '+saved['qa']['checked_at'])
                 st.caption('Prodigi download: ' + ('confirmed' if saved['qa'].get('supplier_download_confirmed')
                     else 'pending; the exact artwork is attached for manual release'))
+            approval=saved.get('print_approval') or {}
+            if approval and not approval.get('print_ready') and approval.get('source_ppi'):
+                st.warning(f"Native source: {min(approval['source_ppi']):.0f} PPI; supplier recommendation: {approval['required_ppi']} PPI. Enlarging the JPG does not create native detail.")
+                st.caption('A higher-resolution original master is required. This limitation is not automatically waived.')
+            if saved.get('document'):
+                st.link_button('Open verified certificate / packing slip PDF',saved['document']['url'])
             if saved.get('order_id') and saved.get('item_id'):
                 with st.expander('Companion QA review prompt'):
                     st.code(queue.review_prompt(saved), language=None)
             for field, label in queue.CHECKS.items():
                 st.caption(('✓ ' if saved['checks'].get(field) else 'Review required · ') + label)
-            if st.button('Recheck same Prodigi item', key=key+'-recheck'):
+            if 'production_approval' in saved['checks']:
+                st.caption(('✓ ' if saved['checks']['production_approval'] else 'Review required · ')+'Production print approval')
+            if st.button('Check all QA again', key=key+'-recheck'):
                 try:
                     queue.reconcile(user, int(allocation))
                 except Exception as error:
                     st.error(str(error) if isinstance(error, ValueError) else 'Could not queue a recheck.')
                 else:
                     st.rerun()
-            if answers is not None:
+            from prodigi_full_qa import live_enabled
+            if answers is not None and not live_enabled():
                 slip = st.checkbox('I verified the certificate and paid packing slip are attached to this exact Prodigi order.', key=key+'-slip')
                 if st.button('Save QA · ready for manual payment', key=key+'-ready', disabled=saved['status'] != 'Needs QA'):
                     try:

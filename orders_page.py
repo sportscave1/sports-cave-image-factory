@@ -1670,6 +1670,11 @@ def _selected_rows_from_state(rows):
     if st.session_state.get('orders-narrow-view'):
         selected_ids = set(st.session_state.get('orders-mobile-selection') or [])
         return [_normalise_row(row) for row in rows if _mobile_unit_id(row) in selected_ids]
+    if 'orders-grid-selected-ids' in st.session_state:
+        from orders_prodigi_grid import row_identity
+        selected_ids=set(st.session_state['orders-grid-selected-ids'])
+        normalised=[_normalise_row(row) for row in rows]
+        return [row for row in normalised if row_identity(row) in selected_ids]
     selected = []
     for index in _selected_indices_from_state():
         if 0 <= index < len(rows):
@@ -2800,7 +2805,7 @@ def _render_orders_table(rows):
     selected_print_rows = _selected_rows_from_state(rows)
     if selected_print_rows:
         mapping, cloud_links = resources
-        with st.expander("Selected unit details / Print JPG", expanded=True):
+        with st.expander("Selected unit details / Print JPG", expanded=bool(st.session_state.get('orders-prodigi-review'))):
             for selected in selected_print_rows:
                 status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
@@ -2824,19 +2829,12 @@ def _render_orders_table(rows):
                 if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
                     st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
     with st.container(border=False, key="orders-table"):
-        st.dataframe(
-            _display_table_payload(rows, normalised=True, resources=resources),
-            hide_index=True,
-            use_container_width=True,
-            height=min(760, max(420, 28 * (len(rows) + 1))),
-            column_order=VISIBLE_COLUMNS,
-            column_config=_column_config(),
-            selection_mode="multi-row",
-            on_select="rerun",
-            row_height=28,
-            key=GRID_KEY,
-        )
-        _render_order_copy_click_handler()
+        @st.fragment
+        def compact_grid():
+            from orders_prodigi_grid import render
+            render(rows,_display_rows(rows,normalised=True,resources=resources),grid_key=GRID_KEY,
+                selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {})
+        compact_grid()
         psd_directory.render_missing_link_guard(st)
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)

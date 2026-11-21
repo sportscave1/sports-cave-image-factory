@@ -4981,6 +4981,18 @@ def render_prodigi_page():
         selected_row = next((row for row in matches if row.get("row_id") == selected_id), None)
         _prodigi_order_line_table(matches, existing_dispatch_rows, selected_id)
 
+    from prodigi_full_qa import live_enabled
+    automatic_actor = st.session_state.get('sports_cave_current_user') or {}
+    if (selected_row and live_enabled() and os_accounts.is_admin(automatic_actor)
+            and str(selected_row.get('edition_order_id') or '').isdigit()):
+        manual_qa = st.toggle('Manual QA details', value=False, key='prodigi-manual-qa-details')
+        if not manual_qa:
+            _prodigi_selected_line_summary(selected_row)
+            from prodigi_preparation_ui import render as render_automatic_qa
+            render_automatic_qa(selected_row, automatic_actor)
+            st.caption('The companion checks every question together. Pay and Submit manually in Prodigi after Ready appears.')
+            selected_row = None
+
     if selected_row:
         existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row)
         already_submitted = existing and _prodigi_dispatch_status(existing) in {"Submitted", "Complete"}

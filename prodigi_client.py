@@ -47,6 +47,9 @@ class Client:
                    or (method == 'GET' and path.startswith('/orders?merchantReference=') and listing)
                    or (method == 'GET' and path == '/assets?limit=100' and listing)
                    or (method == 'GET' and re.fullmatch(r'/assets/[A-Za-z0-9-]{1,100}', path))
+                   or (method == 'GET' and re.fullmatch(r'/catalogue/variants/[A-Za-z0-9-]{1,100}', path))
+                   or (method == 'POST' and re.fullmatch(r'/assets/[A-Za-z0-9-]{1,100}/validate', path)
+                       and isinstance(body,dict) and set(body)=={'catalogueVariantId','printArea'} and body['printArea']=='default')
                    or (method == 'PATCH' and re.fullmatch(r'/orders/[A-Za-z0-9-]{1,100}/items/[A-Za-z0-9-]{1,100}', path)))
         if not allowed:
             raise ProdigiError('Only existing order reads and draft artwork edits are supported.')
@@ -86,6 +89,37 @@ class Client:
 
     def asset(self, asset_id):
         return self.request('GET','/assets/'+identifier(asset_id))
+
+    def catalogue(self,sku):
+        return self.request('GET','/catalogue/variants/'+identifier(sku))
+
+    def validate_asset(self,asset_id,sku):
+        return self.request('POST','/assets/'+identifier(asset_id)+'/validate',
+            {'catalogueVariantId':identifier(sku),'printArea':'default'})
+
+    def packing_slip(self,order_id,url):
+        """Only the exact certificate capability, on an unpaid editable draft."""
+        if not re.fullmatch(r'https://sports-cave-image-factory\.onrender\.com/api/prodigi-document/[A-Za-z0-9_-]{43}',url):
+            raise ProdigiError('A verified certificate document is required.')
+        if self.mode=='live' and (os.getenv('SPORTS_CAVE_PRODIGI_FULL_QA_ACCEPTED','').lower()!='true' or
+                os.getenv('SPORTS_CAVE_PRODIGI_FULL_QA_ENABLED','true').lower()!='true'):
+            raise ProdigiError('Live document attachment is disabled pending sandbox acceptance.')
+        order=self.order(order_id)
+        if order.get('status')!='draft' or 'update' not in order.get('allowedActions',[]) or order.get('charges'):
+            raise ProdigiError('Packing slips require an unpaid editable draft.')
+        old=(order.get('packingSlip') or {}).get('url')
+        if old and old!=url:raise ProdigiError('An existing packing slip requires preservation and review.')
+        # The custom packing slip IS this unit's certificate, as in Fulfilment.
+        # No item, product, customer, shipping, payment or submit field is sent.
+        try:
+            response=self.transport.request('PATCH','https://api.prodigi.com/v5/orders/'+identifier(order_id),
+                headers={'X-API-Key':self.key,'Content-Type':'application/json'},
+                json={'packingSlip':{'url':url}},timeout=(5,20),allow_redirects=False)
+        except requests.RequestException:
+            raise ProdigiError('Packing-slip acknowledgement uncertain. Recheck the same draft; do not upload again.') from None
+        if response.status_code!=200:
+            raise ProdigiError(f'Packing-slip attachment returned HTTP {response.status_code}; review this draft.')
+        return response.json().get('data') or {}
 
     def artwork(self, order_id, item_id, url, md5):
         # No arbitrary paths or request payloads from a browser/worker.

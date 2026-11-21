@@ -38,13 +38,17 @@ def render(selected, user):
                 'Customer': snap['recipient']['name'], 'Product': snap['product'],
                 'Edition': f"{snap['number']:03}/{snap['total']}", 'Status': row['status']}], hide_index=True)
             st.info(row['message'])
-            if not (row['source_snapshot'].get('production_evidence') or {}).get('print_ready'):
+            if row.get('document'):
+                st.link_button('Open sandbox certificate / packing slip PDF',row['document']['url'])
+            if not row.get('print_approval') and not (row['source_snapshot'].get('production_evidence') or {}).get('print_ready'):
                 st.warning('This export has no production approval. It can be tested in sandbox; live preparation still requires approval.')
             with st.expander('Sandbox customer and QA · '+row['id'][:8]):
                 st.json(snap['recipient'])
                 st.caption('QA passes only with evidence; missing certificate/packing slip checks remain for review.')
                 for field, label in prep.CHECKS.items():
                     st.caption(('✓ ' if row['checks'].get(field) else 'Review required · ') + label)
+                if 'production_approval' in row['checks']:
+                    st.caption(('✓ ' if row['checks']['production_approval'] else 'Review required · ')+'Production print approval')
             if row.get('order_id'):
                 from prodigi_client import identifier
                 st.link_button('Open sandbox draft', 'https://sandbox-beta-dashboard.pwinty.com/orders/'
@@ -52,6 +56,9 @@ def render(selected, user):
             if row.get('sandbox_unpaid_verified') and row.get('artwork_readback_verified'):
                 st.success('Exact artwork read back from the sandbox. Draft remains unpaid and unsubmitted.')
             receipt = row.get('browser') or {}
+            if receipt.get('verified'):
+                if st.button('Check all sandbox QA again',key='sandbox-all-qa-'+row['id'],disabled=row['status']=='Checking QA'):
+                    sandbox.recheck(user,row['id']);st.rerun()
             if receipt.get('started') and not receipt.get('verified'):
                 if st.button('Recheck saved sandbox artwork', key='sandbox-recheck-'+row['id']):
                     try:
@@ -62,7 +69,7 @@ def render(selected, user):
                     else:
                         st.rerun()
             if st.button('Remove sandbox row from app', key='sandbox-remove-'+row['id'],
-                         disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading')):
+                         disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading','Checking QA')):
                 try:
                     sandbox.remove(user, row['id'])
                 except Exception as error:

@@ -75,6 +75,10 @@ def list_jobs():
         return [r['value'] for r in cur.fetchall()]
 
 
+class MissingJPG(ValueError):
+    pass
+
+
 def resolve(allocation_id, *, allow_sandbox=False):
     """Read the authoritative allocation, existing QA mapping and production JPG."""
     import auto_editions_runtime as runtime
@@ -101,11 +105,13 @@ def resolve(allocation_id, *, allow_sandbox=False):
             AND payload->'identity'->>'allocation_id'=%s ORDER BY updated_at DESC LIMIT 1''', (str(allocation_id),))
         ready = cur.fetchone()
     if not ready:
-        raise ValueError('Generate this unit’s Auto Editions JPG first.')
+        raise MissingJPG('Generate this unit’s Auto Editions JPG first.')
     record, current_unit = jobs.read_bound(ready['id'], allocation_id)
     if not record or not same_allocation(current_unit, record['payload']['identity']):
         raise ValueError('The JPG no longer belongs to this exact allocation.')
-    if (record['result'].get('retained') is not True or (not allow_sandbox and
+    from prodigi_full_qa import live_enabled
+    draft_preparation=not allow_sandbox and live_enabled() and (record['result'].get('test_only') is not False or not record['payload'].get('production'))
+    if (record['result'].get('retained') is not True or (not allow_sandbox and not draft_preparation and
             (record['result'].get('test_only') is not False or not record['payload'].get('production')))):
         raise ValueError('A retained production-approved JPG for this exact allocation is required.')
     output = record['result']['output']
@@ -130,7 +136,8 @@ def resolve(allocation_id, *, allow_sandbox=False):
         recipient=recipient, certificate_url=row.get('certificate_pdf_url') or row.get('shopify_file_url'),
         dimensions=record['result'].get('dimensions'), rendered_number=record['result'].get('edition_number'),
         rendered_total=record['result'].get('edition_total'),
-        production_evidence=(record['payload'].get('production') or {}).get('evidence', {}))
+        production_evidence=(record['payload'].get('production') or {}).get('evidence', {}),
+        **({'draft_preparation':True} if draft_preparation else {}))
 
 
 def validate_order(order, snapshot, order_id, item_id):
@@ -196,11 +203,20 @@ def request(user, allocation_id, order_id='', item_id=''):
     if not enabled():
         raise ValueError('Prodigi preparation is disabled pending imported-order acceptance.')
     allocation_id = int(allocation_id)
-    snapshot = resolve(allocation_id)
+    preparing=False
+    try:snapshot = resolve(allocation_id)
+    except MissingJPG:
+        from prodigi_full_qa import live_enabled
+        if not live_enabled():raise
+        import auto_editions_runtime as runtime
+        job,_=runtime.job_for(allocation_id);registry,jobs=runtime.stores();unit,_=registry.unit(allocation_id)
+        jobs.enqueue(job,str(user['id']));runtime.start_worker();preparing=True
+        snapshot=dict(allocation_id=allocation_id,job_id=job['id'],order_reference=unit.get('shopify_order_name') or unit.get('order_name'),
+            number=job['number'],total=job['total'],product=unit.get('product_title'),identity=job['identity'])
     if order_id or item_id:
         order_id, item_id = identifier(order_id), identifier(item_id)
     value = dict(allocation_id=allocation_id, order_id=order_id, item_id=item_id,
-        fingerprint=digest(snapshot), snapshot=snapshot, status='Queued',
+        fingerprint=digest(snapshot), snapshot=snapshot, status='Preparing JPG' if preparing else 'Queued',
         requester=str(user['id']), checks={}, message='Waiting for Orders companion', history=[],browser_requested=True)
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
@@ -211,6 +227,8 @@ def request(user, allocation_id, order_id='', item_id=''):
             if order_id and item_id and (saved['order_id'], saved['item_id']) == (order_id, item_id) and saved['allocation_id'] != allocation_id:
                 raise ValueError('This Prodigi item is already bound to another numbered unit.')
             if saved['allocation_id'] == allocation_id:
+                if saved['status']=='Preparing JPG' and not preparing and saved['snapshot']['job_id']==snapshot['job_id']:
+                    saved.update(snapshot=snapshot,fingerprint=digest(snapshot),status='Queued');save(cur,saved);return saved
                 if saved['fingerprint'] != value['fingerprint'] or (order_id and
                         any(saved[k] != value[k] for k in ('order_id', 'item_id'))):
                     raise ValueError('This allocation already has a preparation record. Reconcile it before changing the artwork or target.')
@@ -299,12 +317,14 @@ def tick():
             return None
         cur.execute("SET LOCAL idle_in_transaction_session_timeout = '0'")
         cur.execute('''SELECT value FROM app_settings WHERE key LIKE %s
-            AND value->>'status' IN ('Queued','Uploading') ORDER BY updated_at LIMIT 1''', (PREFIX + '%',))
+            AND value->>'status' IN ('Queued','Uploading','Preparing JPG','Checking QA') ORDER BY updated_at LIMIT 1''', (PREFIX + '%',))
         row = cur.fetchone()
         if not row:
             return None
         value = row['value']
+        document_fenced=bool(value.get('document_write_intent'))
         def persist(v):
+            nonlocal document_fenced
             with connect() as write_conn, write_conn.cursor() as write_cur:
                 if v.get('order_id') and v.get('item_id'):
                     write_cur.execute('''SELECT 1 FROM app_settings WHERE key LIKE %s AND key<>%s
@@ -312,6 +332,13 @@ def tick():
                         (PREFIX + '%', PREFIX + str(v['allocation_id']), v['order_id'], v['item_id']))
                     if write_cur.fetchone():
                         raise UploadFenceLost('This Prodigi item belongs to another numbered allocation.')
+                if v.get('document_write_intent') and not document_fenced:
+                    write_cur.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
+                        WHERE key=%s AND NOT COALESCE((value->>'document_write_intent')::boolean,false) RETURNING key''',
+                        (json.dumps(v),PREFIX+str(v['allocation_id'])))
+                    if not write_cur.fetchone():raise UploadFenceLost('Another worker recorded the document upload. Recheck this same draft.')
+                    document_fenced=True
+                    return
                 if v['status'] == 'Uploading':
                     # Durable compare-and-set is an independent second fence if
                     # a network/database failure loses the advisory-lock session.
@@ -323,6 +350,17 @@ def tick():
                     return
                 save(write_cur, v)
         try:
+            if value['status']=='Preparing JPG':
+                import auto_editions_runtime as runtime
+                _,jobs=runtime.stores();job=jobs.read(value['snapshot']['job_id']);runtime.start_worker()
+                if not job or job['status'] in ('Queued','Generating'):return value
+                if job['status']!='Ready':raise ValueError('Numbered JPG generation requires review: '+str(job.get('error_code') or job['status']))
+                snapshot=resolve(value['allocation_id'])
+                if snapshot['job_id']!=value['snapshot']['job_id']:raise ValueError('Source changed during JPG generation.')
+                value.update(snapshot=snapshot,fingerprint=digest(snapshot),status='Queued');persist(value)
+            if value['status']=='Checking QA':
+                from prodigi_full_qa import run as full_qa
+                return full_qa(value,Client(),resolve,persist)
             return run(value, Client(), resolve, artwork_link, persist)
         except UploadFenceLost as error:
             current = read(value['allocation_id'])
@@ -345,6 +383,11 @@ def reconcile(user, allocation_id):
     require_user(user)
     current = read(allocation_id)
     receipt = (current or {}).get('browser') or {}
+    from prodigi_full_qa import live_enabled
+    if receipt.get('verified') and live_enabled():
+        current.update(status='Checking QA',message='Checking all QA evidence for this same draft')
+        with connect() as c,c.cursor() as q:save(q,current)
+        return current
     if receipt.get('started') and not receipt.get('verified'):
         from prodigi_browser import recheck
         return recheck(user, PREFIX + str(int(allocation_id)))
@@ -364,6 +407,8 @@ def reconcile(user, allocation_id):
 def complete_qa(user, allocation_id, answers, packing_slip):
     require_user(user)
     value = read(allocation_id)
+    if value and value['snapshot'].get('draft_preparation'):
+        raise ValueError('Run all automatic QA checks. Draft print approval cannot be replaced by unchecked answers.')
     if not value or not value.get('write_intent') or value['status'] != 'Needs QA':
         raise ValueError('Verify the uploaded artwork before completing QA.')
     if value.get('artwork_expires_at') and datetime.fromisoformat(value['artwork_expires_at']) <= datetime.now(timezone.utc):
