@@ -80,3 +80,7 @@ SEO_ROUTES = (*SEO_ROUTES, SEO_ANALYTICS_ROUTE, *SEO_MENU_ROUTES[1:])
 SEO_NAV_LABELS.update(dict(zip(SEO_MENU_ROUTES, ("Worker", "Plan", "Review", "History"))))
 SEO_NAV_LABELS[SEO_ANALYTICS_ROUTE] = "Analytics"
 SEO_PAGE_KEYS.update({SEO_ANALYTICS_ROUTE: "seo_analytics_workspace", SEO_PLAN_ROUTE: "seo_plan", SEO_REVIEW_ROUTE: "seo_review", SEO_HISTORY_ROUTE: "seo_history"})
+
+# A single visible destination; legacy identities remain permission checked.
+SEO_MENU_ROUTES = (SEO_OVERVIEW_ROUTE,)
+SEO_NAV_LABELS[SEO_OVERVIEW_ROUTE] = "SEO"

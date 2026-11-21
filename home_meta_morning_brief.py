@@ -360,6 +360,18 @@ def publish(raw, user):
     return edition
 
 
+def _seo_fallback(st, user, today, snapshot):
+    """SEO publication remains visible even while the independent CRM brief is missing."""
+    if not os_accounts.can_access_page(user, 'seo'):
+        return
+    import home_seo_report
+    try:
+        saved = snapshot.get('seo', {}) if snapshot is not None else home_seo_report.latest()
+        st.html(home_seo_report.compact_html(saved, today))
+    except Exception:
+        st.caption('SEO report temporarily unavailable.')
+
+
 def render(st, user, today, *, snapshot=None):
     if not can_view(user):
         return
@@ -370,6 +382,7 @@ def render(st, user, today, *, snapshot=None):
         saved = snapshot['saved'] if snapshot is not None else get_app_setting(SETTING_KEY, ensure_schema_first=False)
         if not saved:
             st.caption("No Meta brief has been published yet.")
+            _seo_fallback(st, user, today, snapshot)
             return
         day = _day(saved["date"])
         # Older editions include unrestricted text and financial metrics. Keep them out of the page entirely.
@@ -377,6 +390,7 @@ def render(st, user, today, *, snapshot=None):
     except Exception as error:
         LOG.warning("home_meta_morning_brief_unavailable type=%s", type(error).__name__)
         st.warning("The Meta brief is temporarily unavailable.")
+        _seo_fallback(st, user, today, snapshot)
         return
     if day != today:
         st.caption("Today's recommendations are pending.")
@@ -387,13 +401,26 @@ def render(st, user, today, *, snapshot=None):
             f'<p>{escape(edition["summary"])}</p>'
             f'<details><summary>Ad recommendations</summary>{ad_rows_html(edition, today, compact=True)}</details></section>'
         )
+    saved_seo = {}
+    if os_accounts.can_access_page(user, 'seo'):
+        import home_seo_report
+        try:
+            saved_seo = snapshot.get('seo', {}) if snapshot is not None else home_seo_report.latest()
+        except Exception:
+            pass
     insights = (edition or {}).get("insights", {})
     insight_cards = "".join(
         f'<details class="sc-meta-insight"><summary>{label}</summary><ul>'
         + "".join(f"<li>{escape(item)}</li>" for item in insights[section])
         + "</ul></details>"
-        for section, label in INSIGHT_LABELS.items() if section in insights
+        for section, label in INSIGHT_LABELS.items() if section in insights and (section != "seo" or not saved_seo)
     )
+    if os_accounts.can_access_page(user, 'seo'):
+        import home_seo_report
+        try:
+            insight_cards += home_seo_report.compact_html(saved_seo, today)
+        except Exception:
+            insight_cards += '<p>SEO report temporarily unavailable.</p>'
     try:
         refresh = snapshot['refresh'] if snapshot is not None else home_design_refresh.render_html(today)
     except Exception as error:

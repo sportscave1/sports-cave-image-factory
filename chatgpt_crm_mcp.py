@@ -86,7 +86,7 @@ BRIEF_TOOLS = {
         "Read GA4 purchase-session channels, stored Shopify order totals and complete Meta ad history "
         "for the Friday–Thursday week ending on date. Google Ads API inputs remain unavailable.", DAILY_INPUT),
     "submit_daily_home_brief": (PUBLISH_SCOPE, "dashboard", "Submit a completed Home brief",
-                               "Queue today's completed Sports, Meta or Designs to Refresh edition "
+                               "Queue today's completed Sports, Meta, SEO or Designs to Refresh edition "
                                "for publication to Sports Cave OS Home. Compatibility for Google weekly reports: "
                                "kind=meta with edition.destination=ads_google routes only to Ads > Google, never Home.", BRIEF_SUBMIT),
     "get_daily_home_brief_status": (PUBLISH_SCOPE, "dashboard", "Get Home brief publication status",
@@ -102,6 +102,8 @@ def _scopes():
     return SCOPES if briefs.enabled() else READ_SCOPES
 
 TOOLS = {
+    "get_seo_daily_context": (GROWTH_SCOPE, "seo", "Read daily SEO evidence",
+        "Read complete comparable 28-day GSC query/page and GA4 organic landing-page evidence for AU, US and UK. Missing sources remain gaps.", DAILY_INPUT),
     TOOL: (SCOPE, "crm_campaigns_manage", "Get CRM campaign summary",
            "Read current CRM campaign counts and delivery activity.", EMPTY_INPUT),
     "get_orders_daily_summary": (ORDERS_SCOPE, "orders", "Get daily Orders summary",
@@ -541,6 +543,12 @@ async def mcp(request):
                     summary = await run_in_threadpool(OutreachStore().submit, edition)
                 else:
                     raise ValueError("Choose history or submit for Marketplace Outreach.")
+            elif (schema is BRIEF_SUBMIT and arguments.get("kind") == "meta"
+                  and isinstance(arguments.get("edition"), dict)
+                  and arguments["edition"].get("destination") == "seo"):
+                edition = dict(arguments["edition"])
+                edition.pop("destination")
+                summary = await run_in_threadpool(briefs.enqueue, "seo", edition, claims)
             elif schema is GOOGLE_SUBMIT:
                 summary = await run_in_threadpool(google_ads_reviews.enqueue, arguments["edition"], claims)
             elif name == "get_google_ads_reviews":
@@ -574,9 +582,20 @@ async def mcp(request):
                     summary["home_crm_basis"] = "Home is CRM: Facebook, Google, organic and unresolved sources use Shopify last-visit evidence; devices use exact Shopify/GA4 ID matches. Paid ROAS is separate platform attribution. Pending or missing source data remains unknown."
             elif scope == META_HISTORY_SCOPE:
                 summary = await run_in_threadpool(meta_ad_history, *report_args)
+            elif name == "get_seo_daily_context":
+                from seo_daily_context import context
+                summary = await run_in_threadpool(context, *report_args)
             elif scope == GROWTH_SCOPE:
                 reader = refresh_traffic if name == "get_design_refresh_traffic" else growth_report
                 summary = await run_in_threadpool(reader, *report_args)
+                if (name == "get_growth_analytics"
+                        and await run_in_threadpool(_active_owner, claims, "seo")):
+                    from seo_daily_context import context as seo_context
+                    try:
+                        summary["seo_daily_context"] = await run_in_threadpool(seo_context, *report_args)
+                        summary["seo_publication"] = await run_in_threadpool(briefs.status, "seo")
+                    except Exception:
+                        summary["seo_daily_context"] = {"status": "unavailable"}
                 if (name == "get_growth_analytics"
                         and await run_in_threadpool(_active_owner, claims, "ads_google")):
                     # Existing installed catalogs can read Ads without a connector reinstall.

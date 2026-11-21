@@ -46,7 +46,12 @@ def meta_data(today):
         cached_crm = dict(state='saved', data=crm.saved(day, day))
     except Exception:
         cached_crm = None
-    return dict(saved=saved, refresh=refresh, crm=cached_crm)
+    import home_seo_report
+    try:
+        seo_report = home_seo_report.latest()
+    except Exception:
+        seo_report = {}
+    return dict(saved=saved, refresh=refresh, crm=cached_crm, seo=seo_report)
 
 
 def panel(st, user, today, name, loader, renderer):

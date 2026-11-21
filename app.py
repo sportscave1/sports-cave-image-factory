@@ -7430,22 +7430,8 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         for route in website_routes:
             child_button(children, route, analytics_nav.WEBSITE_NAV_LABELS[route])
 
-    if any(route in allowed_routes for route in seo_nav.SEO_MENU_ROUTES):
-        if disclosure(
-            "seo",
-            "SEO",
-            SIDEBAR_ICON_BY_ROUTE[seo_nav.SEO_OVERVIEW_ROUTE],
-            seo_nav.SEO_OVERVIEW_ROUTE,
-            force_open_routes=tuple(route for route in seo_nav.SEO_ROUTES if route != analytics_nav.WEBSITE_OVERVIEW_ROUTE),
-        ):
-            children = st.container(key="sidebar-seo-children")
-            children.markdown('<span id="sidebar-seo-children"></span>', unsafe_allow_html=True)
-            for route in navigation_runtime.disclosure_child_routes(
-                seo_nav.SEO_MENU_ROUTES,
-                seo_nav.SEO_OVERVIEW_ROUTE,
-                include_overview=True,
-            ):
-                child_button(children, route, seo_nav.SEO_NAV_LABELS[route])
+    _sidebar_route_button(seo_nav.SEO_OVERVIEW_ROUTE, current_page, allowed_routes,
+                          label="SEO", root=st)
     import crm_navigation
     email_routes = tuple(route for route in crm_navigation.SIDEBAR_ROUTES if route in allowed_routes)
     _sidebar_route_button("Reviews", current_page, allowed_routes, root=st)

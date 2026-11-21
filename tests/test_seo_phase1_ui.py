@@ -9,6 +9,17 @@ FIXTURE=Path(__file__).parent/'fixtures'/'seo_phase1_preview.py'
 
 class Phase1UITests(unittest.TestCase):
     def setUp(self):
+        # AppTest does not serialize stateful expanders; emulate the browser's
+        # bool widget state so child button reruns keep their section open.
+        from streamlit.testing.v1 import element_tree
+        from streamlit.proto.WidgetStates_pb2 import WidgetState
+        original = element_tree.get_widget_state
+        def state(node):
+            if isinstance(node, element_tree.Expander) and node.proto.id:
+                return WidgetState(id=node.proto.id, bool_value=bool(node.proto.expanded))
+            return original(node)
+        self.expanders = patch.object(element_tree, 'get_widget_state', side_effect=state)
+        self.expanders.start()
         self.temp=tempfile.TemporaryDirectory()
         self.env=patch.dict('os.environ',{'SEO_PHASE1_FIXTURE_DIR':self.temp.name,'SEO_PHASE1_MODE':'local'})
         self.env.start()
@@ -18,6 +29,7 @@ class Phase1UITests(unittest.TestCase):
     def tearDown(self):
         self.assertEqual(self.network_mock.call_count,0)
         self.assertEqual(self.database_mock.call_count,0)
+        self.expanders.stop()
         self.network.stop(); self.database.stop()
         self.env.stop(); self.temp.cleanup()
     def app(self):return AppTest.from_file(str(FIXTURE),default_timeout=15).run()
@@ -31,7 +43,7 @@ class Phase1UITests(unittest.TestCase):
         app=self.app(); self.assertEqual(list(app.exception),[])
         self.select(app,'Workspace',nav.SEO_ANALYTICS_ROUTE)
         self.select(app,'View','Queries')
-        app.session_state['seo-report-task-details'] = True
+        next(x for x in app.expander if x.label=='Details and Plan task').proto.expanded = True
         app.run()
         self.click(app,'Create Plan task')
         self.select(app,'Workspace',nav.SEO_PLAN_ROUTE)
@@ -73,6 +85,18 @@ class Phase1UITests(unittest.TestCase):
         self.select(app,'Workspace',nav.SEO_ANALYTICS_ROUTE)
         self.assertEqual(next(x for x in app.text_input if x.label=='Filter rows').value,'sports art')
         app.run()
+        self.assertFalse(app.exception)
+
+    def test_opening_plan_closes_analytics_before_reusing_mapping_editor(self):
+        app = self.app()
+        next(x for x in app.expander if x.label == 'Search evidence and analytics').proto.expanded = True
+        app.run()
+        self.select(app, 'View', 'Mappings')
+        next(x for x in app.expander if x.label == 'SEO plan and tools').proto.expanded = True
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertFalse(any(x.label == 'View' for x in app.selectbox))
+        self.select(app, 'Tool', 'Keyword mappings')
         self.assertFalse(app.exception)
 
 if __name__=='__main__':unittest.main()

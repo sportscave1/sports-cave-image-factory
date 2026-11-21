@@ -69,7 +69,7 @@ def report_rows(report):
 def task_action(row, context, store, user):
     target = row.get('page') or row.get('landingPagePlusQueryString') or row.get('canonical_url') or ''
     query = row.get('query') or ''
-    panel = st.expander('Details and Plan task', key='seo-report-task-details', on_change='rerun')
+    panel = st.expander('Details and Plan task', key='seo-report-task-details', expanded=bool(st.session_state.get('seo-report-task-details')), on_change='rerun')
     if not panel.open:
         return
     with panel:
@@ -579,11 +579,8 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
             state = load_analytics_state(store) if os_accounts.can_access_page(user, nav.SEO_OVERVIEW_ROUTE) else workspace.default_state()
             if state is None:
                 return
-            st.subheader(nav.SEO_NAV_LABELS.get(destination, 'SEO'))
-            if destination == nav.SEO_PLAN_ROUTE: plan(user, state, store, navigate, initial)
-            elif destination == nav.SEO_REVIEW_ROUTE: review(user, state, store, initial)
-            elif destination == nav.SEO_HISTORY_ROUTE: history(user, state)
-            else: worker(user, state, store, reports, navigate)
+            import seo_daily_ui
+            seo_daily_ui.render(user, state, store, reports, navigate, legacy_route=route)
     except Exception:
         status='error'
         raise
