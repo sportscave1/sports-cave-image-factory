@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import time
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
 import meta_review_retry as retry
 
@@ -180,18 +180,24 @@ def load_overview(config, since, until):
     result = load_campaigns(config, since, until, status='All', reader=reader)
     fields = ','.join(field for field in INSIGHT_FIELDS.split(',')
                       if field not in ('ad_id','ad_name','adset_id','adset_name'))
-    rows = reader.pages(config['ad_account_id'] + '/insights', {
-        'fields': fields, 'level': 'campaign', 'use_unified_attribution_setting': 'true',
-        **date_params(since, until)})
-    reports = {}
-    for row in rows:
-        key = str(row.get('campaign_id') or '')
-        if not key:
-            raise ValueError('Meta returned campaign Insights without a campaign identity.')
-        if key in reports and reports[key] != row:
-            raise ValueError('Meta returned conflicting campaign range reports. Refresh again.')
-        reports[key] = row
-    countries = load_countries(config, config['ad_account_id'], 'campaign', since, until, reader=reader)
+    # After account/campaign validation, these two independent GET-only reports
+    # can overlap. Pagination stays sequential within each report, with the same
+    # shared deadline and account cooldown. Never expose a partial overview.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='meta-review') as pool:
+        country_read = pool.submit(load_countries, config, config['ad_account_id'],
+                                   'campaign', since, until, reader=reader)
+        rows = reader.pages(config['ad_account_id'] + '/insights', {
+            'fields': fields, 'level': 'campaign', 'use_unified_attribution_setting': 'true',
+            **date_params(since, until)})
+        reports = {}
+        for row in rows:
+            key = str(row.get('campaign_id') or '')
+            if not key:
+                raise ValueError('Meta returned campaign Insights without a campaign identity.')
+            if key in reports and reports[key] != row:
+                raise ValueError('Meta returned conflicting campaign range reports. Refresh again.')
+            reports[key] = row
+        countries = country_read.result()
     by_campaign = {}
     for row in countries:
         by_campaign.setdefault(str(row.get('campaign_id')), []).append(row)
