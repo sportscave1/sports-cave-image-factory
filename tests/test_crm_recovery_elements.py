@@ -158,6 +158,20 @@ class RecoveryElementsTests(unittest.TestCase):
         reader.assert_called_once_with(product_ids=['gid://shopify/Product/100','gid://shopify/Product/101'],handles=[],limit=100)
         before=deepcopy(data);hydrate(design(*starter()),data);self.assertEqual(data,before)
 
+    def test_checkout_renders_when_remaining_edition_count_is_unknown(self):
+        # The catalogue deliberately returns None when sales and numbering
+        # cannot establish a trustworthy remaining count.
+        for remaining in (None, '12', False, -1, 0):
+            with self.subTest(remaining=remaining):
+                for item in self.data['items']:
+                    item['edition']={'limit':100,'next':5,'remaining':remaining}
+                message=self.message(native_document())
+                self.assertIn('LIMITED TO 100 WORLDWIDE',message['html'])
+                self.assertNotIn('NEXT AVAILABLE EDITION',message['html'])
+                verify(message,self.data['recovery_url'],3)
+        self.assertEqual(edition_label({'limit':100,'next':5,'remaining':12}),
+                         'NEXT AVAILABLE EDITION · #005/100')
+
     def test_custom_master_no_required_styles_and_explicit_native_separation(self):
         from crm_checkout_template import validate as master_validate
         master_validate(f'<h1>Own The Moment</h1><a href="{TOKEN}">Return To Checkout</a>')

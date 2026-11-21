@@ -1,0 +1,30 @@
+Sports Cave automation review - 21 November 2026
+Task 20261120-324fe274; owner codex-email-flows-review-20261121-01a1fad3.
+
+Performance baseline (lifetime; distinct provider-event messages, not proven human clicks):
+Abandoned Checkout: 153 accepted, 153 delivered, 6 clicked messages, no verified attributed orders.
+Current stable stage IDs: first reminder 3 clicks /43 delivered; second 2/77; final 1/33.
+Post Checkout: 330 accepted, 327 delivered, 40 clicked messages, no verified attributed orders.
+First collector note:31/208 clicked; feedback note:9/119. Four distinct recipients have bounce events; both permanent-bounce recipients are already suppressed.
+Welcome Series: disabled, zero entrants/sends. Win Back: draft, zero entrants/sends. Neither has a performance basis for claiming success or failure.
+No flow-attributed orders were found in the eligible attribution ledger. This is not proof that no recipient purchased or a causal assessment of these designs.
+
+Revised authored drafts saved with optimistic revision and previous-definition history:
+Welcome rev54: four short emails at signup/day1/day3/day6, once per subscriber, purchase exit preserved. Smart recommendation sections on emails1/2/4, two eligible products each; guide-only email3. Existing country, permission, purchase exclusions and send-time availability checks preserved. A link to the live Find your next edition collection and a verified size/frame guide are included.
+Post Checkout rev112: gratitude/certificate-access note 3h after payment; honest feedback day7 after confirmed delivery; optional photo day14 after confirmed delivery; complementary Smart recommendations day45 after confirmed delivery. Fulfilment-to-delivery time guessing disabled. Removed unresolved [[product.url]], unsupported blanket edition-limit claims, five-star review framing, unrelated sales grid in feedback email and an unverified COLLECTOR10 promise.
+Win Back rev4: all four drafts restyled; two enabled stages at90/105 days, later120/150-day stages disabled. No new cold-list activation during this review.
+Abandoned Checkout: reviewed against the same light design; its recently published sequence and recovery-specific discount were retained. Results are too recent to infer an uplift from today's changes.
+
+Personalisation boundary:
+The website Find your next edition quiz stores anonymous consent-gated analytics. Its answers cannot currently be joined to a subscriber. No such identity association was fabricated. Email Smart recommendations use verified purchase/checkout/email-click product signals, exclude owned/unavailable editions, and use the existing eligible-popular fallback where no interest is known. Native preview resolved two real products; tests also show different verified customer histories resolve different recommendations. A full quiz-to-consented-email preference integration is not implemented by these content changes.
+
+Design:
+White, charcoal, shared transparent PNG logo and readable footer;16px body,30px Georgia headline,48px charcoal buttons; short body copy below90 words. The opt-in email-light-v1 renderer makes native Smart product cards follow the same light design. Untagged legacy designs retain their existing dark rendering. No recommendation ranking logic is changed.
+
+Validation:
+All12 revised documents passed strict automation/document validation and fixture-only HTML rendering below80KB. No live customer data or credentials were used in local previews, and no test email was sent.
+105 focused recommendation/catalogue/lifecycle/shared-branding tests:68 passed,37 disposable-SQL tests skipped. New regressions cover light contrast/button size, original links/tracking/escaping, immutable product facts and legacy dark rendering. Existing catalogue image assertions now distinguish product images from the shared header logo.
+Studio Verify, topology and git diff checks passed. The owner explicitly approved commit, integration into main, push and deployment on21 November2026. Verify the existing services and live flow publications after release; activation is a separate application operation.
+
+Scope limitations:
+Observed provider clicks are not independently filtered human-click or incrementality results. Real Gmail/Outlook/Apple Mail inbox and forced-dark-mode QA has not been performed. Separate signup/quiz identity capture, DNS/authentication, attribution-policy changes and additional event-source integrations are outside this content refresh.

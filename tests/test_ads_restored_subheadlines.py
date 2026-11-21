@@ -43,7 +43,7 @@ class RestoredSubheadlineTests(unittest.TestCase):
                 self.assertEqual(selected, reopened['product_metadata']['instant_experience_footer_selections'])
                 self.assertIn('supporting line 24–26 px, Montserrat Regular', new['master_prompt'])
                 self.assertIn('18–20%', new['master_prompt'])
-                self.assertIn('Always highlight all three digits of 100', new['master_prompt'])
+                self.assertIn('colour and underline those existing headline digits in place', new['master_prompt'])
                 history = new['instant_experience_fingerprints'] + history
         self.assertEqual(seen, set(words.eligible_support_lines({})) | set(words.eligible_support_lines({"supporting_line_market": "Australia"})))
 

@@ -43,7 +43,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         for i, (_, _, prompt) in enumerate(groups):
             self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
             headline = re.search(r"^HEADLINE: (.+)$", prompt, re.M).group(1)
-            self.assertNotIn("SUPPORTING LINE:", prompt)
+            self.assertRegex(prompt, r"(?m)^SUPPORTING LINE: .+$")
             context = {"edition_limit": limit}
             self.assertIn(headline, ads_page.ie_visuals.eligible_headlines(context))
             self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))

@@ -75,7 +75,9 @@ class Jobs:
                     # Arbitrary SDK/provider messages must never reach the UI.
                     message=str(error) if isinstance(error,(PreparationError,ValueError)) else 'Processing failed. Retry; the selected PSD and product details are retained.'
                     logging.getLogger(__name__).error('product_upload_job_failed workflow=%s operation=%s error_type=%s',key,operation,type(error).__name__)
-                    with self.lock:job.update(state='Failed',stage='Error',error=message,elapsed_ms=round((monotonic()-job['submitted'])*1000,2))
+                    with self.lock:
+                        if self.jobs.get(identity) is job and job['state'] != 'Cancelled':
+                            job.update(state='Failed',stage='Error',error=message,elapsed_ms=round((monotonic()-job['submitted'])*1000,2))
             try:job['future']=self.pool.submit(run)
             except Exception:
                 self.jobs.pop(identity,None);raise
@@ -92,8 +94,10 @@ class Jobs:
             job=self.jobs.get((str(actor),str(key),operation))
             return job.get('result') if job and job['state']=='Ready' and job['token']==token else None
 
-    def cancel(self,key,actor):
+    def cancel(self,key,actor,*,attempt=None):
         with self.lock:
+            if attempt and self.staff_attempts.get((str(actor),str(key))) not in (None,attempt):
+                return
             for identity,job in self.jobs.items():
                 if identity[:2]==(str(actor),str(key)) and identity[2]!='sync-map' and job['state'] in ('Queued','Running'):
                     job['state']='Cancelled'

@@ -25,6 +25,7 @@ GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/webmasters.readonly",
     "https://www.googleapis.com/auth/analytics.readonly",
 )
+GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords"
 GOOGLE_OAUTH_CONNECT_PATH = "/api/os/google/connect"
 GOOGLE_OAUTH_CALLBACK_PATH = "/api/os/google/oauth/callback"
 GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -245,13 +246,13 @@ def oauth_state_hash(state):
     return hashlib.sha256(str(state or "").encode("utf-8")).hexdigest()
 
 
-def build_authorization_url(state, config):
+def build_authorization_url(state, config, *, ads=False):
     query = urlencode(
         {
             "client_id": config["client_id"],
             "redirect_uri": config["redirect_uri"],
             "response_type": "code",
-            "scope": " ".join(GOOGLE_SCOPES),
+            "scope": " ".join(GOOGLE_SCOPES + ((GOOGLE_ADS_SCOPE,) if ads else ())),
             "access_type": "offline",
             "include_granted_scopes": "true",
             "enable_granular_consent": "true",
@@ -272,7 +273,7 @@ def create_oauth_request(store, user, config, *, return_page="seo", now=None):
         return_page=return_page,
         expires_at=created_at + timedelta(seconds=GOOGLE_OAUTH_STATE_SECONDS),
     )
-    return build_authorization_url(state, config)
+    return build_authorization_url(state, config, ads=return_page == "ads_google")
 
 
 def consume_oauth_state(store, state, user, *, now=None):
@@ -386,7 +387,7 @@ def exchange_authorization_code(code, config, *, request_post=requests.post):
     return _response_json(response, stage="token_exchange")
 
 
-def refresh_access_token(refresh_token, config, *, request_post=requests.post):
+def refresh_access_token(refresh_token, config, *, request_post=requests.post, scopes=None):
     response = _request_with_retries(
         lambda: request_post(
             GOOGLE_TOKEN_ENDPOINT,
@@ -395,6 +396,7 @@ def refresh_access_token(refresh_token, config, *, request_post=requests.post):
                 "client_id": config["client_id"],
                 "client_secret": config["client_secret"],
                 "grant_type": "refresh_token",
+                **({"scope": " ".join(scopes)} if scopes else {}),
             },
             timeout=GOOGLE_HTTP_TIMEOUT_SECONDS,
         ),
@@ -429,7 +431,7 @@ def verify_required_scopes(token_payload):
             stage="scope_verification",
             reconnect_required=True,
         )
-    return tuple(scope for scope in GOOGLE_SCOPES if scope in granted)
+    return tuple(scope for scope in (*GOOGLE_SCOPES, GOOGLE_ADS_SCOPE) if scope in granted)
 
 
 def _bearer_headers(access_token):
@@ -1329,10 +1331,14 @@ def complete_authorization(
     *,
     request_post=requests.post,
     request_get=requests.get,
+    require_ads=False,
 ):
     require_admin(user)
     token_payload = exchange_authorization_code(code, config, request_post=request_post)
     scopes = verify_required_scopes(token_payload)
+    if require_ads and GOOGLE_ADS_SCOPE not in scopes:
+        raise GoogleSEOError("Google Ads access was not approved. Existing connection unchanged.",
+                             code="ads_scope_missing", stage="scope_verification")
     access_token = str(token_payload.get("access_token") or "")
     if not access_token:
         raise GoogleSEOError(
@@ -1399,16 +1405,20 @@ def complete_authorization(
     }
 
 
-def _access_token_for_connection(store, config, *, request_post=requests.post):
+def _access_token_for_connection(store, config, *, request_post=requests.post, scopes=None):
     connection = store.get_connection_secret()
+    if scopes is not None and (not scopes or not set(scopes) <= set(connection.get("granted_scopes") or [])):
+        raise GoogleSEOError("Requested Google access has not been granted.",
+                             code="required_scopes_missing", stage="token_refresh")
     encrypted = str(connection.get("encrypted_refresh_token") or "")
     refresh_token = decrypt_refresh_token(encrypted, config["encryption_key"])
-    return refresh_access_token(refresh_token, config, request_post=request_post), connection
+    kwargs = {"scopes": scopes} if scopes is not None else {}
+    return refresh_access_token(refresh_token, config, request_post=request_post, **kwargs), connection
 
 
-def access_token_for_connection(store, config, *, request_post=requests.post):
+def access_token_for_connection(store, config, *, request_post=requests.post, scopes=None):
     """Return a short-lived access token without exposing the stored refresh token."""
-    return _access_token_for_connection(store, config, request_post=request_post)
+    return _access_token_for_connection(store, config, request_post=request_post, scopes=scopes)
 
 
 def refresh_properties(

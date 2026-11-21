@@ -1,0 +1,78 @@
+Product webhook delay: Melbourne in Papaya – Oscar Piastri Wall Art
+18 November 2026. Investigation and approved release preparation.
+
+Evidence
+Product: gid://shopify/Product/15492235624755, oscar-piastri-wall-art.
+Authoritative database: ceyzbfpuwuuxaiqwiltz (read-only connector queries).
+Render workspace: tea-cut91gtsvqrc73e5acs0 (confirmed by user).
+Receiver: srv-d9146onlk1mc739nrm7g; worker: srv-d9ujm9navr4c73amurgg.
+Inspected deployed source: 390f01054192fa1d067343a09944037e6e9acf04.
+
+Sydney times (AEDT):
+- 14:54:17 Shopify product created (stored current-product snapshot).
+- 14:54:20 receiver authenticated products/create delivery
+  a435fcd5-aa55-5a35-9b33-b17631556042.
+- 14:54:21 durable receipt stored.
+- Worker product processing logs cease after 14:42:59; other worker activity
+  continues. Deployment shutdown logged at 14:42:37 for the retiring instance.
+- Deployment dep-dbui5g7b9u1s738kv0m0 became live at 15:01:42.
+- 15:01:59 replacement worker classified an update for this product.
+- 15:02:02 Edition Ops record created; 15:02:05 mirror marked Synced.
+- 15:03:39 original create receipt marked processed.
+The product was delayed, not lost. Verified next edition 1, total/remaining 100,
+sold 0, mirror Synced, and empty last_metafield_error. No replay was necessary.
+
+Diagnosis and confidence
+Receipt delivery, signature verification, durable acceptance and eventual
+registration are confirmed. The delay was downstream of receipt acceptance.
+Production already queues receipts; the original dirty checkout had older
+synchronous receiver code and was NOT used as the repair baseline.
+The worker had an unsupervised daemon thread sharing its process with other
+background work. Batches and scans did not check shutdown, despite a ten-minute
+renewable ownership lease and bounded supervisor shutdown. Queue ordering favored
+newest receipts. These are verified recovery/scheduling defects.
+Historical logs do not prove whether this particular stall was a blocked call,
+an abandoned lease, or another thread failure. Do not claim a proven exception,
+network outage, or Shopify delivery failure. No error for this product was found.
+
+Repair
+- Existing supervisor launches product onboarding as a child process, with the
+  existing five-second restart policy and independent connection/module state.
+- Child handles SIGTERM/SIGINT. Drain and scan stop between work items; tick's
+  finally block releases ownership. Interrupted scan pages remain replayable.
+- Operational ticks handle five receipts and at most ten scan candidates;
+  continuation pages remain due after five seconds, interleaved with deliveries.
+- Fresh delivery lane is oldest-first; reserved retry capacity is retained.
+- Lease contention and completed tick counts now appear in logs. Failed/blocked
+  scans are not incorrectly postponed for five minutes.
+- Script entry uses the canonical module to preserve PendingRegistration type
+  identity across backend imports.
+
+Validation
+46 distinct focused tests passed: onboarding PostgreSQL/PGlite tests and worker
+supervisor tests (43 in the main run, three additional focused tests). Final
+canonical-module entry adjustment's signal test passed again.
+Disposable PGlite, synthetic fixtures and mocked Shopify only; no live writes.
+Coverage includes shutdown handover, mid-page replay, duplicate receipts,
+retryable failures, existing counter preservation, signatures, wrong-shop denial,
+FIFO priority, reserved retries, bounded scan continuation and child restart.
+Python compilation, git diff --check and Render topology validation passed.
+Initial system-Python run lacked FastAPI; validation used the existing repository
+venv. Only existing FastAPI/Starlette deprecation warnings remained.
+
+Scope and limitations
+Managed task checkout: product-webhook-delay; branch codex/product-webhook-delay.
+The app's managed-worktree mechanism provided task isolation at the deployed SHA;
+no other task checkout or original dirty working files were modified.
+The user explicitly authorized commit, push and deployment, followed by live
+verification. The task branch was fast-forwarded to current origin/main
+79c5d896044b88df8b48373e7461a17972447001; none of the four changed code/test files
+conflicted. The full focused test group is rerun on that integrated baseline.
+Release uses the existing main-branch auto-deploy configuration. No schema change,
+service creation, Blueprint sync or product replay is required. The deployment
+must be verified live with child startup and receipt progress before completion.
+This is reliability hardening, not an absolute never-fails guarantee. A hard kill
+can still require the existing lease to expire. A hung child is not automatically
+detected by exit supervision; API/database timeouts and the new progress logs
+remain important. Additional process memory has not been measured on Render.
+The exact original stall cannot be retroactively proven from available logging.

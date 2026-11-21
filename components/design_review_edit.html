@@ -1,82 +1,37 @@
 <script>
 (() => {
-  const listenerKey = Symbol.for('sports-cave.design-review.edit');
+  const listenerKey = Symbol.for('sports-cave.design-review.edit-create-v2');
   if (document[listenerKey]) return;
   document[listenerKey] = true;
 
-  const copyText = (text) => {
-    const field = document.createElement('textarea');
-    field.value = text;
-    field.style.cssText = 'position:fixed;left:-9999px';
-    document.body.append(field);
-    field.select();
-    try { return document.execCommand('copy'); }
-    finally { field.remove(); }
-  };
-
-  const applyEdit = async (action, comments) => {
+  const applyEdit = async (action, comments, requestId, errorTarget) => {
+    const creating = Boolean(action.dataset.designCreate);
+    if (errorTarget) errorTarget.textContent = '';
     if (action.getAttribute('aria-busy') === 'true') return;
     action.setAttribute('aria-busy', 'true');
-    const card = action.closest('[class*="st-key-design-review-card-"]');
+    const card = action.closest('[class*="st-key-design-review-card-"]') || action.closest('.st-key-design-review-toolbar');
     card?.querySelector('.sc-review-edit-feedback')?.remove();
     const feedback = document.createElement('div');
     feedback.className = 'sc-review-edit-feedback';
-    const status = document.createElement('div');
-    status.role = 'status';
-    status.textContent = 'Getting the edit prompt…';
-    feedback.append(status);
+    feedback.role = 'status';
+    feedback.textContent = creating ? 'Adding design to companion…' : 'Adding edit to companion…';
     card?.append(feedback);
-
-    const payload = fetch(action.dataset.designReviewPrompt, {credentials: 'same-origin'})
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok || !data.prompt) throw new Error(data.error || 'Could not load the edit prompt.');
-        return '**USER-REQUESTED DESIGN CHANGES**\n'
-          + (comments || 'No additional changes specified.')
-          + '\n\n' + data.prompt;
-      });
-    // Start clipboard access during the click. The prompt is fetched only for this design.
-    const copied = window.ClipboardItem && navigator.clipboard?.write
-      ? navigator.clipboard.write([new ClipboardItem({
-          'text/plain': payload.then((text) => new Blob([text], {type: 'text/plain'})),
-        })]).then(() => true, () => false)
-      : Promise.resolve(false);
-    const projectTab = window.open('about:blank', '_blank');
-    if (projectTab) projectTab.opener = null;
-
     try {
-      const prompt = await payload;
-      let success = await copied;
-      if (!success) {
-        projectTab?.close();
-        navigator.clipboard?.writeText && (success = await navigator.clipboard.writeText(prompt).then(() => true, () => false));
-        if (!success) {
-          try { success = copyText(prompt); } catch {}
-        }
-      } else if (projectTab && !projectTab.closed) {
-        projectTab.location.replace(action.href);
-        feedback.remove();
-        return;
-      }
-      status.textContent = success ? 'Prompt copied. Open Sports Cave Designs and paste it.'
-        : 'Copy this prompt, then open Sports Cave Designs and paste it.';
-      if (!success) {
-        const field = document.createElement('textarea');
-        field.value = prompt;
-        field.readOnly = true;
-        field.setAttribute('aria-label', 'Edit prompt');
-        feedback.append(field);
-        field.select();
-      }
-      const open = document.createElement('a');
-      open.href = action.href;
-      open.target = '_blank';
-      open.rel = 'noopener noreferrer';
-      open.textContent = 'Open Sports Cave Designs';
-      feedback.append(open);
+      const url = new URL(action.dataset.designReviewPrompt || '/api/design-review/create-queue', location.origin);
+      url.pathname = creating ? '/api/design-review/create-queue' : '/api/design-review/edit-queue';
+      const response = await fetch(url.pathname + url.search, {
+        method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(creating ? {brief:comments, request_id:requestId} : {comments})
+      });
+      const data = await response.json();
+      if (!response.ok || !data.queued) throw new Error(data.error || 'Could not queue the edit.');
+      feedback.textContent = (creating ? 'Design' : 'Edit') + ' queued. Companion will open, paste and submit it automatically.';
+      document.dispatchEvent(new CustomEvent('sc-design-edit-queued'));
+      return true;
     } catch (error) {
-      projectTab?.close();
-      status.textContent = error.message || 'Could not load the edit prompt. Try Edit again.';
+      feedback.textContent = error.message || 'Could not queue the design. Try again.';
+      if (errorTarget) errorTarget.textContent = feedback.textContent;
+      return false;
     } finally {
       action.removeAttribute('aria-busy');
     }
@@ -96,47 +51,61 @@
   document.head.append(style);
   let dialog;
   document.addEventListener('click', (event) => {
-    const action = event.target.closest('a[data-design-review-prompt]');
+    const action = event.target.closest('a[data-design-review-prompt], a[data-design-create]');
     if (!action) return;
     event.preventDefault();
+    event.stopImmediatePropagation?.();
     if (action.getAttribute('aria-busy') === 'true' || dialog?.open) return;
+    const creating = Boolean(action.dataset.designCreate);
+    const requestId = creating ? crypto.randomUUID() : null;
     dialog = document.createElement('dialog');
-    dialog.className = 'sc-review-edit-dialog';
-    dialog.setAttribute('aria-labelledby', 'sc-review-edit-label');
+    const activeDialog = dialog;
+    activeDialog.className = 'sc-review-edit-dialog';
+    activeDialog.setAttribute('aria-labelledby', 'sc-review-edit-label');
     const form = document.createElement('form');
     const label = document.createElement('label');
     label.id = 'sc-review-edit-label';
     label.htmlFor = 'sc-review-edit-comments';
-    label.textContent = 'What needs changing?';
+    label.textContent = creating ? 'What design would you like to create?' : 'What needs changing?';
     const comments = document.createElement('textarea');
     comments.id = 'sc-review-edit-comments';
-    comments.placeholder = 'Describe what’s wrong or how to improve this design…';
+    comments.placeholder = creating ? 'Describe the athlete, team, rivalry or moment and the design you want…' : 'Describe what’s wrong or how to improve this design…';
+    comments.maxLength = 20000;
+    comments.required = creating;
     const footer = document.createElement('footer');
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.textContent = 'Cancel';
-    cancel.addEventListener('click', () => dialog.close());
+    cancel.addEventListener('click', () => activeDialog.close());
     const apply = document.createElement('button');
     apply.type = 'submit';
-    apply.textContent = 'Apply';
+    apply.textContent = creating ? 'Create design' : 'Apply';
     footer.append(cancel, apply);
-    form.append(label, comments, footer);
-    dialog.append(form);
-    dialog.addEventListener('close', () => {
-      dialog.remove();
+    const errorMessage = document.createElement('div');
+    errorMessage.setAttribute('role', 'alert');
+    form.append(label, comments, errorMessage, footer);
+    activeDialog.append(form);
+    activeDialog.addEventListener('close', () => {
+      activeDialog.remove();
       action.focus();
     }, {once:true});
-    form.addEventListener('submit', (submitEvent) => {
+    form.addEventListener('submit', async (submitEvent) => {
       submitEvent.preventDefault();
       if (apply.disabled) return;
-      apply.disabled = true;
       const instructions = comments.value.trim();
-      dialog.close();
-      void applyEdit(action, instructions);
+      if (creating && !instructions) { comments.focus(); return; }
+      apply.disabled = true;
+      if (creating) {
+        if (await applyEdit(action, instructions, requestId, errorMessage)) activeDialog.close();
+        else apply.disabled = false;
+      } else {
+        activeDialog.close();
+        void applyEdit(action, instructions);
+      }
     });
-    document.body.append(dialog);
-    dialog.showModal();
+    document.body.append(activeDialog);
+    activeDialog.showModal();
     comments.focus();
-  });
+  }, true);
 })();
 </script>

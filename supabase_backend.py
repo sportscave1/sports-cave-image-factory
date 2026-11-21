@@ -23850,9 +23850,15 @@ def _recalculate_next_edition_number_with_cursor(cur, product, run=None, *, reas
         1,
     )
     max_assigned = max(_max_assigned_for_product(cur, product, run), 0)
-    sold_out = max_assigned >= edition_total
-    next_number = edition_total if sold_out else min(max(max_assigned + 1, 1), edition_total)
-    remaining = max(edition_total - max_assigned, 0)
+    # Issued numbers are not sales counts (legacy gaps and explicit starting
+    # numbers are valid). Preserve sales and derive its complementary counter
+    # from the same authority, or the atomic allocator rejects the next order.
+    sold_count = _int_value(product.get("sold_count"), -1)
+    if not 0 <= sold_count <= edition_total:
+        raise ValueError("Sales unit count requires review before edition recalculation.")
+    sold_out = max_assigned >= edition_total or sold_count >= edition_total
+    next_number = min(max(max_assigned + 1, 1), edition_total + 1)
+    remaining = edition_total - sold_count
     run_status = SOLD_OUT_RUN_STATUS if sold_out else ACTIVE_RUN_STATUS
 
     if run and run.get("id"):

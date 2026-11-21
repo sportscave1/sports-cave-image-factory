@@ -1,4 +1,5 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
+import ads_ie_two_line as two_line
 import hashlib
 import re
 import random
@@ -51,7 +52,7 @@ def stable_rank(seed, value):
 
 
 # Legacy fields are retained for stored-record compatibility, never alternative wording.
-FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_signature", "footer_emphasis", "eligible_headline_alternatives", "headline_fit_fallback")
+FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_signature", "footer_emphasis", "eligible_headline_alternatives", "headline_fit_fallback", *two_line.FIELDS)
 
 
 def eligible_headlines(context):
@@ -226,8 +227,8 @@ def resolved_camera_variation(visual, index, context, variation_token):
     return CAMERA_VARIATIONS[0]
 
 
-SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline, supporting line and fixed CTA. '
-                 'Render the assigned supporting line directly below the headline; never move its wording into the headline. '
+SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use the exact assigned 100-variation title and assigned second line only. '
+                 'Render exactly two footer lines. The second line is either its assigned FOMO sentence or CLAIM YOUR EDITION; the unused line is the written Meta headline, never a third image line. '
                  'All Sports Cave editions are owner-confirmed as limited to 100 worldwide; no verification flag or confirmation is required. '
                  'Never replace selected copy with arbitrary wording. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '
@@ -254,9 +255,9 @@ def resolve_visual_system(visual, index, context, variation_token):
         creative_variation_token=variation_token or "standard", room_type=copy_room,
         fan_archetype=fan_style(context)[0], supporting_line=support, fomo_line=support,
         product_width=("79-86%", "84-87%", "77-84%")[index],
-        overlay_position="fixed opaque full-width black/gold footer across bottom 18–20%",
+        overlay_position="fixed opaque full-width black/gold footer across bottom 15.625%",
         product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
-        composition="1024 x 1024 square; upper 80–82% lifestyle room; bottom 18–20% opaque collector footer",
+        composition="1024 x 1024 square; upper 84.375% lifestyle room; bottom 15.625% opaque collector footer",
     )
 
 
@@ -345,7 +346,7 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             secondary_cue=saved.get("secondary_cue") or "no additional styling",
             time_of_day=saved.get("time_of_day") or visual["lighting"],
             atmosphere="restrained collector home; authentic residential materials",
-            shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one resolved architectural glimpse", "close product view with the resolved residential depth arrangement")[index],
+            shot_distance=("close product view with a subtle receding passage", "close straight-on collector hallway with visible passage depth", "close product view with the resolved residential depth arrangement")[index],
             physical_product=context.get("physical_product", {}))
         visual["purpose"] = f"Image {index + 1}: {visual['room_type']}; {visual['camera_side']}"
         collector_detail = bool(visual.get("collector_detail"))
@@ -358,8 +359,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
             f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
                 f"Premium collector hallway: close edition-led photography, premium textured wall, believable passage depth, {hallway_joinery}natural directional light and realistic glazing reflections. Supplied hallway references guide atmosphere only; never copy their product, footer wording or typography.",
-                "Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence.",
-                f"Premium residential man cave: show only the resolved {man_cave_detail} glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s architectural product wall; retain close edition prominence.",
+                "Front-view collector hallway: complete frame mostly straight on, a recognisable residential passage with believable receding depth. Use only the resolved peripheral detail when present, keeping it restrained and secondary. Use a different home, wall treatment and lighting from Image 1. Keep the framed edition dominant; a bare product wall or isolated window recess does not establish a hallway. No foreground furniture obscuring the frame.",
+                f"Premium residential man cave: show only the resolved {man_cave_detail} glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s front-view collector hallway; retain close edition prominence.",
             )[index] +
             (scene_library.COLLECTOR_DETAIL_RULES if collector_detail else "") +
             SCENE_VISIBILITY_RULES
@@ -368,7 +369,7 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             visual["product_width"] = "source-proportionate, recognisable at thumbnail size; no universal crop target"
             visual["shot_distance"] = "edition-led moderate perspective; wider residential context only when recognition is retained"
             if index == 2:
-                old = f"Premium residential man cave: show only the resolved {man_cave_detail} glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s architectural product wall; retain close edition prominence."
+                old = f"Premium residential man cave: show only the resolved {man_cave_detail} glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s front-view collector hallway; retain close edition prominence."
                 new = (f"Premium residential man cave: make the resolved {visual['primary_cue']} recognisable as a dedicated private recreation/media space, "
                        "not a generic living room, study, hallway or bare product wall. Show a clear but minimal man-cave setup using that one resolved "
                        "leather media lounge, pool-table corner or home-bar joinery cue; do not combine all three. "

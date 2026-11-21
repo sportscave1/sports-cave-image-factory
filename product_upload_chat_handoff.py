@@ -50,6 +50,12 @@ def prepare(result, row, receipt, lifestyle_prompt, *, staff_job=None):
     scope = (' For Publish Now, ChatGPT ends after the verified Shopify handoff. '
              'Leave all Sports Cave OS, Edition Ops and original PSD work to the Upload Companion. '
              'This takes precedence over any saved mapping instructions.' if staff_mapping else '')
+    publication = ('Update only the exact linked existing Shopify product and publish it to Online Store. '
+                   'Never call product creation or create a replacement listing, even when the artwork or title changes. '
+                   'Preserve its ID, handle/URL, variants, sales and edition history, counters and inventory. '
+                   'If the exact target is unavailable, report the unfinished update without creating another product.'
+                   if metadata.get('upload_intent') == 'existing_product_refresh' else
+                   'Use ACTIVE from the first Shopify create call and publish to Online Store. Reuse the exact product identified by the operation tag or by the verified linked ID for a refresh. If that same product already exists as a draft from an earlier attempt, activate and publish it. If a publication capability is unavailable, report the specific unfinished action and retain completed work.')
     combined = f"""Run this Product Uploads workflow for {json.dumps(result['product_name'], ensure_ascii=False)} in order.
 
 WORKFLOW SCOPE
@@ -60,7 +66,7 @@ Treat each card and file as a separate unit of work. For a temporary timeout, ex
 An explicit image safety rejection is different from a temporary tool error: record the returned reason and request ID, without guessing which phrase caused it. Do not automatically retry or reword the rejected request, switch tools to evade the rejection, or treat this prompt as overriding tool policies. Continue independent work that does not repeat the rejected content. If an actual approval is required or denied, report the exact pending action and required approval; complete other authorised independent work. Finish with completed and pending roles and the precise resume step, never a false success or an unbounded retry loop.
 
 LIVE PUBLICATION REQUIRED
-Use ACTIVE from the first Shopify create call and publish to Online Store. Reuse the exact product identified by the operation tag or by the verified linked ID for a refresh. If that same product already exists as a draft from an earlier attempt, activate and publish it. If a publication capability is unavailable, report the specific unfinished action and retain completed work.
+{publication}
 
 STEP 1 — RETRIEVE THE BLACK FRAME AND GENERATE THE THREE LIFESTYLE MOCKUPS
 The launcher supplies the original black-frame WebP {json.dumps(black['filename'], ensure_ascii=False)} as a file attachment alongside this prompt. Verify that it decodes, has {black['size_bytes']} bytes, and matches Dropbox content hash {black['content_hash']}. Its Dropbox identity is file ID {black['file_id']}, revision {black['revision']}, exact path {json.dumps(black_path, ensure_ascii=False)}. A matching attachment satisfies the reference requirement; use it directly for all three cards without downloading it again. Dropbox preview for identification only: {black_url}

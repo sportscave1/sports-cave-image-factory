@@ -2,13 +2,14 @@
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
+from companion_display import read as read_display, invalidate as invalidate_display, page_rows, visible
 
 
 def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'os-bridge.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js'):
+        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 
@@ -32,6 +33,8 @@ def _summary(jobs, *, designs, paused=False):
              ('Waiting', waiting, 'Paused · press Play' if paused else 'Starts automatically', 'gold'),
              ('Completed' if designs else 'Published', saved, 'Verified output', 'green'),
              ('Needs attention', attention, 'Does not block the queue', 'amber')]
+    import streamlit as st
+    st.caption('Counts reflect the loaded queue window.')
     _markup('<div class="cq-metrics">' + ''.join(
         f'<div class="cq-metric {tone}"><span>{label}</span><strong>{number:02d}</strong><small>{hint}</small></div>'
         for label, number, hint, tone in cards) + '</div>')
@@ -49,8 +52,8 @@ def estimated_progress(job):
         elapsed = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(job['updated_at'])).total_seconds() / 60)
     except (KeyError, ValueError, TypeError):
         return 10, 'Generating · completion time varies'
-    percent = min(90, int(10 + elapsed / 20 * 80))
-    return percent, f'About {int(elapsed)} min elapsed · time-based estimate, not measured completion'
+    percent = 10  # Generation has no measurable completion percentage.
+    return percent, f'{int(elapsed)} min elapsed · waiting for verified output'
 
 
 def _jobs(jobs, *, designs, paused=False, user=None):
@@ -75,6 +78,7 @@ def _jobs(jobs, *, designs, paused=False, user=None):
                         from product_upload_staff_queue import restart
                         try:
                             restart(job['id'], user, job['updated_at'])
+                            invalidate_display()
                             st.rerun()
                         except (ValueError, PermissionError) as error:
                             st.error(str(error))
@@ -89,8 +93,21 @@ def _jobs(jobs, *, designs, paused=False, user=None):
             _markup(f'<div class="cq-job"><h4>{_html(job["title"])}</h4><span class="cq-badge blue">{_html(job["label"])}</span></div>')
             percent, text = estimated_progress(job) if designs else (job['percent'], job['label'])
             st.progress(percent / 100, text=f'{"Estimated " if designs else "Stage progress "}{percent}% · {text}')
+            if job.get('updated_at'):
+                st.caption('Latest checkpoint: ' + str(job['updated_at']))
+            if job.get('detail'):
+                st.caption(job['detail'])
             if job.get('chat_url'):
                 st.link_button('Open design chat ↗', job['chat_url'])
+            if designs:
+                for action, label in (('defer', 'Move to pending'), ('cancel', 'Cancel design')):
+                    if job.get('can_'+action) and st.button(label, key='cq-design-'+action+'-'+job['id'], disabled=user is None):
+                        from morning_design_queue import control
+                        try:
+                            control(job['id'], user, job['updated_at'], action)
+                            invalidate_display();st.rerun()
+                        except (ValueError, PermissionError) as error:
+                            st.error(str(error))
     _markup(f'<div class="cq-section"><h3>Waiting queue</h3><span>{len(waiting)}</span></div>')
     if waiting:
         st.dataframe([{'Position': n, 'Design' if designs else 'Artwork': j['title'], 'Status': 'Waiting'}
@@ -101,7 +118,7 @@ def _jobs(jobs, *, designs, paused=False, user=None):
         if finished:
             st.dataframe([{'Design' if designs else 'Artwork': j['title'], 'Status': j['label'],
                            'Saved file' if designs else 'Live listing': j.get('file_path') if designs else j.get('storefront'),
-                           'Notes': j.get('detail', '')} for j in finished], hide_index=True, width='stretch')
+                           'Last update': j.get('updated_at'), 'Notes': j.get('detail', '')} for j in page_rows(finished, 'cq-design-history-page' if designs else 'cq-upload-history-page')], hide_index=True, width='stretch')
         else:
             st.caption('No completed jobs yet.')
 
@@ -113,39 +130,48 @@ def render_page(user):
     if not os_accounts.can_access_page(user, 'Upload Companion'):
         st.error('Companion Queues requires an authorised administrator.')
         return
+    from workspace_display_cache import user_scope
+    st.session_state['companion-display-scope'] = user_scope(user)
+    st.session_state['companion-visible-now'] = visible()
     _markup('<style>' + (Path(__file__).parent / 'components' / 'companion_queues.css').read_text(encoding='utf8') + '</style>')
     with st.container(key='companion-dashboard'):
         _markup('<div class="cq-hero"><div><div class="cq-eyebrow">SPORTS CAVE / AUTOMATION</div>'
                 '<h1>Companion control</h1><p>Designs, product uploads and Meta ads.</p></div>'
                 '<div class="cq-capacity"><span>PARALLEL CAPACITY</span><strong>1 design <i>+</i> 1 upload <i>+</i> 1 ad</strong>'
                 '<small>Independent queues · automatic progression</small></div></div>')
-        designs, uploads, ads = st.tabs(['Design queue', 'Upload queue', 'Ads queue'])
-        with designs:
-            render_design_queue()
-        with uploads:
-            render_queue(user)
-        with ads:
-            render_ad_queue()
+        with st.expander('This browser · companion version'):
+            from product_upload_gallery import render as render_browser_connection
+            render_browser_connection(key='companion-browser-connection', mode='companion-health')
+        designs, uploads, ads = st.tabs(['Design queue', 'Upload queue', 'Ads queue'],
+                                        key='companion-queue-tabs', on_change='rerun')
+        if designs.open:
+            with designs:
+                render_design_queue(user)
+        if uploads.open:
+            with uploads:
+                render_queue(user)
+        if ads.open:
+            with ads:
+                render_ad_queue()
 
 
 def _connection(online, *, name='Companion'):
     _markup(f'<div class="cq-connection"><span class="cq-dot {"green" if online else "amber"}"></span>'
             f'<b>{name + " online" if online else "Waiting for " + name.lower()}</b>'
-            '<span>Updates every 10 seconds</span></div>')
+            '<span>Refreshes automatically</span></div>')
 
 
 def render_queue(user=None):
     import streamlit as st
     from product_upload_staff_queue import list_jobs, settings
 
-    @st.fragment(run_every=10)
+    @st.fragment(run_every=2 if st.session_state.get('companion-visible-now', True) else None)
     def history():
-        try:
-            status = list_jobs()
-            control = settings()
-        except Exception:
-            st.warning('Could not load the upload queue. Retrying automatically.')
-            return
+        def load():
+            return dict(status=list_jobs(display_only=True), control=settings())
+        value = read_display('Upload queue', load)
+        if value is None: return
+        status, control = value['status'], value['control']
         _connection(status['online'])
         _summary(status['jobs'], designs=False, paused=not control['enabled'])
         with st.container(border=True):
@@ -160,34 +186,34 @@ def render_queue(user=None):
                     if st.button('Play', icon=':material/play_arrow:', disabled=enabled, key='cq-upload-play',
                                  help='Resume starting queued uploads. Current work is never restarted.'):
                         settings(True)
+                        invalidate_display()
                         st.rerun()
                 with pause:
                     if st.button('Pause', icon=':material/pause:', disabled=not enabled, key='cq-upload-pause',
                                  help='Hold the next upload. The current upload keeps running.'):
                         settings(False)
+                        invalidate_display()
                         st.rerun()
                 _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
-        _markup('<div class="cq-notice"><b>Add uploads from Design Studio</b><span>Press Publish now on each artwork. '
+        _markup('<div class="cq-notice"><b>Add uploads from Design Studio</b><span>Press Add to queue on each artwork. '
                 'They wait here and run one at a time while the queue is playing.</span></div>')
         _jobs(status['jobs'], designs=False, paused=not control['enabled'], user=user)
         st.caption('Showing the latest 20 upload jobs. Keep Edge open and the computer awake.')
     history()
 
 
-def render_design_queue():
+def render_design_queue(user=None):
     import streamlit as st
     from morning_design_queue import settings, list_jobs
-    from product_upload_staff_queue import list_jobs as upload_status
+    from product_upload_staff_queue import desktop_online
 
-    @st.fragment(run_every=10)
+    @st.fragment(run_every=2 if st.session_state.get('companion-visible-now', True) else None)
     def history():
-        try:
-            control = settings()
-            jobs = list_jobs()
-            online = upload_status()['online']
-        except Exception:
-            st.warning('Could not load the design queue. Retrying automatically.')
-            return
+        def load():
+            return dict(control=settings(), jobs=list_jobs(display_only=True), online=desktop_online())
+        value = read_display('Design queue', load)
+        if value is None: return
+        control, jobs, online = value['control'], value['jobs'], value['online']
         _connection(online)
         _summary(jobs, designs=True, paused=not control['enabled'])
         with st.container(border=True):
@@ -202,14 +228,16 @@ def render_design_queue():
                     if st.button('Play', icon=':material/play_arrow:', disabled=enabled, key='cq-design-play',
                                  help='Resume starting queued designs. Current work is never restarted.'):
                         settings(True)
+                        invalidate_display()
                         st.rerun()
                 with pause:
                     if st.button('Pause', icon=':material/pause:', disabled=not enabled, key='cq-design-pause',
                                  help='Hold the next design. The current ChatGPT job keeps running.'):
                         settings(False)
+                        invalidate_display()
                         st.rerun()
                 _markup(f'<span class="cq-badge {"green" if enabled else "amber"}">{"Queue playing" if enabled else "Queue paused"}</span>')
-        _jobs(jobs, designs=True, paused=not control['enabled'])
+        _jobs(jobs, designs=True, paused=not control['enabled'], user=user)
         st.caption('Up to 100 jobs · active jobs first · Edge must stay open and signed in; keep the computer awake.')
     history()
 
@@ -223,6 +251,8 @@ def render_ad_queue():
     quick_add()
 
     def links(job):
+        if job.get('updated_at'):
+            st.caption('Latest checkpoint: ' + str(job['updated_at']))
         if job.get('id'):
             import os_accounts
             st.link_button('View imported ad draft', '/?'+urlencode(dict(page=os_accounts.page_key_for_route('Ads'),ads_queue_job=job['id'])))
@@ -241,16 +271,14 @@ def render_ad_queue():
             if column.button(label,key='cq-ad-'+operation+'-'+job['id'],disabled=not allowed):
                 try:
                     action(current_ads_user(),job['id'],operation)
+                    invalidate_display()
                     st.rerun()
                 except (ValueError,PermissionError) as error:st.error(str(error))
 
-    @st.fragment(run_every=10)
+    @st.fragment(run_every=2 if st.session_state.get('companion-visible-now', True) else None)
     def history():
-        try:
-            status = dashboard()
-        except Exception:
-            st.warning('Could not load the Ads queue. Retrying automatically.')
-            return
+        status = read_display('Ads queue', dashboard)
+        if status is None: return
         _connection(status['online'], name='Ads Companion')
         enabled = status['enabled']
         jobs = status['jobs']
@@ -269,9 +297,11 @@ def render_ad_queue():
             controls.caption('Pause holds the next ad. Running ads and product uploads continue.')
             if play.button('Play', icon=':material/play_arrow:', disabled=enabled, key='cq-ads-play'):
                 settings(True)
+                invalidate_display()
                 st.rerun()
             if pause.button('Pause', icon=':material/pause:', disabled=not enabled, key='cq-ads-pause'):
                 settings(False)
+                invalidate_display()
                 st.rerun()
 
         st.caption('Add products above or use Publish + ad in Design Studio. Cancel stops future automation; Delete hides the job without removing files or Meta receipts.')
@@ -288,7 +318,7 @@ def render_ad_queue():
 
         st.subheader('Waiting queue')
         if waiting:
-            for position,job in enumerate(waiting,1):
+            for position,job in enumerate(page_rows(waiting, 'cq-ads-waiting-page'),1):
                 with st.container(border=True):
                     st.write(f"{position}. {job['title']}")
                     st.caption(f"{job['country']} · {job['sport']}")
@@ -299,7 +329,7 @@ def render_ad_queue():
         with st.expander(f'Completed & stopped history ({len(finished)})'):
             if not finished:
                 st.caption('No completed jobs yet.')
-            for job in finished:
+            for job in page_rows(finished, 'cq-ads-history-page'):
                 st.write(job['title'])
                 st.caption(f"{job['country']} | {job['sport']} | {job['label']}")
                 if job['detail']:

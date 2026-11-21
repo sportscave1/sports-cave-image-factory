@@ -32,10 +32,15 @@ def collection(service,category='All'):
 
 def page(service,category='All',cursor=''):
     if cursor:identity(cursor)
-    summary,rows=collection(service,category)
-    batch=[r for r in rows if r['id']>cursor][:PAGE_SIZE+1];more=len(batch)>PAGE_SIZE;batch=batch[:PAGE_SIZE]
-    return dict(summary=summary,jobs=batch,total_rows=len(rows),next_cursor=batch[-1]['id'] if more else None,
-                scanned_to=batch[-1]['id'] if more else 'end',page_size=PAGE_SIZE)
+    if category not in FILTERS: raise ValueError('Invalid job filter.')
+    from worker_health_cache import index, summary
+    view, freshness = index(service)
+    batch = view.select(category, cursor, PAGE_SIZE+1)
+    more = len(batch)>PAGE_SIZE
+    batch = batch[:PAGE_SIZE]
+    return dict(summary=summary(view, freshness), jobs=batch, total_rows=view.filters[category],
+                next_cursor=batch[-1]['id'] if more else None,
+                scanned_to=batch[-1]['id'] if more else 'end', page_size=PAGE_SIZE)
 
 
 def changes(service,category,known,scanned_to):
@@ -44,11 +49,12 @@ def changes(service,category,known,scanned_to):
         identity(pid)
         if not isinstance(value,str) or not re.fullmatch('[a-f0-9]{20}',value):raise ValueError('Invalid job version.')
     if scanned_to not in ('','end'):identity(scanned_to)
-    summary,rows=collection(service,category);current={r['id']:r for r in rows}
-    updates=[r for r in rows if r['id'] in known and known[r['id']]!=r['version']]
-    # Reconcile newly matching jobs behind the stable cursor after live changes.
-    arrivals=[r for r in rows if r['id'] not in known and (scanned_to=='end' or r['id']<=scanned_to)][:PAGE_SIZE]
-    return dict(summary=summary,jobs=updates+arrivals,removed=[pid for pid in known if pid not in current],total_rows=len(rows))
+    if category not in FILTERS: raise ValueError('Invalid job filter.')
+    from worker_health_cache import index, summary
+    view, freshness = index(service)
+    updates, removed = view.changes(category, known, scanned_to)
+    return dict(summary=summary(view, freshness), jobs=updates, removed=removed, total_rows=view.filters[category])
+
 
 
 # A reset audit can prove that a different revision is archived. Current

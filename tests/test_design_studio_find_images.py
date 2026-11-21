@@ -19,6 +19,12 @@ def assert_short_find_images(test, prompt):
         "IMAGE CAROUSEL", "approximately 4–6", "before any commentary",
         "Best primary image:", "Best supporting image:", "Do not generate the artwork yet",
         "source URLs/references", "asset_id", "role", "use_mode", "actual image inputs",
+        "locked defining moment or verified signature action/celebration",
+        "Exclude training jerseys, warm-ups and routine posed photos",
+        "not the first result",
+        "crop preserves the defining gesture and complete physical interaction",
+        "hands with a ball or trophy",
+        "Avoid watermarked previews",
     ):
         test.assertIn(required, prompt)
     for obsolete in (

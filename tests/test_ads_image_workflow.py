@@ -111,7 +111,7 @@ class AdsImageProcessingTests(unittest.TestCase):
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Instant Experience")],
             [
                 "Collector Hallway Cover",
-                "Architectural Wall Cover",
+                "Collector Hallway Front View Cover",
                 "Man Cave Cover",
             ],
         )

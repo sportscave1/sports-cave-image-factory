@@ -14,6 +14,7 @@ EDITION_SYNC_RULES = """Edition Ops owns all sports_cave edition metafields. Upl
 FIELDS = (
     'product_name', 'design_name', 'sport_category', 'sport', 'subjects', 'athletes',
     'team', 'event', 'product_context', 'research', 'customer_facing_title',
+    'existing_product_title', 'design_origin', 'upload_intent',
     'confirmed_limit', 'edition_limit', 'edition_total', 'limited_edition',
     'worldwide', 'selected_collections', 'verified_collection_facts', 'existing_tags',
     'tags', 'shopify_product_id', 'shopify_product_gid', 'product_gid', 'product_id',
@@ -198,7 +199,8 @@ def sport_requirements(metadata):
 def build(selected, filename, source, metadata, additions=None, *, automatic=False, companion_mapping=False):
     from product_upload_intake import MODES
     from product_upload_source import prompt_section
-    m = dict(metadata or {})
+    from product_title_rules import publication_metadata
+    m = publication_metadata(metadata) if selected == 'UPDATE' else dict(metadata or {})
     if m.get('customer_facing_title'):
         from product_title_rules import apply_rules
         apply_rules('', m)  # Shared explicit-title validation before prompt handoff.
@@ -331,9 +333,9 @@ def build(selected, filename, source, metadata, additions=None, *, automatic=Fal
         publication = 'Create as DRAFT, published false; leave unpublished for manual review. Do not activate or publish product/collections or change Markets availability. Preserve the existing Draft inventory behaviour.'
     elif selected == 'LIVE':
         targets = ('the saved channel/Market selection: ' + encoded(m['publication_settings']) if m.get('publication_settings') else 'all enabled normal wall-art channels: Online Store, Facebook & Instagram, Google & YouTube, Shop, Pinterest and Linktree where enabled, and applicable active Markets/catalogs')
-        create = ('Create the product as ACTIVE from the first create call and publish the product AND every selected collection to ' if automatic else
-                  'Create/configure the product, then set ACTIVE and publish the product AND every selected collection to ')
-        publication = (create + targets + '. Discover their current publication IDs; apply product availability, including inherited channel availability where a catalog has no publication. Reuse existing publications. Preserve shared collection publications and global Markets, currencies and price lists. ACTIVE alone is not proof of publication. Report disabled/absent channels as not applicable and unsupported required channel/Market operations as unfinished. Downstream Meta catalogue propagation is separate; do not edit ads.')
+        create = ('Create the product as ACTIVE from the first create call and publish the product to ' if automatic else
+                  'Create/configure the product, then set ACTIVE and publish the product to ')
+        publication = (create + targets + '. Discover their current publication IDs; apply product availability, including inherited channel availability where a catalog has no publication. Separately publish and verify every selected collection only on enabled required sales-channel publications (AppCatalog), not MarketCatalog or CompanyLocationCatalog publications. Collection publication to market/B2B catalogues is not required: record it as not applicable, not a Shopify blocker. Verified collection channel publication satisfies this collection gate; product Market availability remains required. Reuse existing publications. Preserve shared collection publications and global Markets, currencies and price lists. ACTIVE alone is not proof of publication. Report disabled/absent channels as not applicable and unsupported required product channel/Market operations as unfinished. Downstream Meta catalogue propagation is separate; do not edit ads.')
     else:
         update_status = ('For the exact verified product only, ensure status ACTIVE and Online Store publication. Activate and publish that same product if an earlier attempt left it in Draft. An Archived product needs explicit edit authorization. ' if automatic else
                          'Preserve existing status and publication state (Active stays Active, Draft stays Draft); an Archived product needs explicit edit authorization. ')
