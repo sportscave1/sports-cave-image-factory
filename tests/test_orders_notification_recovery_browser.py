@@ -40,6 +40,9 @@ def fixture(value=None, viewport=None, **settings):
                 route.fulfill(body=html, content_type='text/html')
             elif route.request.url.endswith('/order-status'):
                 state['calls'] += 1
+                if state.get('hold'):
+                    state.setdefault('held_routes', []).append(route)
+                    return
                 route.fulfill(status=503 if state['fail'] else 200, json={} if state['fail'] else {
                     'ok':True, 'action_required_count':state['count'], 'badge_label':str(state['count']) if state['count'] else ''})
             elif route.request.url.endswith('/notifications'):
@@ -54,6 +57,11 @@ def fixture(value=None, viewport=None, **settings):
             yield page, state
             assert not errors
         finally:
+            for held in state.get('held_routes', []):
+                try:
+                    held.abort()
+                except Exception:
+                    pass  # The remount may already have aborted its transport.
             browser.close()
 
 
@@ -177,3 +185,14 @@ def test_mobile_bell_count_and_order_reminder_are_visible(tmp_path):
         expect(page.locator('#sc-os-notifications-panel')).to_contain_text('2 orders require action')
         assert state['calls'] == 1
         page.screenshot(path=str(tmp_path/'orders-notification-mobile.png'))
+
+
+def test_remount_restarts_interrupted_initial_read_without_waiting_a_poll():
+    with fixture(hold=True) as (page, state):
+        expect(page.locator('#sports-cave-os-top-bar')).to_have_attribute('data-install-stage','ready')
+        assert state['calls'] == 1
+        state['hold'] = False
+        page.evaluate(script(config()))
+        expect(sidebar_badge(page)).to_have_text('2')
+        expect(page.locator('#sc-os-orders-notification-count')).to_have_text('2')
+        assert state['calls'] == 2
