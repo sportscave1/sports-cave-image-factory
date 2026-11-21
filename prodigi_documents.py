@@ -12,13 +12,25 @@ PREFIX='prodigi_document:'
 URL='https://sports-cave-image-factory.onrender.com/api/prodigi-document/'
 
 
+def render_certificate(snapshot,path):
+    """Fit the existing certificate on one A4 landscape sheet, with safe margins."""
+    from PIL import Image
+    from certificate_service import render_template_certificate_image
+    with Image.new('RGB',(3508,2480),'white') as page:
+        certificate=render_template_certificate_image(product_title=snapshot['product'],edition_number=snapshot['number'],
+            edition_total=snapshot['total'],target_size=(3300,2200))
+        try:page.paste(certificate,(104,140))
+        finally:certificate.close()
+        page.save(path,'PDF',resolution=300.0)
+
+
 def subject_key(value):
     return ('prodigi_sandbox_test:'+value['id']) if value.get('environment')=='sandbox' else prep.PREFIX+str(value['allocation_id'])
 
 
 def create(value,snapshot):
     key=PREFIX+subject_key(value)
-    identity=prep.digest({k:snapshot[k] for k in ('allocation_id','job_id','output','product','number','total')})
+    identity=prep.digest(dict(format='a4-landscape-certificate-v1',**{k:snapshot[k] for k in ('allocation_id','job_id','output','product','number','total')}))
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT value FROM app_settings WHERE key=%s',(key,));found=q.fetchone()
     if found:
@@ -27,12 +39,10 @@ def create(value,snapshot):
         import auto_editions_runtime as rt
         rt.storage().verify_output(doc['output'])
         return doc
-    from certificate_service import generate_template_certificate_pdf
     import auto_editions_runtime as rt
     import auto_editions as ae
     with tempfile.TemporaryDirectory(prefix='sc-prodigi-certificate-') as folder:
-        path=Path(generate_template_certificate_pdf(folder,product_title=snapshot['product'],edition_number=snapshot['number'],
-            edition_total=snapshot['total'],order_name=snapshot['order_reference'],filename='certificate.pdf'))
+        path=Path(folder)/'certificate.pdf';render_certificate(snapshot,path)
         if not 0<path.stat().st_size<=16*1024*1024:raise ValueError('Certificate PDF exceeds the supported limit.')
         sha=hashlib.sha256(path.read_bytes()).hexdigest();storage=rt.storage()
         destination=storage.GENERATED_ROOT+'/Fulfilment Documents/'+str(snapshot['allocation_id'])+'/'+sha+'.pdf'

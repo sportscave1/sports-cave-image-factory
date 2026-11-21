@@ -20,7 +20,8 @@ After the single-use Save permit and artwork readback, one background pass:
 - Generates the existing Sports Cave certificate template for this exact unit
   and archives its PDF by immutable hash/revision. In this workflow the custom
   packing slip **is the numbered certificate**, matching the existing Fulfilment
-  convention. It does not claim that a draft's fee has already been paid.
+  convention. The original layout is fitted to one A4 landscape sheet with safe
+  margins. It does not claim that a draft's fee has already been paid.
 - Attaches only `packingSlip.url` to an unpaid editable draft, without touching
   any items, artwork, customer, shipping or Submit fields. A durable intent
   precedes the request. An uncertain response is re-read, never uploaded again.
