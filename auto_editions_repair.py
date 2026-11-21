@@ -196,14 +196,14 @@ def run_one(connect):
                 checkpoint(connect,record,'Needs help','Colour approval required: this untagged PSD has no verified colour interpretation. Review its source profile before preparation can resume.')
             else:checkpoint(connect,record,'Waiting','Approved colour interpretation found; queued for Photoshop preparation.')
             return True
+        pending=row.get('replacement') or {}
+        if row['status'] in ('Preparing','Awaiting preparation') or pending.get('stage') in ('Discovering','Queued','Preparing'):
+            checkpoint(connect,record,'Waiting','Companion preparation and technical validation are running.');return True
         if d['state']=='Codex queued':return False
         if d['state']=='Codex repairing':
             started=datetime.fromisoformat(d['handoff_started'])
             if (datetime.now(timezone.utc)-started).total_seconds()>7200:checkpoint(connect,record,'Needs help','Codex repair needs attention. The saved repair prompt and original PSD are retained.')
             return False
-        pending=row.get('replacement') or {}
-        if row['status'] in ('Preparing','Awaiting preparation') or pending.get('stage') in ('Discovering','Queued','Preparing'):
-            checkpoint(connect,record,'Waiting','Companion preparation and technical validation are running.');return True
         if row.get('technical_state') in ('Pending','Processing'):
             checkpoint(connect,record,'Waiting','Verifying the retained PSD package.');return True
         if (row.get('preparation_hash') and row['status']=='Blocked' and row.get('priority',0)>0
@@ -242,7 +242,13 @@ def run_one(connect):
 
 def claim(connect):
     with connect() as conn,conn.cursor() as cur:
-        cur.execute("SELECT id,actor_id,detail FROM auto_edition_onboarding_audit WHERE event=%s AND detail->>'state'='Codex queued' ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1",(EVENT,));record=cur.fetchone()
+        cur.execute("""SELECT a.id,a.actor_id,a.detail FROM auto_edition_onboarding_audit a
+          JOIN auto_edition_onboarding q ON q.product_gid=a.product_gid AND q.file_id=a.detail->>'file_id'
+          WHERE a.event=%s AND a.detail->>'state'='Codex queued'
+          AND q.status IN ('Blocked','Needs PSD Repair')
+          AND COALESCE(q.replacement->>'stage','') NOT IN ('Discovering','Queued','Preparing')
+          AND COALESCE(q.reset_cancellation->>'stage','') NOT IN ('Cancelling','Confirmed')
+          ORDER BY a.id FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(EVENT,));record=cur.fetchone()
         if not record:return None
         d={**record['detail'],'state':'Codex repairing','handoff_token':str(uuid.uuid4()),'handoff_started':datetime.now(timezone.utc).isoformat(),'message':'Edition Companion submitted the PSD diagnosis to Codex.'}
         cur.execute('UPDATE auto_edition_onboarding_audit SET detail=%s::jsonb WHERE id=%s',(encode(d),record['id']))
@@ -255,8 +261,12 @@ def returned(connect,pid,request_id,token,ok):
         d=(record or {}).get('detail',{})
         if d.get('request_id')!=request_id or d.get('handoff_token')!=token:raise ValueError('Repair handoff ownership changed.')
         if d.get('state')!='Codex repairing':return # Late/repeated receipt; never reopen a terminal repair.
-        state='Waiting' if ok else 'Needs help'
-        d={**d,'state':state,'message':'Codex returned; verifying the actual PSD and JPG queue.' if ok else 'Codex repair needs attention. Open the retained repair prompt.'}
+        cur.execute('SELECT status FROM auto_edition_onboarding WHERE product_gid=%s',(pid,))
+        preparing=(cur.fetchone() or {}).get('status') in ('Awaiting preparation','Preparing','Cloud Ready')
+        state='Waiting' if ok or preparing else 'Needs help'
+        message=('Native preparation resumed; verifying the actual PSD and JPG queue.' if preparing else
+            'Codex returned; verifying the actual PSD and JPG queue.' if ok else 'Codex repair needs attention. Open the retained repair prompt.')
+        d={**d,'state':state,'message':message}
         cur.execute('UPDATE auto_edition_onboarding_audit SET detail=%s::jsonb WHERE id=%s',(encode(d),record['id']))
 
 async def action(request):

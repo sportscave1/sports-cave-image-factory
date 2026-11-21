@@ -41,7 +41,8 @@ def test_executor_uses_pinned_chat_stdin_and_existing_permissions(monkeypatch,tm
     monkeypatch.setattr(local.subprocess,'run',execute)
     local.execute(state)
     command=execute.call_args.args[0]
-    assert command==['C:/trusted/codex.exe','exec','resume','--json',target['thread_id'],'-']
+    assert command==['C:/trusted/codex.exe','exec','--json','-']
+    assert execute.call_args.kwargs['cwd']==target['cwd']
     assert execute.call_args.kwargs['input']==b'exact scoped repair'
     assert json.loads(state.with_suffix('.result.json').read_text())==dict(ok=True)
 

@@ -230,3 +230,12 @@ def test_existing_shared_photoshop_lock_is_never_stolen(tmp_path):
     with patch.object(Path,'home',return_value=tmp_path):
         with pytest.raises(FileExistsError):local.processor_lease()
     assert lock.read_bytes()==b'unknown existing operation'
+
+
+def test_live_heartbeat_payload_matches_server_contract(monkeypatch,tmp_path):
+    import worker_health
+    monkeypatch.setattr(local,'JOBS',{})
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:tmp_path))
+    payload=local.health_payload()
+    assert worker_health.validate_heartbeat(payload)==payload
+    assert 'repair_handoff' not in payload
