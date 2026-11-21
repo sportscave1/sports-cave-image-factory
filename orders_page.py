@@ -2810,19 +2810,34 @@ def _selected_detail_rows(rows):
     return [by_id.get(chosen,rows[0])]
 
 
-def _render_orders_table(rows):
+def _render_orders_table(rows,selection_guard=None):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
     if st.session_state.get('orders-narrow-view'):
+        _render_top_actions(rows,None)
         _render_mobile_orders(rows)
         return
-    _render_inline_prodigi_actions(rows)
-    import auto_editions_runtime
     resources = _order_display_resources(rows)
+    display_rows = _display_rows(rows,normalised=True,resources=resources)
+    import orders_prodigi_grid as grid
+    actor=st.session_state.get('sports_cave_current_user') or {}
+    statuses=grid.read_statuses(rows,actor)
+    @st.fragment
+    def selection_workspace():
+        if selection_guard and not selection_guard():return
+        _render_top_actions(rows,None)
+        _render_orders_selection_workspace(rows,resources,display_rows,statuses)
+    selection_workspace()
+    _perf_log("render table", start, rows=len(rows))
+
+
+def _render_orders_selection_workspace(rows,resources,display_rows,statuses):
+    import auto_editions_runtime
+    _render_inline_prodigi_actions(rows)
     with st.container(border=False, key="orders-table"):
         from orders_prodigi_grid import render
-        render(rows,_display_rows(rows,normalised=True,resources=resources),grid_key=GRID_KEY,
-            selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {})
+        render(rows,display_rows,grid_key=GRID_KEY,
+            selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {},statuses=statuses)
         psd_directory.render_missing_link_guard(st)
     selected_print_rows = _selected_rows_from_state(rows)
     if selected_print_rows and not st.session_state.get('orders-prodigi-review'):
@@ -2854,8 +2869,6 @@ def _render_orders_table(rows):
                     st.caption(f"Print JPG — {status['label']}: {status['reason']}")
                 if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
                     st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
-    _perf_log("render table", start, rows=len(rows))
-    print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 
 
 def _mobile_unit_id(row):
@@ -2984,7 +2997,7 @@ def _render_orders_load_failure(query):
         st.rerun()
 
 
-def _render_orders_data_area():
+def _render_orders_data_area(selection_guard=None):
     prep_started = time.perf_counter()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
@@ -3024,9 +3037,8 @@ def _render_orders_data_area():
     _responsive_orders_mode()
     if st.session_state.get('orders-prodigi-feedback'):
         st.warning(st.session_state.pop('orders-prodigi-feedback'))
-    _render_top_actions(visible_rows, None)
-
-    _render_orders_table(visible_rows)
+    if selection_guard is None:_render_orders_table(visible_rows)
+    else:_render_orders_table(visible_rows,selection_guard=selection_guard)
 
 
 def _render_orders_loading_fragment():
@@ -3051,7 +3063,7 @@ def _render_orders_styles():
         st.html((Path(__file__).parent / "orders_page.css").read_text(encoding="utf-8"))
 
 
-def render_page():
+def render_page(selection_guard=None):
     page_started = time.perf_counter()
     _ensure_state()
     print("PERF Orders page entry", flush=True)
@@ -3086,6 +3098,6 @@ def render_page():
         elif not st.session_state.get(SNAPSHOT_LOADED_KEY):
             _load_snapshot_once("")
 
-    _render_orders_data_area()
+    _render_orders_data_area(selection_guard=selection_guard)
     _render_orders_supabase_live_refresh()
     _perf_log("total page load", page_started, rows=len(st.session_state.get(ROWS_KEY) or []))

@@ -55,7 +55,7 @@ def test_no_supplier_io_or_writes_when_table_refreshes(screen):
     state,calls,view,reply=screen
     reply['event']={'event':'nonce','type':'refresh'}
     grid.render([{'edition_order_id':2}],[{'product':'Untrusted <script>text</script>'}],grid_key='selection',selected=[],actor={'id':'staff'})
-    assert not calls and view['rows'][0]['cells']['product']=='Untrusted <script>text</script>'
+    assert not [c for c in calls if c[0]=='prepare'] and view['rows'][0]['cells']['product']=='Untrusted <script>text</script>'
 
 
 def test_complete_order_is_not_sendable_even_with_a_stale_send_event(screen,monkeypatch):
@@ -74,4 +74,12 @@ def test_checkbox_selection_only_reruns_orders_fragment(screen):
     state,calls,view,reply=screen
     reply['event']={'event':'selection','type':'select','ids':['allocation:2']}
     grid.render([{'edition_order_id':2}],[{}],grid_key='selection',selected=[],actor={'id':'staff'})
+    assert calls==[('rerun',{'scope':'fragment'})]
+
+
+def test_selection_uses_snapshot_without_reloading_statuses(screen,monkeypatch):
+    state,calls,view,reply=screen
+    monkeypatch.setattr(grid,'batch_status',lambda _:pytest.fail('Checkbox must not read the database'))
+    reply['event']={'event':'selection','type':'select','ids':['allocation:2']}
+    grid.render([{'edition_order_id':2}],[{}],grid_key='selection',selected=[],actor={'id':'staff'},statuses={})
     assert calls==[('rerun',{'scope':'fragment'})]

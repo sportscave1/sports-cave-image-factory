@@ -13785,6 +13785,14 @@ def _navigation_page_status(current_page):
     return "ready"
 
 
+def _orders_selection_access_allowed():
+    if st.session_state.get("current_page", "Orders") != "Orders":return False
+    if not is_app_authenticated():
+        st.rerun()
+        return False
+    return bool(ensure_current_page_access("Orders"))
+
+
 @st.fragment
 def _render_orders_workspace():
     # Form and selection events rerender only the existing Orders workspace.
@@ -13798,7 +13806,7 @@ def _render_orders_workspace():
     allowed = ensure_current_page_access("Orders")
     if allowed:
         try:
-            get_orders_page().render_page()
+            get_orders_page().render_page(selection_guard=_orders_selection_access_allowed)
         except Exception as error:
             logging.exception("Page render failed for Orders")
             _render_navigation_failure("Orders", error)

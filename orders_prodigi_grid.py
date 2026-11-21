@@ -50,7 +50,16 @@ def row_identity(row):
         ('shopify_order_id','shopify_line_item_id','allocation_index','unit_ordinal','shopify_product_id')]).encode()).hexdigest()[:24]
 
 
-def render(rows,display_rows,*,grid_key,selected,actor):
+def read_statuses(rows,actor):
+    import prodigi_preparation as queue
+    import os_accounts
+    if not (queue.enabled() and os_accounts.is_admin(actor) and os_accounts.can_access_page(actor,'Prodigi')):return {}
+    try:return batch_status([r.get('edition_order_id') for r in rows])
+    except Exception:
+        return {str(r.get('edition_order_id')):{'status':'Status unavailable','message':'Status could not be read. Review this unit before sending.'} for r in rows}
+
+
+def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
     import streamlit as st
     import streamlit.components.v1 as components
     import prodigi_preparation as queue
@@ -58,9 +67,7 @@ def render(rows,display_rows,*,grid_key,selected,actor):
     component=components.declare_component('orders_prodigi_grid',path=str(Path(__file__).parent/'components/orders_prodigi_grid'))
     allowed=queue.enabled() and os_accounts.is_admin(actor) and os_accounts.can_access_page(actor,'Prodigi')
     by_id={row_identity(r):r for r in rows}
-    try:statuses=batch_status([r.get('edition_order_id') for r in rows]) if allowed else {}
-    except Exception:
-        statuses={str(r.get('edition_order_id')):{'status':'Status unavailable','message':'Status could not be read. Review this unit before sending.'} for r in rows}
+    if statuses is None:statuses=read_statuses(rows,actor)
     payload=[]
     for r,d in zip(rows,display_rows):
         aid=str(r.get('edition_order_id') or '')
@@ -85,6 +92,9 @@ def render(rows,display_rows,*,grid_key,selected,actor):
         st.session_state['orders-grid-selected-ids']=list(chosen)
         st.session_state[grid_key]={'selection':{'rows':[i for i,r in enumerate(rows) if row_identity(r) in chosen]}}
         st.rerun(scope='fragment')
+        return
+    if event.get('type')=='refresh':
+        st.rerun()
         return
     rid=str(event.get('id',''))
     if rid not in by_id or not allowed:return
