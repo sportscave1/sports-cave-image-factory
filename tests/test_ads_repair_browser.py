@@ -54,6 +54,7 @@ def test_repair_send_once_drafts_and_response_isolation(paragraph_paste, mode):
         page.locator('#prompt-textarea').fill('')
         assert request('send',permit=True)['found']
         sent_prompt=page.locator('#turns [data-message-author-role="user"]').last.inner_text()
+        assert 'three-line footer' not in sent_prompt
         if mode == 'complete_missing':
             assert 'Complete ONLY these missing deliverables: ad_copy.csv' in sent_prompt
             assert 'Do not restart the job or regenerate completed artwork' in sent_prompt
@@ -61,7 +62,7 @@ def test_repair_send_once_drafts_and_response_isolation(paragraph_paste, mode):
         else:
             assert 'download recovery only' in sent_prompt
             assert 'do not generate, recreate, redraw, restyle or replace an image' in sent_prompt
-            assert 'change the three-line footer' in sent_prompt
+            assert 'change the assigned footer layout' in sent_prompt
             assert 'otherwise recreate' not in sent_prompt
             assert 'all four required files exist' in sent_prompt
             assert 'end with SC_AD_BLOCKED:' in sent_prompt

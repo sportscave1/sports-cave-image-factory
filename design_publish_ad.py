@@ -83,7 +83,8 @@ def public(value):
         return None
     generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
     retry = value.get('auto_recovery') or {}
-    return dict(label=('Automatic recovery scheduled' if value['stage']=='waiting' and retry.get('state')=='scheduled' else
+    return dict(label=('Continuing updated ad workflow' if value.get('superseded_by') else
+                       'Automatic recovery scheduled' if value['stage']=='waiting' and retry.get('state')=='scheduled' else
                        'Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
                        'ChatGPT is thinking / generating' if generating else
                        'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else
@@ -306,6 +307,9 @@ def _download(provider, meta, size_limit):
 
 
 def _post_request(value):
+    from ads_creative_contract import obsolete
+    if not value.get('posting_id') and obsolete(value.get('result')):
+        raise ValueError('An obsolete creative release cannot create a new campaign; rebuild through the current ad queue.')
     import ads_direct_post
     import ads_image_workflow
     import ads_page
@@ -365,6 +369,10 @@ def _step(key, value, job, event, age):
     from ads_companion_controls import stopped
     from meta_posting_jobs import JOBS, TERMINAL, confirmed_ads
     from meta_posting_service import PostingBusyError
+
+    from ads_creative_contract import replace_unposted
+    if replace_unposted(value):
+        return {}
 
     stage = value['stage']
     # Polling writes cannot renew a stage deadline. Bootstrap old checkpoints
