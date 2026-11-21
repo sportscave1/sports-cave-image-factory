@@ -137,6 +137,60 @@ def test_report_persistence_retry_conflict_and_bounded_history(store):
     assert len(store.recent(10000)) == 2
 
 
+def test_history_uses_report_day_then_publication_time_not_random_ids(store):
+    older = report(id='ffffffff-ffff-4fff-bfff-ffffffffffff', section='Initial setup')
+    newer = report(id='00000000-0000-4000-8000-000000000001', section='Completed installation', status='reviewed')
+    backfill = report(date=(dt.date.fromisoformat(newer['date']) - dt.timedelta(days=1)).isoformat())
+    for value in (older, newer, backfill):
+        store.publish(value)
+    with store.connect() as conn:
+        with conn.cursor() as cur:
+            for value, at in [(older, '2026-11-21 00:00:00'), (newer, '2026-11-21 00:00:01'), (backfill, '2026-11-21 00:00:02')]:
+                cur.execute('UPDATE app_settings SET updated_at=%s WHERE key=%s',
+                            (at, speed.PREFIX + value['date'] + ':' + value['id']))
+        conn.commit()
+    assert store.recent() == [newer, older, backfill]
+    assert store.recent(1) == [newer]
+    assert store.publish(older) == older
+    assert store.recent()[0] == newer, 'A delivery retry must not make the old blocker current again'
+
+
+def speed_page(reports):
+    # Keep native dataframe modules outside the fixture's sys.modules scope.
+    importlib.import_module('pandas')
+    from streamlit.testing.v1 import AppTest
+    source = f'''
+import sys, types
+from unittest.mock import patch
+from speed_optimisation import Reports
+from speed_optimisation_page import render_page
+def no_database(): raise AssertionError('Page fixture must not connect to any database')
+with patch.dict(sys.modules, {{'supabase_backend': types.SimpleNamespace(connect=no_database)}}), patch('os_accounts.can_access_page',return_value=True), patch.object(Reports,'recent',return_value={reports!r}):
+    render_page({{'role':'admin','is_active':True}})
+'''
+    return AppTest.from_string(source, default_timeout=15).run()
+
+
+def test_page_separates_latest_result_from_old_blocked_snapshot():
+    latest = report(section='Installation', status='released', candidate_sha='a' * 40, live_sha='a' * 40)
+    older = report(section='Initial setup', status='blocked')
+    page = speed_page([latest, older])
+    assert not page.exception
+    assert page.success[0].value == 'Latest report: Released'
+    assert not page.warning
+    assert page.dataframe[0].value['Status'].tolist() == ['Released']
+    assert page.dataframe[1].value['Status'].tolist() == ['Blocked (historical)']
+    history = next(row for row in page.expander if row.label == 'Earlier reports (1)')
+    assert not history.proto.expanded
+
+
+def test_page_keeps_a_genuine_latest_blocker_visible():
+    page = speed_page([report(status='blocked'), report(status='released')])
+    assert not page.exception
+    assert page.warning[0].value == 'Latest report: Blocked'
+    assert not page.success
+
+
 @pytest.fixture
 def client(monkeypatch, store):
     import files_upload_api

@@ -142,7 +142,8 @@ class Reports:
         with self.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute('''SELECT value FROM app_settings WHERE key LIKE %s
-                    ORDER BY key DESC LIMIT %s''', (PREFIX + '%', limit))
+                    ORDER BY substr(key, %s, 10) DESC, updated_at DESC, key DESC LIMIT %s''',
+                            (PREFIX + '%', len(PREFIX) + 1, limit))
                 return [row['value'] for row in cur.fetchall()]
 
 
