@@ -222,3 +222,16 @@ def test_primary_reconciler_starts_once_and_retries_after_failure(monkeypatch):
     monkeypatch.setattr(crm,"tick",tick)
     crm._loop(stop)
     assert tick.call_count==2 and stop.wait.call_count==2
+
+
+def test_initial_html_is_useful_without_javascript_and_escapes_payload():
+    import home_crm_ui as ui
+    from bs4 import BeautifulSoup
+    value={"state":"saved","data":{"ledger":{"rows":[{"channel":"Facebook paid","mobile":2,"desktop":0,"other":0,"total":2}]},
+        "roas":{"facebook":6.25,"google":None},"basis":'" onmouseover="bad() </section><script>bad()</script>'}}
+    soup=BeautifulSoup(ui.html(date(2026,11,21),value),"html.parser")
+    assert soup.select_one('[data-roas="facebook"]').text=="6.25×"
+    assert soup.select_one('[data-roas="google"]').text=="—"
+    assert soup.select_one('[data-channel="Facebook paid"] [data-device="mobile"]').text=="2"
+    assert json.loads(soup.select_one('.sc-home-crm')["data-initial"])==value
+    assert not soup.select("script,[onmouseover]")
