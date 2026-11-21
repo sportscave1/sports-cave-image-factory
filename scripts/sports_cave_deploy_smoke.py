@@ -6,12 +6,13 @@ import os
 from pathlib import Path
 import re
 import socket
+import _socket
 import sys
 import unittest
 from unittest.mock import patch
 from contextlib import nullcontext
 
-_LOCAL_CONNECT = socket.socket.connect
+_LOCAL_CONNECT = _socket.socket.connect
 
 
 def local_test_socketpair(family=None, type=socket.SOCK_STREAM, proto=0):

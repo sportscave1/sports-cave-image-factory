@@ -19,7 +19,7 @@ sys.path[:0] = [str(ROOT / 'scripts' / 'studio'), str(ROOT / 'scripts'), str(ROO
 import studio
 from sports_cave_deploy import Git, ORIGINS, Stop, export_tree, safe_path, validate
 
-INSTALLATION_BASE = '27ce65fb97ba046b6ad5f3692dd2e6e0eb6dea0f'
+INSTALLATION_BASE = 'bcd10fe0f0ab67e7408238b02c8362b5e088e1ea'
 INSTALLATION_TASK = '20261121-d5f7b916'
 
 
