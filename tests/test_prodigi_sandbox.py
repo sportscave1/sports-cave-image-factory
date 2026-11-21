@@ -121,8 +121,8 @@ def test_orders_has_visible_action_and_separate_removable_test_rows():
 def test_durable_test_queue_and_cleanup_never_touch_live_preparation_records(store,monkeypatch):
     import uuid
     p=SandboxProvider(); v=value();v['id']=str(uuid.uuid4())
-    monkeypatch.setattr(prep,'resolve',lambda _:source())
-    monkeypatch.setattr(prep,'artwork_link',lambda _:('https://fixture.invalid/number.jpg','b'*32))
+    monkeypatch.setattr(sandbox,'resolve',lambda _:source())
+    monkeypatch.setattr(sandbox,'artwork_link',lambda *_:('https://fixture.invalid/number.jpg','b'*32))
     monkeypatch.setattr(sandbox,'SandboxClient',lambda:p)
     with store() as c,c.cursor() as q:
         sandbox.save(q,v)
@@ -143,7 +143,7 @@ def test_duplicate_request_is_rejected_without_creating_a_supplier_order(store,m
     p=Provider();p.data.update(recipient=source()['recipient'],shippingMethod='Standard')
     monkeypatch.setattr(sandbox,'SandboxClient',lambda:SimpleNamespace())
     monkeypatch.setattr(sandbox,'Client',lambda:p)
-    monkeypatch.setattr(prep,'resolve',lambda _:source())
+    monkeypatch.setattr(sandbox,'resolve',lambda _:source())
     first=sandbox.request({'id':'fixture'},1)
     with pytest.raises(ValueError,match='already has'):
         sandbox.request({'id':'fixture'},1)

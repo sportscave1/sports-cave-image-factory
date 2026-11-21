@@ -44,6 +44,13 @@ a complete artwork-upload fixture; an existing completed unit with a retained
 numbered JPG provides the positive sandbox source instead. No historical order
 was completed, cancelled, paid or submitted as part of diagnosis.
 
+Live acceptance found that the retained Captains export is marked test_only,
+without a production approval. Sandbox can use this exact retained export for
+attachment testing, without changing its classification. Its one-file link is
+valid for at most 24 hours, requires the matching active sandbox row on every
+fetch and is revoked by removing the test row. Live preparation still requires
+a production-approved export, and QA never marks test-only pixels print-ready.
+
 Offline tests use synthetic names/addresses and disposable PGlite. They cover
 the real toolbar dialog, customer/test-row display and removal, separate keys,
 forbidden production actions, unchanged source identity, uncertain responses,
