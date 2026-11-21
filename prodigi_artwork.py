@@ -21,11 +21,14 @@ HEADERS = {'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer
            'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow'}
 
 
-def issue(snapshot):
+def issue(snapshot, *, sandbox_test_id=None):
     from prodigi_preparation import connect
     token = secrets.token_urlsafe(32)
     value = dict(allocation_id=snapshot['allocation_id'], job_id=snapshot['job_id'], output=snapshot['output'],
-                 expires_at=(datetime.now(timezone.utc) + timedelta(days=30)).isoformat())
+                 expires_at=(datetime.now(timezone.utc) + timedelta(days=1 if sandbox_test_id else 30)).isoformat())
+    if sandbox_test_id:
+        import uuid
+        value['sandbox_test_id'] = str(uuid.UUID(sandbox_test_id))
     with connect() as conn, conn.cursor() as cur:
         cur.execute('INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())',
                     (PREFIX + hashlib.sha256(token.encode()).hexdigest(), json.dumps(value)))
@@ -46,9 +49,20 @@ def bound(token):
     value = found['value']
     if datetime.fromisoformat(value['expires_at']) <= datetime.now(timezone.utc):
         raise ValueError('Unavailable')
+    sandbox = value.get('sandbox_test_id')
+    if sandbox:
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute('SELECT value FROM app_settings WHERE key=%s', ('prodigi_sandbox_test:'+sandbox,))
+            row = cur.fetchone()
+        test = row['value'] if row else {}
+        source = test.get('source_snapshot') or {}
+        if (test.get('environment') != 'sandbox' or test.get('hidden') or
+                source.get('job_id') != value['job_id'] or source.get('output') != value['output']
+                or test.get('allocation_id') != value['allocation_id']):
+            raise ValueError('Unavailable')
     record, unit = Jobs(connect).read_bound(value['job_id'], value['allocation_id'])
     if (not record or record['status'] != 'Ready' or not same_allocation(unit, record['payload']['identity'])
-            or record['result'].get('test_only') is not False or record['result'].get('retained') is not True
+            or (not sandbox and record['result'].get('test_only') is not False) or record['result'].get('retained') is not True
             or record['result']['output'] != value['output']):
         raise ValueError('Unavailable')
     return value

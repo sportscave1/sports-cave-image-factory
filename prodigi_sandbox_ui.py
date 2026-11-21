@@ -38,6 +38,8 @@ def render(selected, user):
                 'Customer': snap['recipient']['name'], 'Product': snap['product'],
                 'Edition': f"{snap['number']:03}/{snap['total']}", 'Status': row['status']}], hide_index=True)
             st.info(row['message'])
+            if not (row['source_snapshot'].get('production_evidence') or {}).get('print_ready'):
+                st.warning('This export has no production approval. It can be tested in sandbox; live preparation still requires approval.')
             with st.expander('Sandbox customer and QA · '+row['id'][:8]):
                 st.json(snap['recipient'])
                 st.caption('QA passes only with evidence; missing certificate/packing slip checks remain for review.')

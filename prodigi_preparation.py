@@ -75,7 +75,7 @@ def list_jobs():
         return [r['value'] for r in cur.fetchall()]
 
 
-def resolve(allocation_id):
+def resolve(allocation_id, *, allow_sandbox=False):
     """Read the authoritative allocation, existing QA mapping and production JPG."""
     import auto_editions_runtime as runtime
     from auto_editions_api import same_allocation
@@ -103,9 +103,10 @@ def resolve(allocation_id):
     if not ready:
         raise ValueError('Generate this unit’s Auto Editions JPG first.')
     record, current_unit = jobs.read_bound(ready['id'], allocation_id)
-    if (not record or not same_allocation(current_unit, record['payload']['identity'])
-            or record['result'].get('test_only') is not False
-            or not record['payload'].get('production') or record['result'].get('retained') is not True):
+    if not record or not same_allocation(current_unit, record['payload']['identity']):
+        raise ValueError('The JPG no longer belongs to this exact allocation.')
+    if (record['result'].get('retained') is not True or (not allow_sandbox and
+            (record['result'].get('test_only') is not False or not record['payload'].get('production')))):
         raise ValueError('A retained production-approved JPG for this exact allocation is required.')
     output = record['result']['output']
     if not output.get('sha256'):
@@ -129,7 +130,7 @@ def resolve(allocation_id):
         recipient=recipient, certificate_url=row.get('certificate_pdf_url') or row.get('shopify_file_url'),
         dimensions=record['result'].get('dimensions'), rendered_number=record['result'].get('edition_number'),
         rendered_total=record['result'].get('edition_total'),
-        production_evidence=record['payload']['production'].get('evidence', {}))
+        production_evidence=(record['payload'].get('production') or {}).get('evidence', {}))
 
 
 def validate_order(order, snapshot, order_id, item_id):

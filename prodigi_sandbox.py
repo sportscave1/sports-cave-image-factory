@@ -15,6 +15,22 @@ PREFIX = 'prodigi_sandbox_test:'
 LOCK = 19721123
 
 
+def resolve(allocation_id):
+    # Test exports stay test-only; this never alters live preparation eligibility.
+    return prep.resolve(allocation_id, allow_sandbox=True)
+
+
+def artwork_link(snapshot, test_id):
+    import hashlib
+    import tempfile
+    from prodigi_artwork import fetch, issue
+    with tempfile.TemporaryDirectory(prefix='sc-sandbox-verify-') as folder:
+        path = fetch({'output': snapshot['output']}, folder)
+        with path.open('rb') as stream:
+            md5 = hashlib.file_digest(stream, 'md5').hexdigest()
+    return issue(snapshot, sandbox_test_id=test_id), md5
+
+
 class SandboxClient(Client):
     def __init__(self, key=None, transport=None):
         raw = key or os.getenv('PRODIGI_SANDBOX_API_KEY', '')
@@ -74,7 +90,7 @@ def request(user, allocation_id):
     if not prep.enabled():
         raise ValueError('Enable Orders preparation first.')
     SandboxClient()  # Reject missing/cross-environment credentials before storing anything.
-    source = prep.resolve(int(allocation_id))
+    source = resolve(int(allocation_id))
     live = Client()
     order_id, item_id = prep.discover(source, live)
     order = live.order(order_id)  # Read only, including completed/production source orders.
@@ -171,15 +187,21 @@ def tick():
                 new_fence = next((field for field in fenced if v.get(field) and not fenced[field]), None)
                 if new_fence:
                     q.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
-                        WHERE key=%s AND NOT COALESCE((value->>%s)::boolean,false) RETURNING key''',
+                        WHERE key=%s AND NOT COALESCE((value->>'hidden')::boolean,false)
+                        AND NOT COALESCE((value->>%s)::boolean,false) RETURNING key''',
                         (json.dumps(v), PREFIX+v['id'], new_fence))
                     if not q.fetchone():
                         raise prep.UploadFenceLost('Another worker owns this sandbox attempt.')
                     fenced[new_fence] = True
                 else:
-                    save(q, v)
+                    v['updated_at'] = prep.now()
+                    q.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
+                        WHERE key=%s AND NOT COALESCE((value->>'hidden')::boolean,false) RETURNING key''',
+                        (json.dumps(v), PREFIX+v['id']))
+                    if not q.fetchone():
+                        raise prep.UploadFenceLost('The sandbox test was removed; no stale update is allowed.')
         try:
-            return run(value, SandboxClient(), prep.resolve, prep.artwork_link, persist)
+            return run(value, SandboxClient(), resolve, lambda s:artwork_link(s,value['id']), persist)
         except prep.UploadFenceLost:
             return None
         except Exception as error:

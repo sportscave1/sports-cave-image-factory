@@ -95,3 +95,21 @@ def test_cancellation_during_transfer_rejects_response(cap,monkeypatch):
     app=Starlette(routes=[Route('/image/{token}',artwork.serve,methods=['GET'])])
     with TestClient(app) as client:
         assert client.get('/image/'+cap.token).status_code==404
+
+
+def test_sandbox_test_export_link_requires_matching_active_test_and_revokes_on_removal(cap):
+    import uuid
+    cap.record['result']['test_only']=True
+    key=str(uuid.uuid4())
+    snapshot=dict(allocation_id=1,job_id='f'*64,output=cap.output)
+    link=artwork.issue(snapshot,sandbox_test_id=key)
+    token=link.rsplit('/',1)[-1]
+    with pytest.raises(ValueError):artwork.bound(token)
+    record=dict(environment='sandbox',allocation_id=1,source_snapshot=snapshot,hidden=False)
+    cap.sql.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',
+        ('prodigi_sandbox_test:'+key,json.dumps(record)))
+    assert artwork.bound(token)['output']==cap.output
+    with pytest.raises(ValueError):artwork.bound(cap.token)  # Live link still refuses test exports.
+    cap.sql.execute("UPDATE app_settings SET value=jsonb_set(value,'{hidden}','true'::jsonb) WHERE key=%s",
+                    ('prodigi_sandbox_test:'+key,))
+    with pytest.raises(ValueError):artwork.bound(token)
