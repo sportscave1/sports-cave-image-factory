@@ -53,7 +53,10 @@ class ReadService:
                     if old[0] == 'related_headers_many' and entry[0].cancel():
                         self.jobs.pop(old, None)
             job = self.jobs.get(key)
-            if job and job[0].done() and (now > job[1] or job[0].exception() is not None):
+            # A completed failure must reach the controller before it is removed.
+            # Otherwise readiness wakes the UI only to start another failing read.
+            if job and job[0].done() and (job[0].cancelled() or
+                    (now > job[1] and job[0].exception() is None)):
                 self.jobs.pop(key); job = None
             if job is None:
                 # Keep queued work bounded even during rapid thread switching.
@@ -67,13 +70,28 @@ class ReadService:
                     try:return loader()
                     finally:LOGGER.info('email_read stage=%s duration_ms=%.1f',key[0],(self.clock()-started)*1000)
                 future = self.pool.submit(timed)
-                job = (future, now + ttl)
+                # Queue/connect time is not useful cache lifetime. In particular a
+                # slow successful read must still be available on its first poll.
+                job = (future, float('inf'))
                 self.jobs[key] = job
+                def completed(done):
+                    with self.lock:
+                        current = self.jobs.get(key)
+                        if current and current[0] is done:
+                            self.jobs[key] = (done, self.clock() + ttl)
+                future.add_done_callback(completed)
             if not job[0].done() and not wait:
                 raise MailboxError('Loading mailbox…', code='pending', retry_after=1)
         try:return deepcopy(job[0].result(timeout=25 if wait else 0))
-        except TimeoutError:
-            raise MailboxError('Message loading timed out.',code='timeout',retryable=True) from None
+        except Exception as error:
+            # Deliver the original safe classification/retry deadline once, then
+            # allow recovery. Provider admission still enforces connection backoff.
+            with self.lock:
+                current = self.jobs.get(key)
+                if current and current[0] is job[0] and job[0].done():self.jobs.pop(key)
+            if isinstance(error, TimeoutError):
+                raise MailboxError('Message loading timed out.',code='timeout',retryable=True) from None
+            raise
 
     def start(self):
         with self.lock:

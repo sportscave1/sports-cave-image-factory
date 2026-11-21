@@ -34,6 +34,17 @@ def thumbnail_workers(requested):
     return min(requested, 1) if limit is not None and limit <= 768 * MIB else requested
 
 
+def thumbnail_has_headroom():
+    """Reserve browser startup space; optional previews may retry later.
+
+    This is admission control, not a hard memory limit: other workers can grow
+    after the check. Unknown/unlimited local cgroups retain existing behaviour.
+    """
+    group = cgroup_memory()
+    current, limit = group['current'], group['limit']
+    return current is None or limit is None or limit - current >= 256 * MIB
+
+
 class MemoryMonitor:
     def __init__(self):
         self.next_sample = 0

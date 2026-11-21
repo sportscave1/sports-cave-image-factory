@@ -16,7 +16,8 @@ def required_topics(kind,flow):
 def worker_configuration(config):
     from email.utils import parseaddr
     from crm_resend_marketing import single_email
-    return {'marketing_enabled':config.enabled,'provider_configured':bool(config.api_key.strip()),
+    from crm_unsubscribe_headers import configured
+    return {'marketing_enabled':config.enabled,'provider_configured':bool(config.api_key.strip()),'one_click_configured':configured(config),
         'sender_configured':bool(single_email(parseaddr(config.sender)[1]) and single_email(config.reply_to)
             and not any(ord(c)<32 for c in config.sender))}
 

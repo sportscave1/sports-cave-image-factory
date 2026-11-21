@@ -1,0 +1,52 @@
+{
+  "task_id": "20261121-efe81b2f",
+  "owner": "codex-01a1fb88-worker-memory",
+  "base_commit": "7f9f617e2bce2f150d51561c2f0873412312b036",
+  "state": "User authorized commit, push, merge and live release; verification in progress",
+  "render_change": {
+    "service_id": "srv-d9ujm9navr4c73amurgg",
+    "user_authorized": true,
+    "plan": "1c-2g",
+    "monthly_price_shown": 25,
+    "deploy_id": "dep-dc0eise1egvs73fm8ef0",
+    "live_at_utc": "2026-11-21T00:44:55.953512Z",
+    "code_revision_unchanged": "20da6fba230c56def1e04f6a95b47279f73d9c48",
+    "runtime_cgroup_limit_bytes": 2147483648,
+    "observed_cgroup_bytes_at_004605_utc": 324534272
+  },
+  "local_changes": [
+    "Reserve 256 MiB of available cgroup memory before optional browser startup. Existing failure cooldown, lease release and later request retry remain active.",
+    "Stream image downloads in 64 KiB chunks with a 2 MiB per-image and 8 MiB per-preview budget; disable redirects and environment proxy/auth inheritance.",
+    "Reject images over four million pixels or 8192 pixels on either axis before Chromium decoding; cap external image attempts at 24 per preview.",
+    "Preserve the existing image URL allowlist, immutable cache identities, publication and delivery behaviour."
+  ],
+  "tests": {
+    "runtime": "Local Python 3.14, Pillow 12.3.0; no production credentials, provider calls or customer data used",
+    "focused_command": "THUMBNAIL_BROWSER_CHECKS=1 CRM_THUMBNAIL_BROWSER_CHANNEL=msedge .venv/Scripts/python.exe -m pytest tests/test_thumbnail_browser_budget.py tests/test_thumbnail_memory_budget.py tests/test_worker_memory.py tests/test_crm_thumbnail_cache.py -q",
+    "focused_result": "29 passed, including two real headless Edge synthetic-image acceptance tests with external networking blocked",
+    "additional_command": ".venv/Scripts/python.exe -m pytest tests/test_crm_flow_v4.py tests/test_sports_cave_worker.py -q",
+    "additional_result": "17 passed, 3 failed",
+    "baseline_verification": "All three failures reproduced using unmodified base versions of worker_memory, crm_thumbnail_render and crm_thumbnail_cache loaded from temporary files. Those three files also have no upstream diff between task base and live 20da6fba.",
+    "existing_failures": [
+      "test_discount_and_personalisation_and_checkout_are_read_only: fixture expects Alex but existing preview uses Nathan",
+      "test_main_page_restores_operational_controls_and_admin_route_is_gated: outdated source-string assertion",
+      "test_stable_identity_for_one_three_six_twelve_and_future_triggers: incomplete shared branding database mock"
+    ],
+    "whitespace": "git diff --check passed",
+    "browser_benchmark": {
+      "command": ".venv/Scripts/python.exe tests/benchmark_worker_memory.py --phase after --channel msedge --cycles 1 --reserve-mib 110",
+      "thumbnails": 6,
+      "seconds": 10.15,
+      "peak_tree_mib": 811.57,
+      "settled_tree_mib": 197.67,
+      "platform": "Windows; process-tree RSS is not Linux container usage"
+    }
+  },
+  "limitations": [
+    "No production code performance improvement claimed: only the compute upgrade is live.",
+    "Admission check is a snapshot, not a hard reservation against concurrent workload growth.",
+    "Oversized images are omitted from optional thumbnails; delivery images are unchanged.",
+    "Chromium runtime installation behaviour is unchanged; moving installation to builds requires separate packaging validation.",
+    "No Linux cgroup benchmark: Docker daemon was unavailable. The synthetic real-browser tests passed on Windows."
+  ]
+}

@@ -8,6 +8,51 @@ import subprocess
 from urllib.parse import urlsplit, urlunsplit, parse_qs, urlencode
 
 
+class ThumbnailImages:
+    """Bound network buffers and browser image decoding for one preview."""
+    MAX_BYTES = 2 * 1024 * 1024
+    MAX_TOTAL_BYTES = 8 * 1024 * 1024
+    MAX_PIXELS = 4_000_000
+    MAX_REQUESTS = 24
+
+    def __init__(self):
+        import requests
+        self.session = requests.Session()
+        self.session.trust_env = False
+        self.remaining = self.MAX_TOTAL_BYTES
+        self.requests = 0
+
+    def close(self):
+        self.session.close()
+
+    def fetch(self, url):
+        from PIL import Image
+        self.requests += 1
+        if self.requests > self.MAX_REQUESTS or self.remaining <= 0:
+            raise ValueError('Thumbnail image budget exhausted')
+        body = bytearray()
+        with self.session.get(url, stream=True, allow_redirects=False, timeout=5) as response:
+            if response.status_code != 200 or not response.headers.get('Content-Type', '').startswith('image/'):
+                raise ValueError('Thumbnail image response rejected')
+            length = response.headers.get('Content-Length')
+            if length and int(length) > min(self.MAX_BYTES, self.remaining):
+                raise ValueError('Thumbnail image exceeds byte budget')
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                self.remaining -= len(chunk)
+                if len(body) + len(chunk) > self.MAX_BYTES or self.remaining < 0:
+                    raise ValueError('Thumbnail image exceeds byte budget')
+                body.extend(chunk)
+        # Inspect the header before Chromium decodes compressed raster pixels.
+        # A tiny compressed PNG can otherwise expand to hundreds of MB.
+        with Image.open(BytesIO(body)) as image:
+            if image.width * image.height > self.MAX_PIXELS or max(image.size) > 8192:
+                raise ValueError('Thumbnail image exceeds pixel budget')
+            content_type = Image.MIME.get(image.format)
+            if content_type not in ('image/png', 'image/jpeg', 'image/gif', 'image/webp'):
+                raise ValueError('Thumbnail image format rejected')
+        return bytes(body), content_type
+
+
 def image_url(value):
     from crm_tracking import public_https, store_host
     if not public_https(value):return None
@@ -70,6 +115,7 @@ def render(doc, cfg):
                 capture_output=True, timeout=55, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             if installed.returncode:raise RuntimeError('Chromium installation failed')
         browser = pw.chromium.launch(**options)
+        images = ThumbnailImages()
         try:
             context = browser.new_context(viewport={'width': 600, 'height': 790}, java_script_enabled=False, service_workers='block')
             def route(request):
@@ -78,12 +124,8 @@ def render(doc, cfg):
                 # Rewritten request strips all original query parameters. Redirects
                 # cannot reach private hosts or tracking endpoints.
                 try:
-                    response = request.fetch(url=url, max_redirects=0, timeout=5000)
-                    if response.status != 200 or not response.headers.get('content-type','').startswith('image/'):
-                        return request.abort()
-                    body = response.body()
-                    if len(body)>2*1024*1024:return request.abort()
-                    request.fulfill(response=response, body=body)
+                    body, content_type = images.fetch(url)
+                    request.fulfill(status=200, content_type=content_type, body=body)
                 except Exception:request.abort()
             context.route('**/*', route)
             page = context.new_page()
@@ -94,7 +136,9 @@ def render(doc, cfg):
             image = Image.open(BytesIO(png)).convert('RGB').resize((240,316), Image.Resampling.LANCZOS)
             result = BytesIO();image.save(result, format='WEBP', quality=75, method=4)
             return result.getvalue()
-        finally:browser.close()
+        finally:
+            images.close()
+            browser.close()
 
 
 if __name__ == '__main__':

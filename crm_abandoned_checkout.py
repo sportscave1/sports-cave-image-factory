@@ -190,9 +190,9 @@ def variant_details(value):
 
 def edition_label(edition):
     if not isinstance(edition,dict):return ''
-    limit=edition.get('limit');number=edition.get('next')
+    limit=edition.get('limit');number=edition.get('next');remaining=edition.get('remaining')
     if type(limit) is not int or limit<1:return ''
-    if type(number) is int and 1<=number<=limit and edition.get('remaining',0)>0:
+    if type(number) is int and 1<=number<=limit and type(remaining) is int and remaining>0:
         return 'NEXT AVAILABLE EDITION · #'+str(number).zfill(3 if limit==100 else len(str(limit)))+'/'+str(limit)
     return 'LIMITED TO '+str(limit)+' WORLDWIDE'
 

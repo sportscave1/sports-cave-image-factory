@@ -108,6 +108,9 @@ def _loop():
                         jobs.forget_expired_output(row['id'])
                 last_cleanup=time.monotonic()
             from companion_package_api import run_one as run_package
+            from auto_editions_repair import run_one as run_repair
+            try:run_repair(jobs.connect)
+            except Exception:LOG.warning('AUTO_EDITIONS repair diagnosis temporarily unavailable')
             from companion_acceptance import run_one as run_acceptance
             if run_acceptance():continue
             if run_package():continue
@@ -146,11 +149,19 @@ def download_links(rows, *, read_connection=None):
             key=(psd_directory.product_id(row),variant(row.get('shopify_variant_id') or row.get('variant_id')))
             if key not in index:key=(key[0],'*')
             if not allocation.isdigit():continue
+            if reasons.get(key[0])=='Repairing':
+                from urllib.parse import urlencode
+                links[allocation]='/auto-editions/status?'+urlencode({'product_gid':key[0],'allocation_id':allocation})+'#Repairing'
+                continue
             if key not in index:
                 if key[0] in reasons:
                     from urllib.parse import urlencode
                     label=reasons[key[0]]
-                    links[allocation]='/auto-editions/status?'+urlencode({'product_gid':key[0],'allocation_id':allocation})+'#'+label
+                    repairable=label in ('Needs Review','Needs PSD Repair','Failed','Needs compatible layout','Preparation review required')
+                    if repairable:label='Repair'
+                    params={'product_gid':key[0],'allocation_id':allocation}
+                    if repairable:params['repair']='1'
+                    links[allocation]='/auto-editions/status?'+urlencode(params)+'#'+label
                 continue
             if index[key] is not None and int(allocation) not in index[key]:continue
             links[allocation]='/auto-editions/download?allocation_id='+allocation+'#Download JPG'
@@ -172,4 +183,4 @@ def download_links(rows, *, read_connection=None):
 
 
 def link_label(url):
-    return {'Retry Open':'Retry Open','Open':'Open','View':'Open','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')
+    return {'Repair':'Repair','Repairing':'Repairing','Retry Open':'Retry Open','Open':'Open','View':'Open','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')
