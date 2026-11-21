@@ -10,7 +10,7 @@ async function main() {
   const chrome = {
     runtime: {getManifest: () => ({version:'1.1.0'}),onMessage: {addListener: listener => { onMessage = listener; }},
       onInstalled:{addListener(){}},onStartup:{addListener(){}}},
-    storage: {local: {get: async key => ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
+    storage: {local: {get: async key => Array.isArray(key) ? {} : ({[key]: {state: key.startsWith('upload:') ? 'submitted' : 'ready'}})}},
     alarms:{get:async()=>alarm,create:async name=>{alarm={name};},onAlarm:{addListener(){}}},
   };
   const context = vm.createContext({chrome, URL, AbortSignal, setTimeout, clearTimeout, setInterval, clearInterval, crypto:require('node:crypto').webcrypto, atob, Uint8Array, fetch:(...args)=>fetchQueue(...args)});

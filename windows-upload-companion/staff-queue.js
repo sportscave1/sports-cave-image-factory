@@ -23,6 +23,8 @@ async function pairStaffQueue(token) {
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return {paired:false};
   await staffWrite(staffDeviceKey, token);
   await ensureStaffAlarm();
+  await ensureOrdersAlarm();
+  void ordersQueueTick();
   void staffQueueTick();
   return {paired:true};
 }

@@ -131,6 +131,10 @@
         : 'Upload Companion is not connected in this Edge profile.');
       const time=report?.time ? ' · '+new Date(report.time).toLocaleString() : '';
       status.textContent=label+(report?.version ? ' · '+report.version : '')+time+(report?.reason ? ' · '+report.reason : '');
+      if(report?.orders){
+        status.textContent+=' · Orders: '+(!report.orders.paired ? 'pair this profile' :
+          report.orders.last?.enabled ? 'connected' : 'waiting for first server check');
+      }
       resize();
       setTimeout(()=>{if(!signal.aborted)void refresh();},5000);
     }

@@ -25,8 +25,12 @@ async function ordersQueueTick() {
   } finally { clearInterval(keepAlive); ordersTickRunning = false; }
 }
 async function ensureOrdersAlarm() {
+  if (!(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential) return;
   if (!await chrome.alarms.get(ordersAlarm)) await chrome.alarms.create(ordersAlarm, {periodInMinutes:0.5});
 }
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === ordersAlarm) void ordersQueueTick(); });
 chrome.runtime.onStartup.addListener(() => { void ensureOrdersAlarm().then(ordersQueueTick); });
 chrome.runtime.onInstalled.addListener(() => { void ensureOrdersAlarm().then(ordersQueueTick); });
+// Unpacked-extension reloads and MV3 worker recovery do not consistently emit
+// installation/startup events. Restore only the alarm here, with no supplier call.
+void ensureOrdersAlarm();
