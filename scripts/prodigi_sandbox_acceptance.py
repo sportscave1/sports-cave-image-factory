@@ -70,6 +70,8 @@ def run():
         if not current or current['status'] != 'draft' or current.get('charges'):
             raise ValueError('Sandbox edit did not retain an unpaid draft.')
         actual = next(i for i in current['items'] if i['id'] == item['id'])
+        if actual.get('sku') != item.get('sku') or actual.get('attributes') != item.get('attributes'):
+            raise ValueError('Sandbox artwork PATCH did not preserve the selected product/frame. Use browser upload.')
         if actual['merchantReference'] != item['merchantReference'] or actual['quantity'] != 1:
             raise ValueError('Sandbox item identity changed.')
         if not any(a.get('url') == url for a in actual.get('assets', [])):

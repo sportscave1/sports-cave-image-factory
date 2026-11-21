@@ -42,12 +42,45 @@ async def tick(request):
         if value is None:
             from prodigi_sandbox import tick as sandbox_tick
             value = await run_in_threadpool(sandbox_tick)
+        from prodigi_browser import claim
+        browser = (await run_in_threadpool(claim)
+            if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
         return JSONResponse({'enabled': queue.enabled(), 'job':
-            {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None}, headers=HEADERS)
+            {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None,
+            'browser': browser}, headers=HEADERS)
     except Exception as error:
         return failure(error)
 
 
 from prodigi_artwork import serve as serve_artwork
+
+
+async def browser_action(request):
+    from product_upload_api import HEADERS, failure
+    try:
+        import json
+        auth=request.headers.get('authorization','')
+        if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}',auth):
+            raise PermissionError('A paired desktop credential is required.')
+        await run_in_threadpool(desktop,auth[7:])
+        raw=bytearray()
+        async for block in request.stream():
+            raw.extend(block)
+            if len(raw)>512: raise ValueError('Orders receipt is too large.')
+        body=json.loads(raw)
+        is_permit=request.url.path.endswith('/permit')
+        if (not isinstance(body,dict) or set(body)!=({'key','token','sha256'} if is_permit else {'key','token'}) or
+            not all(isinstance(v,str) for v in body.values()) or
+            not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])):
+            raise ValueError('Only an exact Orders handoff receipt is accepted.')
+        from prodigi_browser import permit,finish
+        result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'])
+        return JSONResponse(result,headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
 ROUTES = (('/api/orders-companion/tick', tick, ('POST',)),
+          ('/api/orders-companion/browser/permit',browser_action,('POST',)),
+          ('/api/orders-companion/browser/finish',browser_action,('POST',)),
           ('/api/prodigi-artwork/{token}', serve_artwork, ('GET', 'HEAD')))

@@ -115,7 +115,7 @@ def request(user, allocation_id):
         source_order_id=order_id, source_item_id=item_id, source_snapshot=source,
         snapshot=snap, fingerprint=prep.digest(snap), order_id='', item_id='',
         status='Queued', checks={}, history=[], message='Sandbox only; waiting for Orders companion.',
-        requester=str(user['id']), hidden=False)
+        requester=str(user['id']), hidden=False,browser_requested=True)
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         cur.execute('SELECT value FROM app_settings WHERE key LIKE %s', (PREFIX+'%',))
@@ -224,7 +224,7 @@ def remove(user, key):
         if not row or row['value'].get('environment') != 'sandbox':
             raise ValueError('Sandbox test not found.')
         value = row['value']
-        if value['status'] in ('Queued','Uploading','Creating sandbox draft'):
+        if value['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading'):
             raise ValueError('Wait for the sandbox worker to finish before removing the test row.')
         value.update(hidden=True, removed_at=prep.now())
         save(cur, value)  # Recoverable test-row removal; no live order or supplier deletion.

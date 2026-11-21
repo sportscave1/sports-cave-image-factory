@@ -83,7 +83,7 @@ def test_draft_verified_but_edit_acceptance_is_required(monkeypatch):
     p = Provider(); saved=[]
     result = queue.run(value(), p, lambda _:snapshot(), lambda _:pytest.fail('No artwork transfer before acceptance'),
                        lambda v:saved.append(deepcopy(v)))
-    assert result['status'] == 'Needs acceptance'
+    assert result['status'] == 'Awaiting browser upload'
     assert not p.writes
 
 
@@ -154,7 +154,7 @@ def test_client_has_only_get_and_draft_item_patch_and_redacts_provider_errors(mo
     def request(method,url,**kwargs):
         calls.append((method,url,kwargs))
         return SimpleNamespace(status_code=200,json=lambda:{'data':order()})
-    client=Client('fixture-key',SimpleNamespace(request=request))
+    client=Client('fixture-key',SimpleNamespace(request=request),mode='sandbox')
     client.order('99');client.artwork('99','88','https://fixture.invalid/art.jpg','b'*32)
     assert [c[0] for c in calls]==['GET','PATCH']
     assert calls[1][2]['json']=={'assets':[{'printArea':'default','url':'https://fixture.invalid/art.jpg','md5Hash':'b'*32}]}
@@ -166,7 +166,7 @@ def test_client_has_only_get_and_draft_item_patch_and_redacts_provider_errors(mo
 
 
 def test_adapter_itself_rejects_artwork_writes_until_both_flags_are_enabled(monkeypatch):
-    client=Client('fixture',SimpleNamespace(request=lambda *a,**k:pytest.fail('No provider write')))
+    client=Client('fixture',SimpleNamespace(request=lambda *a,**k:pytest.fail('No provider write')),mode='sandbox')
     monkeypatch.delenv('SPORTS_CAVE_PRODIGI_PREPARE',raising=False)
     monkeypatch.delenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED',raising=False)
     with pytest.raises(ValueError,match='writes are disabled'):
@@ -226,9 +226,14 @@ def test_normal_dashboard_link_and_companion_login_isolation():
     assert 'connect-sales-channel/shopify?' not in source
     manifest=json.loads((root/'windows-upload-companion/manifest.json').read_text())
     assert not {'cookies','webRequest','declarativeNetRequest'}.intersection(manifest['permissions'])
-    assert not any('prodigi' in host or 'pwinty' in host for host in manifest['host_permissions'])
+    assert {host for host in manifest['host_permissions'] if 'prodigi' in host or 'pwinty' in host} == {
+        'https://dashboard.prodigi.com/*','https://sandbox-beta-dashboard.pwinty.com/*'}
+    supplier_scripts=[script for script in manifest['content_scripts'] if 'prodigi-page.js' in script['js']]
+    assert supplier_scripts[0]['matches']==['https://dashboard.prodigi.com/orders/*/detail',
+        'https://sandbox-beta-dashboard.pwinty.com/orders/*/detail']
     scripts=[match for content in manifest['content_scripts'] for match in content['matches']]
-    assert not any('prodigi' in match or 'pwinty' in match or '<all_urls>' in match for match in scripts)
+    assert not any('<all_urls>' in match or '/login' in match for match in scripts)
+    assert {match for match in scripts if 'prodigi' in match or 'pwinty' in match}==set(supplier_scripts[0]['matches'])
     import io,zipfile
     from upload_companion_page import extension_package
     with zipfile.ZipFile(io.BytesIO(extension_package())) as archive:
@@ -326,19 +331,27 @@ def test_durable_requests_deduplicate_and_reserve_supplier_item(store,monkeypatc
     assert queue.read(1)['history'][-1]['event']=='reconcile_requested'
 
 
-def test_real_sql_tick_commits_intent_and_reconcile_never_resets_it(store,monkeypatch):
+def test_real_sql_new_requests_use_browser_even_if_old_api_acceptance_flag_is_set(store,monkeypatch):
     p=Provider(); p.timeout=True
     monkeypatch.setattr(queue,'Client',lambda:p)
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','true')
     monkeypatch.setattr(queue,'artwork_link',lambda _:('https://fixture.invalid/art.jpg','b'*32))
     queue.request({'id':'fixture'},1,'99','88')
     result=queue.tick()
-    assert result['status']=='Needs review' and result['write_intent']
+    assert result['status']=='Awaiting browser upload' and not result.get('write_intent')
     queue.reconcile({'id':'fixture'},1)
-    assert queue.read(1)['write_intent']
+    assert queue.read(1)['browser_requested']
     queue.tick()
-    assert len(p.writes)==1
-    assert queue.read(1)['status']=='Needs QA'
+    assert not p.writes
+    assert queue.read(1)['status']=='Awaiting browser upload'
+
+
+def test_live_api_artwork_patch_is_blocked_even_with_legacy_acceptance_enabled(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_PREPARE','true')
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','true')
+    client=Client('synthetic',SimpleNamespace(request=lambda *a,**k:pytest.fail('No live artwork PATCH')))
+    with pytest.raises(ProdigiError,match='companion browser'):
+        client.artwork('99','88','https://fixture.invalid/art.jpg','b'*32)
 
 
 def test_automatic_matching_runs_in_companion_and_missing_product_is_diagnosed(store,monkeypatch):
@@ -375,7 +388,11 @@ def test_qa_requires_every_question_packing_slip_and_download_readback(store,mon
     p=Provider(); monkeypatch.setattr(queue,'Client',lambda:p)
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','true')
     monkeypatch.setattr(queue,'artwork_link',lambda _:('https://fixture.invalid/art.jpg','b'*32))
-    queue.request({'id':'fixture'},1,'99','88');queue.tick()
+    queued=queue.request({'id':'fixture'},1,'99','88')
+    # Seed the independently tested upload state; this test exercises the QA gate.
+    queued.pop('browser_requested')
+    with store() as c,c.cursor() as q:queue.save(q,queued)
+    queue.tick()
     answers={key:'Yes' for key in queue.CHECKS}
     with pytest.raises(ValueError,match='all Fulfilment'):
         queue.complete_qa({'id':'fixture'},1,answers,False)

@@ -21,8 +21,7 @@ def render(row, user, *, answers=None, compact=False):
     with st.expander('Prepare for Prodigi · manual payment', expanded=not compact):
         st.caption('Attach the numbered production JPG to an existing draft. Payment and release stay manual.')
         if os.getenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED', '').lower() != 'true':
-            st.warning('Automatic artwork uploads are paused pending successful sandbox acceptance. '
-                       'Review and upload artwork manually in Prodigi.')
+            st.caption('The companion uploads artwork through the Prodigi browser. The API only reads and verifies the draft. Payment and production stay manual.')
         if saved:
             st.write(saved['status'])
             st.caption(f"Prodigi order {saved['order_id'] or 'matching pending'} · item {saved['item_id'] or 'matching pending'} · allocation {allocation}")

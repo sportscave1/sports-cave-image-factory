@@ -13,12 +13,20 @@ async function ordersQueueTick() {
   try {
     const token = (await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
     if (!token) return;
+    const interrupted=(await chrome.storage.local.get('ordersBrowserPending')).ordersBrowserPending;
+    if(interrupted && typeof prodigiReceipt==='function') {
+      await prodigiReceipt(interrupted,'finish');
+      await chrome.storage.local.remove('ordersBrowserPending');
+    }
     const response = await fetch(osOrigin + '/api/orders-companion/tick', {
-      method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
+      method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json',
+        'X-Sports-Cave-Orders-Browser':'1'},
       body:'{}', credentials:'omit', signal:AbortSignal.timeout(150000),
     });
     if (!response.ok) return;
     const result = await response.json();
+    if(result.browser && typeof prodigiBrowserRun==='function')
+      result.job={...result.job,...await prodigiBrowserRun(result.browser)};
     await chrome.storage.local.set({ordersCompanionLast:{time:Date.now(), ...result}});
   } catch {
     // Reconnection reads the same durable upload intent; it never resends blindly.
