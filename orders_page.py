@@ -2923,7 +2923,9 @@ def _render_mobile_orders(rows):
                 fulfilment = f':red[{fulfilment}]'
             st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Certificate: {fulfilment}")
             certificate=row.get('certificate_pdf_url') or row.get('shopify_file_url')
-            if fulfilment=='Complete' and certificate and str(certificate).startswith('https://'):
+            if fulfilment=='Complete' and str(row.get('edition_order_id') or '').isdigit():
+                certificate='/api/orders/certificate?allocation_id='+str(row['edition_order_id'])
+            if fulfilment=='Complete' and certificate and str(certificate).startswith(('https://','/api/orders/certificate?')):
                 st.link_button('Complete · Open certificate',certificate)
             link = psd_directory.link(row, mapping)
             if link: st.link_button('Open PSD', link + '#Open PSD')

@@ -88,7 +88,7 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
         payload.append(dict(id=row_identity(r),cells={k:str(d.get(k) or '') for k in ('order','edition','customer','product','variant','shipping','date','prodigi')},
             psd=safe_link(d.get('file')),jpg=safe_link(d.get('print_jpg')),
             jpg_label=str(d.get('print_jpg') or '').rsplit('#',1)[-1] if '#' in str(d.get('print_jpg') or '') else ('Open JPG' if safe_link(d.get('print_jpg')) else str(d.get('print_jpg') or '')),
-            state=state,certificate=safe_link(r.get('certificate_pdf_url') or r.get('shopify_file_url')),
+            state=state,certificate=(ORIGIN+'/api/orders/certificate?allocation_id='+aid if aid.isdigit() and str(r.get('prodigi','')).lower()=='complete' else safe_link(r.get('certificate_pdf_url') or r.get('shopify_file_url'))),
             jpg_download=(safe_link(d.get('print_jpg')).replace('&inline=1','').split('#')[0] if '/api/auto-editions/file?' in str(d.get('print_jpg')) else '')))
         if payload[-1]['jpg_label']=='Open':payload[-1]['jpg_label']='Open JPG'
         shipping=payload[-1]['cells']['shipping']

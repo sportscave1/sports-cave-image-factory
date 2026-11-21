@@ -116,7 +116,9 @@ async def dashboard_qa_action(request):
     except Exception as error:return failure(error)
 
 
-ROUTES = (('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+from orders_certificate import open_certificate
+
+ROUTES = (('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),
