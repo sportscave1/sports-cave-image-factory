@@ -109,6 +109,19 @@ def test_source_discovery_excludes_collection_product_duplicates_and_query_traps
     assert audit.source_url(ORIGIN + '/blogs/news/brock-story')
 
 
+def test_shopify_image_sitemap_locations_do_not_stop_page_discovery():
+    data = pages()
+    data[ORIGIN + '/sitemap_pages_1.xml'] = (200, '<urlset xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">'
+        '<url><loc>' + ORIGIN + '/pages/editorial</loc><image:image><image:loc>https://cdn.shopify.com/image.jpg</image:loc></image:image></url>'
+        '<url><loc>' + ORIGIN + '/pages/second-story</loc></url></urlset>')
+    data[ORIGIN + '/pages/second-story'] = (200, '<h1>Second</h1>')
+    crawler = Crawler(data)
+    result = audit.audit(job(), crawler=crawler)
+    assert ORIGIN + '/pages/second-story' in crawler.visited
+    assert not any('Sitemap could not be read' in gap for gap in result['gaps'])
+    assert not any('cdn.shopify.com' in url for url in crawler.visited)
+
+
 def test_unverified_target_does_not_become_broken_page_proposal():
     crawler = Crawler(pages())
     fetch = crawler.fetch_page

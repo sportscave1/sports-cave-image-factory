@@ -165,7 +165,9 @@ def audit(job, *, crawler, progress=lambda value: None, stopped=lambda: False,
             if fetched.status_code != 200 or len(fetched.text) > 10_000_000:
                 raise ValueError('Sitemap unavailable or too large')
             xml = ET.fromstring(fetched.text)
-            for node in xml.iter():
+            # Shopify embeds image:loc below image:image. Only entry-level loc
+            # elements identify sitemap files or storefront pages.
+            for node in (child for entry in xml for child in entry):
                 if node.tag.rsplit('}', 1)[-1] != 'loc' or not node.text:
                     continue
                 candidate = public_url(node.text)
