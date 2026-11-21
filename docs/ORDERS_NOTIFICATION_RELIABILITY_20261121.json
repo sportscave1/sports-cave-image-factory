@@ -1,0 +1,44 @@
+{
+  "task": "20261121-df453d28",
+  "owner": "codex-01a1fb88-order-notifications",
+  "base": "360a3a4e6a695b36fad5f7ae3bf7550b4ea0d87f",
+  "authorization": "User requested Orders notification debugging, lightweight reliable behavior, preserved functions, proper tests and live release.",
+  "diagnosis": [
+    "Read-only production aggregate returned2, matching the two unfinished orders in the screenshot; counting SQL was correct.",
+    "Live DOM showed persistent header navigation epoch1/revisionff42789817fb1d26, while current iframe supplied epoch0/revisionab4646785f3b64f0. The global lower-epoch guard rejected the fresh controller/configuration after session reset.",
+    "Baseline browser reproduction retained old-scope and made no new status request after a same-page lower-epoch remount.",
+    "Bell notifications were activity-only; no persistent unfinished-order reminder existed. Sidebar observer missed badge-only removal and did not reconnect when its observed section was replaced."
+  ],
+  "changes": [
+    "Accept a reset epoch only for the settled current document route, with no pending navigation; retain the browser's monotonic epoch. Other-route and pending late responses remain rejected.",
+    "Restore cached badge presentation after badge/button/sidebar redraws without an additional request.",
+    "One managed timer/request per controller; thirty-second visible-page polling and rate-bounded focus/bell recovery. Shared server aggregate cache reduced from thirty to ten seconds.",
+    "Reuse the same permission-scoped count for sidebar, bell count and persistent Orders reminder. Activity stays lazy; no extra full Orders/Shopify reads.",
+    "Keep last-known counts with delayed labeling during outages; unknown is not presented as zero. Refresh open reminders on successful count changes and outages. Destroyed controllers cannot mark replacement status stale."
+  ],
+  "preserved": [
+    "Order completion, refund, cancellation, multi-line and distinct-order counting rules",
+    "Existing one-time new-order toast and activity notifications",
+    "Permissions, identity scopes, navigation guards and request cancellation",
+    "Certificates, fulfilment actions, allocations, numbering, counters and customer data",
+    "Render topology, plans, schema and production dependencies"
+  ],
+  "lightweight_evidence": {
+    "live_aggregate_execution_ms": 26.692,
+    "live_aggregate_planning_ms": 50.508,
+    "note": "Single read-only PostgreSQL EXPLAIN ANALYZE; not an end-to-end latency guarantee.",
+    "browser_checks": "Sidebar redraws cause no request; repeated focus events coalesce; activity query remains lazy; counts2to1to0 update/clear both reminders."
+  },
+  "validation": {
+    "release_suite": "90 tests and3subtests: notification API/state, new browser and disposable SQL regressions, header recovery, sidebar and navigation",
+    "node": "Existing top-bar request and native-navigation contract scripts passed",
+    "sql_fixture": "Synthetic disposable PGlite with numeric/GID aliases, multi-line orders,1000 completed orders, refunds/cancellations and transitions2to1to0",
+    "browser_fixture": "Headless Edge with intercepted synthetic GET requests only; desktop1440x900 and mobile390x844; no app preview or production writes",
+    "static": "Python compilation, git diff check, Studio verification and Render topology validation required before release"
+  },
+  "limits": [
+    "Counts are refreshed periodically and on focus/open; they are not a transactional instantaneous feed.",
+    "An outage preserves a marked last-known count rather than inventing a successful zero.",
+    "This is scoped validation, not a claim that the entire repository test suite is green."
+  ]
+}
