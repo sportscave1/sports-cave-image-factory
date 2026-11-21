@@ -12,14 +12,14 @@ def fixture():
     return dict(online=True, display_state='ready', checked_at=1,
         jobs=[dict(job, dispatch_id='dispatch', storefront='https://fixture.invalid/product',
                    restartable=False, cancellable=True, stalled=False, ad=dict(label='Posting', detail='Keep ad diagnostic', posting_id='posting'))],
-        queues={name:dict(enabled=True, online=True, waiting=2, display=True, jobs=[job]) for name in ('upload','design','ads','editions')})
+        queues={name:dict(enabled=True, online=True, waiting=2, display=True, jobs=[job]) for name in ('upload','design','ads','editions','orders')})
 
 
 def test_projection_preserves_display_controls_identity_order_and_diagnostics():
     source = fixture(); before = deepcopy(source); result = payload(source)
     assert source == before
     assert result['schema_version'] == 1
-    assert 'editions' in result['queues']
+    assert 'editions' in result['queues'] and 'orders' in result['queues']
     assert result['checked_at'] == source['checked_at'] and result['display_state'] == 'ready'
     for name, queue in result['queues'].items():
         assert queue['waiting'] == 2 and queue['enabled']

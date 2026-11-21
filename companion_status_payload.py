@@ -23,7 +23,7 @@ def payload(result):
         value['jobs'].append(job)
     if 'queues' in result:
         value['queues'] = {}
-        for name in ('upload', 'design', 'ads', 'editions'):
+        for name in ('upload', 'design', 'ads', 'editions', 'orders'):
             if name not in result['queues']:
                 continue
             control = result['queues'][name]
