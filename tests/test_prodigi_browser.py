@@ -55,6 +55,8 @@ def test_claim_save_permit_and_independent_source_verification(handoff,monkeypat
     assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
     with pytest.raises(ValueError,match='already'):browser.permit(KEY,plan['token'],plan['sha256'])
     provider.artwork('99','88',render_url(),'a'*32)
+    provider.data['items'][0].update(unitPrice={'amount':'52.00','currency':'USD'},
+        lineTotal={'amount':'52.00','currency':'USD'})
     verified=[]
     monkeypatch.setattr(browser,'verify_file',lambda url,output:verified.append((url,output)))
     assert browser.finish(KEY,plan['token'])['status']=='Needs QA'
@@ -71,11 +73,22 @@ def test_claim_save_permit_and_independent_source_verification(handoff,monkeypat
     lambda p:p.data.update(status='in_production'),
     lambda p:p.data['items'][0].update(sku='different'),
     lambda p:p.data['items'][0].update(quantity=2),
+    lambda p:p.data['items'][0].update(unitPrice={'amount':'52.00','currency':'USD'}),
 ])
 def test_changed_supplier_order_blocks_save_before_browser_mutation(handoff,change):
     _,provider,_=handoff;plan=browser.claim();change(provider)
     with pytest.raises(ValueError):browser.permit(KEY,plan['token'],plan['sha256'])
     assert not provider.writes
+
+
+@pytest.mark.parametrize('field,value',[('sku','changed'),('quantity',2),('attributes',{'color':'Black'})])
+def test_after_save_price_calculation_does_not_hide_product_changes(handoff,monkeypatch,field,value):
+    _,provider,_=handoff;plan=browser.claim();browser.permit(KEY,plan['token'],plan['sha256'])
+    provider.artwork('99','88',render_url(),'a'*32)
+    provider.data['items'][0].update(unitPrice={'amount':'52.00','currency':'USD'},**{field:value})
+    monkeypatch.setattr(browser,'verify_file',lambda *_:True)
+    assert browser.finish(KEY,plan['token'])['status']=='Needs review'
+    assert not sandbox.list_tests()[0]['browser'].get('verified')
 
 
 def test_interrupted_upload_is_reviewed_without_another_browser_claim(handoff):
@@ -101,6 +114,23 @@ def test_checksum_mismatch_cannot_become_ready(handoff,monkeypatch):
     monkeypatch.setattr(browser,'verify_file',mismatch)
     assert browser.finish(KEY,plan['token'])['status']=='Needs review'
     assert not sandbox.list_tests()[0]['browser'].get('verified')
+
+
+def test_staff_recheck_reads_uncertain_save_without_another_upload_or_permit(handoff,monkeypatch):
+    _,provider,_=handoff;plan=browser.claim()
+    allowed=[]
+    monkeypatch.setattr(prep,'require_user',lambda user:allowed.append(user))
+    assert browser.recheck({'id':'staff'},KEY)['status']=='Handoff unavailable'
+    browser.permit(KEY,plan['token'],plan['sha256'])
+    assert browser.finish(KEY,plan['token'])['status']=='Needs review'
+    provider.artwork('99','88',render_url(),'a'*32)
+    provider.data['items'][0].update(unitPrice={'amount':'52.00','currency':'USD'})
+    monkeypatch.setattr(browser,'verify_file',lambda *_:True)
+    assert browser.recheck({'id':'staff'},KEY)['status']=='Needs QA'
+    assert len(provider.writes)==1 and len(allowed)==2
+    assert browser.claim() is None
+    with pytest.raises(ValueError,match='already'):
+        browser.permit(KEY,plan['token'],plan['sha256'])
 
 
 @pytest.mark.parametrize('changes',[

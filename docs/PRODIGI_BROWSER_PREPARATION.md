@@ -33,6 +33,10 @@ pages. New supplier-site access requires the owner's approval and extension relo
   existing artwork and ambiguous identical product/frame rows stop for review.
 - A worker interruption reads back the same supplier item; it never repeats an
   uncertain Save automatically.
+- Staff can recheck a permitted Save without uploading again. The first image
+  causes Prodigi to calculate the target item's unit price and line total;
+  readback permits those computed values while still pinning charges, product,
+  frame, quantity, address, shipping and every other item.
 - Supplier render URLs identify their image-library source and placement. QA
   checks orientation, rotation, border, translation and full-image fit.
 - Asset detail identifies the source transform; the bounded recent-asset list

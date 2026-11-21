@@ -343,6 +343,11 @@ def tick():
 
 def reconcile(user, allocation_id):
     require_user(user)
+    current = read(allocation_id)
+    receipt = (current or {}).get('browser') or {}
+    if receipt.get('started') and not receipt.get('verified'):
+        from prodigi_browser import recheck
+        return recheck(user, PREFIX + str(int(allocation_id)))
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         cur.execute('SELECT value FROM app_settings WHERE key=%s', (PREFIX + str(int(allocation_id)),))

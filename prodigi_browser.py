@@ -55,7 +55,7 @@ def snapshot(value, resolver, sandbox):
     return value['snapshot']
 
 
-def business(order, target):
+def business(order, target, *, after_save=False):
     """Pin everything except this item's artwork and its editor sizing."""
     result = {k:deepcopy(order.get(k)) for k in
         ('id','merchantReference','recipient','shippingMethod','branding','packingSlip','charges')}
@@ -63,7 +63,8 @@ def business(order, target):
     for item in order.get('items', []):
         result['items'].append({k:deepcopy(v) for k,v in item.items()
             if k not in ('status','productionTime') and
-            (str(item['id']) != str(target) or k not in ('assets','sizing'))})
+            (str(item['id']) != str(target) or k not in
+             (('assets','sizing','unitPrice','lineTotal') if after_save else ('assets','sizing')))})
     return result
 
 
@@ -237,12 +238,27 @@ def verify_original(provider,source,filename,output,dimensions):
 
 
 def finish(key,token,stage='readback'):
+    return _finish(key,lambda cur:authorised(cur,key,token),stage)
+
+
+def recheck(user,key):
+    """Staff can re-read an uncertain Save; this never issues another permit."""
+    prep.require_user(user)
+    def saved(cur):
+        value=read(cur,key)
+        if not (value.get('browser') or {}).get('started'):
+            raise ValueError('No permitted Save exists to recheck.')
+        return value
+    return _finish(key,saved,'readback')
+
+
+def _finish(key,read_receipt,stage):
     provider,resolver,_,sandbox=context(key)
     with prep.connect() as conn,conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
         cur.execute("SET LOCAL idle_in_transaction_session_timeout = '0'")
         try:
-            value=authorised(cur,key,token)
+            value=read_receipt(cur)
         except (ValueError,PermissionError):
             # A removed/superseded receipt must not wedge the desktop queue.
             # This performs no supplier read/write and never grants Save.
@@ -252,7 +268,9 @@ def finish(key,token,stage='readback'):
             return {'status':value['status']}
         try:
             snap,order,item=checked(value,provider,resolver,sandbox)
-            if not value['browser']['started'] or business(order,item['id'])!=value['browser']['before']:
+            # Saving the first artwork makes Prodigi calculate target-item prices.
+            # Pre-Save checks stay strict; charges and every other item stay pinned.
+            if not value['browser']['started'] or business(order,item['id'],after_save=True)!=business(value['browser']['before'],item['id'],after_save=True):
                 raise ValueError('Supplier order changed or Save was not permitted. Review this exact draft.')
             if value['browser'].get('companion_sha256')!=snap['output']['sha256']:
                 raise ValueError('The paired companion source checksum was not confirmed.')
@@ -265,7 +283,7 @@ def finish(key,token,stage='readback'):
             _,latest,current=checked(value,provider,resolver,sandbox)
             if latest!=order:
                 # Download status may progress independently; artwork and business must not change.
-                if (business(latest,item['id'])!=business(order,item['id']) or
+                if (business(latest,item['id'],after_save=True)!=business(order,item['id'],after_save=True) or
                     [a.get('url') for a in current.get('assets',[])]!=[assets[0]['url']]):
                     raise ValueError('Supplier artwork/order changed during verification.')
             from prodigi_qa import evaluate

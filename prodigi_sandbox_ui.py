@@ -51,6 +51,16 @@ def render(selected, user):
                     + identifier(row['order_id'])+'/detail')
             if row.get('sandbox_unpaid_verified') and row.get('artwork_readback_verified'):
                 st.success('Exact artwork read back from the sandbox. Draft remains unpaid and unsubmitted.')
+            receipt = row.get('browser') or {}
+            if receipt.get('started') and not receipt.get('verified'):
+                if st.button('Recheck saved sandbox artwork', key='sandbox-recheck-'+row['id']):
+                    try:
+                        from prodigi_browser import recheck
+                        recheck(user, sandbox.PREFIX+row['id'])
+                    except Exception:
+                        st.error('Could not recheck the saved artwork. No upload was retried.')
+                    else:
+                        st.rerun()
             if st.button('Remove sandbox row from app', key='sandbox-remove-'+row['id'],
                          disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading')):
                 try:
