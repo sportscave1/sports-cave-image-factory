@@ -241,7 +241,12 @@ def finish(key,token,stage='readback'):
     with prep.connect() as conn,conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
         cur.execute("SET LOCAL idle_in_transaction_session_timeout = '0'")
-        value=authorised(cur,key,token)
+        try:
+            value=authorised(cur,key,token)
+        except (ValueError,PermissionError):
+            # A removed/superseded receipt must not wedge the desktop queue.
+            # This performs no supplier read/write and never grants Save.
+            return {'status':'Handoff unavailable'}
         value['browser']['last_stage']=stage
         if value['browser'].get('verified'):
             return {'status':value['status']}

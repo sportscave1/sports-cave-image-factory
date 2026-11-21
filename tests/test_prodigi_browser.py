@@ -84,6 +84,16 @@ def test_interrupted_upload_is_reviewed_without_another_browser_claim(handoff):
     assert browser.claim() is None and not provider.writes
 
 
+def test_removed_or_superseded_receipt_cannot_block_the_next_desktop_tick(handoff):
+    store,provider,_=handoff;plan=browser.claim()
+    assert browser.finish(KEY,'superseded')['status']=='Handoff unavailable'
+    assert sandbox.list_tests()[0]['status']=='Browser uploading'
+    with store() as c,c.cursor() as q:
+        q.execute("UPDATE app_settings SET value=jsonb_set(value,'{hidden}','true'::jsonb) WHERE key=%s",(KEY,))
+    assert browser.finish(KEY,plan['token'])['status']=='Handoff unavailable'
+    assert sandbox.list_tests()[0]['hidden'] is True and not provider.writes
+
+
 def test_checksum_mismatch_cannot_become_ready(handoff,monkeypatch):
     _,provider,_=handoff;plan=browser.claim();browser.permit(KEY,plan['token'],plan['sha256'])
     provider.artwork('99','88',render_url(),'a'*32)
