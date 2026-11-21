@@ -507,7 +507,8 @@ async def status_route(request):
                 # Omit unknown counts rather than manufacturing a zero.
                 upload.setdefault('waiting', None)
                 queues['upload'] = upload
-            return JSONResponse(result, headers=HEADERS)
+            from companion_status_payload import response
+            return response(result, user, request, HEADERS)
         result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
             result['queues'] = await run_in_threadpool(header_queue_status)

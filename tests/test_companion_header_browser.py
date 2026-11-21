@@ -20,7 +20,7 @@ def test_two_designs_rotate_in_one_card_without_changing_other_panels():
     html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
     errors = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel='msedge',headless=True)
+        browser = p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page = browser.new_page(viewport={'width':1600,'height':600})
             page.clock.install()
@@ -90,7 +90,7 @@ def test_four_cards_search_overlay_and_responsive_layout(tmp_path):
     html = html.replace('</body>', '<main id="fixture-content" style="padding:180px 24px;background:#faf8f2;min-height:80vh">Synthetic Ads page</main></body>')
     writes, errors = [], []
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel='msedge',headless=True)
+        browser = p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page = browser.new_page(viewport={'width':1600,'height':600})
             page.on('pageerror',lambda error: errors.append(str(error)))
@@ -185,7 +185,7 @@ def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_re
     payload = dict(online=True, jobs=[old], queues=dict(upload=dict(enabled=True,display=True,waiting=0)))
     html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel='msedge',headless=True)
+        browser = p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page = browser.new_page(viewport={'width':1600,'height':700})
             errors = []
@@ -241,7 +241,7 @@ def test_design_defer_and_cancel_controls_follow_the_next_job_without_enqueuing(
     payload=dict(online=True,jobs=[],queues=dict(upload=dict(enabled=True,waiting=0,display=True),design=dict(enabled=True,waiting=1,jobs=[first,second])))
     writes=[]
     with sync_playwright() as p:
-        browser=p.chromium.launch(channel='msedge',headless=True)
+        browser=p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page=browser.new_page(viewport={'width':1200,'height':750})
             def respond(route):

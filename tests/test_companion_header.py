@@ -37,6 +37,8 @@ def test_delivered_design_review_notes_are_not_a_failed_generation(monkeypatch):
     assert result[0]['label'] == 'Uploaded · needs review'
     assert result[0]['detail'] == jobs[0]['detail']
     assert result[1]['state'] == 'pending'
+    assert result[1]['percent'] == 0 and not result[1]['estimated']
+    assert result[1]['detail'] == jobs[1]['detail']
 
 
 def test_header_and_ads_controls_keep_admin_and_origin_guards(monkeypatch):
