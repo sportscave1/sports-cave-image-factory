@@ -13,9 +13,9 @@ from display_snapshot import Snapshots
 from google_direct_reporting import GoogleReports, MemoryReports
 
 SYDNEY = ZoneInfo("Australia/Sydney")
-VERSION = 4
-PREFIX = "home_crm_v4:"
-CHANNELS = ("Facebook paid", "Google paid", "Organic", "Other", "Unresolved")
+VERSION = 5
+PREFIX = "home_crm_v5:"
+CHANNELS = ("Facebook paid", "Google paid", "Organic", "Etsy", "Other", "Unresolved")
 DEVICES = ("mobile", "desktop", "other")
 SNAPSHOTS = Snapshots(workers=2, limit=24, ttl=900, retry=60, max_age=21600, byte_limit=2_000_000)
 SAVED = MemoryReports(max_bytes=2_000_000)
@@ -27,8 +27,8 @@ PURCHASES = GA4ReportContract("home_crm_transactions", "Purchase source and devi
 ORDERS_QUERY = """query HomeCRMOrders($query: String!, $after: String) {
   currentAppInstallation { accessScopes { handle } }
   orders(first: 250, after: $after, query: $query, sortKey: CREATED_AT) {
-    nodes { id createdAt cancelledAt test
-      customerJourneySummary { ready lastVisit { source sourceType landingPage
+    nodes { id createdAt cancelledAt test sourceName app { id }
+      customerJourneySummary { ready lastVisit { source sourceType landingPage referrerUrl
         utmParameters { source medium campaign term } } }
     }
     pageInfo { hasNextPage endCursor }
@@ -89,8 +89,8 @@ def orders(start, end):
                 if not identity:
                     raise ValueError("Shopify returned an invalid order ID.")
                 ids.add(identity)
-                from order_source_attribution import last_visit
-                journeys[identity] = last_visit(row.get("customerJourneySummary"))
+                from order_source_attribution import order_source
+                journeys[identity] = order_source(row)
         info = connection["pageInfo"]
         if not info["hasNextPage"]:
             return {"status": "verified", "ids": ids, "journeys": journeys, "fetched_at": datetime.now(timezone.utc).isoformat()}
@@ -136,6 +136,8 @@ def ledger(order_ids, rows, journeys=None):
     reconciliations, reasons = {}, {}
     resolutions = {"paid": 0, "organic": 0}
     raw_shopify_counts = {name: 0 for name in CHANNELS}
+    unresolved_referrals = {}
+    marketplace_orders = marketplace_unmatched = 0
     for identity in order_ids:
         observations = matches.get(identity, set())
         sources = {s for s, _ in observations}
@@ -148,10 +150,13 @@ def ledger(order_ids, rows, journeys=None):
             evidence = journeys.get(identity, {"channel":"Unresolved", "reason":"journey_pending_or_missing"})
             chosen = evidence["channel"]
             raw_shopify_counts[chosen] += 1
+            if chosen == "Etsy":
+                marketplace_orders += 1
+                marketplace_unmatched += not observations
             paid_organic_differences += (
                 source in ("Facebook paid", "Google paid") and chosen == "Organic"
                 or chosen in ("Facebook paid", "Google paid") and source == "Organic")
-            if chosen != source:
+            if chosen != source and chosen != "Etsy":
                 pair = (source, chosen)
                 reconciliations[pair] = reconciliations.get(pair, 0) + 1
             source = chosen
@@ -166,6 +171,12 @@ def ledger(order_ids, rows, journeys=None):
                     elif observed == "google / organic":
                         source, reason = "Organic", "google_listing_ga4_organic"
                         resolutions["organic"] += 1
+            if source == "Unresolved":
+                # Only allowlisted labels can enter durable aggregate snapshots.
+                referral = evidence.get("observed_referral")
+                if referral not in ("Facebook", "Instagram", "Google", "Brave Search"):
+                    referral = "Unknown or conflicting"
+                unresolved_referrals[referral] = unresolved_referrals.get(referral, 0) + 1
             reasons[reason] = reasons.get(reason, 0) + 1
         device = next(iter(devices)) if len(devices) == 1 else "other"
         conflicted += len(sources) > 1 or len(devices) > 1
@@ -177,6 +188,9 @@ def ledger(order_ids, rows, journeys=None):
             "source_reasons": reasons, "ga4_channel_orders": ga4_counts,
             "shopify_channel_orders": raw_shopify_counts,
             "google_listing_resolutions": resolutions,
+            "unresolved_referrals": unresolved_referrals,
+            "marketplace_orders": marketplace_orders, "marketplace_unmatched": marketplace_unmatched,
+            "non_marketplace_unmatched": len(order_ids) - len(matches) - marketplace_unmatched,
             "paid_organic_differences": paid_organic_differences}
 
 
@@ -261,7 +275,7 @@ def build(start, end, *, readers=None):
             "checked_at": datetime.now(timezone.utc).isoformat(), "partial_day": end >= datetime.now(SYDNEY).date(),
             "ledger": cohort, "coverage": coverage,
             "roas": {name: sources[name].get("roas") for name in ("facebook", "google")},
-            "basis": "One non-test, non-cancelled Shopify order per row, by creation date. Source uses Shopify last recorded visit. Only ambiguous Google feed-only visits can be resolved by a single consistent Google paid or organic session on the exact GA4 transaction ID; missing or conflicting evidence stays unresolved. Raw Shopify and GA4 counts remain separate. Device is from exact GA4 purchase transaction-ID matches. GA4 purchase-session comparison is a separate model for the same order cohort, never additional orders. Organic last visit does not rule out an earlier ad interaction. Google Ads purchases and ROAS use ad interaction dates, can include later purchases, and cannot identify individual Shopify orders from this aggregate report. Paid platforms can claim overlapping credit."}
+            "basis": "One non-test, non-cancelled Shopify order per row, by creation date. Etsy orders use matching Shopify sales-channel evidence and do not require storefront GA4 matches. Other sources use Shopify last recorded visit. Known referral names alone do not establish paid or organic status. Only ambiguous Google feed-only visits can be resolved by a single consistent Google paid or organic session on the exact GA4 transaction ID; missing or conflicting evidence stays unresolved. Raw Shopify and GA4 counts remain separate; source-model differences exclude Etsy sales channels. Device is from exact GA4 purchase transaction-ID matches. GA4 purchase-session comparison is a separate model for the same order cohort, never additional orders. Organic last visit does not rule out an earlier ad interaction. Google Ads purchases and ROAS use ad interaction dates, can include later purchases, and cannot identify individual Shopify orders from this aggregate report. Paid platforms can claim overlapping credit."}
 
 
 def key(start, end):

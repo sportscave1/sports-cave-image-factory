@@ -8,10 +8,12 @@ from home_crm_ui import CSS, html
 def test_source_comparison_stays_visible_on_mobile(tmp_path):
     rows=[{"dimensions":{"transactionId":str(i),"sessionSourceMedium":"google / cpc",
         "deviceCategory":"mobile"},"metrics":{"ecommercePurchases":"1"}} for i in (1,2,3)]
-    report=ledger({"1","2","3"},rows,{
+    report=ledger({"1","2","3","4","5"},rows,{
         "1":{"channel":"Google paid","reason":"explicit_paid_tags"},
         "2":{"channel":"Organic","reason":"explicit_organic_evidence"},
-        "3":{"channel":"Unresolved","reason":"google_listing_paid_status_unknown"}})
+        "3":{"channel":"Unresolved","reason":"google_listing_paid_status_unknown"},
+        "4":{"channel":"Etsy","reason":"etsy_sales_channel"},
+        "5":{"channel":"Unresolved","reason":"source_evidence_missing","observed_referral":"Brave Search"}})
     data={"start":"2026-11-14","end":"2026-11-20","checked_at":"2026-11-21T04:00:00Z",
         "ledger":report,"roas":{"google":3.5,"facebook":2},
         "coverage":{"ga4":{"status":"verified"},"google":{"status":"verified","purchases":2.5}}}
@@ -29,6 +31,9 @@ def test_source_comparison_stays_visible_on_mobile(tmp_path):
             expect(warning).to_contain_text('1 order has paid/organic model differences')
             expect(warning).to_contain_text('Google listing orders resolved by exact Analytics transaction matches: 1 paid')
             expect(page.locator('[data-channel="Organic"]')).to_contain_text('Organic')
+            expect(page.locator('[data-channel="Etsy"]')).to_contain_text('1')
+            expect(warning).to_contain_text('Brave Search: 1')
+            expect(page.locator('.sc-crm-status')).to_contain_text('1 Etsy; 1 other')
             for width in (1600,820,390,320):
                 page.set_viewport_size({"width":width,"height":900})
                 assert page.evaluate('document.documentElement.scrollWidth')<=width

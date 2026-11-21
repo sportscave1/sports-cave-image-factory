@@ -268,7 +268,7 @@ def test_build_keeps_journey_records_transient_and_discloses_source_model():
         "ga4":lambda *a:{"status":"verified","rows":[ga(1,"facebook / referral")]},
         "facebook":lambda *a:{"status":"verified","roas":5},"google":lambda *a:{"status":"verified","roas":3}}
     result=crm.build(START,END,readers=readers)
-    assert result["version"]==4
+    assert result["version"]==5
     assert result["ledger"]["rows"][0]["mobile"]==1
     assert result["ledger"]["source_reconciliation"]==[{"ga4_channel":"Unresolved","shopify_channel":"Facebook paid","orders":1}]
     raw=json.dumps(result)
@@ -284,8 +284,8 @@ def test_parallel_source_models_deduplicate_same_cohort_without_overwriting_visi
         "5":{"channel":"Google paid","reason":"explicit_paid_tags"}}
     result=crm.ledger(set("12345"),observations,journeys)
     counts={r["channel"]:r["total"] for r in result["rows"]}
-    assert counts=={"Facebook paid":0,"Google paid":2,"Organic":1,"Other":0,"Unresolved":2}
-    assert result["ga4_channel_orders"]=={"Facebook paid":0,"Google paid":2,"Organic":0,"Other":0,"Unresolved":3}
+    assert counts=={"Facebook paid":0,"Google paid":2,"Organic":1,"Etsy":0,"Other":0,"Unresolved":2}
+    assert result["ga4_channel_orders"]=={"Facebook paid":0,"Google paid":2,"Organic":0,"Etsy":0,"Other":0,"Unresolved":3}
     assert result["paid_organic_differences"]==1
     assert result["source_reasons"]["google_listing_ga4_paid"]==1
     assert result["shopify_channel_orders"]["Google paid"] == 1
@@ -327,3 +327,50 @@ def test_only_consistent_google_transaction_evidence_resolves_feed_ambiguity():
     assert result["paid_organic_differences"] == 1
     assert sum(row["total"] for row in result["rows"]) == 8
     assert next(row for row in result["rows"] if row["channel"]=="Google paid")["other"] == 1
+
+
+
+def test_sales_channels_and_known_referrals_keep_uncertainty_and_coverage_separate():
+    from order_source_attribution import order_source
+    journeys={str(i):order_source({"sourceName":"etsy","app":{"id":"gid://shopify/App/1777077"}}) for i in (1,2,3)}
+    for i in range(4,9):
+        journeys[str(i)]=order_source({"customerJourneySummary":{"ready":True,"lastVisit":{
+            "source":"Facebook","referrerUrl":"https://m.facebook.com/","utmParameters":None}}})
+    journeys["9"]=order_source({"customerJourneySummary":{"ready":True,"lastVisit":{
+        "source":"https://search.brave.com/","referrerUrl":"https://search.brave.com/"}}})
+    journeys["10"]={"channel":"Google paid","reason":"explicit_paid_tags"}
+    rows=[ga(i,"facebook / referral") for i in range(4,8)]+[ga(8,"(direct) / (none)"),ga(9,"(not set)")]
+    report=crm.ledger(set(journeys),rows,journeys)
+    by={row["channel"]:row for row in report["rows"]}
+    assert by["Etsy"]["total"]==3
+    assert by["Etsy"]["other"]==3
+    assert by["Unresolved"]["total"]==6
+    assert report["unresolved_referrals"]=={"Facebook":5,"Brave Search":1}
+    assert report["marketplace_unmatched"]==3 and report["non_marketplace_unmatched"]==1
+    assert report["unmatched"]==4 and report["marketplace_orders"]==3
+    assert not any(row["shopify_channel"]=="Etsy" for row in report["source_reconciliation"])
+    assert sum(row["total"] for row in report["rows"])==10
+
+
+def test_reporting_reads_sales_channel_and_does_not_save_raw_referrers(monkeypatch):
+    import shopify_sync as shop
+    monkeypatch.setattr(shop,"get_config",lambda:{"store_domain":"sportscave-nb.myshopify.com"})
+    fetch=Mock(return_value=({"orders":{"nodes":[{"id":"gid://shopify/Order/1","createdAt":"2026-11-20T04:00:00Z",
+        "test":False,"cancelledAt":None,"sourceName":"etsy","app":{"id":"gid://shopify/App/1777077"}}],
+        "pageInfo":{"hasNextPage":False,"endCursor":None}}},None))
+    monkeypatch.setattr(shop,"graphql_request",fetch)
+    result=crm.orders(START,END)
+    assert result["journeys"]["1"]=={"channel":"Etsy","reason":"etsy_sales_channel"}
+    assert "sourceName" in fetch.call_args.args[0] and "referrerUrl" in fetch.call_args.args[0]
+    readers={"shopify":lambda *a:result,"ga4":lambda *a:{"status":"verified","rows":[]},
+        "facebook":lambda *a:{"status":"no_delivery"},"google":lambda *a:{"status":"no_delivery"}}
+    saved=crm.build(START,END,readers=readers)
+    assert saved["ledger"]["marketplace_orders"]==1
+    assert all(key not in json.dumps(saved) for key in ('"journeys"','"referrerUrl"','"transactionId"','"sourceName"'))
+
+
+def test_untrusted_referral_labels_cannot_enter_aggregate_snapshots():
+    result=crm.ledger({"1"},[],{"1":{"channel":"Unresolved","reason":"source_evidence_missing",
+        "observed_referral":"private@example.test"}})
+    assert result["unresolved_referrals"]=={"Unknown or conflicting":1}
+    assert "private" not in json.dumps(result)
