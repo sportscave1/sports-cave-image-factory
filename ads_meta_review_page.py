@@ -4,7 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 from contextlib import nullcontext
 from html import escape
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import hashlib
 import json

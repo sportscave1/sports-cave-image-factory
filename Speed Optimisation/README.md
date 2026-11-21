@@ -37,6 +37,19 @@ recorded under `.local-data/speed/preview/`. Containers are removed afterwards.
 This is scoped Speed acceptance; other workflows need their own populated fixtures.
 General uncontained previews remain disabled. Production authentication is unchanged.
 
+For the Meta Review overview, add `--meta-baseline <previous-full-Git-SHA>` to
+the verifier. It compares the actual prior Git object's reader against the
+candidate using a 20-campaign, two-page synthetic provider fixture, nine cold
+reads and five complete Streamlit refreshes per revision. It checks identical
+request multisets, metrics, tables, search/sort controls and desktop/mobile
+visual parity inside the same Docker boundary. The JPEG transport permits at most
+two channel levels of noise in 0.05% of pixels; content must match exactly.
+These artificial request delays
+demonstrate the scheduling improvement; they are never production speed claims.
+The preview-only provider overrides are recorded in the acceptance evidence and
+are never exported back to application source or the live service. Live Meta
+verification must use the existing account connection and GET-only refresh.
+
 The image refresh supports current static navigation, existing services source
 and the current connection-pool dependency. Speed.Dockerfile pins the original
 local base and hash-checks the dependency wheel; build from a minimal source context.
