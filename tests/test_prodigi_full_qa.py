@@ -55,6 +55,16 @@ def test_quality_warning_does_not_hide_successful_independent_checks():
     assert not qa['checks']['production_approval'] and not qa['checks']['final_check']
 
 
+def test_colour_evidence_blocks_missing_invalid_profiles_without_guessing():
+    from PIL import ImageCms
+    for value in (b'',b'invalid-profile'):
+        digest,blocker=full.colour_evidence(value)
+        assert digest is None and 'verified colour policy' in blocker
+    profile=ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+    digest,blocker=full.colour_evidence(profile)
+    assert len(digest)==64 and blocker is None
+
+
 @pytest.fixture
 def pipeline(monkeypatch):
     from test_prodigi_sandbox import source

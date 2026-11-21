@@ -69,9 +69,8 @@ def approve(snapshot,provider,asset_id):
                 list(image.info.get('dpi',()))!=[300,300] or JpegImagePlugin.get_sampling(image)!=0 or
                 not image.quantization or any(v!=1 for t in image.quantization.values() for v in t)):
                 raise ValueError('JPEG encoding, colour mode, dimensions or quality differ from the generated print file.')
-            if not icc:raise ValueError('The JPG has no embedded colour profile; a verified colour policy is required.')
-            ImageCms.ImageCmsProfile(io.BytesIO(icc))
-            icc_sha=hashlib.sha256(icc).hexdigest()
+            icc_sha,colour_blocker=colour_evidence(icc)
+            if colour_blocker:blockers.append(colour_blocker)
     validation=provider.validate_asset(asset_id,sku)
     if validation.get('valid') is not True or validation.get('status')!='valid' or validation.get('issues'):
         blockers.append('Supplier artwork validation reports a warning or error. Review the full print preview.')
@@ -80,6 +79,14 @@ def approve(snapshot,provider,asset_id):
         source_ppi=ppi,required_ppi=dpi,physical_mm=physical,icc_sha256=icc_sha,
         layout_pixel_proofs_verified=True,number_verified=True,supplier_asset_validated=bool(validation.get('valid') is True and validation.get('status')=='valid' and not validation.get('issues')),
         print_ready=not blockers,blockers=blockers,checked_at=prep.now(),basis='Existing approved layout, original pixel proofs, exact archived encoding and supplier validation')
+
+
+def colour_evidence(icc):
+    from PIL import ImageCms
+    if not icc:return None,'The JPG has no embedded colour profile; a verified colour policy is required.'
+    try:ImageCms.ImageCmsProfile(io.BytesIO(icc))
+    except Exception:return None,'The JPG colour profile is invalid; a verified colour policy is required.'
+    return hashlib.sha256(icc).hexdigest(),None
 
 
 def approval_matches(approval,snapshot):
