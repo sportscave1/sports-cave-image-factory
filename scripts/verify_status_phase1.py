@@ -35,6 +35,7 @@ def main():
     output = ROOT / 'output/status-speed-audit' / name
     output.mkdir(parents=True)
     archive = call(['git', 'archive', 'HEAD'])
+    reference = call(['git', 'merge-base', 'HEAD', 'origin/main']).decode().strip()
     extra = io.BytesIO()
     hashes = {}
     with tarfile.open(fileobj=extra, mode='w') as tar:
@@ -53,10 +54,10 @@ def main():
         baseline = call(['git', 'show', '58569c66:product_upload_artwork.py'])
         item = tarfile.TarInfo('baseline.py'); item.size = len(baseline)
         tar.addfile(item, io.BytesIO(baseline))
-        header = call(['git', 'show', 'HEAD:components/sports_cave_top_bar/index.html'])
+        header = call(['git', 'show', reference + ':components/sports_cave_top_bar/index.html'])
         item = tarfile.TarInfo('header-baseline.html'); item.size = len(header)
         tar.addfile(item, io.BytesIO(header))
-        composer = call(['git', 'show', 'HEAD:windows-upload-companion/composer.js'])
+        composer = call(['git', 'show', reference + ':windows-upload-companion/composer.js'])
         item = tarfile.TarInfo('composer-baseline.js'); item.size = len(composer)
         tar.addfile(item, io.BytesIO(composer))
         for module in ('pytest', '_pytest', 'pluggy', 'packaging', 'iniconfig', 'pygments', 'py'):
@@ -64,7 +65,7 @@ def main():
             path = path.parent if path.name == '__init__.py' else path
             tar.add(path, arcname='deps/' + (module if path.is_dir() else path.name),
                     filter=lambda item: None if '__pycache__' in item.name else item)
-    metadata = dict(base_sha=call(['git', 'rev-parse', 'HEAD']).decode().strip(), image=IMAGE,
+    metadata = dict(base_sha=call(['git', 'rev-parse', 'HEAD']).decode().strip(), image=IMAGE, baseline_sha=reference,
                     test_sha256=hashes, baseline_sha256=hashlib.sha256(baseline).hexdigest())
     (output / 'manifest.json').write_text(json.dumps(metadata, indent=2))
     try:

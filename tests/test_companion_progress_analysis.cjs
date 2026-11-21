@@ -1,6 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {execFileSync}=require('node:child_process');
-const baseline=execFileSync('git',['show','HEAD:windows-upload-companion/composer.js'],{encoding:'utf8'});
+const reference=execFileSync('git',['merge-base','HEAD','origin/main'],{encoding:'utf8'}).trim();
+const baseline=execFileSync('git',['show',reference+':windows-upload-companion/composer.js'],{encoding:'utf8'});
 const candidate=fs.readFileSync('windows-upload-companion/composer.js','utf8');
 function probe(source,design=false,ad=false){
   const state={text:'',generating:false,alert:'',visible:true,reads:0};
