@@ -78,3 +78,8 @@ reworded retry; preserve outputs and report the actual reason. Ambiguous results
 and failed downloads require original-asset recovery, not generation. Do not
 reset reserve budgets on review, reopen or resume. Follow the OS brief's exact
 reserve scene definitions and incomplete-delivery handling without a new approval.
+For an eligible technical failure, the allocated unused reserve is mandatory:
+execute it before final review or a blocked response, without user approval.
+Report each missing filename's provider code/message and available request ID,
+its reserve eligibility, attempted reserve and result, or exact ineligibility
+reason. A missing image alone does not establish a retryable technical failure.

@@ -83,13 +83,16 @@ def public(value):
         return None
     generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
     retry = value.get('auto_recovery') or {}
+    detail = 'ChatGPT is still generating; waiting for finished attachments' if generating else str(value.get('detail') or '')
+    if value['stage'] == 'failed' and 'moderation_blocked' in detail.casefold():
+        detail += ' Reserve rooms apply only to retryable technical failures; this provider rejection requires review.'
     return dict(label=('Continuing updated ad workflow' if value.get('superseded_by') else
                        'Automatic recovery scheduled' if value['stage']=='waiting' and retry.get('state')=='scheduled' else
                        'Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
                        'ChatGPT is thinking / generating' if generating else
                        'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else
                        'Restoring missing ad attachments' if value.get('attachment_repair', {}).get('state') in ('ready','sending','submitted') and value['stage']=='generating' else
-                       f"Collecting ad files · {sum(name in value['artifacts'] for name in COVERS.values())} of 3 covers" if value.get('artifacts') and value['stage']=='generating' else LABELS[value['stage']]), detail=('ChatGPT is still generating; waiting for finished attachments' if generating else value.get('detail', '')),
+                       f"Collecting ad files · {sum(name in value['artifacts'] for name in COVERS.values())} of 3 covers" if value.get('artifacts') and value['stage']=='generating' else LABELS[value['stage']]), detail=detail,
                 active=value['stage'] not in ('complete', 'failed', 'cancelled'),
                 posting_id=value.get('posting_id'))
 
