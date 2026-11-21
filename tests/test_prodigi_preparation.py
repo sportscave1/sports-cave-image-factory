@@ -295,6 +295,7 @@ def test_preparation_ui_retains_manual_qa_and_has_no_production_action(monkeypat
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_PREPARE','true')
     saved=value();saved.update(status='Needs QA',message='Fixture uploaded; manual QA required.')
     monkeypatch.setattr(queue,'read',lambda _:saved)
+    monkeypatch.setattr(queue,'request_failure',lambda _:None)
     script="""
 from prodigi_preparation_ui import render
 render({'edition_order_id': '1'}, {'id':'fixture','role':'admin'}, answers={})

@@ -42,10 +42,12 @@ def test_stale_or_unlisted_unit_cannot_be_sent(screen):
 
 def test_selection_survives_reordering_by_stable_unit_identity(screen):
     state,calls,view,reply=screen
+    state['orders-prodigi-review']='allocation:2'
     rows=[{'edition_order_id':2},{'edition_order_id':1}]
     reply['event']={'event':'nonce','type':'select','ids':['allocation:1']}
     grid.render(rows,[{},{}],grid_key='selection',selected=[],actor={'id':'staff'})
     assert state['orders-grid-selected-ids']==['allocation:1'] and state['selection']['selection']['rows']==[1]
+    assert 'orders-prodigi-review' not in state
     assert grid.row_identity({'shopify_order_id':'a','shopify_line_item_id':'one'})!=grid.row_identity({'shopify_order_id':'a','shopify_line_item_id':'two'})
 
 

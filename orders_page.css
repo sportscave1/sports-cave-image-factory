@@ -1,7 +1,7 @@
 <style>
 [data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) {
   padding-top: calc(var(--sc-topbar-height, 64px) + 8px) !important;
-  padding-bottom: 12px;
+  padding-bottom: 0;
   padding-left: 24px; padding-right: 24px;
 }
 [data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) > [data-testid="stVerticalBlock"],
@@ -45,6 +45,9 @@
 [data-testid="stForm"]:has(.st-key-orders_search_text) button { background:#252720 !important; border-color:#252720 !important; color:#fff !important; }
 .st-key-orders-table [data-testid="stDataFrame"] { height: auto !important; }
 .st-key-orders-table { min-width: 0; max-width: 100%; }
+/* Background event frames stay loaded without reserving blank widget rows. */
+[data-testid="stElementContainer"]:has(iframe[title="orders_page.orders_viewport"][height="0"]),
+[data-testid="stElementContainer"]:has(iframe[title="psd_directory.psd_picker_events"][height="0"]) { display:none; }
 [class*="st-key-orders-mobile-card-"] { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 [class*="st-key-orders-mobile-card-"] [data-testid="stVerticalBlock"] { gap: 3px; }
 [class*="st-key-orders-mobile-card-"] p { font-size: 12px; }

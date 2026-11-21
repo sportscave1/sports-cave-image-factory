@@ -20,6 +20,24 @@ def test_live_preflight_failure_is_recorded_before_any_supplier_upload(store,mon
     assert not saved.get('browser') and not saved.get('write_intent')
 
 
+def test_source_failure_is_saved_even_before_a_preparation_can_be_created(store,monkeypatch):
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(prep,'enabled',lambda:True)
+    def reject(*_):raise ValueError('Source profile requires review')
+    monkeypatch.setattr(prep,'_request',reject)
+    with pytest.raises(ValueError):prep.request({'id':'staff'},1)
+    with pytest.raises(ValueError):prep.request({'id':'staff'},1)
+    assert prep.read(1) is None
+    failure=prep.request_failure(1)
+    assert len(failure['history'])==2
+    assert failure['last_failure']['stage']=='request' and failure['message']=='Source profile requires review'
+    from orders_prodigi_grid import batch_status
+    assert batch_status([1])['1']['status']=='Needs review'
+    monkeypatch.setattr(prep,'_request',lambda *_:{'status':'Queued'})
+    assert prep.request({'id':'staff'},1)['status']=='Queued'
+    assert prep.request_failure(1) is None
+
+
 def test_disabled_test_handoff_cannot_reach_a_provider(monkeypatch):
     monkeypatch.delenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED',raising=False)
     with pytest.raises(ValueError,match='disabled'):browser.context('prodigi_sandbox_test:00000000-0000-4000-8000-000000000001')

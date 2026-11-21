@@ -25,9 +25,13 @@ def batch_status(ids):
     import prodigi_preparation as queue
     keys=[queue.PREFIX+str(int(i)) for i in ids if str(i).isdigit()]
     if not keys:return {}
+    keys += [queue.FAILURE_PREFIX+str(int(i)) for i in ids if str(i).isdigit()]
     with queue.connect() as c,c.cursor() as q:
         q.execute('SELECT key,value FROM app_settings WHERE key=ANY(%s)',(keys,))
-        return {r['key'].split(':')[1]:r['value'] for r in q.fetchall()}
+        rows=q.fetchall()
+    states={r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.PREFIX)}
+    states.update({r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.FAILURE_PREFIX) and r['value'].get('active')})
+    return states
 
 
 def safe_link(value):
@@ -71,6 +75,7 @@ def render(rows,display_rows,*,grid_key,selected,actor):
     if not isinstance(event,dict) or not event.get('event') or event['event']==st.session_state.get('orders-grid-last-event'):return
     st.session_state['orders-grid-last-event']=event['event']
     if event.get('type')=='select':
+        st.session_state.pop('orders-prodigi-review',None)
         chosen=set(str(i) for i in event.get('ids',[]) if str(i) in by_id)
         st.session_state['orders-grid-selected-ids']=list(chosen)
         st.session_state[grid_key]={'selection':{'rows':[i for i,r in enumerate(rows) if row_identity(r) in chosen]}}
@@ -82,7 +87,8 @@ def render(rows,display_rows,*,grid_key,selected,actor):
     if event.get('type')=='send':
         try:
             queued=queue.request(actor,int(aid))
-        except Exception as error:st.error(str(error) if isinstance(error,ValueError) else 'Could not queue preparation. Open Fulfilment for review.')
+        except Exception as error:
+            st.session_state['orders-prodigi-feedback']=str(error) if isinstance(error,ValueError) else 'Could not queue preparation. Open Fulfilment for review.'
         else:st.toast((queued or {}).get('message') or 'Preparing the existing Prodigi draft. Payment and Submit stay manual.')
         st.rerun()
     if event.get('type')=='review':

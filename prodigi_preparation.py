@@ -12,6 +12,7 @@ import os
 from prodigi_client import Client, ProdigiError, identifier
 
 PREFIX = 'prodigi_prepare:'
+FAILURE_PREFIX = 'prodigi_prepare_failure:'
 LOCK = 19721121
 
 
@@ -204,7 +205,37 @@ def discover(snapshot, provider):
     return order_id, item_id
 
 
+def request_failure(allocation_id):
+    with connect() as c,c.cursor() as q:
+        q.execute('SELECT value FROM app_settings WHERE key=%s',(FAILURE_PREFIX+str(int(allocation_id)),));r=q.fetchone()
+    return r['value'] if r and r['value'].get('active') else None
+
+
 def request(user, allocation_id, order_id='', item_id=''):
+    require_user(user)
+    if not enabled():raise ValueError('Prodigi preparation is disabled.')
+    allocation_id=int(allocation_id)
+    try:result=_request(user,allocation_id,order_id,item_id)
+    except ValueError as error:
+        failure=dict(allocation_id=allocation_id,status='Needs review',message=str(error),active=True,requester=str(user['id']),history=[])
+        record_failure(failure,'request',str(error),type(error).__name__)
+        try:
+            with connect() as c,c.cursor() as q:
+                q.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())
+                    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value || jsonb_build_object('history',
+                    COALESCE(app_settings.value->'history','[]'::jsonb) || (EXCLUDED.value->'history')),updated_at=now()''',
+                    (FAILURE_PREFIX+str(allocation_id),json.dumps(failure)))
+        except Exception:print(f'WARN Prodigi failure-record storage unavailable allocation_id={allocation_id}',flush=True)
+        raise
+    try:
+        with connect() as c,c.cursor() as q:
+            q.execute("UPDATE app_settings SET value=value || %s::jsonb,updated_at=now() WHERE key=%s",
+                (json.dumps(dict(active=False,resolved_at=now())),FAILURE_PREFIX+str(allocation_id)))
+    except Exception:print(f'WARN Prodigi failure-record resolution unavailable allocation_id={allocation_id}',flush=True)
+    return result
+
+
+def _request(user, allocation_id, order_id='', item_id=''):
     require_user(user)
     if not enabled():
         raise ValueError('Prodigi preparation is disabled pending imported-order acceptance.')
@@ -381,11 +412,14 @@ def tick():
                 if snapshot['job_id']!=value['snapshot']['job_id']:raise ValueError('Source changed during JPG generation.')
                 value.update(snapshot=snapshot,fingerprint=digest(snapshot),status='Queued');persist(value)
             if value['status']=='Checking QA':
+                phase='QA'
                 from prodigi_full_qa import run as full_qa
                 return full_qa(value,Client(),resolve,persist)
             from prodigi_full_qa import live_enabled,native_gate
             if live_enabled() and not value.get('browser') and not value.get('write_intent'):
+                phase='preflight'
                 native_gate(value['snapshot'],Client())
+            phase='artwork_readback' if value.get('write_intent') else 'supplier_match'
             return run(value, Client(), resolve, artwork_link, persist)
         except UploadFenceLost as error:
             current = read(value['allocation_id'])

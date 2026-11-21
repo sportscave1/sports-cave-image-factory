@@ -3006,6 +3006,8 @@ def _render_orders_data_area():
     visible_rows = rows
 
     _responsive_orders_mode()
+    if st.session_state.get('orders-prodigi-feedback'):
+        st.warning(st.session_state.pop('orders-prodigi-feedback'))
     _render_top_actions(visible_rows, None)
 
     _render_orders_table(visible_rows)

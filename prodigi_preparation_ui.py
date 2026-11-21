@@ -14,12 +14,22 @@ def render(row, user, *, answers=None, compact=False):
     try:
         queue.require_user(user)
         saved = queue.read(int(allocation))
+        request_failure=queue.request_failure(int(allocation))
     except Exception:
         st.warning('Prodigi preparation status is unavailable. No order was submitted.')
         return
     key = 'prodigi-prepare-' + allocation + ('-orders' if compact else '-fulfilment')
-    with st.expander('Prepare for Prodigi · manual payment', expanded=not compact):
+    with st.expander('Prepare for Prodigi · manual payment', expanded=not compact or str(st.session_state.get('orders-prodigi-review'))==allocation):
         st.caption('Attach the numbered production JPG to an existing draft. Payment and release stay manual.')
+        if request_failure:
+            st.warning(request_failure['message'])
+            st.caption('Failed at request · '+request_failure['last_failure']['at'])
+            if st.button('Retry failed preparation',key=key+'-retry-request'):
+                try:queue.request(user,int(allocation))
+                except ValueError as error:st.warning(str(error))
+                else:st.rerun()
+            if not saved:return
+            saved=dict(saved,status='Needs review',message=request_failure['message'])
         if os.getenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED', '').lower() != 'true':
             st.caption('The companion uploads artwork through the Prodigi browser. The API only reads and verifies the draft. Payment and production stay manual.')
         if saved:
