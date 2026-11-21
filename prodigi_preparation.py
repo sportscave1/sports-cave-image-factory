@@ -55,6 +55,12 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def record_failure(value,stage,message,error_type='VerificationError'):
+    failure=dict(at=now(),stage=stage,error_type=error_type,message=message)
+    value['last_failure']=failure
+    value.setdefault('history',[]).append(dict(at=failure['at'],event='check_failed',stage=stage,error_type=error_type))
+
+
 def save(cur, value):
     value['updated_at'] = now()
     cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())
@@ -224,7 +230,9 @@ def request(user, allocation_id, order_id='', item_id=''):
     value = dict(allocation_id=allocation_id, order_id=order_id, item_id=item_id,
         fingerprint=digest(snapshot), snapshot=snapshot, status='Needs QA' if preflight_error else ('Preparing JPG' if preparing else 'Queued'),
         requester=str(user['id']), checks={}, message='Waiting for Orders companion', history=[],browser_requested=True)
-    if preflight_error:value.update(message=preflight_error,checks={'production_approval':False})
+    if preflight_error:
+        value.update(message=preflight_error,checks={'production_approval':False})
+        record_failure(value,'preflight',preflight_error,'ArtworkQuality')
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         # A supplier item is reserved for one allocation, across every requester.
@@ -362,6 +370,7 @@ def tick():
                         raise UploadFenceLost('Another worker recorded an upload intent. Reconcile this item.')
                     return
                 save(write_cur, v)
+        phase=value['status']
         try:
             if value['status']=='Preparing JPG':
                 import auto_editions_runtime as runtime
@@ -391,6 +400,7 @@ def tick():
             value.update(status='Needs review', message=str(error) if isinstance(error, ValueError)
                          else 'Preparation could not be verified. Review the same order before retrying.')
             value['history'].append(dict(at=now(), event='stopped'))
+            record_failure(value,phase,value['message'],type(error).__name__)
             persist(value)
             return value
 
@@ -400,6 +410,9 @@ def reconcile(user, allocation_id):
     current = read(allocation_id)
     receipt = (current or {}).get('browser') or {}
     document_receipt=(current or {}).get('document_browser') or {}
+    if document_receipt.get('started') is False and (current or {}).get('status')=='Needs review':
+        from prodigi_document_browser import resume_unstarted
+        return resume_unstarted(user,PREFIX+str(int(allocation_id)))
     if document_receipt.get('started') and not document_receipt.get('verified'):
         from prodigi_document_browser import recheck
         return recheck(user,PREFIX+str(int(allocation_id)))

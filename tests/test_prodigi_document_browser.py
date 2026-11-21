@@ -52,6 +52,18 @@ def test_uncertain_certificate_upload_is_read_back_and_never_claimed_again(hando
     assert saved['document_browser']['started'] and not saved['document_browser'].get('verified')
 
 
+def test_staff_can_rearm_only_a_stopped_unused_certificate_permit(handoff,monkeypatch):
+    key,v,supplier,store=handoff;plan=docs.claim()
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    assert docs.finish(plan['key'],plan['token'],'row')['status']=='Needs review'
+    assert docs.resume_unstarted({'id':'admin'},key)['status']==docs.WAITING
+    with pytest.raises(PermissionError):docs.permit(plan['key'],plan['token'],'a'*64)
+    fresh=docs.claim();assert fresh['token']!=plan['token']
+    docs.permit(fresh['key'],fresh['token'],'a'*64)
+    docs.finish(fresh['key'],fresh['token'],'save')
+    with pytest.raises(ValueError,match='unused'):docs.resume_unstarted({'id':'admin'},key)
+
+
 def test_certificate_readback_binds_asset_identity_and_reports_unavailable_raw_bytes(monkeypatch):
     v={'document_browser':{'started':True,'companion_sha256':'a'*64,'filename':'SC-1-certificate-'+'a'*16+'.pdf'},
        'document':{'output':{'sha256':'a'*64,'bytes':5}}}

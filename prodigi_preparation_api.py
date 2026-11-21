@@ -39,9 +39,6 @@ async def tick(request):
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         await run_in_threadpool(desktop, auth[7:])
         value = await run_in_threadpool(queue.tick)
-        if value is None:
-            from prodigi_sandbox import tick as sandbox_tick
-            value = await run_in_threadpool(sandbox_tick)
         from prodigi_browser import claim
         browser = (await run_in_threadpool(claim)
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
@@ -79,6 +76,10 @@ async def browser_action(request):
             raise ValueError('Only an exact Orders handoff receipt is accepted.')
         if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','picker','transfer','uploaded','orientation','permit','save'):
             raise ValueError('Unknown browser stage.')
+        import os
+        if (re.fullmatch(r'(?:document:)?prodigi_sandbox_test:[a-f0-9-]{36}',body['key']) and
+            os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true'):
+            return JSONResponse({'status':'Stopped'},headers=HEADERS)
         from prodigi_browser import permit,finish
         if body['key'].startswith('document:'):
             from prodigi_document_browser import permit,finish
