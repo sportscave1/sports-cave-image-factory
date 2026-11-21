@@ -2798,6 +2798,18 @@ def _render_admin_panel(rows):
         _render_missing_data_diagnostics(rows)
 
 
+def _selected_detail_rows(rows):
+    """Keep bulk selection intact while loading one focused unit's controls."""
+    if len(rows)<=1:return rows
+    from orders_prodigi_grid import row_identity
+    by_id={row_identity(row):row for row in rows}
+    def label(identity):
+        row=by_id[identity]
+        return f"{row.get('order')} · {row.get('edition')} · {row.get('product')}"
+    chosen=st.selectbox('Review selected edition',list(by_id),format_func=label,key='orders-selected-detail')
+    return [by_id.get(chosen,rows[0])]
+
+
 def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
@@ -2811,7 +2823,7 @@ def _render_orders_table(rows):
     if selected_print_rows:
         mapping, cloud_links = resources
         with st.expander("Selected unit details / Print JPG", expanded=bool(st.session_state.get('orders-prodigi-review'))):
-            for selected in selected_print_rows:
+            for selected in _selected_detail_rows(selected_print_rows):
                 status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
                 st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
