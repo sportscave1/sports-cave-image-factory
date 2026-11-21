@@ -277,7 +277,9 @@ class Engine:
             else:
                 optout=self.config.test_unsubscribe_url() if row['test_send'] else unsubscribe
                 message=render(content,context,optout,self.config.logo_url,row['idempotency_key'])
-            message['unsubscribe_one_click']=False  # Shopify documents navigation, not RFC 8058 POST.
+            from crm_unsubscribe_headers import headers as unsubscribe_headers
+            message['unsubscribe_headers']=unsubscribe_headers(self.config,row['id'],message['unsubscribe_url'],test=row['test_send'])
+            message['unsubscribe_one_click']='List-Unsubscribe-Post' in message['unsubscribe_headers']
             digest=hashlib.sha256(json.dumps({'to':address,**message},sort_keys=True).encode()).hexdigest()
             # Recheck local suppressions immediately before committing the submission claim.
             if self.store.suppressed(row['shopify_customer_id'],recipient_hash(address)):

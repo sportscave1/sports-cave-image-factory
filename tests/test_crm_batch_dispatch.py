@@ -92,8 +92,13 @@ class DispatchTests(unittest.TestCase):
                 self.assertEqual(len(messages),count);self.assertTrue(all(len(g)<=100 for _,g in self.transport.calls))
                 self.assertEqual([recipient_hash(m['to'][0]) for m in messages],sorted(recipient_hash(m['to'][0]) for m in messages))
                 self.assertEqual(len({m['headers']['List-Unsubscribe'] for m in messages}),count)
+                receipts={r['recipient_hash']:r for r in self.sends(identity)}
                 for m in messages:
-                    self.assertIn(m['headers']['List-Unsubscribe'][1:-1].replace('&','&amp;'),m['html'])
+                    self.assertEqual(m['headers']['List-Unsubscribe-Post'],'List-Unsubscribe=One-Click')
+                    token=m['headers']['List-Unsubscribe'][1:-1].split('token=')[1]
+                    receipt=receipts[recipient_hash(m['to'][0])]
+                    self.assertEqual(self.config.verify_token(token),str(receipt['id']))
+                    self.assertIn('/account/unsubscribe?token=fixture-',m['html'])
                     self.assertIn('sc_campaign_id=',m['html']);self.assertNotIn('sc_test=1',m['html'])
                 self.assertTrue(all(r['status']=='ACCEPTED' for r in self.sends(identity)))
                 self.assertTrue(all('payloads' not in s['value'] and '_payloads' not in s['value'] for s in self.states(identity)))
