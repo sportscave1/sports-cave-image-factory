@@ -103,6 +103,12 @@ def test_revision_survives_jsonb_number_normalisation():
     assert jobs.revision({'duration_seconds': 0.0}) == jobs.revision({'duration_seconds': 0})
 
 
+def test_source_discovery_excludes_collection_product_duplicates_and_query_traps():
+    assert not audit.source_url(ORIGIN + '/collections/v8/products/another-edition')
+    assert not audit.source_url(ORIGIN + '/collections/v8?sort_by=price')
+    assert audit.source_url(ORIGIN + '/blogs/news/brock-story')
+
+
 def test_unverified_target_does_not_become_broken_page_proposal():
     crawler = Crawler(pages())
     fetch = crawler.fetch_page

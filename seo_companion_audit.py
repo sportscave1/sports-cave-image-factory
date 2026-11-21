@@ -44,7 +44,11 @@ def source_url(value):
     except ValueError:
         return ''
     path = parsed.path
-    if parsed.query or not (path == '/' or path == '/collections' or path.startswith(('/collections/', '/blogs/', '/pages/'))):
+    parts = [part for part in path.split('/') if part]
+    in_scope = (not parts or parts in (['collections'], ['blogs'])
+                or len(parts) == 2 and parts[0] in ('collections', 'pages')
+                or 2 <= len(parts) <= 3 and parts[0] == 'blogs')
+    if parsed.query or not in_scope:
         return ''
     return public_url(value)
 
