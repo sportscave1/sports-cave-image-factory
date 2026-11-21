@@ -1,0 +1,16 @@
+# Home CRM reporting
+
+Home's CRM Morning Brief combines an independently refreshed order ledger with separate paid-platform ROAS and the existing qualitative daily review.
+
+- Sydney calendar dates; Yesterday defaults to the last completed day. Today is explicitly partial and Google ROAS waits until the day closes.
+- Shopify cohort: all pages of non-test, non-cancelled orders created in the exact date window. Numeric transaction IDs must match Shopify order IDs exactly; no customer details are requested. Windows older than sixty days require existing read_all_orders access or the entire count is withheld.
+- GA4 property 355333982: purchase transaction ID, purchase-session source/medium and device. Each Shopify order is counted once. Missing/conflicting evidence remains Unresolved; tablets and unknown devices use Other / unknown. Other covers direct, email and other referrals. Referrers alone never prove paid traffic. This is observed session attribution, not causal proof.
+- Facebook includes Instagram: direct account insights, AUD/Sydney, impression-date reporting with unified attribution. Prefer purchase value divided by spend; use the platform's reported purchase ROAS only if value is absent. Purchase aliases are alternatives, never summed. Missing value is unknown, and no spend has no defined ROAS.
+- Google covers existing PM021126 campaign in account 6581121605: primary purchase conversion value / spend, ad-interaction date. Longer periods combine summed value and spend across bounded API windows. Budget remains A$20/day; the integration has no campaign mutation calls.
+- Platform ROAS can overlap across networks and is not the exclusive order ledger. Organic/SEO has no advertising ROAS.
+
+The authenticated Home results endpoint returns a nonblocking cache snapshot. Refreshes run in bounded background lanes, at most every fifteen minutes, with manual refresh throttled to once a minute. The existing hosted daily-brief worker warms yesterday after 05:00 Sydney. Only aggregate counts, ratios, coverage and timestamps are persisted in existing private app_settings keys home_crm_v1:<start>:<end>; raw order/transaction IDs stay transient. Date selection, saved data age, source gaps and partial days are explicit. A late written brief does not stop statistics refreshing.
+
+The existing cloud task 6af6847486588190984cc9941e6f5707 is named CRM — Morning Brief, daily 05:00 Sydney. Its tracking addendum reads get_meta_daily_summary.home_crm and get_growth_analytics.google_ads while preserving its live-sports recommendations and kind meta publication contract. Its JSON stays qualitative with roas null; the model cannot overwrite the machine-derived panel. The weekly marketing scorecard and recovery schedules remain unchanged. The connector rechecks current owner, dashboard, reporting and Google-page permissions before returning the Home aggregate context.
+
+Validation: synthetic provider/ledger/security tests; disposable PostgreSQL aggregate-storage round trip; intercepted-network Edge browser rendering at 1600, 820, 390 and 320 pixels; existing Google Ads read-only and budget regression tests; Studio Verify and Render topology check. Production verification must read the deployed panel's exact period, source coverage, ratios, matched/unmatched counts and current revision before claiming full availability.

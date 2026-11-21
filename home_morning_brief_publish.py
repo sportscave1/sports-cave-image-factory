@@ -157,7 +157,8 @@ async def results(request):
     period = request.query_params.get("period")
     if period not in meta.PERIODS:
         return JSONResponse({"error": "invalid_period"}, status_code=400, headers=HEADERS)
-    data = await run_in_threadpool(meta.period_results, period, sydney_date())
+    data = await run_in_threadpool(meta.period_results, period, sydney_date(),
+                                  force=request.query_params.get("refresh") == "1")
     return JSONResponse(data, headers=HEADERS)
 
 

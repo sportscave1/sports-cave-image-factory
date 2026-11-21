@@ -39,7 +39,14 @@ def meta_data(today):
         refresh = brief.home_design_refresh.render_html(today)
     except Exception:
         refresh = ''
-    return dict(saved=saved, refresh=refresh)
+    import home_crm_reporting as crm
+    from datetime import timedelta
+    day = today - timedelta(days=1)
+    try:
+        cached_crm = dict(state='saved', data=crm.saved(day, day))
+    except Exception:
+        cached_crm = None
+    return dict(saved=saved, refresh=refresh, crm=cached_crm)
 
 
 def panel(st, user, today, name, loader, renderer):
@@ -88,7 +95,7 @@ def render_briefs(st, user, today):
             def show(value):
                 from home_meta_morning_brief import render
                 render(st, user, today, snapshot=value)
-            panel(st, user, today, 'Meta Morning Brief', lambda: meta_data(today), show)
+            panel(st, user, today, 'CRM Morning Brief', lambda: meta_data(today), show)
     else:
         sports()
 

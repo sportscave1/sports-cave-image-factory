@@ -565,6 +565,13 @@ async def mcp(request):
                 summary = await run_in_threadpool(orders_daily, *report_args)
             elif scope == META_SCOPE:
                 summary = await run_in_threadpool(meta_daily, *report_args)
+                if (await run_in_threadpool(_active_owner, claims, "dashboard")
+                        and await run_in_threadpool(_active_owner, claims, "reporting")
+                        and await run_in_threadpool(_active_owner, claims, "ads_google")):
+                    import home_crm_reporting
+                    summary["home_crm"] = await run_in_threadpool(
+                        home_crm_reporting.request, report_args[0], report_args[0])
+                    summary["home_crm_basis"] = "Home is CRM: Facebook, Google, organic and unresolved source/device counts are exact Shopify/GA4 ID matches. Paid ROAS is separate platform attribution. Pending or missing source data remains unknown."
             elif scope == META_HISTORY_SCOPE:
                 summary = await run_in_threadpool(meta_ad_history, *report_args)
             elif scope == GROWTH_SCOPE:
