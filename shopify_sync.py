@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import threading
 import time
@@ -42,6 +43,12 @@ class ShopifyConfigurationError(ValueError):
 
 class ShopifyAPIError(RuntimeError):
     pass
+
+
+class ShopifyThrottleError(ShopifyAPIError):
+    def __init__(self, message, retry_delay):
+        super().__init__(message)
+        self.retry_delay = retry_delay
 
 
 class ShopifyAuthenticationError(ShopifyAPIError):
@@ -313,7 +320,46 @@ def get_access_token(config=None, timeout=10, request_post=None):
     )
 
 
+def _graphql_throttle_delay(payload=None, headers=None, attempt=0):
+    """Wait for explicit capacity refusals only; long waits stay in the durable queue."""
+    delay = float(2 ** attempt)
+    try:
+        retry_after = (headers or {}).get('Retry-After')
+        if retry_after is not None:
+            retry_after = float(retry_after)
+            if not math.isfinite(retry_after) or retry_after < 0:
+                return None
+            delay = max(delay, retry_after)
+        cost = (payload or {}).get('extensions', {}).get('cost') or {}
+        throttle = cost.get('throttleStatus') or {}
+        requested = float(cost.get('requestedQueryCost', 0))
+        maximum = float(throttle.get('maximumAvailable', requested))
+        available = float(throttle.get('currentlyAvailable', requested))
+        rate = float(throttle.get('restoreRate', 0))
+        if not all(math.isfinite(value) for value in (requested, maximum, available, rate)):
+            return None
+        if requested > maximum:
+            return None
+        if requested > available:
+            if rate <= 0:
+                return None
+            delay = max(delay, (requested - available) / rate + 0.1)
+    except (TypeError, ValueError, AttributeError, OverflowError):
+        return None
+    return delay if math.isfinite(delay) and 0 <= delay <= 10 else None
+
+
 def graphql_request(query, variables=None, timeout=10, config=None, request_post=None):
+    for attempt in range(3):
+        try:
+            return _graphql_request_once(query, variables, timeout, config, request_post, attempt)
+        except ShopifyThrottleError as error:
+            if attempt == 2 or error.retry_delay is None:
+                raise
+            time.sleep(error.retry_delay)
+
+
+def _graphql_request_once(query, variables=None, timeout=10, config=None, request_post=None, attempt=0):
     config = config or get_config()
     validate_config(config)
     request_post = request_post or requests.post
@@ -338,7 +384,8 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
         )
         response.raise_for_status()
     except requests.RequestException as error:
-        response = getattr(error, "response", None)
+        failed_response = getattr(error, "response", None)
+        response = failed_response if failed_response is not None else locals().get("response")
         status_code = getattr(response, "status_code", None) or getattr(
             locals().get("response", None),
             "status_code",
@@ -349,10 +396,14 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
             response_body = getattr(response, "text", "") or ""
         elif "response" in locals():
             response_body = getattr(locals()["response"], "text", "") or ""
-        raise ShopifyAPIError(
+        message = (
             "Shopify GraphQL sync failed. "
             f"Status: {status_code}. Response: {_sanitize_shopify_error_text(response_body, config)}"
-        ) from error
+        )
+        if status_code == 429:
+            raise ShopifyThrottleError(message, _graphql_throttle_delay(
+                headers=getattr(response, 'headers', None), attempt=attempt)) from error
+        raise ShopifyAPIError(message) from error
 
     try:
         payload = response.json()
@@ -363,6 +414,15 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
 
     if payload.get("errors"):
         error_text = _sanitize_shopify_error_text(payload.get("errors"), config)
+        errors = payload['errors']
+        # A partial result or mixed errors can follow execution. Never replay it,
+        # particularly mutations. Explicit pre-execution throttles are safe.
+        if (payload.get('data') is None and isinstance(errors, list) and errors
+                and all(isinstance(item, dict) and
+                        isinstance(item.get('extensions'), dict) and
+                        (item.get('extensions') or {}).get('code') == 'THROTTLED' for item in errors)):
+            raise ShopifyThrottleError(f"Shopify GraphQL sync failed. Errors: {error_text}",
+                                       _graphql_throttle_delay(payload, response.headers, attempt))
         raise ShopifyAPIError(
             f"Shopify GraphQL sync failed. Errors: {error_text}"
         )
