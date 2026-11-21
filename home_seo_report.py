@@ -98,6 +98,7 @@ def compact_html(saved, today):
         rows = saved.get('opportunities', [])[:3]
         body += '<ul>' + ''.join(f'<li>{escape(r["market"])} · {escape(r["query"])}</li>' for r in rows) + '</ul>'
         if saved.get('source_gaps'):
-            body += '<small>Source gaps: ' + escape('; '.join(saved['source_gaps'])) + '</small>'
+            body += ('<details><summary>' + str(len(saved['source_gaps'])) + ' source gaps</summary><small>'
+                     + escape('; '.join(saved['source_gaps'])) + '</small></details>')
     return ('<section class="sc-meta-insight sc-seo-daily" aria-label="SEO daily review" style="padding:.6rem .75rem">'
             + heading + body + '<a href="/?page=seo">Open SEO review, plan and reports →</a></section>')

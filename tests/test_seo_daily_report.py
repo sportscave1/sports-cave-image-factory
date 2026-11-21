@@ -46,6 +46,7 @@ def test_gap_report_and_html_escape():
     markup = seo.compact_html(parsed, TODAY + timedelta(days=1))
     assert '<script>' not in markup and '&lt;script&gt;' in markup
     assert 'awaiting today' in markup
+    assert '<details><summary>1 source gaps</summary>' in markup
 
 
 @pytest.fixture
