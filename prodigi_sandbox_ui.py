@@ -52,7 +52,7 @@ def render(selected, user):
             if row.get('sandbox_unpaid_verified') and row.get('artwork_readback_verified'):
                 st.success('Exact artwork read back from the sandbox. Draft remains unpaid and unsubmitted.')
             if st.button('Remove sandbox row from app', key='sandbox-remove-'+row['id'],
-                         disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft')):
+                         disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading')):
                 try:
                     sandbox.remove(user, row['id'])
                 except Exception as error:

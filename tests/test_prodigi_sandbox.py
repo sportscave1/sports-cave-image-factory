@@ -90,7 +90,7 @@ def test_unpaid_draft_without_write_acceptance_never_claims_artwork_readback(mon
     provider=SandboxProvider()
     result=sandbox.run(value(),provider,lambda _:source(),
         lambda _:pytest.fail('No artwork transfer before acceptance'),lambda _:None)
-    assert result['status']=='Needs acceptance' and result['sandbox_unpaid_verified']
+    assert result['status']=='Awaiting browser upload' and result['sandbox_unpaid_verified']
     assert not result['artwork_readback_verified'] and not provider.writes
 
 

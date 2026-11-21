@@ -2800,7 +2800,7 @@ def _render_orders_table(rows):
     selected_print_rows = _selected_rows_from_state(rows)
     if selected_print_rows:
         mapping, cloud_links = resources
-        with st.expander("Selected unit details / Print JPG", expanded=False):
+        with st.expander("Selected unit details / Print JPG", expanded=True):
             for selected in selected_print_rows:
                 status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
@@ -2810,11 +2810,15 @@ def _render_orders_table(rows):
                 render_prodigi_preparation(selected, st.session_state.get('sports_cave_current_user') or {}, compact=True)
                 if allocation_id in cloud_links:
                     if cloud_links[allocation_id].startswith('/auto-editions/'):
-                        st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                        with st.container(horizontal=True):
+                            st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                            _render_send_artwork(selected, 'selected')
                     else:
                         st.caption('Edition JPG: '+cloud_links[allocation_id])
                 elif edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
-                    st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
+                    with st.container(horizontal=True):
+                        st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
+                        _render_send_artwork(selected, 'selected')
                 else:
                     st.caption(f"Print JPG — {status['label']}: {status['reason']}")
                 if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
@@ -2840,6 +2844,22 @@ def _render_orders_table(rows):
 
 def _mobile_unit_id(row):
     return hashlib.sha256(json.dumps([str(row.get('shopify_order_id') or ''), str(row.get('shopify_line_item_id') or ''), int(row.get('allocation_index') or 1), str(row.get('shopify_product_id') or '')], default=str).encode()).hexdigest()[:20]
+
+
+def _render_send_artwork(row, placement):
+    import prodigi_preparation as queue
+    actor=st.session_state.get('sports_cave_current_user') or {}
+    allocation=str(row.get('edition_order_id') or '')
+    if not queue.enabled() or not allocation.isdigit() or not os_accounts.is_admin(actor):
+        return
+    if st.button('Send to Prodigi',key='orders-send-'+placement+'-'+allocation,
+                 help='Queues the exact numbered JPG for the existing draft. Payment and production stay manual.'):
+        try:
+            value=queue.request(actor,int(allocation))
+        except Exception as error:
+            st.error(str(error) if isinstance(error,ValueError) else 'Could not queue artwork. Open Fulfilment for review.')
+        else:
+            st.success(value['message'])
 
 
 def _mobile_toggle(key, unit):
@@ -2876,11 +2896,15 @@ def _render_mobile_orders(rows):
             allocation_id=str(row.get('edition_order_id') or '')
             if allocation_id in cloud_links:
                 if cloud_links[allocation_id].startswith('/auto-editions/'):
-                    st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                    with st.container(horizontal=True):
+                        st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                        _render_send_artwork(row,'mobile')
                 else:
                     st.caption('Edition JPG: '+cloud_links[allocation_id])
             elif edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
-                st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
+                with st.container(horizontal=True):
+                    st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
+                    _render_send_artwork(row,'mobile')
             else:
                 st.caption(f"Print JPG: {status['label']} — {status['reason']}")
             if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):

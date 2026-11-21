@@ -201,7 +201,7 @@ def request(user, allocation_id, order_id='', item_id=''):
         order_id, item_id = identifier(order_id), identifier(item_id)
     value = dict(allocation_id=allocation_id, order_id=order_id, item_id=item_id,
         fingerprint=digest(snapshot), snapshot=snapshot, status='Queued',
-        requester=str(user['id']), checks={}, message='Waiting for Orders companion', history=[])
+        requester=str(user['id']), checks={}, message='Waiting for Orders companion', history=[],browser_requested=True)
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         # A supplier item is reserved for one allocation, across every requester.
@@ -214,6 +214,9 @@ def request(user, allocation_id, order_id='', item_id=''):
                 if saved['fingerprint'] != value['fingerprint'] or (order_id and
                         any(saved[k] != value[k] for k in ('order_id', 'item_id'))):
                     raise ValueError('This allocation already has a preparation record. Reconcile it before changing the artwork or target.')
+                if not saved.get('write_intent') and not saved.get('browser') and not saved.get('browser_requested'):
+                    saved.update(browser_requested=True,status='Queued',message='Waiting for companion browser upload')
+                    save(cur,saved)
                 return saved  # Double clicks never reset a completed/uncertain upload.
         value['history'].append(dict(at=now(), actor=str(user['id']), event='requested'))
         save(cur, value)
@@ -261,9 +264,11 @@ def run(value, provider, resolver, link, persist):
         return value
     # Hidden write-only editor data cannot be round-tripped from a GET. This gate
     # stays off until a non-production imported-order acceptance proves it safe.
-    if os.getenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED', '').lower() != 'true':
-        value['status'] = 'Needs acceptance'
-        value['message'] = 'Exact draft found. Imported-order edit and editor-data preservation require non-production acceptance before artwork writes.'
+    if value.get('browser_requested') or os.getenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED', '').lower() != 'true':
+        if value.get('browser'):
+            raise ValueError('A browser upload was already attempted. Review the same supplier item; no automatic retry.')
+        value['status'] = 'Awaiting browser upload'
+        value['message'] = 'Exact draft found. Waiting for the companion browser upload; payment and production remain manual.'
         persist(value)
         return value
     if item.get('assets'):

@@ -84,3 +84,21 @@ def test_organic_social_never_inherits_paid_click_or_campaign_identifiers():
     assert query["utm_source"]==["facebook"] and query["utm_medium"]==["organic_social"]
     assert query["variant"]==["123"]
     assert not ({"gclid","fbclid","utm_id","ad_id","UTM_Source"}&query.keys())
+
+
+@pytest.mark.parametrize("medium,tactic,source,expected", [
+    ("product_sync",None,"google","Google paid"), ("cpc",None,"google","Google paid"),
+    ("organic",None,"google","Unresolved"), ("email",None,"google","Unresolved"),
+    ("product_sync","SEO","google","Unresolved"), ("cpc",None,"facebook","Unresolved")])
+def test_paid_only_term_marker_and_explicit_conflicts(medium,tactic,source,expected):
+    item=journey(source,medium,"sag_organic",tactic=tactic)
+    item["lastVisit"]["utmParameters"]["term"]="sc_google_paid_24420240881"
+    assert last_visit(item)["channel"]==expected
+
+
+def test_paid_term_resolves_shared_feed_duplicate_medium_without_guessing_from_campaign():
+    url="https://example.test/?utm_source=google&utm_medium=product_sync&utm_campaign=sag_organic&utm_source=google&utm_medium=cpc&utm_campaign=PM021126&utm_term=sc_google_paid_24420240881"
+    item=journey("google","product_sync","sag_organic",url)
+    assert last_visit(item)=={"channel":"Google paid","reason":"google_paid_utm_marker"}
+    item["lastVisit"]["landingPage"] += "&utm_term=another"
+    assert last_visit(item)["channel"]=="Unresolved"

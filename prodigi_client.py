@@ -45,9 +45,13 @@ class Client:
     def request(self, method, path, body=None, *, listing=False):
         allowed = ((method == 'GET' and re.fullmatch(r'/orders/[A-Za-z0-9-]{1,100}', path))
                    or (method == 'GET' and path.startswith('/orders?merchantReference=') and listing)
+                   or (method == 'GET' and path == '/assets?limit=100' and listing)
+                   or (method == 'GET' and re.fullmatch(r'/assets/[A-Za-z0-9-]{1,100}', path))
                    or (method == 'PATCH' and re.fullmatch(r'/orders/[A-Za-z0-9-]{1,100}/items/[A-Za-z0-9-]{1,100}', path)))
         if not allowed:
             raise ProdigiError('Only existing order reads and draft artwork edits are supported.')
+        if method == 'PATCH' and self.mode != 'sandbox':
+            raise ProdigiError('Live artwork updates use the companion browser; API artwork writes are blocked.')
         if method == 'PATCH' and any(os.getenv(flag, '').lower() != 'true' for flag in
                 ('SPORTS_CAVE_PRODIGI_PREPARE', 'SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED')):
             raise ProdigiError('Artwork writes are disabled pending imported-order acceptance.')
@@ -64,7 +68,7 @@ class Client:
         data = envelope.get('data')
         if listing:
             total = envelope.get('total')
-            if not isinstance(data, list) or (total is not None and total > len(data)):
+            if not isinstance(data, list) or (path.startswith('/orders?') and total is not None and total > len(data)):
                 raise ProdigiError('The Prodigi order lookup is incomplete or ambiguous.')
             return data
         if not isinstance(data, dict):
@@ -76,6 +80,12 @@ class Client:
 
     def find(self, reference):
         return self.request('GET', '/orders?' + urlencode({'merchantReference': reference, 'limit': 100}), listing=True)
+
+    def assets(self):
+        return self.request('GET','/assets?limit=100',listing=True)
+
+    def asset(self, asset_id):
+        return self.request('GET','/assets/'+identifier(asset_id))
 
     def artwork(self, order_id, item_id, url, md5):
         # No arbitrary paths or request payloads from a browser/worker.

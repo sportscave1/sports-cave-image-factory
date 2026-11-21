@@ -115,7 +115,7 @@ def request(user, allocation_id):
         source_order_id=order_id, source_item_id=item_id, source_snapshot=source,
         snapshot=snap, fingerprint=prep.digest(snap), order_id='', item_id='',
         status='Queued', checks={}, history=[], message='Sandbox only; waiting for Orders companion.',
-        requester=str(user['id']), hidden=False)
+        requester=str(user['id']), hidden=False,browser_requested=True)
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         cur.execute('SELECT value FROM app_settings WHERE key LIKE %s', (PREFIX+'%',))
@@ -141,11 +141,21 @@ def run(value, provider, resolver, link, persist):
             value['order_id'] = identifier(found[0]['id'])
         else:
             value['create_intent'] = True
+            value['create_started_at'] = prep.now()
             value['status'] = 'Creating sandbox draft'
             persist(value)  # Commit the create fence before contacting the sandbox API.
             value['order_id'] = provider.create_draft(payload(value['snapshot']), value['id'])
         persist(value)
-    order = provider.order(value['order_id'])
+    try:
+        order = provider.order(value['order_id'])
+    except ProdigiError as error:
+        from datetime import datetime,timezone
+        started=datetime.fromisoformat(value.get('create_started_at') or '2000-01-01T00:00:00+00:00')
+        if 'HTTP 404' in str(error) and not value.get('item_id') and (datetime.now(timezone.utc)-started).total_seconds()<120:
+            value.update(status='Creating sandbox draft',message='Waiting for the same new sandbox draft to become readable.')
+            persist(value)
+            return value
+        raise
     if order.get('charges') or order.get('status') != 'draft':
         raise ValueError('Sandbox is no longer an unpaid draft; no artwork will be changed.')
     items = [i for i in order.get('items', []) if i.get('merchantReference') == value['snapshot']['identity']['line_id']]
@@ -224,7 +234,7 @@ def remove(user, key):
         if not row or row['value'].get('environment') != 'sandbox':
             raise ValueError('Sandbox test not found.')
         value = row['value']
-        if value['status'] in ('Queued','Uploading','Creating sandbox draft'):
+        if value['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading'):
             raise ValueError('Wait for the sandbox worker to finish before removing the test row.')
         value.update(hidden=True, removed_at=prep.now())
         save(cur, value)  # Recoverable test-row removal; no live order or supplier deletion.

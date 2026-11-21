@@ -230,7 +230,16 @@ def render_page(user):
                            "Evidence": row["detail"], "Checked on": row["checked_on"]}
                           for row in latest["edition"]["tracking"]], hide_index=True, width="stretch")
         st.caption("Verified means observed on the recorded check date. A live tag still needs validation on future real clicks and purchases.")
-        st.code("Google: utm_source=google&utm_medium=cpc&utm_campaign=PM021126&utm_id={campaignid}", language=None)
+        from google_tracking_contract import CAMPAIGN_SUFFIX
+        st.code("Google campaign final URL suffix: " + CAMPAIGN_SUFFIX, language=None)
+        observed = (automatic or {}).get("tracking_health") or {}
+        if observed:
+            st.dataframe([{"Live setting": key.replace("_", " "), "Verified": value}
+                          for key, value in observed.get("checks", {}).items()], hide_index=True, width="stretch")
+            if observed.get("status") == "attention":
+                st.warning("Google paid tracking settings need attention: " + ", ".join(observed.get("missing", [])))
+            st.caption(observed.get("note", ""))
+        st.write("Paid-only UTM term markers distinguish ad clicks from shared Merchant feed URLs. Keep Google auto-tagging enabled. Never label free listings as paid or tag internal links.")
         from ads_meta_contract import META_AD_URL_PARAMETERS
         st.code("Future OS Meta ads: " + META_AD_URL_PARAMETERS, language=None)
         st.write("Organic posts retain organic_social. Keep internal store links untagged.")

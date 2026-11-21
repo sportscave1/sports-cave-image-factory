@@ -391,7 +391,7 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     markup = st.html.call_args.args[0]
     crm_markup = next(c.args[0] for c in st.html.call_args_list if 'class="sc-home-crm"' in c.args[0])
     assert 'Facebook / Instagram ROAS' in crm_markup and 'Google ROAS' in crm_markup
-    assert 'Shopify last-visit source · GA4 matched device' in crm_markup
+    assert 'Recorded source · Shopify + matched Analytics' in crm_markup
     assert '2.75×' not in crm_markup  # Written brief cannot supply financial metrics.
     assert "Review creatives for a refresh" not in markup
 

@@ -24,11 +24,11 @@ def test_source_comparison_stays_visible_on_mobile(tmp_path):
             page.set_content(markup)
             comparison=page.locator('.sc-crm-comparison')
             warning=page.locator('.sc-crm-warning')
-            expect(comparison).to_contain_text('Shopify last visit 1 · GA4 purchase session 3')
+            expect(comparison).to_contain_text('reconciled 2 · Shopify last visit 1 · GA4 purchase session 3')
             expect(comparison).to_contain_text('Google Ads: 2.5 attributed purchases (ad interaction dates)')
             expect(warning).to_contain_text('1 order has paid/organic model differences')
-            expect(warning).to_contain_text('Google listing order has unverified paid/organic status')
-            expect(page.locator('[data-channel="Organic"]')).to_contain_text('Organic (last visit)')
+            expect(warning).to_contain_text('Google listing orders resolved by exact Analytics transaction matches: 1 paid')
+            expect(page.locator('[data-channel="Organic"]')).to_contain_text('Organic')
             for width in (1600,820,390,320):
                 page.set_viewport_size({"width":width,"height":900})
                 assert page.evaluate('document.documentElement.scrollWidth')<=width
