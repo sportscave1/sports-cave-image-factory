@@ -399,9 +399,9 @@ def reconcile(user, allocation_id):
     require_user(user)
     current = read(allocation_id)
     receipt = (current or {}).get('browser') or {}
-    if current and not receipt and not current.get('write_intent'):
-        return request(user,allocation_id,current.get('order_id',''),current.get('item_id',''))
     from prodigi_full_qa import live_enabled
+    if current and current['status'] in ('Needs QA','Needs review') and not receipt and not current.get('write_intent') and live_enabled():
+        return request(user,allocation_id,current.get('order_id',''),current.get('item_id',''))
     if receipt.get('verified') and live_enabled():
         current.update(status='Checking QA',message='Checking all QA evidence for this same draft')
         with connect() as c,c.cursor() as q:save(q,current)

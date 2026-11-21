@@ -2857,7 +2857,7 @@ def _render_send_artwork(row, placement):
         except Exception as error:
             st.error(str(error) if isinstance(error,ValueError) else 'Could not queue artwork. Open Fulfilment for review.')
         else:
-            if value['status'] in ('Needs QA','Needs review'):st.warning(value['message'])
+            if value.get('status') in ('Needs QA','Needs review'):st.warning(value['message'])
             else:st.success(value['message'])
 
 
