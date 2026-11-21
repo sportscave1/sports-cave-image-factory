@@ -14,13 +14,21 @@ function prodigiOrderAddress(address,expected) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.kind==='qa')return Boolean(host==='dashboard.prodigi.com' && plan.environment==='live' && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) && plan.order_url===`https://${host}/orders/${plan.order_id}/detail` && /^prodigi_prepare:\d+$/.test(plan.key) && /^[A-Za-z0-9_-]{43}$/.test(plan.token) && typeof plan.reference==='string' && typeof plan.sku==='string' && typeof plan.colour==='string' && ['standard','express'].includes(plan.shipping_intent) && plan.branding_set==='SC EDITION BRANDING');
   return Boolean(host && (plan.kind===undefined||plan.kind==='certificate') && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) &&
     plan.order_url===`https://${host}/orders/${plan.order_id}/detail` &&
     (plan.kind==='certificate'?/^https:\/\/sports-cave-image-factory\.onrender\.com\/api\/prodigi-document\/[A-Za-z0-9_-]{43}$/:/^https:\/\/sports-cave-image-factory\.onrender\.com\/api\/prodigi-artwork\/[A-Za-z0-9_-]{43}$/).test(plan.artwork_url) &&
     /^[a-f0-9]{64}$/.test(plan.sha256) && Number.isSafeInteger(plan.bytes) && plan.bytes>0 && plan.bytes<=128*1024*1024 &&
     (plan.kind==='certificate'?/^SC-\d+-certificate-[a-f0-9]{16}\.pdf$/:/^SC-\d+-[a-f0-9]{16}-[a-f0-9]{8}\.jpg$/).test(plan.filename) && typeof plan.reference==='string');
 }
+async function prodigiQAReceipt(plan,action,evidence=null,error='') {
+  const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
+  if(!token)throw Error('Desktop pairing unavailable.');
+  const response=await fetch(osOrigin+'/api/orders-companion/qa/'+action,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({key:plan.key,token:plan.token,evidence,...(error?{error}: {})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
+  if(!response.ok)throw Error('The pinned QA receipt could not be verified.');return response.json();
+}
 async function prodigiReceipt(plan,action,stage='readback') {
+  if(plan.kind==='qa')return prodigiQAReceipt(plan,action,null,'Interrupted QA; recheck the saved order without repeating an upload.');
   const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
   if(!token) throw Error('Desktop pairing is unavailable.');
   const response=await fetch(osOrigin+'/api/orders-companion/browser/'+action,{
@@ -34,6 +42,13 @@ async function prodigiBrowserRun(plan) {
   await chrome.storage.local.set({ordersBrowserPending:plan});
   let stage='download';
   try {
+    if(plan.kind==='qa'){
+      const tab=await chrome.tabs.create({url:plan.order_url,active:false});prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
+      let ready=false;for(let n=0;n<30;n++){try{ready=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.ready;if(ready)break;}catch{}await ordersDelay(1000);}
+      if(!ready)throw Error('Sign into Prodigi before checking the saved order.');
+      const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:qa',plan});
+      return await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||'');
+    }
     const file=await fetch(plan.artwork_url,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(150000)});
     if(!file.ok || (file.headers.get('content-length') && Number(file.headers.get('content-length'))!==plan.bytes))
       throw Error('The pinned JPG is unavailable.');
@@ -65,6 +80,7 @@ async function prodigiBrowserRun(plan) {
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const job=prodigiBrowserTransfer;
   if(!job || sender.frameId!==0 || sender.tab?.id!==job.tab || !prodigiOrderAddress(sender.url,job.plan.order_url)) return;
+  if(message?.type==='prodigi:qa-permit'&&job.plan.kind==='qa'){prodigiQAReceipt(job.plan,'permit',message.evidence).then(reply,()=>reply({error:true}));return true;}
   if(message?.type==='prodigi:chunk') {
     const offset=message.offset;
     if(!Number.isSafeInteger(offset)||offset<0||offset>=job.bytes.length||offset%262144) {reply({error:true});return;}

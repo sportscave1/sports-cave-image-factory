@@ -18,6 +18,8 @@ def unpack(key):
 def current(value,provider,resolver,sandbox):
     from prodigi_full_qa import same_order,enabled,live_enabled
     if not enabled() or (not sandbox and not live_enabled()):raise ValueError('Automatic certificate upload is paused.')
+    if not sandbox and os.getenv('SPORTS_CAVE_PRODIGI_LEGACY_DOCUMENT_UPLOAD','').lower()!='true':
+        raise ValueError('Certificate uploads are retired. Recheck the saved branding inserts instead.')
     snap,order,item=browser.checked(value,provider,resolver,sandbox)
     if not (value.get('browser') or {}).get('verified'):raise ValueError('Verify saved artwork first.')
     if len(order.get('items',[]))!=1 or item.get('quantity')!=1:raise ValueError('One numbered item is required.')

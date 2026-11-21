@@ -39,7 +39,7 @@ def render(row, user, *, answers=None, compact=False):
                 from prodigi_client import identifier
                 st.link_button('Open this existing Prodigi order', 'https://dashboard.prodigi.com/orders/'
                                + identifier(saved['order_id']) + '/detail')
-            if saved['status']=='Ready for manual payment':st.success(saved['message'])
+            if saved['status']=='Ready for manual payment':st.success('Ready in Prodigi · payment and Submit remain manual.')
             elif saved['status'] in ('Needs QA','Needs review'):st.warning(saved['message'])
             else:st.info(saved['message'])
             if saved.get('last_failure'):
@@ -55,16 +55,19 @@ def render(row, user, *, answers=None, compact=False):
                     st.caption('Certificate attachment verified. Supplier document download: '+
                         ('confirmed' if saved['qa'].get('supplier_certificate_download_confirmed') else 'pending until manual release'))
             approval=saved.get('print_approval') or {}
-            if approval and not approval.get('print_ready') and approval.get('source_ppi'):
+            if not (saved.get('browser') or {}).get('verified') and (saved.get('qa') or {}).get('policy')!='prodigi-dashboard-inserts-qa-v1' and approval and not approval.get('print_ready') and approval.get('source_ppi'):
                 st.warning(f"Native source: {min(approval['source_ppi']):.0f} PPI; supplier recommendation: {approval['required_ppi']} PPI. Enlarging the JPG does not create native detail.")
                 st.caption('A higher-resolution original master is required. This limitation is not automatically waived.')
-            if saved.get('document'):
+            if saved.get('document') and not (saved.get('browser') or {}).get('verified'):
                 st.link_button('Open verified certificate / packing slip PDF',saved['document']['url'])
             if saved.get('order_id') and saved.get('item_id'):
                 with st.expander('Companion QA review prompt'):
                     st.code(queue.review_prompt(saved), language=None)
-            for field, label in queue.CHECKS.items():
-                st.caption(('✓ ' if saved['checks'].get(field) else 'Review required · ') + label)
+            from prodigi_dashboard_qa import CHECKS as dashboard_checks
+            labels=dashboard_checks if (saved.get('qa') or {}).get('policy')=='prodigi-dashboard-inserts-qa-v1' or (saved.get('browser') or {}).get('verified') else queue.CHECKS
+            active=saved['status'] in ('Checking QA','Awaiting dashboard QA','Checking dashboard QA')
+            for field, label in labels.items():
+                st.caption(('✓ ' if saved['checks'].get(field) else ('Checking · ' if active else 'Review required · ')) + label)
             if 'production_approval' in saved['checks']:
                 st.caption(('✓ ' if saved['checks']['production_approval'] else 'Review required · ')+'Production print approval')
             if st.button('Check all QA again', key=key+'-recheck'):

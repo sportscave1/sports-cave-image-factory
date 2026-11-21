@@ -100,3 +100,15 @@ test('uncertain Save is reconciled once without another upload',async()=>{
   await vm.runInContext('prodigiBrowserRun(plan)',context);
   assert.equal(tabs.length,1);assert.equal(calls.filter(c=>c.url.endsWith('/finish')).length,1);
 });
+
+
+test('dashboard QA opens only the pinned live order and never downloads artwork',async()=>{
+  const {context,calls,tabs}=setup();
+  context.plan={kind:'qa',environment:'live',order_id:'99',order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'prodigi_prepare:1',token:'b'.repeat(43),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'black',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+  assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+  await vm.runInContext('prodigiBrowserRun(plan)',context);
+  assert.equal(tabs.length,1);assert.equal(tabs[0].active,false);
+  assert.equal(calls.length,1);assert(calls[0].url.endsWith('/qa/finish'));
+  context.plan.order_url='https://dashboard.prodigi.com/orders/other/detail';
+  assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+});

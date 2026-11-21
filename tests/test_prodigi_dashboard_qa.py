@@ -1,0 +1,126 @@
+from copy import deepcopy
+import json
+from types import SimpleNamespace
+import pytest
+import prodigi_dashboard_qa as qa
+import prodigi_preparation as prep
+import prodigi_browser as browser
+from test_auto_editions_jobs import database
+from test_prodigi_preparation import store,snapshot,order,Provider
+
+
+def options():return [dict(service='budget',cents=500,currency='$'),dict(service='standard',cents=700,currency='$'),dict(service='express',cents=1200,currency='$')]
+def inserts():
+    rows=[dict(name='Round packaging sticker',asset='sticker-id'),dict(name='Packing slip (colour)',asset='slip-id')]
+    return dict(set_name=qa.SET,saved=rows,expected=deepcopy(rows),available=True)
+def address():return dict(name='Synthetic Customer',address=dict(line1='1 Fixture Street',line2='',townOrCity='Fixture',stateOrCounty='VIC',postalOrZipCode='3000',countryCode='AU'))
+def fixture():
+    snap=snapshot();snap['recipient']=address()
+    provider=Provider();provider.mode='live';provider.data.update(recipient=address(),shippingMethod='Standard')
+    provider.data['items'][0]['assets']=[dict(url='https://fixture/art',printArea='default',status='complete')]
+    value=dict(allocation_id=1,order_id='99',item_id='88',snapshot=snap,fingerprint=prep.digest(snap),url_hash=prep.digest('https://fixture/art'),
+        browser=dict(verified=True,full_image_fit_verified=True),status=qa.WAITING,checks={},history=[])
+    evidence=dict(quality='Excellent',sku=snap['mapping']['prodigi_code'],colour='natural',shipping=dict(options=options(),selected='budget'),inserts=inserts())
+    return value,snap,provider,evidence
+
+
+def test_cheapest_and_express_rules_do_not_confuse_price_ties():
+    rows=options()
+    assert qa.shipping_choice(rows,'standard','standard')=='budget'
+    rows[1]['cents']=500
+    assert qa.shipping_choice(rows,'standard','standard')=='standard'
+    assert qa.shipping_choice(rows,'express','budget')=='express'
+    with pytest.raises(ValueError,match='unavailable'):qa.shipping_choice(rows[:2],'express','standard')
+    rows[0]['currency']='€'
+    with pytest.raises(ValueError,match='currencies'):qa.shipping_choice(rows,'standard','standard')
+
+
+def test_insert_check_requires_exact_saved_set_assets_and_availability():
+    proof=inserts();assert qa.insert_checks(proof)==(True,True)
+    proof['available']=False;assert qa.insert_checks(proof)==(True,False)
+    proof['available']=True;proof['saved'][1]['asset']='different-packing-slip'
+    assert qa.insert_checks(proof)==(False,False)
+    proof=inserts();proof['saved'][1]['name']='Flyer'
+    assert qa.insert_checks(proof)==(False,False)
+
+
+def test_live_full_qa_queues_a_dashboard_check_without_creating_a_certificate(monkeypatch):
+    import prodigi_full_qa as full
+    value,snap,p,evidence=fixture();value['status']='Checking QA'
+    monkeypatch.setattr(full,'live_enabled',lambda:True)
+    monkeypatch.setattr(full,'approve',lambda *_:pytest.fail('No legacy native-PPI quality gate'))
+    monkeypatch.setattr('prodigi_documents.create',lambda *_:pytest.fail('No certificate upload'))
+    result=full.run(value,p,lambda _:snap,lambda _:None)
+    assert result['status']==qa.WAITING and not p.writes and 'document' not in value
+
+
+def test_dashboard_qa_uses_excellent_but_never_ignores_address_or_asset_identity():
+    value,snap,p,evidence=fixture();p.data['shippingMethod']='Budget'
+    value['dashboard_qa']={'shipping':dict(options=options(),current='standard',target='budget')}
+    # Superseded native-source warnings must not impersonate a failed supplier rating.
+    value['print_approval']={'print_ready':False,'source_ppi':[121,121]}
+    result=qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)
+    assert all(result['checks'].values()) and result['policy']==qa.POLICY
+    evidence['quality']='Good'
+    assert not qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)['checks']['image_quality']
+    evidence['quality']='Excellent';p.data['recipient']['address']['line1']='Another address'
+    assert not qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)['checks']['customer_address']
+    assert not qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=False)['checks']['edition_number']
+
+
+def test_durable_qa_permit_is_single_use_and_changes_only_shipping(store,monkeypatch):
+    value,snap,p,evidence=fixture();key=prep.PREFIX+'1'
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    with store() as c,c.cursor() as q:prep.save(q,value)
+    plan=qa.claim();assert plan['kind']=='qa' and 'artwork_url' not in plan
+    assert qa.claim() is None
+    with pytest.raises(ValueError,match='differs'):qa.permit(key,plan['token'],dict(options=options(),current='standard',target='standard'))
+    assert qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))=={'permitted':True}
+    with pytest.raises(ValueError,match='used'):qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))
+    p.data['shippingMethod']='Budget'
+    assert qa.finish(key,plan['token'],evidence)['status']=='Ready for manual payment'
+    assert qa.finish(key,plan['token'],None)['status']=='Ready for manual payment'
+    assert not p.writes and p.data['status']=='draft' and not p.data.get('charges')
+    assert all(prep.read(1)['checks'].values())
+
+
+def test_product_change_during_qa_cannot_be_approved(store,monkeypatch):
+    value,snap,p,evidence=fixture();key=prep.PREFIX+'1'
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    with store() as c,c.cursor() as q:prep.save(q,value)
+    plan=qa.claim();qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))
+    p.data['items'][0]['attributes']['color']='black'
+    assert qa.finish(key,plan['token'],evidence)['status']=='Needs review'
+    assert not prep.read(1)['dashboard_qa'].get('verified') and not p.writes
+
+
+def test_existing_unused_certificate_failure_rechecks_only_dashboard(store,monkeypatch):
+    value,snap,p,evidence=fixture();value.update(status='Needs review',document_browser={'started':False})
+    monkeypatch.setattr('prodigi_full_qa.live_enabled',lambda:True)
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr('prodigi_document_browser.resume_unstarted',lambda *_:pytest.fail('Certificate upload is retired'))
+    with store() as c,c.cursor() as q:prep.save(q,value)
+    assert prep.reconcile({'id':'staff'},1)['status']=='Checking QA'
+
+
+def test_browser_receipts_are_bound_to_the_paired_desktop(monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import prodigi_preparation_api as api
+    calls=[]
+    monkeypatch.setattr(api,'desktop',lambda _:calls.append('authenticated'))
+    monkeypatch.setattr(qa,'finish',lambda *args:{'status':'Needs QA'})
+    client=TestClient(Starlette(routes=[Route('/qa/finish',api.dashboard_qa_action,methods=['POST'])]))
+    assert client.post('/qa/finish',json={}).status_code!=200 and not calls
+    response=client.post('/qa/finish',headers={'Authorization':'Bearer '+'a'*43},json=dict(key='prodigi_prepare:1',token='b'*43,evidence={},error='Incomplete'))
+    assert response.status_code==200 and calls==['authenticated']
+
+
+def test_shipping_intent_reads_only_the_service_not_the_appended_recipient():
+    assert qa.intent('Standard Tracked Shipping | Synthetic Recipient | Fixture')=='standard'
+    assert qa.intent('Express Shipping | Synthetic Recipient')=='express'
+    assert qa.intent('Standard | Express Street')=='standard'
+    with pytest.raises(ValueError):qa.intent('Unknown service | Express Street')
