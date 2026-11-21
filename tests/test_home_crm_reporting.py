@@ -90,11 +90,13 @@ def test_google_multichunk_roas_is_ratio_of_totals(monkeypatch):
     import google_ads_api_reporting as ads
     reports=Mock(side_effect=[
         {"status":"connected","currency":"AUD","timezone":"Australia/Sydney",
-         "totals":{"spend":10,"value":100},"fetched_at":"one"},
+         "totals":{"spend":10,"value":100,"purchases":1.25},"fetched_at":"one"},
         {"status":"connected","currency":"AUD","timezone":"Australia/Sydney",
-         "totals":{"spend":90,"value":90},"fetched_at":"two"}])
+         "totals":{"spend":90,"value":90,"purchases":0.75},"fetched_at":"two"}])
     monkeypatch.setattr(ads,"report",reports)
-    assert crm.google(START-timedelta(days=40),END)["roas"]==1.9
+    result=crm.google(START-timedelta(days=40),END)
+    assert result["roas"]==1.9
+    assert result["purchases"]==2 and result["spend"]==100 and result["value"]==190
     assert reports.call_count==2
 
 
@@ -266,8 +268,45 @@ def test_build_keeps_journey_records_transient_and_discloses_source_model():
         "ga4":lambda *a:{"status":"verified","rows":[ga(1,"facebook / referral")]},
         "facebook":lambda *a:{"status":"verified","roas":5},"google":lambda *a:{"status":"verified","roas":3}}
     result=crm.build(START,END,readers=readers)
-    assert result["version"]==2
+    assert result["version"]==3
     assert result["ledger"]["rows"][0]["mobile"]==1
     assert result["ledger"]["source_reconciliation"]==[{"ga4_channel":"Unresolved","shopify_channel":"Facebook paid","orders":1}]
     raw=json.dumps(result)
     assert '"ids"' not in raw and '"journeys"' not in raw and '"transactionId"' not in raw
+
+
+def test_parallel_source_models_deduplicate_same_cohort_without_overwriting_visits():
+    observations=[ga(1,"google / cpc"),ga(1,"google / cpc",count="2"),
+        ga(2,"google / cpc"),ga(3,"google / cpc"),ga(3,"google / organic"),
+        ga(999,"google / cpc")]
+    journeys={"1":{"channel":"Organic","reason":"explicit_organic_evidence"},
+        "2":{"channel":"Unresolved","reason":"google_listing_paid_status_unknown"},
+        "5":{"channel":"Google paid","reason":"explicit_paid_tags"}}
+    result=crm.ledger(set("12345"),observations,journeys)
+    counts={r["channel"]:r["total"] for r in result["rows"]}
+    assert counts=={"Facebook paid":0,"Google paid":1,"Organic":1,"Other":0,"Unresolved":3}
+    assert result["ga4_channel_orders"]=={"Facebook paid":0,"Google paid":2,"Organic":0,"Other":0,"Unresolved":3}
+    assert result["paid_organic_differences"]==1
+    assert result["source_reasons"]["google_listing_paid_status_unknown"]==1
+    assert sum(result["ga4_channel_orders"].values())==result["orders"]==5
+
+
+def test_visible_comparison_distinguishes_conversion_credit_from_order_counts():
+    import home_crm_ui as ui
+    report=crm.ledger({"1","2"},[ga(1,"google / cpc"),ga(2,"google / cpc")],{
+        "1":{"channel":"Organic","reason":"explicit_organic_evidence"},
+        "2":{"channel":"Unresolved","reason":"google_listing_paid_status_unknown"}})
+    data={"start":str(START),"end":str(END),"checked_at":"2026-11-21T04:00:00Z",
+        "ledger":report,"coverage":{"ga4":{"status":"verified"},"google":{"status":"verified","purchases":2.25}},
+        "roas":{"google":3.5}}
+    markup=ui.html(date(2026,11,21),{"state":"ready","data":data})
+    before_details=markup.split('<details')[0]
+    assert 'Shopify last visit 0 · GA4 purchase session 2' in before_details
+    assert 'Google Ads: 2.25 attributed purchases (ad interaction dates)' in before_details
+    assert '1 order has paid/organic model differences' in before_details
+    assert '1 Google listing order has unverified paid/organic status' in before_details
+    assert 'Organic (last visit)' in before_details
+    data["coverage"]["google"]={"status":"unavailable"}
+    assert 'Google Ads: — attributed purchases' in ui.html(date(2026,11,21),{"state":"ready","data":data})
+    data["coverage"]["ga4"]={"status":"unavailable"}
+    assert 'GA4 purchase session —' in ui.html(date(2026,11,21),{"state":"ready","data":data})
