@@ -60,7 +60,9 @@ def last_visit(journey):
     if medium in ORGANIC or tactic == "SEO":
         return {"channel":"Organic", "reason":"explicit_organic_evidence"}
     if source=="google" and medium=="product_sync" and campaign=="sag_organic":
-        return {"channel":"Organic", "reason":"shopify_google_free_listing_tags"}
+        # Merchant feed URLs can also be used by Shopping ads. Absence of a
+        # click ID in Shopify's recorded URL does not establish an unpaid click.
+        return {"channel":"Unresolved", "reason":"google_listing_paid_status_unknown"}
     if medium in ("email","sms","affiliate"):
         return {"channel":"Other", "reason":"other_tagged_channel"}
     if medium in ("product_sync","sag_organic") or origin in ("facebook","google"):
