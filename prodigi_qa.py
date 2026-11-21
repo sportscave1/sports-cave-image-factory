@@ -64,7 +64,10 @@ def evaluate(snapshot, order, item, url_hash):
     branding = order.get('branding') or {}
     slip_urls = [slip.get('url'), *[(branding.get(k) or {}).get('url') for k in ('packing_slip_bw', 'packing_slip_color','packingSlipBw','packingSlipColor')]]
     certificate_attached = bool(certificate and certificate in slip_urls)
-    slip_ready = slip.get('status') == 'ready' and bool(slip.get('url'))
+    slip_state=str(slip.get('status','')).casefold().replace('_','')
+    slip_ready = bool(slip.get('url')) and (slip_state=='ready' or
+        snapshot.get('draft_certificate_verified') is True and certificate_attached and
+        slip_state in ('complete','notyetdownloaded','inprogress'))
     checks = dict(product_option=item.get('sku') == mapping['prodigi_code'],
         artwork_upload=attached and (source_approved or draft_evidence),
         sent_to_production=crop, frame=frame,
@@ -89,4 +92,6 @@ def evaluate(snapshot, order, item, url_hash):
     return {'checks': checks, 'blockers': [reasons[k] for k, passed in checks.items() if not passed],
         'basis': 'Exact archived production approval, supplier readback and full structured address comparison',
         'supplier_status': order.get('status'), 'asset_status': state,
-        'supplier_download_confirmed': state == 'complete', 'checked_at_source': order.get('updatedAt')}
+        'supplier_download_confirmed': state == 'complete',
+        'supplier_certificate_download_confirmed':slip_state in ('ready','complete'),
+        'checked_at_source': order.get('updatedAt')}

@@ -61,6 +61,16 @@ test('the image library may add its own filters without changing the pinned orde
     context.address=address;assert.equal(vm.runInContext('prodigiOrderAddress(address,expected)',context),false);
   }
 });
+
+test('certificate handoffs accept only scoped PDFs and reject crossed artwork plans',()=>{
+  const {context}=setup();const certificate={...plan,kind:'certificate',
+    artwork_url:plan.artwork_url.replace('prodigi-artwork','prodigi-document'),
+    filename:'SC-1-certificate-'+'a'.repeat(16)+'.pdf'};
+  context.plan=certificate;assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+  for(const change of [{artwork_url:plan.artwork_url},{filename:plan.filename},{kind:'other'}]) {
+    context.plan={...certificate,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+  }
+});
 test('worker uploads only verified bytes and opens the exact draft without activation',async()=>{
   const {context,calls,tabs,storage}=setup();context.plan=plan;
   const result=await vm.runInContext('prodigiBrowserRun(plan)',context);

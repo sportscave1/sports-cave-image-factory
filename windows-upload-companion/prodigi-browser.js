@@ -14,11 +14,11 @@ function prodigiOrderAddress(address,expected) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
-  return Boolean(host && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) &&
+  return Boolean(host && (plan.kind===undefined||plan.kind==='certificate') && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) &&
     plan.order_url===`https://${host}/orders/${plan.order_id}/detail` &&
-    /^https:\/\/sports-cave-image-factory\.onrender\.com\/api\/prodigi-artwork\/[A-Za-z0-9_-]{43}$/.test(plan.artwork_url) &&
+    (plan.kind==='certificate'?/^https:\/\/sports-cave-image-factory\.onrender\.com\/api\/prodigi-document\/[A-Za-z0-9_-]{43}$/:/^https:\/\/sports-cave-image-factory\.onrender\.com\/api\/prodigi-artwork\/[A-Za-z0-9_-]{43}$/).test(plan.artwork_url) &&
     /^[a-f0-9]{64}$/.test(plan.sha256) && Number.isSafeInteger(plan.bytes) && plan.bytes>0 && plan.bytes<=128*1024*1024 &&
-    /^SC-\d+-[a-f0-9]{16}-[a-f0-9]{8}\.jpg$/.test(plan.filename) && typeof plan.reference==='string');
+    (plan.kind==='certificate'?/^SC-\d+-certificate-[a-f0-9]{16}\.pdf$/:/^SC-\d+-[a-f0-9]{16}-[a-f0-9]{8}\.jpg$/).test(plan.filename) && typeof plan.reference==='string');
 }
 async function prodigiReceipt(plan,action,stage='readback') {
   const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;

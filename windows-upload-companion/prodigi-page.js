@@ -43,6 +43,39 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls}
     if(!document.querySelector('main')?.textContent.includes(plan.reference)) throw Error('The exact order reference is missing.');
   }
   let running=false;
+  async function uploadCertificate(plan) {
+    let stage='row';
+    try {
+      const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));
+      if(rows.length!==1)throw Error('The exact certificate product/frame row is ambiguous.');
+      button(document.querySelector('main'),'Add packing slip').click();
+      stage='picker';
+      const input=await wait(()=>{
+        if(!dialog('Select image'))return null;
+        const inputs=document.querySelectorAll('input[data-test="image-library-upload-from-file-input"][type="file"]');
+        return inputs.length===1?inputs[0]:null;
+      });
+      stage='transfer';
+      const parts=[];let received=0;
+      while(received<plan.bytes) {
+        const answer=await chrome.runtime.sendMessage({type:'prodigi:chunk',offset:received});
+        if(!answer?.base64)throw Error('Pinned certificate transfer interrupted.');
+        const chunk=Uint8Array.from(atob(answer.base64),c=>c.charCodeAt(0));parts.push(chunk);received+=chunk.length;
+      }
+      if(received!==plan.bytes)throw Error('Certificate byte count differs.');
+      const file=new File(parts,plan.filename,{type:'application/pdf'});
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
+      if(hash!==plan.sha256)throw Error('Certificate checksum differs.');
+      locationMatches(plan);stage='permit';
+      const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:hash});
+      if(permission?.permitted!==true)throw Error('The draft changed before certificate upload.');
+      locationMatches(plan);stage='save';
+      const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await wait(()=>!dialog('Select image')&&Array.from(document.querySelectorAll('main a')).some(a=>text(a)==='View packing slip'),240000);
+      return {saved:true,stage};
+    }catch{return {saved:false,stage};}
+  }
   async function upload(plan) {
     if(running) throw Error('An upload is already in progress.');
     running=true;
@@ -50,6 +83,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls}
     try {
       locationMatches(plan);
       if(dialogs().length) throw Error('An existing editor requires manual review.');
+      if(plan.kind==='certificate')return await uploadCertificate(plan);
       stage='row';
       const row=await wait(()=>{
         const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));

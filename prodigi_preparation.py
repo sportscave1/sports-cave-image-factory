@@ -26,7 +26,7 @@ CHECKS = {
     'frame': 'Frame colour', 'size': 'Print size',
     'shipping': 'Shipping service and complete customer address',
     'edition_number': 'Numbered edition matches this allocated unit',
-    'certificate': 'Certificate / paid packing slip',
+    'certificate': 'Certificate / packing slip',
     'packing_slip': 'Supplier packing slip ready',
     'final_check': 'Final visual error check',
 }
@@ -399,6 +399,10 @@ def reconcile(user, allocation_id):
     require_user(user)
     current = read(allocation_id)
     receipt = (current or {}).get('browser') or {}
+    document_receipt=(current or {}).get('document_browser') or {}
+    if document_receipt.get('started') and not document_receipt.get('verified'):
+        from prodigi_document_browser import recheck
+        return recheck(user,PREFIX+str(int(allocation_id)))
     from prodigi_full_qa import live_enabled
     if current and current['status'] in ('Needs QA','Needs review') and not receipt and not current.get('write_intent') and live_enabled():
         return request(user,allocation_id,current.get('order_id',''),current.get('item_id',''))

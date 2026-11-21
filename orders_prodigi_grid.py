@@ -4,7 +4,7 @@ import re,hashlib,json
 from urllib.parse import urljoin
 
 ORIGIN='https://sports-cave-image-factory.onrender.com'
-ACTIVE={'Queued','Uploading','Creating sandbox draft','Awaiting browser upload','Browser uploading','Checking QA','Preparing JPG','Preparing certificate'}
+ACTIVE={'Queued','Uploading','Creating sandbox draft','Awaiting browser upload','Browser uploading','Checking QA','Preparing JPG','Preparing certificate','Awaiting certificate browser','Certificate browser uploading'}
 
 
 def supplier_link(order_id):

@@ -230,6 +230,11 @@ def tick():
 
 def recheck(user,key):
     prep.require_user(user)
+    current=next((v for v in list_tests() if v['id']==key),None)
+    document_receipt=(current or {}).get('document_browser') or {}
+    if document_receipt.get('started') and not document_receipt.get('verified'):
+        from prodigi_document_browser import recheck as document_recheck
+        return document_recheck(user,PREFIX+key)
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
         q.execute('SELECT value FROM app_settings WHERE key=%s',(PREFIX+str(uuid.UUID(key)),));r=q.fetchone()
@@ -247,7 +252,7 @@ def remove(user, key):
         if not row or row['value'].get('environment') != 'sandbox':
             raise ValueError('Sandbox test not found.')
         value = row['value']
-        if value['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading','Checking QA'):
+        if value['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading','Checking QA','Awaiting certificate browser','Certificate browser uploading'):
             raise ValueError('Wait for the sandbox worker to finish before removing the test row.')
         value.update(hidden=True, removed_at=prep.now())
         save(cur, value)  # Recoverable test-row removal; no live order or supplier deletion.

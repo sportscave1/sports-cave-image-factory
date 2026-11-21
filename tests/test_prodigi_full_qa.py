@@ -77,6 +77,8 @@ def pipeline(monkeypatch):
     monkeypatch.setattr('prodigi_browser.checked',lambda *_:(snap,deepcopy(p.data),deepcopy(p.data['items'][0])))
     monkeypatch.setattr(full,'approve',lambda *_:approved(snap))
     doc=dict(url='https://sports-cave-image-factory.onrender.com/api/prodigi-document/'+'a'*43,output={'sha256':'fixture'})
+    v['document_browser']={'verified':True,'sha256':'fixture','supplier_url':'https://fixture/certificate'}
+    p.data['packingSlip']={'url':'https://fixture/certificate','status':'NotYetDownloaded'}
     monkeypatch.setattr('prodigi_documents.create',lambda *_:doc)
     calls=[];saved=[]
     def slip(oid,url):
@@ -89,20 +91,21 @@ def test_one_pass_checks_all_questions_and_preserves_manual_submission(pipeline)
     v,p,snap,calls,persist=pipeline
     result=full.run(v,p,lambda _:snap,persist)
     assert result['status']=='Ready for manual payment' and all(result['checks'].values())
-    assert p.data['status']=='draft' and not p.data.get('charges') and len(calls)==1
-    assert v['document_write_intent']
+    assert p.data['status']=='draft' and not p.data.get('charges') and len(calls)==0
+    assert v['document_browser']['verified']
     full.run(v,p,lambda _:snap,persist)
-    assert len(calls)==1
+    assert len(calls)==0
 
 
-def test_uncertain_document_acknowledgement_never_uploads_again(pipeline):
+def test_certificate_handoff_is_queued_once_without_an_api_write(pipeline):
     v,p,snap,calls,persist=pipeline
-    def uncertain(*args):calls.append(args);raise ValueError('Uncertain acknowledgement')
-    p.packing_slip=uncertain
-    with pytest.raises(ValueError,match='Uncertain'):full.run(v,p,lambda _:snap,persist)
-    assert v['document_write_intent'] and len(calls)==1
-    with pytest.raises(ValueError,match='uncertain'):full.run(v,p,lambda _:snap,persist)
-    assert len(calls)==1
+    v.pop('document_browser');p.data.pop('packingSlip')
+    result=full.run(v,p,lambda _:snap,persist)
+    assert result['status']=='Awaiting certificate browser' and not calls
+    assert v['document_before']==p.data
+    v['document_browser']={'started':True}
+    with pytest.raises(ValueError,match='no automatic retry'):full.run(v,p,lambda _:snap,persist)
+    assert not calls
 
 
 def test_native_quality_failure_still_verifies_certificate_and_packing_slip(pipeline,monkeypatch):
@@ -110,13 +113,13 @@ def test_native_quality_failure_still_verifies_certificate_and_packing_slip(pipe
     monkeypatch.setattr(full,'approve',lambda *_:approved(snap,False))
     result=full.run(v,p,lambda _:snap,persist)
     assert result['status']=='Needs QA' and result['checks']['certificate'] and result['checks']['packing_slip']
-    assert not result['checks']['production_approval'] and len(calls)==1
+    assert not result['checks']['production_approval'] and len(calls)==0
 
 
 def test_qa_rejects_commercial_changes_during_document_attachment(pipeline):
     v,p,snap,calls,persist=pipeline
-    def changed(oid,url):p.data['packingSlip']={'url':url,'status':'ready'};p.data['items'][0]['quantity']=2
-    p.packing_slip=changed
+    v['document_before']=deepcopy(p.data)
+    p.data['shippingMethod']='Express'
     with pytest.raises(ValueError,match='order changed'):full.run(v,p,lambda _:snap,persist)
 
 

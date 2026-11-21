@@ -134,22 +134,26 @@ def run(value,provider,resolver,persist):
         value['print_approval']=approval;persist(value)
     document=value.get('document') or create(value,snap)
     value['document']=document
-    slip=order.get('packingSlip') or {}
-    if slip.get('url')!=document['url']:
-        if value.get('document_write_intent'):
-            raise ValueError('Packing-slip attachment is uncertain. Recheck this exact draft; no automatic retry.')
-        value.update(document_write_intent=True,document_before=deepcopy(order),document_attempted_at=prep.now());persist(value)
-        provider.packing_slip(value['order_id'],document['url'])
+    slip=order.get('packingSlip') or {};certificate=value.get('document_browser') or {}
+    if not certificate.get('verified'):
+        if slip.get('url') or certificate or value.get('document_write_intent'):
+            raise ValueError('Packing-slip attachment requires review. Preserve the existing draft; no automatic retry.')
+        value.update(document_before=deepcopy(order),status='Awaiting certificate browser',
+            message='Waiting for Companion 1.7.19 to attach the exact certificate. Payment and Submit stay manual.')
+        persist(value);return value
+    if certificate.get('sha256')!=document['output']['sha256'] or slip.get('url')!=certificate.get('supplier_url'):
+        raise ValueError('Verified supplier certificate changed; review this draft.')
     _,latest,current=checked(value,provider,resolver,sandbox)
     if not same_order(value.get('document_before') or order,latest):
         raise ValueError('Supplier order changed while attaching the certificate. Review this exact draft.')
-    evidence=deepcopy(snap);evidence['certificate_url']=document['url'];evidence['draft_print_approval']=approval
+    evidence=deepcopy(snap);evidence['certificate_url']=certificate['supplier_url'];evidence['draft_print_approval']=approval
+    evidence['draft_certificate_verified']=True
     evidence['draft_full_fit_verified']=receipt['full_image_fit_verified']
     qa=evaluate(evidence,latest,current,value['url_hash'])
     qa['blockers']=[*approval.get('blockers',[]),*qa['blockers']]
     qa.update(checked_at=prep.now(),companion_source_sha256_verified=True,supplier_asset_identity_verified=True,supplier_full_image_fit_verified=True,
         supplier_original_bytes_verified=receipt.get('supplier_original_bytes_verified',False),production_approval_basis=approval['basis'])
-    pending=(latest.get('packingSlip') or {}).get('url')==document['url'] and (latest.get('packingSlip') or {}).get('status')=='pending'
+    pending=(latest.get('packingSlip') or {}).get('url')==certificate['supplier_url'] and (latest.get('packingSlip') or {}).get('status')=='pending'
     if pending and value.get('document_attempted_at'):
         pending=(datetime.now(timezone.utc)-datetime.fromisoformat(value['document_attempted_at'])).total_seconds()<600
     value.update(qa=qa,checks=qa['checks'],status='Checking QA' if pending else ('Ready for manual payment' if all(qa['checks'].values()) else 'Needs QA'),

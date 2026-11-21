@@ -45,6 +45,9 @@ async def tick(request):
         from prodigi_browser import claim
         browser = (await run_in_threadpool(claim)
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
+        if browser is None and request.headers.get('x-sports-cave-orders-documents')=='1':
+            from prodigi_document_browser import claim as document_claim
+            browser=await run_in_threadpool(document_claim)
         return JSONResponse({'enabled': queue.enabled(), 'job':
             {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None,
             'browser': browser}, headers=HEADERS)
@@ -77,6 +80,8 @@ async def browser_action(request):
         if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','picker','transfer','uploaded','orientation','permit','save'):
             raise ValueError('Unknown browser stage.')
         from prodigi_browser import permit,finish
+        if body['key'].startswith('document:'):
+            from prodigi_document_browser import permit,finish
         result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'))
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:

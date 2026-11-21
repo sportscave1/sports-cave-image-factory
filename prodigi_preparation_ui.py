@@ -38,6 +38,9 @@ def render(row, user, *, answers=None, compact=False):
                 if saved['qa'].get('checked_at'):st.caption('Last full QA check: '+saved['qa']['checked_at'])
                 st.caption('Prodigi download: ' + ('confirmed' if saved['qa'].get('supplier_download_confirmed')
                     else 'pending; the exact artwork is attached for manual release'))
+                if (saved.get('document_browser') or {}).get('verified'):
+                    st.caption('Certificate attachment verified. Supplier document download: '+
+                        ('confirmed' if saved['qa'].get('supplier_certificate_download_confirmed') else 'pending until manual release'))
             approval=saved.get('print_approval') or {}
             if approval and not approval.get('print_ready') and approval.get('source_ppi'):
                 st.warning(f"Native source: {min(approval['source_ppi']):.0f} PPI; supplier recommendation: {approval['required_ppi']} PPI. Enlarging the JPG does not create native detail.")

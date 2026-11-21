@@ -22,9 +22,11 @@ After the single-use Save permit and artwork readback, one background pass:
   packing slip **is the numbered certificate**, matching the existing Fulfilment
   convention. The original layout is fitted to one A4 landscape sheet with safe
   margins. It does not claim that a draft's fee has already been paid.
-- Attaches only `packingSlip.url` to an unpaid editable draft, without touching
-  any items, artwork, customer, shipping or Submit fields. A durable intent
-  precedes the request. An uncertain response is re-read, never uploaded again.
+- Uses Companion 1.7.19 to upload the checksum-pinned certificate PDF through
+  Add packing slip on the exact unpaid draft. The sandbox API document PATCH
+  returned HTTP 500 on 21 November; the automatic flow does not use that write.
+  A durable single-use permit precedes the browser upload. An uncertain result
+  is re-read, never uploaded again. Existing different slips are preserved.
 - Rechecks all business fields, artwork, certificate and supplier slip status.
   Green Ready appears only when every check passes. The link opens the exact
   supplier order for manual review/payment/submission.
@@ -53,6 +55,11 @@ Only visible active work polls (ten seconds). Expensive file validation is
 cached as immutable job/checksum evidence; pending slips only need readback.
 Certificates use expiring opaque URLs bound to the active preparation and
 current allocation. Hiding a sandbox row revokes its JPG and PDF capabilities.
+The supplier attachment is bound to its unique library asset ID, filename,
+PDF byte count and companion-verified source checksum. If Prodigi's original
+download returns 404, raw supplier byte verification is explicitly false.
+`NotYetDownloaded` means attached for manual release, not already printed or
+downloaded; the UI records that distinction. Errors never pass packing-slip QA.
 
 Full QA is enabled for sandbox by default; `SPORTS_CAVE_PRODIGI_FULL_QA_ENABLED`
 can disable it. Live draft preparation additionally requires the explicit
