@@ -87,4 +87,16 @@ class Phase1UITests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
 
+    def test_opening_plan_closes_analytics_before_reusing_mapping_editor(self):
+        app = self.app()
+        next(x for x in app.expander if x.label == 'Search evidence and analytics').proto.expanded = True
+        app.run()
+        self.select(app, 'View', 'Mappings')
+        next(x for x in app.expander if x.label == 'SEO plan and tools').proto.expanded = True
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertFalse(any(x.label == 'View' for x in app.selectbox))
+        self.select(app, 'Tool', 'Keyword mappings')
+        self.assertFalse(app.exception)
+
 if __name__=='__main__':unittest.main()

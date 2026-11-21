@@ -6,6 +6,15 @@ import seo_navigation as nav
 import seo_phase1 as model
 import home_seo_report as report
 
+EDITOR_ROUTES = (nav.SEO_ANALYTICS_ROUTE, nav.SEO_PLAN_ROUTE, nav.SEO_REVIEW_ROUTE, nav.SEO_HISTORY_ROUTE)
+
+
+def _section_changed(route):
+    if st.session_state.get('seo-single-' + route):
+        for other in EDITOR_ROUTES:
+            if other != route:
+                st.session_state['seo-single-' + other] = False
+
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _latest():
@@ -68,10 +77,13 @@ def render(user, state, store, reports, navigate, *, legacy_route=None):
         st.session_state['seo-single-legacy-route'] = legacy_route
         if legacy_route in (nav.SEO_PLAN_ROUTE, nav.SEO_REVIEW_ROUTE, nav.SEO_HISTORY_ROUTE):
             st.session_state['seo-single-' + legacy_route] = True
+            _section_changed(legacy_route)
     for label, callback, permission in sections:
         if not os_accounts.can_access_page(user, permission):
             continue
-        panel = st.expander(label, key='seo-single-' + permission, expanded=bool(st.session_state.get('seo-single-' + permission)), on_change='rerun')
+        panel = st.expander(label, key='seo-single-' + permission,
+                            expanded=bool(st.session_state.get('seo-single-' + permission)),
+                            on_change=_section_changed, args=(permission,))
         if panel.open:
             with panel:
                 callback()
