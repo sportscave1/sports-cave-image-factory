@@ -236,3 +236,17 @@ def test_scope_narrowing_cannot_expand_granted_access():
     with pytest.raises(google_seo.GoogleSEOError, match="not been granted"):
         google_seo.access_token_for_connection(connection, {}, request_post=post, scopes=(google_seo.GOOGLE_ADS_SCOPE,))
     post.assert_not_called()
+
+
+def test_live_tracking_health_is_reported_without_exposing_suffix(auth):
+    from google_tracking_contract import CAMPAIGN_SUFFIX
+    row=settings()
+    row["customer"]["autoTaggingEnabled"]=True
+    row["campaign"]["finalUrlSuffix"]=CAMPAIGN_SUFFIX
+    post=Mock(side_effect=[response([row]),response([]),response([])])
+    result=ads.fetch(START,END,store=store(),post=post,now=NOW)
+    assert result["tracking_health"]["status"]=="verified"
+    assert "finalUrlSuffix" not in str(result)
+    query=post.call_args_list[0].kwargs["json"]["query"]
+    assert "customer.auto_tagging_enabled" in query
+    assert "campaign.final_url_suffix" in query

@@ -268,7 +268,7 @@ def test_build_keeps_journey_records_transient_and_discloses_source_model():
         "ga4":lambda *a:{"status":"verified","rows":[ga(1,"facebook / referral")]},
         "facebook":lambda *a:{"status":"verified","roas":5},"google":lambda *a:{"status":"verified","roas":3}}
     result=crm.build(START,END,readers=readers)
-    assert result["version"]==3
+    assert result["version"]==4
     assert result["ledger"]["rows"][0]["mobile"]==1
     assert result["ledger"]["source_reconciliation"]==[{"ga4_channel":"Unresolved","shopify_channel":"Facebook paid","orders":1}]
     raw=json.dumps(result)
@@ -284,10 +284,11 @@ def test_parallel_source_models_deduplicate_same_cohort_without_overwriting_visi
         "5":{"channel":"Google paid","reason":"explicit_paid_tags"}}
     result=crm.ledger(set("12345"),observations,journeys)
     counts={r["channel"]:r["total"] for r in result["rows"]}
-    assert counts=={"Facebook paid":0,"Google paid":1,"Organic":1,"Other":0,"Unresolved":3}
+    assert counts=={"Facebook paid":0,"Google paid":2,"Organic":1,"Other":0,"Unresolved":2}
     assert result["ga4_channel_orders"]=={"Facebook paid":0,"Google paid":2,"Organic":0,"Other":0,"Unresolved":3}
     assert result["paid_organic_differences"]==1
-    assert result["source_reasons"]["google_listing_paid_status_unknown"]==1
+    assert result["source_reasons"]["google_listing_ga4_paid"]==1
+    assert result["shopify_channel_orders"]["Google paid"] == 1
     assert sum(result["ga4_channel_orders"].values())==result["orders"]==5
 
 
@@ -301,12 +302,28 @@ def test_visible_comparison_distinguishes_conversion_credit_from_order_counts():
         "roas":{"google":3.5}}
     markup=ui.html(date(2026,11,21),{"state":"ready","data":data})
     before_details=markup.split('<details')[0]
-    assert 'Shopify last visit 0 · GA4 purchase session 2' in before_details
+    assert 'reconciled 1 · Shopify last visit 0 · GA4 purchase session 2' in before_details
     assert 'Google Ads: 2.25 attributed purchases (ad interaction dates)' in before_details
     assert '1 order has paid/organic model differences' in before_details
-    assert '1 Google listing order has unverified paid/organic status' in before_details
-    assert 'Organic (last visit)' in before_details
+    assert 'Google listing orders resolved by exact Analytics transaction matches: 1 paid · 0 organic' in before_details
+    assert 'Organic</th>' in before_details
     data["coverage"]["google"]={"status":"unavailable"}
     assert 'Google Ads: — attributed purchases' in ui.html(date(2026,11,21),{"state":"ready","data":data})
     data["coverage"]["ga4"]={"status":"unavailable"}
     assert 'GA4 purchase session —' in ui.html(date(2026,11,21),{"state":"ready","data":data})
+
+
+def test_only_consistent_google_transaction_evidence_resolves_feed_ambiguity():
+    journeys={str(i):{"channel":"Unresolved","reason":"google_listing_paid_status_unknown"} for i in range(1,8)}
+    journeys["8"]={"channel":"Organic","reason":"explicit_organic_evidence"}
+    result=crm.ledger(set(journeys),[
+        ga(1,"google / cpc"),ga(1,"google / cpc",device="desktop"),
+        ga(2,"google / organic"),ga(3,"google / cpc"),ga(3,"google / organic"),
+        ga(4,"facebook / cpc"),ga(5,"google / referral"),ga(6,"google / cpc"),ga(6,""),
+        ga(8,"google / cpc")],journeys)
+    assert result["google_listing_resolutions"] == {"paid":1,"organic":1}
+    assert result["source_reasons"]["google_listing_paid_status_unknown"] == 5
+    assert result["shopify_channel_orders"]["Unresolved"] == 7
+    assert result["paid_organic_differences"] == 1
+    assert sum(row["total"] for row in result["rows"]) == 8
+    assert next(row for row in result["rows"] if row["channel"]=="Google paid")["other"] == 1

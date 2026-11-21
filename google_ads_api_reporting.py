@@ -105,7 +105,8 @@ def fetch(start, end, *, store=None, post=requests.post, now=None):
     if google_seo.GOOGLE_ADS_SCOPE not in connection.get("granted_scopes", []):
         return {"status": "authorization_required", "note": "Reconnect Google Ads reporting."}
     settings = _read(
-        "SELECT customer.id, customer.currency_code, customer.time_zone, campaign.id, campaign.name, "
+        "SELECT customer.id, customer.currency_code, customer.time_zone, customer.auto_tagging_enabled, "
+        "customer.final_url_suffix, campaign.id, campaign.name, campaign.final_url_suffix, "
         "campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, "
         "campaign.maximize_conversion_value.target_roas, campaign.target_roas.target_roas, "
         "campaign_budget.amount_micros, campaign_budget.explicitly_shared "
@@ -144,6 +145,7 @@ def fetch(start, end, *, store=None, post=requests.post, now=None):
               for field in ("spend", "clicks", "impressions", "purchases", "value")}
     campaign, budget = row["campaign"], row.get("campaignBudget", {})
     current_budget = _number(budget.get("amountMicros")) / 1_000_000
+    from google_tracking_contract import health
     return {"status": "connected", "customer_id": CUSTOMER_ID, "campaign_id": CAMPAIGN_ID,
             "campaign_name": campaign.get("name"), "campaign_status": campaign.get("status"),
             "campaign_type": campaign.get("advertisingChannelType"), "timezone": tz, "currency": "AUD",
@@ -151,6 +153,7 @@ def fetch(start, end, *, store=None, post=requests.post, now=None):
             "fetched_at": instant.isoformat(), "daily": list(daily.values()), "totals": totals,
             "daily_budget": current_budget, "budget_matches_plan": current_budget == 20,
             "budget_shared": bool(budget.get("explicitlyShared")),
+            "tracking_health": health(account, campaign),
             "bidding_strategy": campaign.get("biddingStrategyType"),
             "target_roas": (campaign.get("maximizeConversionValue", {}).get("targetRoas")
                             or campaign.get("targetRoas", {}).get("targetRoas")),

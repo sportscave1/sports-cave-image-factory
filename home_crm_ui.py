@@ -28,7 +28,8 @@ def html(today, initial=None):
     ads_purchases = number(google.get("purchases")) if google.get("status") == "verified" else "—"
     ga4_status = data.get("coverage", {}).get("ga4", {}).get("status")
     ga4_paid = number(ledger.get("ga4_channel_orders", {}).get("Google paid")) if ga4_status == "verified" else "—"
-    comparison = (f'Google paid orders: Shopify last visit {count("Google paid", "total")} · '
+    raw_paid = number(ledger.get("shopify_channel_orders", {}).get("Google paid"))
+    comparison = (f'Google paid orders: reconciled {count("Google paid", "total")} · Shopify last visit {raw_paid} · '
                   f'GA4 purchase session {ga4_paid}. Google Ads: {ads_purchases} attributed purchases '
                   '(ad interaction dates).') if ledger else ""
     warnings = []
@@ -38,8 +39,14 @@ def html(today, initial=None):
     listings = ledger.get("source_reasons", {}).get("google_listing_paid_status_unknown", 0)
     if listings:
         warnings.append(f"{listings} Google listing {'order has' if listings == 1 else 'orders have'} unverified paid/organic status; counted as Unresolved.")
+    resolved = ledger.get("google_listing_resolutions", {})
+    if sum(resolved.values()):
+        warnings.append(f"Google listing orders resolved by exact Analytics transaction matches: {resolved.get('paid', 0)} paid · {resolved.get('organic', 0)} organic.")
+    tracking = google.get("tracking_health") or {}
+    if tracking.get("status") == "attention":
+        warnings.append("Google paid tracking settings need attention; see Google Ads Tracking.")
     rows = "".join('<tr data-channel="' + escape(name) + '"><th scope="row">' +
-        escape("Organic (last visit)" if name == "Organic" else name) + '</th>' + ''.join('<td data-device="' + key + '">' + count(name, key) + '</td>'
+        escape(name) + '</th>' + ''.join('<td data-device="' + key + '">' + count(name, key) + '</td>'
             for key in ("mobile", "desktop", "other", "total")) + '</tr>' for name in CHANNELS)
     def coverage_line():
         result = []
@@ -67,7 +74,7 @@ def html(today, initial=None):
       <small class="sc-crm-dates">{escape(dates)}</small>
       <div class="sc-crm-paid"><span>Facebook / Instagram ROAS <b data-roas="facebook">{ratio("facebook")}</b></span>
         <span>Google ROAS <b data-roas="google">{ratio("google")}</b></span></div>
-      <div class="sc-crm-table-wrap"><table><caption>Shopify last-visit source · GA4 matched device</caption>
+      <div class="sc-crm-table-wrap"><table><caption>Recorded source · Shopify + matched Analytics</caption>
         <thead><tr><th scope="col">Source</th><th scope="col">Mobile</th><th scope="col">Desktop</th>
         <th scope="col">Other /<br>unknown</th><th scope="col">Total</th></tr></thead><tbody>{rows}</tbody></table></div>
       <small class="sc-crm-status" role="status" aria-live="polite">{escape(status)}</small>
@@ -76,9 +83,10 @@ def html(today, initial=None):
       <details class="sc-crm-coverage"><summary>Coverage &amp; attribution</summary><p class="sc-crm-basis">{escape(data.get("basis", ""))}</p>
         <p>Other includes direct, email and other referrals. Unresolved includes missing or conflicting source evidence.
         Tablets and unknown devices stay in Other / unknown. Organic has no advertising ROAS.</p>
-        <p>Source-model differences: {escape("; ".join(f"{r['ga4_channel']} → {r['shopify_channel']}: {r['orders']}" for r in ledger.get("source_reconciliation", [])) or "None recorded")}</p>
+        <p>Raw GA4 → Shopify source differences: {escape("; ".join(f"{r['ga4_channel']} → {r['shopify_channel']}: {r['orders']}" for r in ledger.get("source_reconciliation", [])) or "None recorded")}</p>
         <p>Feed tags such as product_sync / sag_organic alone do not verify a free-listing sale.
-        The GA4 comparison counts each matched order once; missing or conflicting sessions stay unresolved.
+        Ambiguous Google feed tags use one consistent Google source from an exact Analytics transaction match.
+        The separate GA4 comparison counts each matched order once; missing or conflicting sessions stay unresolved.
         Google Ads purchases are platform conversion credit, not additional orders to add to the table.</p>
         <p class="sc-crm-sources">{coverage_line()}</p><p>Paid-platform ROAS can overlap and is separate from the order table.
         Facebook includes Instagram. Google covers PM021126. Values can change as conversions arrive.</p></details>
