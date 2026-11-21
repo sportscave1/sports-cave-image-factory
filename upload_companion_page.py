@@ -9,7 +9,7 @@ def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js'):
+        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js', 'orders-queue.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 
@@ -136,13 +136,13 @@ def render_page(user):
     _markup('<style>' + (Path(__file__).parent / 'components' / 'companion_queues.css').read_text(encoding='utf8') + '</style>')
     with st.container(key='companion-dashboard'):
         _markup('<div class="cq-hero"><div><div class="cq-eyebrow">SPORTS CAVE / AUTOMATION</div>'
-                '<h1>Companion control</h1><p>Designs, product uploads and Meta ads.</p></div>'
-                '<div class="cq-capacity"><span>PARALLEL CAPACITY</span><strong>1 design <i>+</i> 1 upload <i>+</i> 1 ad</strong>'
+                '<h1>Companion control</h1><p>Designs, product uploads, Meta ads and order preparation.</p></div>'
+                '<div class="cq-capacity"><span>PARALLEL CAPACITY</span><strong>1 design <i>+</i> 1 upload <i>+</i> 1 ad <i>+</i> 1 order</strong>'
                 '<small>Independent queues · automatic progression</small></div></div>')
         with st.expander('This browser · companion version'):
             from product_upload_gallery import render as render_browser_connection
             render_browser_connection(key='companion-browser-connection', mode='companion-health')
-        designs, uploads, ads = st.tabs(['Design queue', 'Upload queue', 'Ads queue'],
+        designs, uploads, ads, orders = st.tabs(['Design queue', 'Upload queue', 'Ads queue', 'Orders queue'],
                                         key='companion-queue-tabs', on_change='rerun')
         if designs.open:
             with designs:
@@ -153,6 +153,10 @@ def render_page(user):
         if ads.open:
             with ads:
                 render_ad_queue()
+        if orders.open:
+            with orders:
+                from prodigi_preparation_ui import dashboard
+                dashboard()
 
 
 def _connection(online, *, name='Companion'):

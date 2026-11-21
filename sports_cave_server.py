@@ -38,6 +38,7 @@ from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
 from speed_optimisation_api import ROUTES as SPEED_OPTIMISATION_ROUTES
 from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
 from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
+from prodigi_preparation_api import ROUTES as PRODIGI_PREPARATION_ROUTES
 from marketplace_api import ROUTES as MARKETPLACE_ROUTES
 
 
@@ -58,6 +59,7 @@ routes = [
         *SPEED_OPTIMISATION_ROUTES,
         *PRODUCT_UPLOAD_ROUTES,
         *TASK_RECORDER_ROUTES,
+        *PRODIGI_PREPARATION_ROUTES,
         *MARKETPLACE_ROUTES,
 
         *COLLECTOR_VAULT_ROUTES,
@@ -130,7 +132,7 @@ class _WallPreviewAccessLogFilter(logging.Filter):
         # The established binary-body contract carries customer identity in the
         # query. Keep it out of HTTP access logs; ingest logs use safe record IDs.
         message=record.getMessage()
-        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message
+        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message and '/api/prodigi-artwork/' not in message
 
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())

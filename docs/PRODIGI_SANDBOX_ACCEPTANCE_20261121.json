@@ -1,0 +1,30 @@
+{
+  "environment": "sandbox",
+  "credential_source": "separate Sandbox environment dashboard; temporarily loaded without echo or persistence",
+  "known_live_order_lookup_with_sandbox_key": 404,
+  "create_status": 202,
+  "sandbox_order_id": "75245601704925696",
+  "merchant_reference": "SC-COMPANION-SANDBOX-20261121",
+  "item_edits": [
+    {"item_id": "75245601729044992", "http_status": 200, "asset_readback_status": "NotYetDownloaded"},
+    {"item_id": "75245602241272320", "http_status": 200, "asset_readback_status": "NotYetDownloaded"}
+  ],
+  "final_order_status": "draft",
+  "charged": false,
+  "submitted": false,
+  "live_order_modified": false,
+  "fixture": "Synthetic two-item API draft using Prodigi's public sample PNG; no customer artwork or address used",
+  "separate_live_read_only_verification": {
+    "http_status": 200,
+    "order_id": "75236408630055936",
+    "status": "draft",
+    "shopify_order_and_line_references_present": true,
+    "sku_missing_correctly_requires_review": true
+  },
+  "limits": [
+    "This is an API-created sandbox draft, not a Shopify sandbox store connection.",
+    "Existing Shopify import identity and editable draft capability were verified separately with live read-only GETs.",
+    "Supplier asset processing remains pending until its own workflow runs; attachment is not reported as downloaded.",
+    "Existing artwork with hidden editor metadata and quantity-grouped items remain blocked for manual review."
+  ]
+}
