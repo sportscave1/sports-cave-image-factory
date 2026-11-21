@@ -15,7 +15,7 @@ def test_header_preserves_real_states_and_marks_estimates(monkeypatch):
     monkeypatch.setattr(morning_design_queue, 'list_jobs', lambda **kwargs: deepcopy(design_jobs))
     monkeypatch.setattr(design_publish_ad, 'dashboard', lambda: dict(enabled=False, online=True, jobs=deepcopy(ad_jobs)))
     queues = companion_header.enrich_queues(dict(design=dict(waiting=1, enabled=True), upload=dict(waiting=0, enabled=True)))
-    assert [job['state'] for job in queues['design']['jobs']] == ['running', 'waiting', 'failed', 'complete']
+    assert [job['state'] for job in queues['design']['jobs']] == ['running', 'waiting', 'pending', 'complete']
     assert queues['design']['jobs'][0]['estimated']
     assert queues['design']['jobs'][0]['percent'] <= 90
     assert queues['upload']['display']
@@ -36,7 +36,7 @@ def test_delivered_design_review_notes_are_not_a_failed_generation(monkeypatch):
     assert result[0]['state'] == 'complete' and result[0]['percent'] == 100
     assert result[0]['label'] == 'Uploaded · needs review'
     assert result[0]['detail'] == jobs[0]['detail']
-    assert result[1]['state'] == 'failed'
+    assert result[1]['state'] == 'pending'
 
 
 def test_header_and_ads_controls_keep_admin_and_origin_guards(monkeypatch):

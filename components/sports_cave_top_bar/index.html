@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v7-order-status-recovery";
+  const CONTROLLER_VERSION = "companion-header-v8-auto-editions";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1041,6 +1041,22 @@
       #sc-os-companion-status {grid-row:3;gap:5px;}
       .sc-companion-details summary,#sc-os-staff-upload-summary {padding-inline:5px;}
     }
+
+    .sc-os-topbar-actions > .sc-os-topbar-icon-button {position:relative;}
+    .sc-os-tooltip-surface {position:absolute;inset:0;border-radius:inherit;z-index:2;}
+    @media(min-width:1101px) {
+      #${ROOT_ID},#${ROOT_ID}.sc-has-staff-upload {grid-template-columns:var(--sc-sidebar-width) auto auto auto minmax(0,1fr);}
+      #${ROOT_ID}.sc-has-posting,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:var(--sc-sidebar-width) auto auto auto 180px minmax(0,1fr);}
+      #${ROOT_ID} .sc-os-topbar-actions {grid-column:4;grid-row:1;}
+    }
+    @media(max-width:600px) {
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:236px!important;}
+      #${ROOT_ID}.sc-has-staff-upload,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:auto auto minmax(0,1fr);grid-template-rows:56px 48px 132px;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-brand {grid-column:1/-1;}
+      #${ROOT_ID}.sc-has-staff-upload #sc-os-files {grid-column:2;grid-row:2;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-actions {grid-column:3;grid-row:2;justify-content:flex-end;}
+      #sc-os-companion-status {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+    }
   `;
 
   let style = doc.getElementById(STYLE_ID);
@@ -1066,6 +1082,15 @@
       <button id="sc-os-refresh" class="sc-os-topbar-icon-button" type="button" aria-label="Refresh" title="Refresh">${icon("refresh")}</button>
     </div>
     <button id="sc-os-files" class="sc-os-topbar-icon-button" type="button" aria-label="Open Files" ${config.filesEnabled ? "" : "hidden"}>${icon("folder")}<span>Files</span></button>
+    <div class="sc-os-topbar-actions">
+      <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" title="Search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}<span class="sc-os-tooltip-surface" title="Search" aria-hidden="true"></span></button>
+      <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
+      <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}<span class="sc-os-tooltip-surface" title="Schedule" aria-hidden="true"></span></button>
+      <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}<span class="sc-os-tooltip-surface" title="Notifications" aria-hidden="true"></span></button>
+      <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
+      <div id="sc-os-repairs-panel" class="sc-os-topbar-panel" aria-label="Repairs &amp; Improvements" hidden></div>
+      <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
+    </div>
     <div class="sc-os-topbar-search-wrap" role="dialog" aria-label="Search Sports Cave OS">
       <div class="sc-os-topbar-search-shell">
         ${icon("search")}
@@ -1105,18 +1130,12 @@
           <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status" aria-live="polite"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" role="combobox" aria-autocomplete="list" aria-controls="sc-ad-products" aria-expanded="false" placeholder="Search products" required autocomplete="off"><div id="sc-ad-products" role="listbox" aria-label="Edition Ops products" hidden></div></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-reload" type="button">Reload products</button><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
         </details>
       </div>
-    </div>
-    <div class="sc-os-topbar-actions">
-      <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}</button>
-      <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
-      <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}</button>
-      <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}</button>
-      <button id="sc-os-repairs" class="sc-os-topbar-icon-button" type="button" aria-label="Repairs &amp; Improvements" aria-controls="sc-os-repairs-panel" aria-expanded="false" title="Repairs &amp; Improvements">${icon("hammer")}</button>
-      <button id="sc-os-profile" class="sc-os-topbar-icon-button" type="button" aria-label="Open Settings" title="Settings">${icon("user")}</button>
-      <button id="sc-os-settings" class="sc-os-topbar-icon-button" type="button" aria-label="Open settings" aria-controls="sc-os-settings-panel" aria-expanded="false" title="Settings">${icon("settings")}</button>
-      <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
-      <div id="sc-os-repairs-panel" class="sc-os-topbar-panel" aria-label="Repairs &amp; Improvements" hidden></div>
-      <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
+      <div id="sc-os-editions-card" class="sc-companion-card" hidden>
+        <details id="sc-os-editions-status" class="sc-companion-details">
+          <summary><span class="sc-companion-name">Auto Editions</span><span id="sc-os-editions-title" class="sc-companion-title"></span><span id="sc-os-editions-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-editions-meter" max="100" aria-label="Auto Editions checkpoint"></progress></summary>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-editions-close" type="button" aria-label="Close Auto Editions status">×</button><div id="sc-os-editions-list"></div></div>
+        </details>
+      </div>
     </div>
     <div id="sc-os-order-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div id="sc-os-planner-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -1214,7 +1233,7 @@
       queue, root.querySelector("#sc-os-queue-" + queue),
     ]));
     let queues = {};
-    const companionPanels = Object.fromEntries(["design", "ads"].map(name => [name, {
+    const companionPanels = Object.fromEntries(["design", "ads", "editions"].map(name => [name, {
       card:root.querySelector(`#sc-os-${name}-card`),
       panel:root.querySelector(`#sc-os-${name}-status`),
       title:root.querySelector(`#sc-os-${name}-title`),
@@ -1232,12 +1251,12 @@
       }
       const rotating = name === 'design' && running.length > 1;
       const job = (rotating ? running[designRotation % running.length] : running[0]) || jobs.find(item => item.state === 'waiting') || jobs[0];
-      const online = name === 'ads' ? control.online : status.online;
-      const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
+      const online = name === 'design' ? status.online : control.online;
+      const idle = control.unavailable ? 'Status unavailable · retrying' : control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
       let label = job ? job.label : idle;
       if (rotating) label = `${running.length} working · ${designRotation % running.length + 1}/${running.length} · ${label}`;
       if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
-      if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
+      if (job && (name === 'editions' || ['waiting','running'].includes(job.state)) && !online) label += ' · companion offline';
       if (control.waiting) label += ` · ${control.waiting} waiting`;
       const changed = elements.title.dataset.jobId && elements.title.dataset.jobId !== job?.id;
       elements.title.dataset.jobId = job?.id || '';
@@ -1245,8 +1264,9 @@
       elements.stage.textContent = label;
       elements.panel.title = '';
       elements.panel.dataset.state = job?.state || 'idle';
-      elements.panel.dataset.stale = 'false';
-      elements.meter.value = job?.percent || 0;
+      elements.panel.dataset.stale = String(Boolean(control.unavailable));
+      if (job?.state === 'running' && name === 'editions') elements.meter.removeAttribute('value');
+      else elements.meter.value = job?.percent || 0;
       elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
       if (rotating && changed && !parentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         elements.title.animate([{opacity:0},{opacity:1}], {duration:250});
@@ -1401,7 +1421,7 @@
           }else if(article._posting){article._posting.remove();article._posting=null;}
           return article;
         });
-        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';
+        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href=name==='editions'?'/?page=edition_ops':'/?page=upload_companion';queueLink.textContent=name==='editions'?'Open Edition Ops':'Open Companion Queues';
         if(name==='ads'){
           const retained=new Set(jobs.slice(0,10).map(item=>item.id));
           for(const id of adRows.keys())if(!retained.has(id))adRows.delete(id);
@@ -1762,7 +1782,7 @@
         staffProgress.hidden = !jobs.length && !queues.upload?.display && !pendingUploadReveal;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
         staffProgress.dataset.stale=String(status.display_state === 'stale');
-        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale');
+        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale' || (panel.id==='sc-os-editions-status' && queues.editions?.unavailable));
         renderQueueButtons();
         lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
         if (pendingUploadReveal) {
@@ -2009,7 +2029,7 @@
     const repairsButton = root.querySelector("#sc-os-repairs");
     const repairsPanel = root.querySelector("#sc-os-repairs-panel");
     repairsPanel.hidden = true;
-    repairsButton.setAttribute("aria-expanded", "false");
+    repairsButton?.setAttribute("aria-expanded", "false");
     const profileButton = root.querySelector("#sc-os-profile");
     const settingsButton = root.querySelector("#sc-os-settings");
     const settingsPanel = root.querySelector("#sc-os-settings-panel");
@@ -3840,11 +3860,11 @@
       renderNotifications(await loadNotifications());
       notificationsPanel.querySelector("button")?.focus({preventScroll: true});
     }, listenerOptions);
-    repairsButton.addEventListener("click", openRepairPanel, listenerOptions);
-    profileButton.addEventListener("click", () => {
+    repairsButton?.addEventListener("click", openRepairPanel, listenerOptions);
+    profileButton?.addEventListener("click", () => {
       navigateDocument(routeUrl(state.config.accountsRouteKey, "", false));
     }, listenerOptions);
-    settingsButton.addEventListener("click", () => {
+    settingsButton?.addEventListener("click", () => {
       if (!openPanel("settings")) return;
       renderSettings();
       settingsPanel.querySelector("button")?.focus({preventScroll: true});

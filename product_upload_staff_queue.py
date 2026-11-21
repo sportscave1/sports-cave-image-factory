@@ -333,7 +333,9 @@ def header_queue_status():
             (SELECT count(*) FROM product_upload_staff_jobs WHERE stage=0) AS upload_waiting,
             (SELECT value FROM app_settings WHERE key=%s) AS upload_enabled''', (CONTROL_KEY,))
         row = cur.fetchone()
+    from auto_editions_header import snapshot
     return enrich_queues({
+        'editions': snapshot(connect),
         'design': dict(waiting=row['design_waiting'], enabled=bool(row['design_enabled'])),
         'upload': dict(waiting=row['upload_waiting'], enabled=row['upload_enabled'] is not False),
     })
