@@ -1,4 +1,5 @@
 """Shared Orders / Fulfilment view of the same durable preparation record."""
+import os
 import prodigi_preparation as queue
 
 
@@ -19,6 +20,9 @@ def render(row, user, *, answers=None, compact=False):
     key = 'prodigi-prepare-' + allocation + ('-orders' if compact else '-fulfilment')
     with st.expander('Prepare for Prodigi · manual payment', expanded=not compact):
         st.caption('Attach the numbered production JPG to an existing draft. Payment and release stay manual.')
+        if os.getenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED', '').lower() != 'true':
+            st.warning('Automatic artwork uploads are paused pending successful sandbox acceptance. '
+                       'Review and upload artwork manually in Prodigi.')
         if saved:
             st.write(saved['status'])
             st.caption(f"Prodigi order {saved['order_id'] or 'matching pending'} · item {saved['item_id'] or 'matching pending'} · allocation {allocation}")

@@ -82,6 +82,34 @@ def test_full_sandbox_upload_reuses_numbered_source_and_reports_missing_qa():
     assert result['snapshot']['number']==source()['number']
     assert result['snapshot']['output']==source()['output']
     assert result['source_snapshot']['identity']==source()['identity']
+    assert result['artwork_readback_verified']
+
+
+def test_unpaid_draft_without_write_acceptance_never_claims_artwork_readback(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','false')
+    provider=SandboxProvider()
+    result=sandbox.run(value(),provider,lambda _:source(),
+        lambda _:pytest.fail('No artwork transfer before acceptance'),lambda _:None)
+    assert result['status']=='Needs acceptance' and result['sandbox_unpaid_verified']
+    assert not result['artwork_readback_verified'] and not provider.writes
+
+
+def test_supplier_clearing_product_after_artwork_patch_stops_without_retry():
+    provider=SandboxProvider(); original=provider.artwork; saved=[]
+    def destructive_patch(*args):
+        original(*args)
+        provider.data['items'][0]['sku']=None
+    provider.artwork=destructive_patch
+    with pytest.raises(ProdigiError,match='No Prodigi product'):
+        sandbox.run(value(),provider,lambda _:source(),
+            lambda _:('https://fixture.invalid/numbered.jpg','b'*32),
+            lambda v:saved.append(deepcopy(v)))
+    assert saved[-1]['write_intent'] and len(provider.writes)==1
+    assert not saved[-1].get('sandbox_unpaid_verified')
+    with pytest.raises(ProdigiError,match='No Prodigi product'):
+        sandbox.run(saved[-1],provider,lambda _:source(),
+            lambda _:pytest.fail('No automatic retry'),lambda _:None)
+    assert len(provider.writes)==1
 
 
 def test_live_provider_and_changed_source_never_create_or_upload():

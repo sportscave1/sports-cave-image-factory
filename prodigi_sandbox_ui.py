@@ -49,7 +49,7 @@ def render(selected, user):
                 from prodigi_client import identifier
                 st.link_button('Open sandbox draft', 'https://sandbox-beta-dashboard.pwinty.com/orders/'
                     + identifier(row['order_id'])+'/detail')
-            if row.get('sandbox_unpaid_verified'):
+            if row.get('sandbox_unpaid_verified') and row.get('artwork_readback_verified'):
                 st.success('Exact artwork read back from the sandbox. Draft remains unpaid and unsubmitted.')
             if st.button('Remove sandbox row from app', key='sandbox-remove-'+row['id'],
                          disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft')):

@@ -164,6 +164,10 @@ def run(value, provider, resolver, link, persist):
     if final.get('status') != 'draft' or final.get('charges'):
         raise ValueError('Sandbox must remain an unpaid draft.')
     result['sandbox_unpaid_verified'] = True
+    result['artwork_readback_verified'] = bool(result.get('write_intent')) and any(
+        prep.digest(asset.get('url')) == result.get('url_hash')
+        for item in final.get('items', []) if str(item.get('id')) == result['item_id']
+        for asset in item.get('assets', []))
     result['message'] = 'SANDBOX: ' + result['message']
     persist(result)
     return result
