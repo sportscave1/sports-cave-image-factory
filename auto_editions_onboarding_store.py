@@ -113,6 +113,7 @@ class Queue:
             if control(cur)['paused']:return None
             from auto_editions_pipeline import claim_exclusion
             exclude=claim_exclusion(cur,pipeline,actor)
+            if exclude is False:return None
             cur.execute("""SELECT product_gid FROM auto_edition_onboarding q WHERE lease_until>now()
                 AND (%s::text IS NULL OR product_gid<>%s)
                 AND (status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing') LIMIT 1""",(exclude,exclude))

@@ -23,6 +23,9 @@ def claim_exclusion(cur, pipeline, actor):
     pid,token=pipeline['product_gid'],pipeline['lease_token']
     cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit
         WHERE product_gid=%s AND actor_id=%s AND event='claimed' AND detail->>'lease'=%s""",(pid,actor,token))
-    if not cur.fetchone() or not durable_upload(cur,pid,token,actor,pipeline['host_hash']):
-        raise ValueError('Upload has no matching host-owned durable acknowledgement.')
+    if not cur.fetchone():raise ValueError('Upload lease belongs to another operator.')
+    if not durable_upload(cur,pid,token,actor,pipeline['host_hash']):
+        # Normal polling can beat the first chunk ACK or race completion. It
+        # grants no exclusion/claim, and must not turn healthy work Recovering.
+        return False
     return pid

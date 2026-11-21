@@ -33,6 +33,12 @@ Pause is checked before admission. Both active jobs receive their own heartbeat,
 source fences and cancellation handling. A restart restores owned journals through
 the existing serial recovery path; it does not steal a processor lock.
 
+The live boundary check exposed an admission poll before the first chunk ACK.
+An owned but not-yet-acknowledged or no-longer-pending upload now returns no claim,
+without a recovery warning. Cross-actor lease claims still fail; no missing proof
+can exclude a row or create another native job. This also handles completion
+racing a poll without turning a successful transfer into a host error.
+
 Pending upload-status reads authenticate the current registered host and exact
 session, check origin/expiry and validate descriptor/generation, then return only
 durable pending progress. They avoid mapping/provider revalidation and a redundant

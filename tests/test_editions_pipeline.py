@@ -95,7 +95,9 @@ def test_sql_overlap_cannot_bypass_owned_acknowledged_live_lease(sql_pipeline,fa
     if fault=='wrong_host':proof['host_hash']='c'*64
     if fault=='wrong_actor':actor='other-admin'
     if fault=='superseded':e.sql.execute('UPDATE auto_edition_onboarding SET lease_token=gen_random_uuid() WHERE product_gid=%s',(proof['product_gid'],))
-    with pytest.raises(ValueError):e.queue.claim(actor,proof)
+    if fault=='wrong_actor':
+        with pytest.raises(ValueError):e.queue.claim(actor,proof)
+    else:assert e.queue.claim(actor,proof) is None
 
 
 def test_sql_pause_prevents_pipeline_claim(sql_pipeline):
