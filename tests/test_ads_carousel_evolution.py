@@ -252,7 +252,9 @@ class CarouselEvolutionTests(unittest.TestCase):
         workflow = self.workflow()
         workflow['ad_notes']['carousel']['cards'][1]['headline'] = 'Mount Panorama'
         before = deepcopy(workflow)
-        self.assertTrue(any('review is stale' in issue for issue in ads.creative_refresh_quality_issues(self.result,workflow)))
+        self.assertTrue(any('review is stale' in issue for issue in evolution.quality_issues(
+            workflow['ad_notes']['carousel'], workflow['ad_notes']['refresh_executions'],
+            self.context, self.refs, self.result['product_name'], self.result['product_url'], ['Limited to 100'])))
         save_locally(self.result,workflow)
         _, restored=saved.loads(workflow['refresh_workspace_export'])
         self.assertEqual(restored['ad_notes']['refresh_executions'],before['ad_notes']['refresh_executions'])
@@ -296,7 +298,7 @@ class CarouselEvolutionTests(unittest.TestCase):
     def test_active_ui_keeps_draft_save_available_when_historical_copy_review_changes(self):
         from tests.test_ads_refresh_repair import app_for, button
         app = app_for()
-        self.assertFalse(button(app,'Save now').disabled)
+        self.assertTrue(button(app,'Post now').disabled)
         original = deepcopy(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['ad_notes']['carousel'])
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         records = deepcopy(workflow['ad_notes']['refresh_executions'])
@@ -304,7 +306,7 @@ class CarouselEvolutionTests(unittest.TestCase):
         workflow['ad_notes']['refresh_executions']=records
         app.run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertFalse(button(app,'Save now').disabled)
+        self.assertTrue(button(app,'Post now').disabled)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['ad_notes']['carousel'],original)
         self.assertNotIn('Card execution notes (JSON)',[t.label for t in app.text_area])
         self.assertNotIn('POST NOW',[b.label for b in app.button])
@@ -313,7 +315,7 @@ class CarouselEvolutionTests(unittest.TestCase):
         workflow['ad_notes']['refresh_executions']=records
         app.run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertFalse(button(app,'Save now').disabled)
+        self.assertTrue(button(app,'Post now').disabled)
         self.assertEqual(workflow['ad_notes']['carousel'],original)
         self.assertTrue(workflow['ad_notes']['refresh_executions'][1]['copy_review']['headline']['checks']['strategy']['passed'])
 
@@ -321,7 +323,8 @@ class CarouselEvolutionTests(unittest.TestCase):
         old = deepcopy(self.context)
         old['refresh_plan'].pop('copy_contract')
         updated = plan.current_plan(old,'Carousel',self.result['product_name'],self.result['category'],'seed')
-        self.assertEqual(updated['copy_contract'],evolution.CONTRACT)
+        self.assertIs(updated, old['refresh_plan'])
+        self.assertNotIn('copy_contract', updated)
         with patch.object(evolution,'quality_issues',side_effect=AssertionError('Historical package must not opt in')):
             result = {**self.result,'creative_refresh_context':old}
             ads.creative_refresh_quality_issues(result,self.workflow())

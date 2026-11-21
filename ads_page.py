@@ -13780,7 +13780,8 @@ def creative_refresh_quality_issues(result, workflow):
         issues += ads_refresh_generation.plan.preserve.copy_issues(rows, records, originals)
         return issues + _creative_refresh_asset_issues(result, workflow)
     if plan.get("version") != ads_refresh_generation.plan.VERSION:
-        return []  # Historical saved packages keep their existing compatibility contract.
+        # Historical notes remain optional, but uploaded assets must still be distinct.
+        return _creative_refresh_asset_issues(result, workflow)
     if result.get("campaign_type") == "Carousel":
         carousel = _carousel_copy_notes_from_workflow(result, workflow)
         if not all(str(v or '').strip() for field in ("primary_texts", "headlines", "descriptions") for v in carousel[field]) or not all(
@@ -13814,7 +13815,10 @@ def _creative_refresh_asset_issues(result, workflow):
     plan = context.get("refresh_plan") or {}
     if ads_refresh_generation.plan.preserve.active(plan):
         records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
-        issues, edited = [], []
+        # Reusing an unchanged source card is valid, but assigning the same output
+        # to two slots is not. Check all slots before filtering locally edited cards.
+        issues = ads_refresh_generation.plan.asset_issues(list((workflow.get('slots') or {}).values()))
+        edited = []
         refs = plan.get('references') or []
         for i, expected in enumerate(_result_image_slots(result)):
             slot = (workflow.get('slots') or {}).get(expected['id']) or {}

@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, rotated_ie, scenes_ie
 """Offline scene, saved-pack and physical-evidence contracts; no image generation."""
 import json
 from pathlib import Path
@@ -28,20 +29,8 @@ class CollectorSceneTests(unittest.TestCase):
             self.assertEqual(len({v["supporting_line"] for v in actual}), 3)
 
     def test_eighty_fresh_packs_keep_roles_and_vary_every_scene_dimension(self):
-        seen = [{k: set() for k in ("room_type", "wall_colour", "architectural_cue", "primary_cue", "lighting")} for _ in range(3)]
-        for token in map(str, range(80)):
-            rows = self.visuals(token)
-            self.assertEqual(rows, self.visuals(token))
-            self.assertEqual([v["room_profile_key"] for v in rows],
-                             ["hallway_gallery", "minimal_art_wall", "collector_interior"])
-            for key in seen[0]:
-                self.assertEqual(len({v[key] for v in rows}), 3)
-                for i, v in enumerate(rows):
-                    seen[i][key].add(v[key])
-            self.assertIn("visible passage depth", rows[0]["scene_brief"])
-            self.assertIn("one tiny but recognisable softly lit home-context glimpse", rows[1]["scene_brief"])
-            self.assertIn("Neither a hallway nor a nearly empty wall", rows[2]["scene_brief"])
-        self.assertTrue(all(len(values) >= 5 for slot in seen for values in slot.values()))
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        scenes_ie(self)
 
     def test_recent_history_is_used_consistently_by_all_prompt_entry_points(self):
         first = self.visuals()
@@ -86,22 +75,8 @@ class CollectorSceneTests(unittest.TestCase):
             self.assertIn("explicit user selections remain authoritative", prompt)
 
     def test_one_compact_realism_block_survives_metadata_and_shared_enrichment(self):
-        metadata = {"frame_specs": {"verified": True, "source": "fixture", "outer_width_cm": 62,
-                    "outer_height_cm": 45, "depth_mm": 18, "glazing": "unglazed", "frame_finish": "white"}}
-        for i, v in enumerate(self.visuals(product_metadata=metadata), 1):
-            prompt = self.prompt(v, i)
-            enriched = append_sports_cave_image_realism_rules(prompt, physical_product=metadata)
-            self.assertEqual(enriched, prompt)
-            self.assertEqual(len(physical.BLOCK.findall(prompt)), 1)
-            self.assertEqual(prompt.count("PRODUCT LOCK — ABSOLUTE"), 1)
-            self.assertIn('"glazing": "unglazed"', prompt)
-            self.assertIn('"frame_finish": "white"', prompt)
-            self.assertIn('"width_cm": 62.0', prompt)
-            self.assertIn("Never add glazing to known unglazed", prompt)
-            self.assertNotIn("slim-to-medium black timber", prompt)
-            for obsolete in ("office as a workspace", "bar/lounge as a private entertaining space",
-                             "private drinks cabinet or bar shelf", "MANDATORY SEAMLESS WALL SYSTEM"):
-                self.assertNotIn(obsolete, prompt)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        current_ie(self)
 
 
 if __name__ == "__main__":

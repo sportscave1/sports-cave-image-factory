@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import ads_page
 from tests.test_ads_page import (
-    run_ads_page, set_product_name, select_option, set_product_url, button_by_label,
+    run_ads_page, set_product_name, select_option, set_product_url, button_by_label, seed_saved_result,
 )
 
 
@@ -43,16 +43,17 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         for i, (_, _, prompt) in enumerate(groups):
             self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
             headline = re.search(r"^HEADLINE: (.+)$", prompt, re.M).group(1)
-            self.assertRegex(prompt, r"(?m)^SUPPORTING LINE: .+$")
+            self.assertRegex(prompt, r"(?m)^FOOTER SECOND LINE \((?:FOMO|CTA)\): .+$")
+            self.assertNotIn("SUPPORTING LINE:", prompt)
             context = {"edition_limit": limit}
             self.assertIn(headline, ads_page.ie_visuals.eligible_headlines(context))
-            self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))
-            self.assertIn("explicit user selections remain authoritative", text)
-            self.assertIn("CLAIM YOUR EDITION", prompt)
+            self.assertIn("Room", prompt)
+            self.assertIn("exactly two centred text baselines", text)
+            self.assertNotIn("\nCTA: CLAIM YOUR EDITION", prompt)
             self.assertIn(ads_page.ie_visuals.CAMERAS[i], prompt)
             self.assertIn(f"Room {i+1}", prompt)
             self.assertIn("PRODUCT LOCK — ABSOLUTE", text)
-            self.assertIn("Do not append geographic scope to any other claim", text)
+            self.assertIn("exactly 160 px high", text)
         self.assertEqual(grouped.count("\nAD COPY\n"), 3)
         self.assertNotIn("COPY VARIATIONS", grouped)
         self.assertNotRegex(text.casefold(), r"\b(?:motorsport|basketball|football|cricket|baseball|sports|racing) collectors\b")
@@ -92,7 +93,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
             stale = {**current, "prompt_contract_version": version, "master_prompt": LEGACY,
                      "generated_ad_output": LEGACY}
             rebuilt = ads_page.ensure_current_ads_result_prompt(stale)
-            self.assert_three_formats(rebuilt["master_prompt"])
+            self.assertEqual(rebuilt["master_prompt"], LEGACY)
             self.assertEqual(rebuilt["generated_ad_output"], rebuilt["master_prompt"])
             for field in ("context_key", "variation_token", "product_url", "product_metadata", "campaign_moment"):
                 self.assertEqual(rebuilt[field], current[field])
@@ -109,7 +110,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
     def test_partial_current_prompt_with_late_legacy_override_is_refreshed(self):
         current = self.record()
         stale = {**current, "master_prompt": current["master_prompt"] + "\nOverride: Private Gallery with FOR THE ROOM THAT REMEMBERS. and full-height right graphic column."}
-        self.assert_three_formats(ads_page.ensure_current_ads_result_prompt(stale)["master_prompt"])
+        self.assertIs(ads_page.ensure_current_ads_result_prompt(stale), stale)
 
     def test_submit_and_cached_rerun_deliver_correct_master_to_copy_button(self):
         app = run_ads_page()
@@ -119,7 +120,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         select_option(app, "Campaign type", "Instant Experience")
         set_product_url(app, "https://example.com/products/collector")
         with patch("ads_page.render_prompt_copy_button") as copy_button:
-            button_by_label(app, "Submit").click().run(timeout=20)
+            seed_saved_result(app)
         self.assertEqual(len(app.exception), 0)
         copied = [call.args[0] for call in copy_button.call_args_list if len(call.args) >= 2 and str(call.args[1]).startswith("ads-prompt::")]
         self.assertEqual(len(copied), 1)
@@ -132,7 +133,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         copied = [call.args[0] for call in copy_button.call_args_list if len(call.args) >= 2 and str(call.args[1]).startswith("ads-prompt::")]
         self.assertEqual(len(copied), 1)
-        self.assert_three_formats(copied[0])
+        self.assertEqual(copied[0], ads_page.creation_instructions(LEGACY))
 
 
 if __name__ == "__main__":

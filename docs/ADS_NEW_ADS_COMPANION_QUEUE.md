@@ -103,7 +103,39 @@ read duration/count and committed action IDs without product/customer content.
 Regression coverage includes `test_ads_status_reliability_browser.py`,
 `test_ads_companion_controls.py`, `test_ad_quick_picker_browser.py`,
 `test_ads_queue_popup_browser.py` and `test_ads_popup_delete.cjs`, using synthetic
-endpoints or disposable PostgreSQL. A broader legacy prompt test,
-`AdsPageTests.test_added_categories_have_specific_outputs_for_all_campaign_sections`,
-has existing Instant Experience assertions that also fail with the previous
-release's catalog module; those prompt requirements are outside this change.
+endpoints or disposable PostgreSQL.
+
+## Prompt regression follow-up — 21 November 2026
+
+The follow-up suite covers the current production contract rather than the
+superseded three-line footer, manual New Ads Submit action, automatic saved-pack
+upgrades and old description-style bank. The approved two-line footer is 160px
+high, preserves its assigned headline/second-line split, and uses the unused line
+as the written Meta headline. Existing saved output stays verbatim. New Ads uses
+Add to queue; saved-draft renderer tests explicitly seed an existing draft.
+
+Snapshot fixtures were reconciled with production revision `5073a051` and the
+approved current prompt policies. They remain exact hashes/structure assertions;
+the test run does not auto-accept new snapshots. Public builders additionally run
+across every selectable sport and market, checking the image count, footer,
+standalone briefs and persisted copy assignments. Historical seasonal substitution
+has its own synthetic legacy template; current two-line prompts stay unchanged.
+
+Two functional regressions were corrected: shared racing-copy instructions now
+precede the final CSV instead of becoming extra CSV rows, and refresh packages
+validate uploaded image uniqueness even
+across locally edited and reused original cards, preserving their saved notes.
+Optional copy review is tested directly as a compatibility component while
+current generation retains its integrated review.
+
+Run the complete Ads and queue checks with:
+
+```powershell
+$env:AUTO_EDITIONS_TEST_PGLITE = '<local @electric-sql/pglite/dist/index.js>'
+python scripts/run_ads_regression.py
+```
+
+The runner strips inherited production credentials, refuses unmocked provider
+HTTP/database access, runs Python prompt/UI/queue tests and then the Node status,
+request, navigation and download checks. Browser fixtures use synthetic endpoints;
+no real advertising, uploads or customer automations are executed.

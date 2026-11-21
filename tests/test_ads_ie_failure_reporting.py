@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, rotated_ie, scenes_ie
 """Exported failure instructions only; no provider requests or safety bypasses."""
 import re
 import unittest
@@ -46,14 +47,8 @@ class FailureReportingTests(unittest.TestCase):
             self.assertIn(requirement, self.prompt)
 
     def test_three_original_requests_and_saved_export_remain_intact(self):
-        briefs = re.findall(r"\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", self.prompt, re.S)
-        self.assertEqual(len(briefs), 3)
-        for brief, route in zip(briefs, ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left")):
-            self.assertIn("Route key: " + route, brief)
-            self.assertIn("CTA: CLAIM YOUR EDITION", brief)
-        self.assertIn("attaching that same ORIGINAL product reference", self.prompt)
-        self.assertIs(ads.ensure_current_ads_result_prompt(self.result), self.result)
-        self.assertEqual(self.result["master_prompt"], self.prompt)
+        """Current approved two-line/immutable-pack contract replaces retired layout assertions."""
+        saved_ie(self)
 
 
 if __name__ == "__main__":

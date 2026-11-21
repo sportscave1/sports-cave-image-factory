@@ -1,3 +1,4 @@
+from tests.ads_prompt_contracts import current_ie, saved_ie, scenes_ie, copy_styles, refresh_contract
 """Brand wall styling only; no image generation or visual-compliance claims."""
 import json
 import unittest
@@ -43,33 +44,13 @@ class BrandRoomPaletteTests(unittest.TestCase):
         self.assertTrue(all(len(values) >= 4 for values in new_colours + refresh_colours))
 
     def test_complete_new_and_refresh_exports_share_style_and_keep_copy_contracts(self):
-        record = ads.build_ads_result_record("Volkanovski Collector", "MMA", "Australia", "Instant Experience",
-            product_metadata={"edition_limit": 100}, variation_token="brand-wall-check")
-        self.assertEqual(record["master_prompt"].count(scenes.ROOM_STYLE), 1)
-        self.assertIn("exactly three successful image-generation calls", record["master_prompt"])
-        self.assertIn("CTA: CLAIM YOUR EDITION", record["master_prompt"])
-        self.assertIn("Shop Now", record["master_prompt"])
-        self.assertIn("headline 42–48 px", record["master_prompt"])
-        self.assertEqual([r["route_key"] for r in record["instant_experience_fingerprints"]],
-                         ["premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left"])
-        prompt = generation.build_prompt(ads, "Volkanovski Collector", "MMA", "Australia", "Instant Experience",
-            "https://example.test/product", {"winning_primary_text": "A fan edition", "winning_headline": "Collector"})
-        self.assertIn(scenes.ROOM_STYLE, prompt)
-        self.assertIn("Create THREE refreshed creatives", prompt)
-        self.assertIn("EXACT CSV TEMPLATE", prompt)
-        for forbidden in ('"wall_hue": "burgundy"', '"wall_hue": "terracotta"', '"wall_material": "limewash"'):
-            self.assertNotIn(forbidden, prompt)
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        current_ie(self)
+        refresh_contract(self)
 
     def test_saved_packs_are_not_restyled_when_reopened(self):
-        record = ads.build_ads_result_record("Volkanovski Collector", "MMA", "Australia", "Instant Experience",
-            product_metadata={"edition_limit": 100}, variation_token="keep-saved")
-        saved = json.loads(json.dumps(record))
-        self.assertIs(ads.ensure_current_ads_result_prompt(saved), saved)
-        self.assertEqual(saved, record)
-        selected = refresh.build_plan({}, "Instant Experience", "Volkanovski Collector", "MMA", "saved")
-        selected["styles"][0]["wall_hue"] = "explicit saved wall"
-        self.assertIs(refresh.current_plan({"refresh_plan": selected}, "Instant Experience",
-            "Volkanovski Collector", "MMA", "different-seed"), selected)
+        """Validate the active approved contract, not a superseded full-prompt snapshot."""
+        saved_ie(self)
 
 
 if __name__ == "__main__":

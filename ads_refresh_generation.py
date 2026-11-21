@@ -6,6 +6,12 @@ import json
 import ads_refresh_plan as plan
 
 
+def _copy_rules_before_template(prompt, rules):
+    """Retain the saved-plan header and leave the final CSV as CSV only."""
+    header, separator, body = prompt.partition('\n')
+    return header + separator + rules + '\n\n' + body
+
+
 def ie_refresh_image_rules():
     """Prompt-only refinement; no change to New Ads, carousel or generation flow."""
     return '''IE WINNER REFINEMENT — PREMIUM PRODUCT / REAL CUSTOMER WALL / FOMO FOOTER
@@ -104,9 +110,9 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
         if issue:
             raise ValueError(issue)
     if plan.distinct.active(selected):
-        return plan.distinct.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata) + "\n\n" + ads.RACING_WRITTEN_COPY_INSTRUCTIONS
+        return _copy_rules_before_template(plan.distinct.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata), ads.RACING_WRITTEN_COPY_INSTRUCTIONS)
     if plan.preserve.active(selected):
-        return plan.preserve.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata) + "\n\n" + ads.RACING_WRITTEN_COPY_INSTRUCTIONS
+        return _copy_rules_before_template(plan.preserve.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata), ads.RACING_WRITTEN_COPY_INSTRUCTIONS)
     if campaign_type == 'Carousel':
         return build_carousel_refresh_prompt(ads, product, category, country, url, winner,
             campaign_moment=campaign_moment, product_metadata=product_metadata)
@@ -263,7 +269,7 @@ def build_carousel_refresh_prompt(ads, product, category, country, url, winner,
         return build_prompt(ads, product, category, country, 'Single Image / Video', url, winner, campaign_moment=campaign_moment, product_metadata=product_metadata)
     selected = plan.current_plan(winner, 'Carousel', product, category, 'direct-prompt')
     if plan.preserve.active(selected):
-        return plan.preserve.build_prompt(ads, product, category, country, 'Carousel', url, winner, selected, product_metadata) + "\n\n" + ads.RACING_WRITTEN_COPY_INSTRUCTIONS
+        return _copy_rules_before_template(plan.preserve.build_prompt(ads, product, category, country, 'Carousel', url, winner, selected, product_metadata), ads.RACING_WRITTEN_COPY_INSTRUCTIONS)
     refs = selected['references']
     n = len(refs)
     identity = dict(product_name=product, category=category, country=country,

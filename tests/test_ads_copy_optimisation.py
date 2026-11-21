@@ -91,7 +91,7 @@ class CopyOptimisationTests(unittest.TestCase):
             self.assertIn(token,html)
         source=Path(ads.__file__).read_text(encoding='utf-8');tree=ast.parse(source)
         render=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_render_final_ad_review')
-        self.assertNotIn('expander',ast.unparse(render));self.assertNotIn('st.caption',ast.unparse(render));self.assertNotIn('st.markdown',ast.unparse(render))
+        self.assertNotIn('expander',ast.unparse(render));self.assertIn('Optional:',ast.unparse(render));self.assertNotIn('st.markdown',ast.unparse(render))
         page=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='render_page')
         self.assertNotIn('_render_final_ad_review(',ast.unparse(page))
 

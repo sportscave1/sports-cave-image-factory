@@ -10,6 +10,7 @@ from streamlit.testing.v1 import AppTest
 
 import ads_final_review
 import ads_page
+from tests.test_ads_page import seed_saved_result
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,7 +90,7 @@ def submitted_ads_page(campaign_type="Carousel"):
     select_option(app_test, "Country", "Australia")
     select_option(app_test, "Campaign type", campaign_type)
     set_product_url(app_test)
-    button(app_test, "Submit").click().run(timeout=20)
+    seed_saved_result(app_test)
     return app_test
 
 
@@ -398,7 +399,8 @@ class AdsFinalReviewUiTests(unittest.TestCase):
         with patch.object(ads_page, "render_prompt_copy_button") as button, patch.object(ads_page.st, "markdown") as heading, patch.object(ads_page.st, "caption") as caption, patch.object(ads_page.st, "expander") as accordion:
             ads_page._render_final_ad_review(result, {})
         button.assert_called_once()
-        heading.assert_not_called(); caption.assert_not_called(); accordion.assert_not_called()
+        heading.assert_not_called(); caption.assert_called_once(); accordion.assert_not_called()
+        self.assertIn('Optional:',caption.call_args.args[0])
 
     def test_final_review_copy_prompt_preserves_existing_prompt_and_appends_landing_page(self):
         result = ads_page.build_ads_result_record("Six Laps Ahead", "Motorsport", "Australia", "Carousel", product_url="https://sportscave.com.au/products/six-laps?variant=1", variation_token="copy-review")
@@ -447,7 +449,7 @@ class AdsFinalReviewUiTests(unittest.TestCase):
 
         select_option(app_test, "Campaign type", "Instant Experience")
         set_product_url(app_test)
-        button(app_test, "Submit").click().run(timeout=20)
+        seed_saved_result(app_test)
         image_workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         new_result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
         self.assertNotEqual(new_result["context_key"], old_context)

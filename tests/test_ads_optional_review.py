@@ -15,8 +15,10 @@ result, workflow = st.session_state.setdefault('draft', completed_ad('Instant Ex
 with patch.object(direct, 'render_settings', return_value=({}, [])), patch.object(ads.os_accounts, 'can_access_page', return_value=True), patch.object(ads, 'instant_experience_package_ready', return_value=True):
     if FAIL_REVIEW:
         with patch.object(ads, 'build_final_ad_review_copy_prompt', side_effect=ValueError('review unavailable')):
+            ads._render_final_ad_review(result, workflow)
             ads._render_ads_final_actions(result, workflow)
     else:
+        ads._render_final_ad_review(result, workflow)
         ads._render_ads_final_actions(result, workflow)
 """.replace('FAIL_REVIEW',repr(fail_review))
         return AppTest.from_string(source).run(timeout=20)

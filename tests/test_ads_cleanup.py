@@ -27,9 +27,13 @@ class AdsCleanupTests(unittest.TestCase):
                         product_url='https://sportscave.com.au/products/collector')
                     before = prompt
                     display = creation_instructions(prompt)
-                    self.assertNotIn(META_AD_URL_PARAMETERS, display)
-                    self.assertNotIn('URL parameters', display)
-                    self.assertNotIn('META URL PARAMETERS', display)
+                    if 'ADS_IE_COMBINED_EXECUTION_V1' in prompt:
+                        self.assertEqual(display, prompt)  # Executable setup remains complete.
+                        self.assertIn(META_AD_URL_PARAMETERS, display)
+                    else:
+                        self.assertNotIn(META_AD_URL_PARAMETERS, display)
+                        self.assertNotIn('URL parameters', display)
+                        self.assertNotIn('META URL PARAMETERS', display)
                     self.assertEqual(prompt, before)
                     self.assertIn('Collector Legacy', display)
                     # The clipboard component is the shared new/saved prompt boundary.
@@ -54,6 +58,7 @@ with patch.object(ads, '_ads_image_workflow', return_value={}), \
      patch.object(ads, '_render_ads_setup_notes'), \
      patch.object(ads, '_render_ads_image_save'), \
      patch.object(ads, '_render_saved_ad_post_now'), \
+     patch.object(ads, '_render_ads_final_actions'), \
      patch.object(ads.ads_standard_workflow, 'render'):
     ads.render_supported_result(result)
 '''.replace('CAMPAIGN', repr(campaign)).replace('CONTEXT', repr({'winning_primary_text':'Reference copy','winning_headline':'Collector'} if mode == 'creative_refresh' else None))

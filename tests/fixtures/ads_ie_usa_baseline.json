@@ -39,7 +39,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "2d65cd5e81b921478cdb80278d0c2deb2b737953c77def340fd36c801a45e585",
+    "prompt_sha256": "5f15df83f02f7694c881c7849cb169c320829f204d6bb63f26706573278a7e14",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -69,7 +69,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "af1f80636b83d660a5b27dd1fc870965ec4d4d0f60023758aa50825479c9f287",
+    "prompt_sha256": "2ce52a3740ed4cae38f74d36bbcccdf4c1dfe19bf26c940a0df0f6a41b8cf23c",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -129,7 +129,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "feffd91637f2537676fe15e59ef13e4c16c15ffd2be67f4a83519dfa3e93f143",
+    "prompt_sha256": "a1e206bce64ab141f68c7d95d9b1290016f008df01ab02280c2bf47a45f9a98e",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -159,7 +159,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "ace694e6b266971c92c50307580a90ee5bf9f2d1fb411bc9bf7bf0d7e59d2426",
+    "prompt_sha256": "3aed6af446bd73681bcfb3838acaa5eb6ab078bb66d3c18e75f0f5f8c3cde616",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -219,7 +219,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "cfe21d1f1cc14582220512fe56f596dacd17b31ea2d52d1df34ce9594854b2e6",
+    "prompt_sha256": "aa516513f80836b07e82862424b611085e78a027336a7eb60463ca56a29e114d",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -249,7 +249,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "ca1712f3b3fc719a7a4cc9f5fea7d356867fb67cbf52ac41ff3f27988eafdcc7",
+    "prompt_sha256": "a8f061b2e4a879f2da985c57cc94193ba619b91f5755a2f17c7075f2402e431a",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -309,7 +309,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "039b85c7903e35b301cb5bebbe15141fb0c215734336d471abf615d307d39a00",
+    "prompt_sha256": "f39b931c02ff211b0273d3b707b9c7c95432bcfc7dddb2080698d4df0a01d869",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -339,7 +339,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "fb0c6690f4bc152d9358f677ee1f82e5330e1d4df0b13957a25f97efa62d0f2f",
+    "prompt_sha256": "ff4ce113a6c6c7635b558d520e6df8d204d287f3e061b07167d2aa98d13552c8",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -399,7 +399,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "21de66f35a0b1bef5671710a6e5f248eb17d115bbfd98b97a5b4f8f1ee84eb72",
+    "prompt_sha256": "a5a3ca19109a4c147baaf21a5abc0189001cf9c953e3d3abcc8993e5a1f99dc7",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -429,7 +429,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "c29d4827364e00f1f7fe8fda5b875c919424bbd57ecf4272f7c55e1d84f29472",
+    "prompt_sha256": "ac277373aeab9a8528a2c8f20ccaa94750b1178ef487f691bb07b49923eff346",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -459,8 +459,8 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "f7c01b412dc6b052a65d36bb0a1a0090ffa494a79356adc49dff1b5d613b4dfa",
-    "visuals_sha256": "c55826742875ed98d5b34414282e8737d0344052ebbc4a5d30aec872ad246c5c"
+    "prompt_sha256": "8f33dd41b95111a43710fba51b3f4fcd99cf966a14a23bc1169bf8ea0b2898cc",
+    "visuals_sha256": "6d4d1b6c5d6a3ba37455949d4a2d9979c2c9dea7c7ef3f1512b74d5e53b15fec"
   },
   {
     "args": {
@@ -477,7 +477,7 @@
       }
     },
     "prompt_sha256": "bfad0a6dcbc15fff05a57b946efea532b3ac9957b151613b002a1f440cb878c5",
-    "visuals_sha256": "c55826742875ed98d5b34414282e8737d0344052ebbc4a5d30aec872ad246c5c"
+    "visuals_sha256": "6d4d1b6c5d6a3ba37455949d4a2d9979c2c9dea7c7ef3f1512b74d5e53b15fec"
   },
   {
     "args": {
@@ -489,7 +489,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "56df2a392608d0294beef60cc3aac7fded9385a36b74d0088e925abf22d76f54",
+    "prompt_sha256": "53fac710a74e5c5db0877bf85d93176d70baa0dd60b034bbd3a38b4e70f04544",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -519,7 +519,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "5d7755091822bae4d1c1969136965c2f8acf5feb564ad1765000b8794a6abe7a",
+    "prompt_sha256": "4eac1584861b23d8a5fcc4879083a887171380afae2b2d1345632b6cbd7e0c1c",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -549,8 +549,8 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "00f8755215019048a0cda4e0f5bcf0f695f8a8a30aee034376e4d78e13f8a681",
-    "visuals_sha256": "6df6c49cd418b0d68ded72fc6e99c0b026370c54679ea8e3e99e6a67e7fa4754"
+    "prompt_sha256": "8dd31ccec5dbf5112a47f7c9559609f58c0b19c1d99a375342a3804dcf9806f3",
+    "visuals_sha256": "a00e65712f5d8d9a5a02675f02b049b1f78143a69eaf0a5177a77dfca0bc54ce"
   },
   {
     "args": {
@@ -567,7 +567,7 @@
       }
     },
     "prompt_sha256": "a82cc56c2f461eb7c5af43d145cf6a7b7ddfa8c425bba2f276788a6b651e7e0a",
-    "visuals_sha256": "6df6c49cd418b0d68ded72fc6e99c0b026370c54679ea8e3e99e6a67e7fa4754"
+    "visuals_sha256": "a00e65712f5d8d9a5a02675f02b049b1f78143a69eaf0a5177a77dfca0bc54ce"
   },
   {
     "args": {
@@ -579,7 +579,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "0b7c41f7d766c4bd3f9007b58e5318a1cc7e1c9d933f05d41b32104b34bdb7c2",
+    "prompt_sha256": "0c895551e18767b15e48ed9c15ed944063c47d53226287d79658a132907abe8b",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
@@ -609,7 +609,7 @@
       "product_url": "https://example.test/edition",
       "product_metadata": {}
     },
-    "prompt_sha256": "f7c392eb88147aa5c19e21ea18ab3ebb3a61b43ac2de6ae7a98dd9a818fc30d4",
+    "prompt_sha256": "9960cad3017f2628348b8624113862d35908a347e8cfd20297e2673233115407",
     "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {

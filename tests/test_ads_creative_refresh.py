@@ -252,7 +252,7 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
 
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         ads_start = source.index("    if ads_nav.ADS_CREATE_ROUTE in allowed_routes:")
-        seo_start = source.index("    if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:", ads_start)
+        seo_start = source.index("    if any(route in allowed_routes for route in seo_nav.SEO_MENU_ROUTES):", ads_start)
         ads_source = source[ads_start:seo_start]
         self.assertIn("navigation_runtime.disclosure_child_routes(", ads_source)
         self.assertIn("ads_nav.ADS_CREATE_ROUTE,", ads_source)
@@ -298,7 +298,7 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
         self.assertIn(selector + ' {', SIDEBAR_CSS)
         self.assertIn(selector + ' [data-testid="stButton"] button {', SIDEBAR_CSS)
         self.assertIn('width:100%;max-width:100%;', SIDEBAR_CSS)
-        self.assertIn('padding-left:41px !important;', SIDEBAR_CSS)
+        self.assertIn('padding-left:36px !important;', SIDEBAR_CSS)
 
     def test_seo_cannot_claim_the_creative_refresh_route(self):
         self.assertNotIn(
@@ -816,7 +816,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
         winner_block = ads_page.build_creative_refresh_winner_context(winner_context)
 
-        self.assertIn("original source winner", refresh_prompt)
+        self.assertIn("WINNER_IE", refresh_prompt)
         self.assertIn(winner_context["winning_primary_text"], refresh_prompt)
         self.assertIn(winner_context["winning_headline"], refresh_prompt)
         self.assertEqual(
@@ -847,18 +847,8 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
 
     def test_shared_ie_prompt_requires_three_distinct_visual_formats(self):
-        prompt = ads_page.build_ads_prompt(
-            "Purple Reign", "NBA", "USA", "Instant Experience",
-            variation_token="fixed-diversity-test", product_metadata={"edition_limit": 100},
-        )
-        for wording in (
-            "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
-            "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON", "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE",
-            "Once they’re claimed, this edition retires forever.", "CENTRE / straight-on man cave / office / den, Room 2, with bottom banner",
-            "LEFT-angle bar / lounge, Room 3, with bottom banner",
-        ):
-            self.assertIn(wording, prompt)
-        self.assertEqual(prompt.count(ads_page.build_instant_experience_fixed_opaque_footer_rules()), 3)
+        from tests.ads_prompt_contracts import current_ie
+        current_ie(self, product="Purple Reign", category="NBA", country="USA")
 
     def test_creative_refresh_winner_block_is_internal_context_not_a_review_response(self):
         context = {
@@ -1366,7 +1356,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         self.assertNotIn("Winning creative", labels)
         self.assertIn("Import CSV", labels)
         expected_cover_labels = {
-            f"{concept['display_name']} Cover"
+            f"{concept['scene_name']} Cover"
             for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
         }
         self.assertEqual(expected_cover_labels, expected_cover_labels.intersection(labels))
@@ -1378,10 +1368,10 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             result["creative_refresh_context"]["winning_headline"],
             "Only 100 Shane Warne Editions",
         )
-        self.assertIn("SOURCE WINNER PRESERVATION V1", result["master_prompt"])
+        self.assertIn("WINNER DIRECTION THREE DISTINCT REFRESHES V2", result["master_prompt"])
         self.assertIn("WINNER_IE", result["master_prompt"])
         self.assertIn("CANONICAL_PRODUCT", result["master_prompt"])
-        self.assertIn("original source winner", result["master_prompt"])
+        self.assertIn("same observed room TYPE", result["master_prompt"])
         self.assertEqual(
             len(ads_page.ads_image_workflow.campaign_image_slots(result["campaign_type"])),
             3,

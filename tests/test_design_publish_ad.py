@@ -140,11 +140,13 @@ def test_post_request_imports_originals_in_route_order(country, code, monkeypatc
     monkeypatch.setattr(ads_direct_post, 'references', lambda *_args, **kwargs: refs)
     value = dict(result=result, folder=folder, handle='fixture-product', upload=upload)
     monkeypatch.setattr(ads, 'write', lambda *_: None)
+    def membership_must_not_gate_targeting(*args, **kwargs):
+        raise AssertionError('Queue targeting selects the canonical sport collection without a membership read.')
     monkeypatch.setattr(ads_posting_page, 'MetaPostingClient', lambda: SimpleNamespace(
-        product_set_members=lambda key, **kwargs: [{'url':result['product_url']}] if key=='21' else []))
+        product_set_members=membership_must_not_gate_targeting))
     request = ads._post_request(value)
     assert request.country == code
-    assert request.product_set_id == '21'
+    assert request.product_set_id == '20'
     assert request.audience_id == '24'
     assert request.submission_id == ads._posting_id(upload)
     assert tuple(creative.image_name for creative in request.creatives) == tuple(ads.COVERS.values())
