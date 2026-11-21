@@ -312,3 +312,27 @@ def test_pause_also_prevents_new_quality_validation_without_provider_io(telemetr
     health.set_pause(d.connect,True,'admin');assets=Mock()
     assert Quality(d.connect).run_one(assets,records=[]) is False
     assets.integration.psd_open_metadata.assert_not_called();assets.fetch.assert_not_called()
+
+
+def test_header_controls_bounded_read_and_existing_write_acknowledgement(telemetry):
+    from companion_transfer import Controller
+    d,sql=telemetry
+    controller=Controller();controller.configure(dict(mode='Maximum speed'))
+    instance='a'*24
+    health.record_heartbeat(d.connect,'Companion',instance,dict(state='Idle',transfer_control=controller.snapshot()))
+    with patch('files_upload_api._request_user',return_value=ADMIN),patch.object(api,'store',return_value=health.Health(d.connect)):
+        response=asyncio.run(api.companion_controls(request('GET')))
+        assert response.status_code==200,response.body
+        data=json.loads(response.body)
+        assert data['transfer_control']['effective']['settings']['mode']=='Maximum speed'
+        assert data['transfer_control']['requested'] is None
+        response=asyncio.run(api.pause(request('POST',dict(instance=instance,transfer_settings=dict(mode='Manual',manual_mbps=2)))))
+        assert response.status_code==200,response.body
+        response=asyncio.run(api.companion_controls(request('GET')))
+        data=json.loads(response.body)
+        assert data['transfer_control']['effective']['settings']['mode']=='Maximum speed'
+        assert data['transfer_control']['requested']['settings']['manual_mbps']==2
+        assert not data['control']['paused']
+    with patch('files_upload_api._request_user',return_value=VA),patch.object(api,'store') as forbidden:
+        assert asyncio.run(api.companion_controls(request('GET'))).status_code==403
+        forbidden.assert_not_called()

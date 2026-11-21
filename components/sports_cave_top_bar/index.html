@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v8-auto-editions";
+  const CONTROLLER_VERSION = "companion-header-v9-edition-controls";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -988,6 +988,11 @@
     .sc-companion-details[data-state="complete"] summary {border-color:#71936d;color:#cef1c9;}
     .sc-companion-details[data-stale="true"] summary,#sc-os-staff-uploads[data-stale="true"] summary {border-style:dashed;}
     .sc-companion-popup {position:absolute;top:calc(100% + 6px);right:0;width:min(340px,calc(100vw - 20px));box-sizing:border-box;padding:12px;background:#191612;border:1px solid #63512d;border-radius:8px;color:#f8edcf;box-shadow:0 8px 24px #0004;max-height:55vh;overflow:auto;z-index:2;font-size:12px;}
+    #sc-edition-usage label {display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    #sc-edition-usage input {width:100px;}
+    #sc-edition-usage input,#sc-edition-usage select,#sc-edition-usage button {font:12px Arial,sans-serif;padding:5px;border-radius:4px;}
+    #sc-edition-usage button:disabled {opacity:.5;}
+    #sc-edition-message {overflow-wrap:anywhere;}
     .sc-companion-popup article {padding:6px 0;overflow-wrap:anywhere;}
     .sc-companion-popup article+article {border-top:1px solid #63512d;padding-top:8px;}
     .sc-companion-popup p {margin:2px 0!important;font:11px/1.35 Arial,sans-serif!important;color:#d9cfb8!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
@@ -1133,7 +1138,17 @@
       <div id="sc-os-editions-card" class="sc-companion-card" hidden>
         <details id="sc-os-editions-status" class="sc-companion-details">
           <summary><span class="sc-companion-name">Auto Editions</span><span id="sc-os-editions-title" class="sc-companion-title"></span><span id="sc-os-editions-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-editions-meter" max="100" aria-label="Auto Editions checkpoint"></progress></summary>
-          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-editions-close" type="button" aria-label="Close Auto Editions status">×</button><div id="sc-os-editions-list"></div></div>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-editions-close" type="button" aria-label="Close Auto Editions status">×</button><div id="sc-os-editions-list"></div>
+            <form id="sc-edition-usage" aria-label="Auto Editions usage" style="border-top:1px solid #63512d;margin-top:10px;padding-top:10px;display:grid;gap:8px">
+              <strong>Companion usage</strong>
+              <label>Transfer speed <select id="sc-edition-mode" disabled><option>Balanced</option><option>Background</option><option value="Maximum speed">Maximum (uncapped)</option><option>Manual</option></select></label>
+              <label>Upload cap (Mbps) <input id="sc-edition-upload" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Measured upload (Mbps) <input id="sc-edition-measured" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Download cap (Mbps, optional) <input id="sc-edition-download" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <div><button id="sc-edition-apply" type="submit" disabled>Apply usage</button> <button id="sc-edition-pause" type="button" disabled>Pause companion</button> <button id="sc-edition-refresh" type="button">Refresh</button></div>
+              <span id="sc-edition-message" role="status" aria-live="polite">Open to load current settings.</span>
+              <small>Speed limits transfers. Balanced reserves headroom; Background uses less bandwidth. Pause stops new jobs after current work finishes safely.</small>
+            </form></div>
         </details>
       </div>
     </div>
@@ -1293,6 +1308,58 @@
       catch(error) { if(controller.signal.aborted && !listenerController.signal.aborted) throw Error('Request timed out. Please retry.'); throw error; }
       finally {parentWindow.clearTimeout(timeout);listenerController.signal.removeEventListener('abort',abort);}
     };
+    // On-demand, independent of the shared status poll; never rewrite a dirty form.
+    const usage = Object.fromEntries(['usage','mode','upload','measured','download','apply','pause','refresh','message'].map(key=>[key,root.querySelector('#sc-edition-'+key)]));
+    let usageData=null, usageBusy=false, usageDirty=false;
+    const usageMessage=text=>{usage.message.textContent=text;};
+    const usageSupported=()=>usageData?.transfer_control?.age_seconds<=150 && [1,2,3].includes(usageData?.transfer_control?.effective?.capability);
+    const usageDraw=()=>{
+      const transfer=usageData?.transfer_control, desired=transfer?.requested?.settings || transfer?.effective?.settings;
+      if(desired && !usageDirty){usage.mode.value=desired.mode;usage.upload.value=desired.manual_mbps??'';usage.measured.value=desired.sustainable_mbps??'';usage.download.value=desired.download_mbps??'';}
+      for(const key of ['mode','download','apply'])usage[key].disabled=usageBusy||!usageSupported();
+      usage.upload.disabled=usageBusy||!usageSupported()||usage.mode.value!=='Manual';
+      usage.measured.disabled=usageBusy||!usageSupported()||!['Balanced','Background'].includes(usage.mode.value);
+      usage.pause.disabled=usageBusy||!usageData;
+      usage.refresh.disabled=usageBusy;
+      usage.pause.textContent=usageData?.control?.paused?'Resume companion':'Pause companion';
+    };
+    const usageRead=async()=>{
+      if(usageBusy)return;
+      usageBusy=true;usageDraw();usageMessage('Loading current settings…');
+      try{
+        const response=await companionFetch('/api/worker-health/companion-controls',{credentials:'same-origin'}),data=await response.json();
+        if(!response.ok)throw Error(data.error||'Controls unavailable. Retry refresh.');
+        usageData=data;
+        const t=data.transfer_control, e=t?.effective, pending=t?.requested && t.requested.revision!==e?.revision;
+        usageMessage((data.control.paused?'Companion paused. ':'')+(!usageSupported()?'Companion offline or update required.':pending?'Usage requested; awaiting companion acknowledgement.':'Current: '+e.settings.mode+' · '+e.protection+(e.settings.paused?' · Transfers paused; resume in Worker Health.':'')));
+      }catch(error){usageData=null;usageMessage(error.message);}
+      finally{usageBusy=false;usageDraw();}
+    };
+    const usageWrite=async(body)=>{
+      if(usageBusy)return;
+      usageBusy=true;usageDraw();usageMessage('Saving…');
+      try{
+        const response=await companionFetch('/api/worker-health/control',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),data=await response.json();
+        if(!response.ok)throw Error(data.error||'Could not save. Refresh before retrying.');
+        if(data.requested){usageData.transfer_control.requested=data.requested;usageDirty=false;usageMessage('Usage saved; awaiting companion acknowledgement (next heartbeat).');}
+        else{usageData.control.paused=body.paused;usageMessage(data.state==='Pausing'?'Pausing: current work will finish safely.':body.paused?'Companion paused.':'Companion resumed.');}
+      }catch(error){usageMessage(error.message+' Refresh to check whether it was saved.');}
+      finally{usageBusy=false;usageDraw();}
+    };
+    usage.usage.addEventListener('input',()=>{usageDirty=true;usageDraw();},listenerOptions);
+    usage.usage.addEventListener('submit',event=>{
+      event.preventDefault();if(!usageSupported()||usageBusy)return;
+      const t=usageData.transfer_control, base=t.requested?.settings||t.effective.settings;
+      const value={...base,mode:usage.mode.value,download_mbps:usage.download.value===''?null:Number(usage.download.value)};
+      if(value.mode==='Manual')value.manual_mbps=usage.upload.value===''?null:Number(usage.upload.value);
+      if(['Balanced','Background'].includes(value.mode))value.sustainable_mbps=usage.measured.value===''?null:Number(usage.measured.value);
+      if(value.mode==='Manual'&&!value.manual_mbps){usageMessage('Enter an upload cap for Manual mode.');return;}
+      if(['Balanced','Background'].includes(value.mode)&&!value.sustainable_mbps){usageMessage('Enter a reliable measured upload rate before using this mode.');return;}
+      usageWrite({instance:t.instance,transfer_settings:value});
+    },listenerOptions);
+    usage.pause.addEventListener('click',()=>{if(usageData)usageWrite({paused:!usageData.control.paused});},listenerOptions);
+    usage.refresh.addEventListener('click',()=>usageRead(),listenerOptions);
+    companionPanels.editions.panel.addEventListener('toggle',()=>{if(companionPanels.editions.panel.open)usageRead();},listenerOptions);
     const adRows = new Map(), adControlReceipts = new Map();
     // A new controller must rebind buttons retained by Streamlit's parent shell.
     root.querySelector('#sc-os-ads-list').dataset.signature='';
