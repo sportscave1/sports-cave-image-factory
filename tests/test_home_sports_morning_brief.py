@@ -227,6 +227,7 @@ def test_home_has_compact_links_and_no_publish_form(monkeypatch):
     monkeypatch.setattr(brief, "get_app_setting", Mock(return_value=previous))
     monkeypatch.setattr(brief, "archive_page", Mock(return_value=([], None)))
     st = Mock()
+    st.columns.return_value = [Mock(), Mock()]
     st.fragment.side_effect = lambda **kwargs: lambda fn: fn
     monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     brief.render(st, OWNER, TODAY)
@@ -345,6 +346,8 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     monkeypatch.setattr(db, "connect", jobs.connect)
     monkeypatch.setattr(meta, "connect", jobs.connect)
     monkeypatch.setattr(meta, "sydney_date", lambda: TODAY)
+    import home_crm_reporting as crm
+    monkeypatch.setattr(crm,"request",lambda *a,**k:{"state":"loading","data":None})
     live_roas = Mock(return_value=2.75)
     monkeypatch.setattr(meta, "account_roas", live_roas)
     devices = {"desktop": 2, "mobile": 0, "timezone": "Australia/Sydney"}
@@ -377,6 +380,7 @@ def test_meta_brief_publication_and_home_display(monkeypatch, database):
     live_roas.assert_not_called()
 
     st = Mock()
+    st.columns.return_value = [Mock(), Mock()]
     st.fragment.side_effect = lambda **kwargs: lambda fn: fn
     monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     meta.render(st, OWNER, TODAY)
@@ -486,6 +490,7 @@ def test_calendar_still_renders_when_brief_storage_is_unavailable(monkeypatch):
     monkeypatch.setattr(brief, "get_app_setting", Mock(side_effect=RuntimeError))
     monkeypatch.setattr(brief, "archive_page", Mock(side_effect=RuntimeError))
     st = Mock()
+    st.columns.return_value = [Mock(), Mock()]
     st.fragment.side_effect = lambda **kwargs: lambda fn: fn
     monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     brief.render(st, OWNER, TODAY)
@@ -564,6 +569,7 @@ def test_full_edition_and_selected_story_design_prompt(monkeypatch):
     monkeypatch.setattr(brief, "get_app_setting", Mock(return_value=parsed))
     monkeypatch.setattr(brief, "archive_page", Mock(return_value=([], None)))
     st = Mock()
+    st.columns.return_value = [Mock(), Mock()]
     st.fragment.side_effect = lambda **kwargs: lambda fn: fn
     monkeypatch.setattr("morning_design_queue.list_jobs", lambda day=None: [])
     brief.render(st, OWNER, TODAY)

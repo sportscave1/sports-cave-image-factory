@@ -17,7 +17,12 @@ def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_pat
     monkeypatch.setattr(os_accounts, 'can_access_page', lambda *a: True)
     for module in (sports, meta):
         monkeypatch.setattr(module, 'get_app_setting', Mock(side_effect=AssertionError('render attempted storage')))
+    import home_crm_reporting as crm
+    monkeypatch.setattr(crm,'request',lambda *a,**k:dict(state='ready',data=dict(start='2026-11-17',end='2026-11-17',checked_at='2026-11-18T00:00:00Z',
+        ledger=dict(rows=[dict(channel='Google paid',mobile=1,desktop=2,other=0,total=3)],orders=3,matched=3,unmatched=0),
+        roas=dict(facebook=2.0,google=3.5),coverage={},basis='Synthetic order matches')))
     st = Mock()
+    st.columns.return_value = [Mock(), Mock()]
     saved_sports = dict(edition(), date=str(today))
     sports.render(st, {}, today, snapshot=dict(saved=saved_sports, editions=[], statuses={}))
     # Old reporting data previously triggered provider reads automatically on Home.
@@ -74,13 +79,9 @@ def test_saved_briefs_have_no_provider_reads_and_fit_mobile(monkeypatch, tmp_pat
             for width in (1600, 820, 390, 320):
                 page.set_viewport_size(dict(width=width,height=900))
                 assert page.evaluate('document.documentElement.scrollWidth') <= width
-            assert requests and all('/ops/meta-morning-brief/results?' in url for url in requests)
-            page.get_by_label('CRM reporting period').select_option('week')
+            assert not requests, 'Native controls and saved markup do not issue browser provider requests'
             expect(page.locator('[data-roas="facebook"]')).to_have_text('2.00×')
             expect(page.locator('[data-roas="google"]')).to_have_text('3.50×')
-            page.get_by_role('button',name='Refresh',exact=True).click()
-            page.wait_for_timeout(100)
-            assert any('refresh=1' in url for url in requests)
             page.screenshot(path=str(tmp_path/'home-saved-briefs-mobile.png'))
         finally:
             browser.close()

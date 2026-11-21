@@ -224,6 +224,23 @@ def test_primary_reconciler_starts_once_and_retries_after_failure(monkeypatch):
     assert tick.call_count==2 and stop.wait.call_count==2
 
 
+def test_native_period_and_refresh_controls_use_exact_windows(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    calls=[]
+    def result(start,end,**kwargs):
+        calls.append((start,end,kwargs))
+        return {"state":"loading","data":None}
+    monkeypatch.setattr(crm,"request",result)
+    test=AppTest.from_string("import streamlit as st\nimport home_crm_ui\nfrom datetime import date\nhome_crm_ui.render(st,date(2026,11,21))").run(timeout=10)
+    assert not test.exception
+    assert calls[-1][:2]==(date(2026,11,20),date(2026,11,20))
+    test.selectbox[0].select("week").run(timeout=10)
+    assert calls[-1][:2]==(date(2026,11,14),date(2026,11,20))
+    test.button[0].click().run(timeout=10)
+    assert calls[-1][2]["force"] is True
+    assert not test.exception
+
+
 def test_initial_html_is_useful_without_javascript_and_escapes_payload():
     import home_crm_ui as ui
     from html.parser import HTMLParser
@@ -232,13 +249,13 @@ def test_initial_html_is_useful_without_javascript_and_escapes_payload():
             super().__init__(); self.tags=[]
         def handle_starttag(self,tag,attrs):
             self.tags.append((tag,dict(attrs)))
-    value={"state":"saved","data":{"ledger":{"rows":[{"channel":"Facebook paid","mobile":2,"desktop":0,"other":0,"total":2}]},
+    value={"state":"ready","data":{"start":"2026-11-20","end":"2026-11-20","checked_at":"2026-11-21T03:00:00Z",
+        "ledger":{"rows":[{"channel":"Facebook paid","mobile":2,"desktop":0,"other":0,"total":2}],"orders":2,"matched":2,"unmatched":0},
         "roas":{"facebook":6.25,"google":None},"basis":'" onmouseover="bad() </section><script>bad()</script>'}}
     markup=ui.html(date(2026,11,21),value)
     parsed=Markup(); parsed.feed(markup)
     assert 'data-roas="facebook">6.25×</b>' in markup
     assert 'data-roas="google">—</b>' in markup
     assert 'data-device="mobile">2</td>' in markup
-    initial=next(attrs["data-initial"] for tag,attrs in parsed.tags if tag=="section")
-    assert json.loads(initial)==value
+    assert '2 exact GA4 matches' in markup
     assert not any(tag=="script" or "onmouseover" in attrs for tag,attrs in parsed.tags)

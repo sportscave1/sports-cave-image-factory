@@ -3,6 +3,8 @@ from html import escape
 import json
 from datetime import timedelta
 import math
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 CHANNELS = ("Facebook paid", "Google paid", "Organic", "Other", "Unresolved")
 
@@ -23,23 +25,37 @@ def html(today, initial=None):
     rows = "".join('<tr data-channel="' + escape(name) + '"><th scope="row">' +
         escape(name) + '</th>' + ''.join('<td data-device="' + key + '">' + count(name, key) + '</td>'
             for key in ("mobile", "desktop", "other", "total")) + '</tr>' for name in CHANNELS)
-    options = "".join('<option value="' + key + '">' + label + '</option>' for key, label in (
-        ("yesterday", "Yesterday"), ("week", "Last 7 days"), ("month", "Last 30 days"),
-        ("quarter", "Last 3 months"), ("today", "Today")))
-    payload = json.dumps(initial).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f"""<section class="sc-home-crm" aria-label="CRM source and device snapshot" data-initial="{escape(payload, quote=True)}">
-      <div class="sc-crm-controls"><label>Results <select aria-label="CRM reporting period">{options}</select></label>
-        <button type="button" class="sc-crm-refresh">Refresh</button><small class="sc-crm-dates">{day}</small></div>
+    def coverage_line():
+        result = []
+        for name, source in data.get("coverage", {}).items():
+            result.append(name + ": " + source["status"] + (" · " + source["fetched_at"] if source.get("fetched_at") else ""))
+        return escape(" | ".join(result))
+    if data:
+        stamp = datetime.fromisoformat(data["checked_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Australia/Sydney")).strftime("%d %b %H:%M")
+        status = (f"{ledger['orders']} Shopify orders · {ledger['matched']} exact GA4 matches · {ledger['unmatched']} unmatched"
+                  if ledger else "Shopify count unavailable")
+        if data.get("partial_day"):
+            status += " · Today is partial"
+        if any(row["status"] not in ("verified", "no_delivery") for row in data.get("coverage", {}).values()):
+            status += " · Source gaps; see coverage"
+        if initial.get("state") != "ready":
+            status += " · Refreshing"
+        status += " · Checked " + stamp + " Sydney"
+        dates = data["start"] + " – " + data["end"]
+    else:
+        status, dates = "Loading verified results · updates automatically", ""
+    return f"""<section class="sc-home-crm" aria-label="CRM source and device snapshot">
+      <small class="sc-crm-dates">{escape(dates)}</small>
       <div class="sc-crm-paid"><span>Facebook / Instagram ROAS <b data-roas="facebook">{ratio("facebook")}</b></span>
         <span>Google ROAS <b data-roas="google">{ratio("google")}</b></span></div>
       <div class="sc-crm-table-wrap"><table><caption>Shopify orders · GA4 source and device</caption>
         <thead><tr><th scope="col">Source</th><th scope="col">Mobile</th><th scope="col">Desktop</th>
         <th scope="col">Other /<br>unknown</th><th scope="col">Total</th></tr></thead><tbody>{rows}</tbody></table></div>
-      <small class="sc-crm-status" role="status" aria-live="polite">Loading verified results…</small>
-      <details class="sc-crm-coverage"><summary>Coverage &amp; attribution</summary><p class="sc-crm-basis"></p>
+      <small class="sc-crm-status" role="status" aria-live="polite">{escape(status)}</small>
+      <details class="sc-crm-coverage"><summary>Coverage &amp; attribution</summary><p class="sc-crm-basis">{escape(data.get("basis", ""))}</p>
         <p>Other includes direct, email and other referrals. Unresolved includes missing or conflicting source evidence.
         Tablets and unknown devices stay in Other / unknown. Organic has no advertising ROAS.</p>
-        <p class="sc-crm-sources"></p><p>Paid-platform ROAS can overlap and is separate from the order table.
+        <p class="sc-crm-sources">{coverage_line()}</p><p>Paid-platform ROAS can overlap and is separate from the order table.
         Facebook includes Instagram. Google covers PM021126. Values can change as conversions arrive.</p></details>
     </section>"""
 
@@ -61,56 +77,17 @@ CSS = """<style>
 .sc-crm-coverage summary{cursor:pointer;font-weight:600}.sc-crm-coverage p{margin:.35rem 0}
 </style>"""
 
-JS = """<script>{
-const panel=[...document.querySelectorAll(".sc-home-crm")].at(-1);
-if(panel&&!panel.dataset.ready){
- panel.dataset.ready="1";
- const select=panel.querySelector("select"), status=panel.querySelector(".sc-crm-status");
- try{const saved=sessionStorage.getItem("homeCRMPeriod");if([...select.options].some(x=>x.value===saved))select.value=saved;}catch{}
- let controller, timer, version=0, attempts=0;
- const fmt=v=>typeof v==="number"&&Number.isFinite(v)?v.toLocaleString():"—";
- function paint(result){
-  const data=result.data;
-  if(!data){status.textContent=result.state==="unavailable"?"Reporting unavailable · retrying":"Loading verified results…";return;}
-  panel.querySelector(".sc-crm-dates").textContent=data.start+" – "+data.end;
-  for(const row of panel.querySelectorAll("tbody tr")){
-   const values=data.ledger?.rows.find(item=>item.channel===row.dataset.channel);
-   for(const cell of row.querySelectorAll("td"))cell.textContent=fmt(values?.[cell.dataset.device]);
-  }
-  for(const cell of panel.querySelectorAll("[data-roas]")){
-   const value=data.roas?.[cell.dataset.roas];
-   cell.textContent=typeof value==="number"&&Number.isFinite(value)?value.toFixed(2)+"×":"—";
-  }
-  const ledger=data.ledger;
-  const stamp=new Intl.DateTimeFormat("en-AU",{timeZone:"Australia/Sydney",hour:"2-digit",minute:"2-digit"}).format(new Date(data.checked_at));
-  const coverage=Object.entries(data.coverage||{}).map(([source,item])=>source+": "+item.status+(item.fetched_at?" · "+item.fetched_at:""));
-  panel.querySelector(".sc-crm-sources").textContent=coverage.join(" | ");
-  panel.querySelector(".sc-crm-basis").textContent=data.basis;
-  let note=ledger?ledger.orders+" Shopify orders · "+ledger.matched+" exact GA4 matches · "+ledger.unmatched+" unmatched":"Shopify count unavailable";
-  if(data.partial_day)note+=" · Today is partial";
-  if(Object.values(data.coverage||{}).some(item=>!["verified","no_delivery"].includes(item.status)))note+=" · Source gaps; see coverage";
-  if(result.state!=="ready")note+=" · Refreshing";
-  status.textContent=note+" · Checked "+stamp+" Sydney";
- }
- async function load(force=false){
-  if(!panel.isConnected)return;
-  clearTimeout(timer);controller?.abort();controller=new AbortController();
-  const pending=controller,own=++version;const deadline=setTimeout(()=>pending.abort(),15000);
-  try{
-   const response=await fetch("/ops/meta-morning-brief/results?period="+encodeURIComponent(select.value)+(force?"&refresh=1":""),{signal:pending.signal});
-   if(!response.ok)throw Error("Reporting unavailable");
-   const result=await response.json();if(own!==version)return;paint(result);
-   if(result.state!=="ready"&&attempts++<18)timer=setTimeout(()=>load(),5000);
-  }catch{if(own===version){status.textContent="Refresh unavailable · saved values remain dated; retry with Refresh";}}
-  finally{clearTimeout(deadline);}
- }
- if(select.value==="yesterday")paint(JSON.parse(panel.dataset.initial));
- select.addEventListener("change",()=>{attempts=0;try{sessionStorage.setItem("homeCRMPeriod",select.value);}catch{}for(const cell of panel.querySelectorAll("tbody td,[data-roas]"))cell.textContent="—";status.textContent="Loading selected period…";panel.querySelector(".sc-crm-dates").textContent="";load();});
- panel.querySelector(".sc-crm-refresh").addEventListener("click",()=>{attempts=0;load(true);});
- load(); // Refresh yesterday too; never leave a missing saved ROAS frozen.
-}
-}</script>"""
-
-
 def render(st, today, initial=None):
-    st.html(CSS + html(today, initial) + JS, unsafe_allow_javascript=True)
+    import home_crm_reporting as crm
+    from home_meta_morning_brief import PERIODS, period_window
+    controls = st.columns([4, 1], gap="small")
+    period = controls[0].selectbox("CRM reporting period", list(PERIODS),
+        format_func=PERIODS.get, key="home_crm_period", label_visibility="collapsed")
+    if period not in PERIODS:
+        period = "yesterday"
+    force = controls[1].button("Refresh", key="home_crm_refresh") is True
+    start, end = period_window(period, today)
+    result = crm.request(start, end, force=force)
+    if result.get("data") is None and period == "yesterday" and initial and initial.get("data"):
+        result = dict(state=result["state"], data=initial["data"])
+    st.html(CSS + html(today, result))
