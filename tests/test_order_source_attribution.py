@@ -17,7 +17,7 @@ def journey(source="facebook",medium="paid_social",campaign="fixture",url="https
     ("google","cpc","fixture","Google paid"),
     ("google","organic","","Organic"),
     ("instagram","organic_social","fixture","Organic"),
-    ("google","product_sync","sag_organic","Organic"),
+    ("google","product_sync","sag_organic","Unresolved"),
     ("google","product_sync","","Unresolved"),
     ("facebook","referral","","Unresolved"),
     ("newsletter","email","fixture","Other"),
@@ -42,8 +42,16 @@ def test_referrer_and_fbclid_do_not_prove_paid_or_organic():
     assert last_visit({"ready":True,"firstVisit":journey()["lastVisit"]})["channel"]=="Unresolved"
 
 
+def test_feed_defaults_do_not_establish_unpaid_sale_without_click_evidence():
+    evidence=last_visit(journey("google","product_sync","sag_organic"))
+    assert evidence=={"channel":"Unresolved","reason":"google_listing_paid_status_unknown"}
+    # Distinct, explicit Shopify evidence still establishes a source.
+    assert last_visit(journey("google","product_sync","sag_organic",tactic="AD"))["channel"]=="Google paid"
+    assert last_visit(journey("google","product_sync","sag_organic",tactic="SEO"))["channel"]=="Organic"
+
+
 def test_last_visit_is_one_model_not_union_with_first_or_ga4():
-    data=journey("google","product_sync","sag_organic")
+    data=journey("google","organic","")
     data["firstVisit"]=journey()["lastVisit"]
     evidence=last_visit(data)
     assert evidence["channel"]=="Organic"

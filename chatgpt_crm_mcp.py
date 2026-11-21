@@ -579,7 +579,7 @@ async def mcp(request):
                     import home_crm_reporting
                     summary["home_crm"] = await run_in_threadpool(
                         home_crm_reporting.request, report_args[0], report_args[0])
-                    summary["home_crm_basis"] = "Home is CRM: Facebook, Google, organic and unresolved sources use Shopify last-visit evidence; devices use exact Shopify/GA4 ID matches. Paid ROAS is separate platform attribution. Pending or missing source data remains unknown."
+                    summary["home_crm_basis"] = "Home is CRM: sources use Shopify last-visit evidence; devices and the separate GA4 source comparison use exact Shopify/GA4 ID matches. Google product-feed tags alone do not prove organic or paid. Organic last visits can follow earlier ads. Google Ads purchases and ROAS use ad interaction dates and are separate platform credit, never extra Shopify orders. Pending, ambiguous or missing evidence remains unknown."
             elif scope == META_HISTORY_SCOPE:
                 summary = await run_in_threadpool(meta_ad_history, *report_args)
             elif name == "get_seo_daily_context":
