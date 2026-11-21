@@ -29,6 +29,7 @@ def call(args, **kwargs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--phase3-only', action='store_true')
+    parser.add_argument('--final', action='store_true')
     args = parser.parse_args()
     name = 'sc-status-phase1-' + uuid.uuid4().hex[:10]
     output = ROOT / 'output/status-speed-audit' / name
@@ -44,7 +45,7 @@ def main():
             'tests/status_phase1_queue_baseline.py', 'tests/status_phase2_browser.py',
             'companion_status_payload.py', 'product_upload_staff_queue.py',
             'components/sports_cave_top_bar/index.html', 'windows-upload-companion/composer.js',
-            'tests/status_phase3_browser.py', 'windows-upload-companion/manifest.json', 'scripts/soak_companion_display.py']
+            'tests/status_phase3_browser.py', 'windows-upload-companion/manifest.json', 'scripts/soak_companion_display.py', 'tests/status_final_extension.py']
         for file in files:
             value = (ROOT / file).read_bytes()
             hashes[file] = hashlib.sha256(value).hexdigest()
@@ -89,7 +90,9 @@ def main():
                 ('phase2-browser.json', ['python', '-B', 'tests/status_phase2_browser.py'])]
         if args.phase3_only:
             commands = []
-        commands.append(('phase3-browser.json', ['python', '-B', 'tests/status_phase3_browser.py', 'windows-upload-companion/manifest.json', 'scripts/soak_companion_display.py']))
+        commands.append(('phase3-browser.json', ['python', '-B', 'tests/status_phase3_browser.py', 'windows-upload-companion/manifest.json', 'scripts/soak_companion_display.py', 'tests/status_final_extension.py']))
+        if args.final:
+            commands.append(('final-extension.json', ['python', '-B', 'tests/status_final_extension.py']))
         for filename, command_args in commands:
             result = subprocess.run(command + command_args, capture_output=True, cwd=ROOT, timeout=180)
             (output / filename).write_bytes(result.stdout)
