@@ -12,6 +12,7 @@ import re
 import statistics
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'scripts' / 'studio'), str(ROOT / 'scripts'), str(ROOT)]
@@ -42,11 +43,18 @@ def check_gate(gate, head, base, task_id):
 
 def release(root, task_id, owner, base, evidence, push=False):
     git = Git(root)
-    with studio.locked(studio.DEFAULT_HOME) as file:
-        registry = studio.read(file)
-        task = studio.task_by_id(registry, task_id, owner)
-        if studio.identity(registry, task).resolve() != root.resolve():
-            raise Stop('Release must use its exact owned Studio worktree.')
+    for attempt in range(30):
+        try:
+            with studio.locked(studio.DEFAULT_HOME) as file:
+                registry = studio.read(file)
+                task = studio.task_by_id(registry, task_id, owner)
+                if studio.identity(registry, task).resolve() != root.resolve():
+                    raise Stop('Release must use its exact owned Studio worktree.')
+            break
+        except RuntimeError as error:
+            if not str(error).startswith('Registry occupied.') or attempt == 29:
+                raise
+            time.sleep(1)
     if git.text('status', '--porcelain'):
         raise Stop('Commit and test only the focused task files first. Working tree must be clean.')
     if git.text('remote', 'get-url', 'origin') not in ORIGINS or git.text('remote', 'get-url', '--push', 'origin') not in ORIGINS:

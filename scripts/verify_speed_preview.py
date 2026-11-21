@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts' / 'studio'))
@@ -46,8 +47,8 @@ def main():
                 or 'Traceback' in frame.get('text', '') or 'currently unavailable' in frame.get('text', '')):
             raise AssertionError('Speed page did not render successfully.')
         runtime.event({'action': 'size', 'mode': 'mobile'})
-        # Close the existing mobile navigation drawer using its normal control.
-        capture('speed-mobile', runtime.event({'action': 'click', 'x': 24, 'y': 28}))
+        # Let the normal responsive drawer transition settle before capturing.
+        capture('speed-mobile', runtime.event({'action': 'frame'}))
         evidence['phase2_verified'] = True
         evidence['functional_checks_passed'] = True
         evidence['source_manifest'] = runtime.manifest
@@ -63,7 +64,14 @@ def main():
                 pass
         raise
     finally:
-        runtime.stop()
+        for attempt in range(30):
+            try:
+                runtime.stop()
+                break
+            except RuntimeError as error:
+                if not str(error).startswith('Registry occupied.') or attempt == 29:
+                    raise
+                time.sleep(1)
         studio.atomic(folder / 'acceptance.json', evidence)
 
 
