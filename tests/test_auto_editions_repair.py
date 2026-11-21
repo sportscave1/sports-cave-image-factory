@@ -112,3 +112,8 @@ def test_newly_uploaded_package_waits_for_technical_seed_instead_of_codex(broken
         repair.run_one(d.connect);seed.assert_called_once()
     assert repair.claim(d.connect) is None
     with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
+    # Invalid/stale evidence must not be kept waiting forever by repeated seeds.
+    sql.execute("UPDATE auto_edition_onboarding_audit SET detail=detail-'next_check' WHERE event=%s",(repair.EVENT,))
+    with patch.object(repair,'snapshot',return_value=row),patch('auto_editions_technical.Technical.seed') as seed:
+        repair.run_one(d.connect);seed.assert_not_called()
+    assert repair.claim(d.connect) is not None
