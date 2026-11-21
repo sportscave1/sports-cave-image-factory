@@ -205,3 +205,20 @@ def test_snapshot_request_nonblocking_and_manual_refresh_throttled(monkeypatch):
         assert snapshots.rows[crm.key(START,END)] is row
     finally:
         release.set();snapshots.close()
+
+
+def test_primary_reconciler_starts_once_and_retries_after_failure(monkeypatch):
+    thread=Mock()
+    thread.is_alive.return_value=True
+    factory=Mock(return_value=thread)
+    monkeypatch.setattr(crm,"_APP_THREAD",None)
+    monkeypatch.setattr(crm,"Thread",factory)
+    assert crm.start_app_reconciler() and crm.start_app_reconciler()
+    factory.assert_called_once()
+    thread.start.assert_called_once()
+    stop=Mock()
+    stop.is_set.side_effect=[False,False,True]
+    tick=Mock(side_effect=[RuntimeError("synthetic"),None])
+    monkeypatch.setattr(crm,"tick",tick)
+    crm._loop(stop)
+    assert tick.call_count==2 and stop.wait.call_count==2

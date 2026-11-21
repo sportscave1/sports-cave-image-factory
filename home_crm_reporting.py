@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import json
 import re
-from threading import Lock
+from threading import Event, Lock, Thread
 from time import monotonic
 from zoneinfo import ZoneInfo
 
@@ -257,8 +257,36 @@ def request(start, end, *, force=False):
 
 
 def tick():
-    """Existing hosted worker keeps yesterday warm after 05:00 Sydney, without waiting."""
+    """Primary app keeps yesterday warm after 05:00 Sydney, without waiting."""
     now = datetime.now(SYDNEY)
     if now.hour >= 5:
         day = now.date() - timedelta(days=1)
         request(day, day)
+
+
+_APP_THREAD = None
+_APP_LOCK = Lock()
+
+
+def _loop(stop):
+    import logging
+    while not stop.is_set():
+        try:
+            tick()
+        except Exception as error:
+            logging.getLogger(__name__).warning("home_crm_refresh_failed type=%s", type(error).__name__)
+        stop.wait(30)
+
+
+def start_app_reconciler():
+    """Use the primary app's existing provider grants; never copy worker secrets."""
+    import atexit
+    global _APP_THREAD
+    with _APP_LOCK:
+        if _APP_THREAD is not None and _APP_THREAD.is_alive():
+            return True
+        stop = Event()
+        _APP_THREAD = Thread(target=_loop,args=(stop,),name="home-crm-refresh",daemon=True)
+        atexit.register(stop.set)
+        _APP_THREAD.start()
+    return True
