@@ -8,7 +8,7 @@ def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'os-bridge.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js'):
+        for filename in ('manifest.json', 'os-bridge.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'orders-queue.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 
@@ -116,16 +116,19 @@ def render_page(user):
     _markup('<style>' + (Path(__file__).parent / 'components' / 'companion_queues.css').read_text(encoding='utf8') + '</style>')
     with st.container(key='companion-dashboard'):
         _markup('<div class="cq-hero"><div><div class="cq-eyebrow">SPORTS CAVE / AUTOMATION</div>'
-                '<h1>Companion control</h1><p>Designs, product uploads and Meta ads.</p></div>'
-                '<div class="cq-capacity"><span>PARALLEL CAPACITY</span><strong>1 design <i>+</i> 1 upload <i>+</i> 1 ad</strong>'
+                '<h1>Companion control</h1><p>Designs, product uploads, Meta ads and order preparation.</p></div>'
+                '<div class="cq-capacity"><span>PARALLEL CAPACITY</span><strong>1 design <i>+</i> 1 upload <i>+</i> 1 ad <i>+</i> 1 order</strong>'
                 '<small>Independent queues · automatic progression</small></div></div>')
-        designs, uploads, ads = st.tabs(['Design queue', 'Upload queue', 'Ads queue'])
+        designs, uploads, ads, orders = st.tabs(['Design queue', 'Upload queue', 'Ads queue', 'Orders queue'])
         with designs:
             render_design_queue()
         with uploads:
             render_queue(user)
         with ads:
             render_ad_queue()
+        with orders:
+            from prodigi_preparation_ui import dashboard
+            dashboard()
 
 
 def _connection(online, *, name='Companion'):

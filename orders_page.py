@@ -2793,6 +2793,8 @@ def _render_orders_table(rows):
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
                 st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
                 allocation_id=str(selected.get('edition_order_id') or '')
+                from prodigi_preparation_ui import render as render_prodigi_preparation
+                render_prodigi_preparation(selected, st.session_state.get('sports_cave_current_user') or {}, compact=True)
                 if allocation_id in cloud_links:
                     if cloud_links[allocation_id].startswith('/auto-editions/'):
                         st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])

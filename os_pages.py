@@ -105,15 +105,9 @@ LIMITED_EDITION_EXPORT_FIELDS = (
     "updated_at",
 )
 
-PRODIGI_DASHBOARD_URL = (
-    "https://dashboard.prodigi.com/connect-sales-channel/shopify?"
-    "code=8cb5baf40dc839d456b331fbf23fd82c&"
-    "hmac=3caa9f14ab6565fc1b41d4fa44fe7873d069895aa75192e93ff3a82fdd28de30&"
-    "host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvc3BvcnRzY2F2ZS1uYg&"
-    "shop=sportscave-nb.myshopify.com&"
-    "state=We_6XjylWzROi8kCdXMTLECYFxjp80JZvK82DUf9Xzo&"
-    "timestamp=1782278816"
-)
+# Open normal account navigation. Never replay a Shopify installation/OAuth
+# callback: its code/state/timestamp belong to one short-lived connection flow.
+PRODIGI_DASHBOARD_URL = 'https://dashboard.prodigi.com/'
 PRODIGI_REFERENCE_MAPPINGS = (
     {
         "sports_cave_variant": "Black / XL - 62 × 87 cm (24.4 × 34.3 in)",
@@ -5088,6 +5082,10 @@ def render_prodigi_page():
         qa_answers["final_check_notes"] = final_notes
         qa_answers["edition_number"] = "Yes" if _prodigi_is_limited_edition(selected_row) else "Not Required"
         qa_answers["correct_order"] = "Yes"
+
+        from prodigi_preparation_ui import render as render_prodigi_preparation
+        render_prodigi_preparation({**selected_row, 'prodigi_order_id': (existing or {}).get('prodigi_order_id') or ''},
+            st.session_state.get('sports_cave_current_user') or {}, answers=qa_answers)
 
         issue_reasons = prodigi_dispatch_issue_reasons(selected_row, qa_answers)
         completion_blockers = prodigi_completion_blockers(selected_row, qa_answers)
