@@ -267,6 +267,7 @@ def _request(user, allocation_id, order_id='', item_id=''):
             if order_id and item_id and (saved['order_id'], saved['item_id']) == (order_id, item_id) and saved['allocation_id'] != allocation_id:
                 raise ValueError('This Prodigi item is already bound to another numbered unit.')
             if saved['allocation_id'] == allocation_id:
+                if saved.get('submission'):return saved
                 if saved['status'] in ('Needs QA','Needs review') and not any(saved.get(k) for k in ('browser','write_intent','document_write_intent')):
                     if order_id and any(saved.get(k) and saved[k]!=value[k] for k in ('order_id','item_id')):
                         raise ValueError('The existing supplier target cannot be changed by a retry.')
@@ -436,6 +437,8 @@ def tick():
 def reconcile(user, allocation_id):
     require_user(user)
     current = read(allocation_id)
+    if current and current.get('submission'):
+        raise ValueError('Submission is already recorded. Open the same supplier order; only readback and certificate retries are allowed.')
     receipt = (current or {}).get('browser') or {}
     document_receipt=(current or {}).get('document_browser') or {}
     from prodigi_full_qa import live_enabled
@@ -451,7 +454,9 @@ def reconcile(user, allocation_id):
             if target and clean(Client().order(current['order_id']).get('shippingMethod'))!=target:
                 raise ValueError('Previous shipping change is uncertain. Review this same draft before retrying QA.')
         current.update(status='Checking QA',message='Rechecking saved artwork, branding inserts, Excellent quality, shipping and address.')
-        with connect() as c,c.cursor() as q:save(q,current)
+        with connect() as c,c.cursor() as q:
+            q.execute("UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s AND NOT value ? 'submission' RETURNING key",(json.dumps(current),PREFIX+str(int(allocation_id))))
+            if not q.fetchone():raise ValueError('Submission started during this recheck. Open the supplier order.')
         return current
 
     if document_receipt.get('started') is False and (current or {}).get('status')=='Needs review':

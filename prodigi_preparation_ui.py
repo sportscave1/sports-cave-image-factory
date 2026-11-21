@@ -19,8 +19,8 @@ def render(row, user, *, answers=None, compact=False):
         st.warning('Prodigi preparation status is unavailable. No order was submitted.')
         return
     key = 'prodigi-prepare-' + allocation + ('-orders' if compact else '-fulfilment')
-    with st.expander('Prepare for Prodigi · manual payment', expanded=not compact or str(st.session_state.get('orders-prodigi-review'))==allocation):
-        st.caption('Attach the numbered production JPG to an existing draft. Payment and release stay manual.')
+    with st.expander('Fulfilment · Orders companion', expanded=not compact or str(st.session_state.get('orders-prodigi-review'))==allocation):
+        st.caption('Attach artwork, check the saved order, then follow the owner’s submission setting. No supplier delay settings are changed.')
         if request_failure:
             st.warning(request_failure['message'])
             st.caption('Failed at request · '+request_failure['last_failure']['at'])
@@ -39,7 +39,7 @@ def render(row, user, *, answers=None, compact=False):
                 from prodigi_client import identifier
                 st.link_button('Open this existing Prodigi order', 'https://dashboard.prodigi.com/orders/'
                                + identifier(saved['order_id']) + '/detail')
-            if saved['status']=='Ready for manual payment':st.success('Ready in Prodigi · payment and Submit remain manual.')
+            if saved['status']=='Ready for manual payment':st.success('All QA passed · submission follows the Orders companion setting.')
             elif saved['status'] in ('Needs QA','Needs review'):st.warning(saved['message'])
             else:st.info(saved['message'])
             if saved.get('last_failure'):
@@ -70,7 +70,7 @@ def render(row, user, *, answers=None, compact=False):
                 st.caption(('✓ ' if saved['checks'].get(field) else ('Checking · ' if active else 'Review required · ')) + label)
             if 'production_approval' in saved['checks']:
                 st.caption(('✓ ' if saved['checks']['production_approval'] else 'Review required · ')+'Production print approval')
-            if st.button('Check all QA again', key=key+'-recheck'):
+            if st.button('Check all QA again', key=key+'-recheck',disabled=bool(saved.get('submission'))):
                 try:
                     queue.reconcile(user, int(allocation))
                 except Exception as error:
@@ -108,7 +108,12 @@ def render(row, user, *, answers=None, compact=False):
 
 def dashboard():
     import streamlit as st
-    st.caption('Orders companion attaches artwork and checks API evidence. Pay and release orders manually in Prodigi.')
+    st.caption('Orders companion attaches artwork and checks the exact saved order.')
+    import os_accounts
+    user=st.session_state.get('sports_cave_current_user')
+    if user and os_accounts.is_admin(user):
+        from prodigi_submission import controls
+        controls(user)
     if not queue.enabled():
         st.info('Orders preparation is disabled pending imported-order acceptance.')
         return

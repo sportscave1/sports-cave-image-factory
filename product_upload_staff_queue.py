@@ -336,6 +336,7 @@ def header_queue_status():
     from auto_editions_header import snapshot
     return enrich_queues({
         'editions': snapshot(connect),
+        'orders': __import__('orders_companion_header').snapshot(connect),
         'design': dict(waiting=row['design_waiting'], enabled=bool(row['design_enabled'])),
         'upload': dict(waiting=row['upload_waiting'], enabled=row['upload_enabled'] is not False),
     })

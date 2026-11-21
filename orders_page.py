@@ -2855,7 +2855,7 @@ def _render_orders_selection_workspace(rows,resources,display_rows,statuses):
                 from prodigi_preparation_ui import render as render_prodigi_preparation
                 render_prodigi_preparation(selected, st.session_state.get('sports_cave_current_user') or {}, compact=True)
                 if allocation_id in cloud_links:
-                    if cloud_links[allocation_id].startswith('/auto-editions/'):
+                    if cloud_links[allocation_id].startswith(('/auto-editions/','/api/auto-editions/file')):
                         with st.container(horizontal=True):
                             st.link_button(('Open JPG' if auto_editions_runtime.link_label(cloud_links[allocation_id])=='Open' else auto_editions_runtime.link_label(cloud_links[allocation_id])),cloud_links[allocation_id])
                             _render_send_artwork(selected, 'selected')
@@ -2921,16 +2921,21 @@ def _render_mobile_orders(rows):
             fulfilment = row.get('prodigi')
             if fulfilment in {'Refunded', 'Refund Pending'}:
                 fulfilment = f':red[{fulfilment}]'
-            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {fulfilment}")
+            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Certificate: {fulfilment}")
+            certificate=row.get('certificate_pdf_url') or row.get('shopify_file_url')
+            if fulfilment=='Complete' and certificate and str(certificate).startswith('https://'):
+                st.link_button('Complete · Open certificate',certificate)
             link = psd_directory.link(row, mapping)
             if link: st.link_button('Open PSD', link + '#Open PSD')
             else: st.caption('PSD: Not linked')
             status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
             allocation_id=str(row.get('edition_order_id') or '')
             if allocation_id in cloud_links:
-                if cloud_links[allocation_id].startswith('/auto-editions/'):
+                if cloud_links[allocation_id].startswith(('/auto-editions/','/api/auto-editions/file')):
                     with st.container(horizontal=True):
                         st.link_button(('Open JPG' if auto_editions_runtime.link_label(cloud_links[allocation_id])=='Open' else auto_editions_runtime.link_label(cloud_links[allocation_id])),cloud_links[allocation_id])
+                        if '/api/auto-editions/file?' in cloud_links[allocation_id]:
+                            st.link_button('Download JPG',cloud_links[allocation_id].replace('&inline=1','').split('#')[0])
                         _render_send_artwork(row,'mobile')
                 else:
                     st.caption('Edition JPG: '+cloud_links[allocation_id])
@@ -3069,6 +3074,11 @@ def render_page(selection_guard=None):
     print("PERF Orders page entry", flush=True)
     _render_orders_styles()
     st.title("Orders")
+    actor=st.session_state.get('sports_cave_current_user') or {}
+    import os_accounts,prodigi_preparation
+    if prodigi_preparation.enabled() and os_accounts.is_admin(actor) and os_accounts.can_access_page(actor,'Prodigi'):
+        from prodigi_submission import controls
+        controls(actor)
     search_text, search_submitted = _render_orders_search_form()
     if _async_orders_load_supported():
         if search_submitted:
