@@ -280,6 +280,7 @@ def test_bound_read_observes_current_allocation_without_mapping_queries(database
 
 
 def eligibility_tables(sql,manifest):
+    sql.execute("CREATE TABLE auto_edition_onboarding_audit(id bigserial,product_gid text,event text,detail jsonb)")
     sql.execute('CREATE TABLE product_psd_mappings(shopify_product_gid text PRIMARY KEY,dropbox_file_id text)')
     sql.execute("CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text,reason text DEFAULT '',lease_until timestamptz,updated_at timestamptz)")
     sql.execute('INSERT INTO product_psd_mappings VALUES(%s,%s)',(manifest['source']['product_gid'],manifest['source']['file_id']))

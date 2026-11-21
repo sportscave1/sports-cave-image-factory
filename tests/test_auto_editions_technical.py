@@ -106,7 +106,7 @@ def test_technical_failure_never_becomes_ready(flow,fault):
         sql.execute('UPDATE auto_edition_preparations SET manifest=%s::jsonb,proofs=%s::jsonb WHERE hash=%s',(json.dumps(r['manifest']),json.dumps(r['proofs']),r['hash']))
     assert technical.Technical(d.connect).run_one(assets)=='Failed'
     assert not rows(sql,'auto_edition_layouts')
-    assert statuses.batch(d.connect,[PID])['rows'][0]['status']=='Failed'
+    assert statuses.batch(d.connect,[PID])['rows'][0]['status']=='Repair'
 
 
 def test_restart_exclusive_claim_expired_owner_fence_and_retry_bound(flow):
@@ -117,7 +117,7 @@ def test_restart_exclusive_claim_expired_owner_fence_and_retry_bound(flow):
     assert t.commit(job,r,r,technical.certificate(r))=='Superseded'
     sql.execute("UPDATE auto_edition_technical_checks SET lease_until=now()-interval '1 second',attempts=3")
     assert t.claim() is None
-    assert statuses.batch(d.connect,[PID])['rows'][0]['status']=='Failed'
+    assert statuses.batch(d.connect,[PID])['rows'][0]['status']=='Repair'
     assert t.retry(PID,'owner') and t.retry(PID,'owner')
     assert rows(sql,'auto_edition_technical_checks')[0]['attempts']==0
     assert sum(x['event']=='technical_retry' for x in rows(sql,'auto_edition_onboarding_audit'))==1
