@@ -21,6 +21,8 @@ def advance(value, event):
     import design_publish_ad as ads
     from ads_companion_transfer import delivery
     blocker = value['blocked_collection']
+    # Queued collection starts its deadline when it first owns the worker slot.
+    blocker.setdefault('started_at', time.time())
     payload = delivery(value)
     if not payload['missing'] or event.get('transfer_failed') is True or time.time()-blocker['started_at'] > 600:
         blocker['state'] = 'saved' if not payload['missing'] else 'needs_download_review'

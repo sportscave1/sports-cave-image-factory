@@ -588,7 +588,8 @@ def tick(token, event):
                          COALESCE((a.value->'auto_recovery'->>'next_at')::double precision,0)<=EXTRACT(EPOCH FROM now()))))
                OR (a.value->>'stage'='failed' AND %s AND NOT (a.value ? 'recovery_checked_version')))
             ORDER BY CASE WHEN a.value->>'stage' IN ('preparing','opening','generating','posting') THEN 0
-                          WHEN a.value->>'stage'='failed' THEN 1 ELSE 2 END,
+                          WHEN a.value->>'stage'='waiting' AND a.value ? 'blocked_collection' THEN 1
+                          WHEN a.value->>'stage'='failed' THEN 2 ELSE 3 END,
                      a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled, enabled))
         job = cur.fetchone()
         if not job:

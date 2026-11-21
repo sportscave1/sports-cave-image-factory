@@ -8,6 +8,7 @@ import design_publish_ad as ads
 import ads_companion_transfer as transfer
 from test_ads_companion_transfer import batch, send
 from test_product_upload_staff_queue import database, store
+from test_ads_companion_queue import queued_store, USER, ROW, brief
 
 
 def blocked_value():
@@ -110,3 +111,21 @@ def test_new_prompt_has_one_footer_and_independent_partial_delivery():
     assert 'Complete this independent step even if an image remains missing' in prompt
     assert 'do not regenerate a safety-blocked or unexplained rejected slot' in prompt
     assert 'still attach every completed image' in ads.delivery_prompt(result,'synthetic reference','/fixture','fixture-job')
+
+
+def test_queued_collection_precedes_new_generation_and_deadline_starts_on_claim(queued_store, monkeypatch):
+    import ads_companion_queue as queue
+    import product_upload_staff_queue as uploads
+    queue.enqueue(USER, brief(), {'row':ROW})
+    item = queue.enqueue(USER, {**brief(), 'variation_token':'partial-distinct'}, {'row':ROW})
+    value = dict(blocked_value(), upload=item['id'], requester=USER['id'], source='new_ads',
+        sport='Baseball',country='USA',result=brief(),stage='waiting',resume_stage='generating',collect_only=True,
+        blocked_collection={'reason':'moderation_blocked: man-cave.jpg missing','excluded':['man-cave.jpg']})
+    ads.write(ads.PREFIX+item['id'],value)
+    monkeypatch.setattr(queue, 'prepare', lambda _: pytest.fail('New generation ran before existing export collection'))
+    token = uploads.pair({'id':'desktop'})
+    payload = ads.tick(token, {})['job']
+    assert payload['id'] == item['id'] and payload['repair'] is None
+    with queued_store() as conn, conn.cursor() as cur:
+        cur.execute('SELECT value FROM app_settings WHERE key=%s',(ads.PREFIX+item['id'],))
+        assert cur.fetchone()['value']['blocked_collection']['started_at'] > 0
