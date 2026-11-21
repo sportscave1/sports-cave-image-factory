@@ -19,7 +19,7 @@ def prompts():
     ]
 
 
-@pytest.mark.parametrize("prompt", prompts())
+@pytest.mark.parametrize("prompt", prompts(), ids=("new", "refresh", "edit", "queued"))
 def test_new_refresh_edit_and_queue_continue_with_available_images(prompt):
     assert prompt.count(CONTINUOUS_DESIGN_FLOW) == 1
     assert "The user performs photographic, licensing and collector-art suitability review manually after delivery" in prompt

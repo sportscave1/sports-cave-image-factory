@@ -134,6 +134,8 @@ def test_repair_enqueues_all_valid_orders_and_isolates_blocked_unit(broken):
     sql.execute("INSERT INTO edition_orders SELECT n,%s,'assigned',true,true,NULL FROM generate_series(1,3) n",(PID,))
     repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
     sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready'")
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Waiting',jpg_ready=[1,3],jpg_preparation_hash='old-package')
     calls=[]
     def resolver(i):
         if i==2:raise ValueError('Variant needs review')

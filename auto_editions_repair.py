@@ -129,7 +129,7 @@ def admit(connect,limit=3):
             continue # A concurrently changed mapping/reset is never guessed.
     return len(rows)
 
-def order_jpgs(connect,record,pid):
+def order_jpgs(connect,record,pid,preparation_hash=None):
     """Repair the product once, then resume all its valid outstanding units."""
     import auto_editions_runtime as runtime
     d=record['detail']
@@ -140,7 +140,8 @@ def order_jpgs(connect,record,pid):
           AND COALESCE(to_jsonb(e)->>'duplicate_allocation_warning','') IN ('','false') ORDER BY id""",(pid,))
         ids=[r['id'] for r in cur.fetchall()]
     if d.get('allocation_id') and d['allocation_id'] not in ids:ids.append(d['allocation_id'])
-    ready=set(d.get('jpg_ready',[]));blocked=dict(d.get('jpg_blocked',{}))
+    same=d.get('jpg_preparation_hash')==preparation_hash
+    ready=set(d.get('jpg_ready',[]) if same else []);blocked=dict(d.get('jpg_blocked',{}) if same else {})
     remaining=[i for i in ids if i not in ready and str(i) not in blocked]
     _,jobs=runtime.stores()
     for allocation in remaining[:10]:
@@ -157,11 +158,11 @@ def order_jpgs(connect,record,pid):
             blocked[str(allocation)]=str(error)[:200]
     if any(i not in ready and str(i) not in blocked for i in ids):
         runtime.start_worker()
-        checkpoint(connect,record,'Waiting','PSD verified; generating all outstanding order JPGs.',jpg_ready=sorted(ready),jpg_blocked=blocked)
+        checkpoint(connect,record,'Waiting','PSD verified; generating all outstanding order JPGs.',jpg_ready=sorted(ready),jpg_blocked=blocked,jpg_preparation_hash=preparation_hash)
     elif blocked:
-        checkpoint(connect,record,'Needs help','PSD verified; some order JPGs need review. Other eligible JPGs have completed.',jpg_ready=sorted(ready),jpg_blocked=blocked)
+        checkpoint(connect,record,'Needs help','PSD verified; some order JPGs need review. Other eligible JPGs have completed.',jpg_ready=sorted(ready),jpg_blocked=blocked,jpg_preparation_hash=preparation_hash)
     else:
-        checkpoint(connect,record,'Complete','PSD verified and all outstanding order JPGs ready.',jpg_ready=sorted(ready),jpg_blocked={})
+        checkpoint(connect,record,'Complete','PSD verified and all outstanding order JPGs ready.',jpg_ready=sorted(ready),jpg_blocked={},jpg_preparation_hash=preparation_hash)
 
 def run_one(connect):
     """One bounded diagnosis/monitor step per existing cloud worker cycle."""
@@ -180,7 +181,7 @@ def run_one(connect):
         if not row or row['dropbox_file_id']!=d['file_id']:
             checkpoint(connect,record,'Needs help','Mapped PSD changed; repair stopped for review.');return True
         if row['status']=='Cloud Ready':
-            order_jpgs(connect,record,pid);return True
+            order_jpgs(connect,record,pid,row.get('preparation_hash'));return True
         from worker_diagnostics import explain
         code=explain(row.get('technical_reason') or row.get('reason'))['code']
         if code in ('PROFILE_MISSING','COLOUR_POLICY_PENDING'):
