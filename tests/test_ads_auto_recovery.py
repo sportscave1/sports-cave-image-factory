@@ -119,6 +119,20 @@ def test_legacy_retry_and_policy_refusal_are_distinct():
     assert transient['resume_stage'] == 'preparing'
 
 
+def test_missing_generation_output_recovers_but_policy_refusal_does_not(monkeypatch):
+    import ads_companion_controls
+    monkeypatch.setattr(ads_companion_controls, 'stopped', lambda _: False)
+    monkeypatch.setattr(ads, 'write', lambda *_: None)
+    value = dict(stage='generating', upload=str(uuid4()),
+        chat_url=ads.PROJECT.removesuffix('/project')+'/c/'+str(uuid4()))
+    with pytest.raises(recovery.RetryAd) as pending:
+        ads._step('key', value, {}, {'state':'blocked', 'reason':'man-cave.jpg is missing'}, 0)
+    assert pending.value.mode == 'complete_missing'
+    with pytest.raises(ValueError) as blocked:
+        ads._step('key', value, {}, {'state':'blocked', 'reason':'Image provider moderation_blocked'}, 0)
+    assert not isinstance(blocked.value, recovery.RetryAd)
+
+
 def test_pending_meta_write_is_observed_without_replaying(monkeypatch):
     import meta_posting_jobs
     import ads_companion_controls

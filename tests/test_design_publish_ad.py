@@ -205,8 +205,9 @@ def test_ads_companion_heartbeat_pause_and_blocked_job_history(store, monkeypatc
                             'reason': 'Dropbox did not return the reference.'}) == {}
     assert ads.tick(token, {}) == {}
     jobs = {job['title']: job for job in ads.dashboard()['jobs']}
-    assert jobs['First']['stage'] == 'failed' and jobs['First']['chat_url'] == chat
-    assert jobs['First']['detail'] == 'Dropbox did not return the reference.'
+    assert jobs['First']['stage'] == 'waiting' and jobs['First']['chat_url'] == chat
+    assert jobs['First']['label'] == 'Automatic recovery scheduled'
+    assert 'Dropbox did not return the reference.' in jobs['First']['detail']
     assert jobs['Second']['stage'] == 'waiting'
     ads.settings(True)
     assert ads.tick(token, {})['job']['id'] == str(second)

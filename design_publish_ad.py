@@ -408,6 +408,8 @@ def _step(key, value, job, event, age):
         if POLICY_BLOCK.search(reason):
             raise ValueError(reason)
         if not value.get('collect_only'):
+            if stage == 'generating' and CHAT.fullmatch(value.get('chat_url', '')):
+                raise RetryAd(reason, code='generation', mode='complete_missing')
             if any(word in reason.lower() for word in ('network', 'temporar', 'timed out', 'interrupted', 'connection')):
                 raise RetryAd(reason, code='generation' if stage == 'generating' else 'handoff',
                               mode='complete_missing' if stage == 'generating' else None)
