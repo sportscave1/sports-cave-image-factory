@@ -21,8 +21,10 @@ def test_reserves_are_dormant_and_preserve_each_missing_slot(country):
     assert prompt.count(VERSION) == 1
     assert prompt.count('\nHEADLINE: ') == 3
     assert prompt.count('\nFOOTER SECOND LINE (') == 3
-    assert 'RESERVE A — OPTIONAL FOURTH CALL: COLLECTOR MAN CAVE' in prompt
-    assert 'RESERVE B — OPTIONAL FIFTH CALL: DARK COLLECTOR STUDIO APARTMENT' in prompt
+    assert 'RESERVE A — REQUIRED WHEN FIRST SLOT IS ELIGIBLE: COLLECTOR MAN CAVE' in prompt
+    assert 'RESERVE B — REQUIRED WHEN SECOND SLOT IS ELIGIBLE: DARK COLLECTOR STUDIO APARTMENT' in prompt
+    assert prompt.index('4. Immediately generate Image 3') < prompt.index('4a. Before final review') < prompt.index('4b. Complete the final creative review') < prompt.index('5. Create and attach')
+    assert 'never end early with an eligible reserve still unused' in prompt
     assert 'small, softly out-of-focus hanging sports keepsakes' in normalise(prompt)
     assert 'If all three images exist, skip this entire reserve section' in normalise(prompt)
     assert "Use Reserve B only if a second distinct original slot" in normalise(prompt)
@@ -60,3 +62,26 @@ def test_safety_and_asset_recovery_do_not_trigger_substitutions():
         assert 'retryable technical failure' in project
         assert 'Reserve A' in project and 'Reserve B' in project
         assert 'moderation_blocked' in project
+
+
+def test_incomplete_delivery_explains_reserve_decision_with_provider_evidence():
+    text = normalise(RULES)
+    assert 'exact provider error code/message, request ID and stage when supplied' in text
+    assert 'whether a reserve was eligible' in text
+    assert 'which reserve was attempted and its actual outcome' in text
+    assert 'Never invent a technical cause' in text
+    assert 'Three eligible failures still permit only A and B' in text
+    assert 'do not merely describe the fallback' in text
+
+
+def test_legends_moderation_status_explains_why_no_reserve_ran():
+    from copy import deepcopy
+    from design_publish_ad import public
+    value = dict(stage='failed', detail='Image provider moderation_blocked. Two covers missing.')
+    frozen = deepcopy(value)
+    status = public(value)
+    assert 'requires review' in status['detail']
+    assert 'Reserve rooms apply only to retryable technical failures' in status['detail']
+    assert not status['active'] and value == frozen
+    technical = public(dict(stage='failed', detail='Temporary capacity error.'))
+    assert technical['detail'] == 'Temporary capacity error.'
