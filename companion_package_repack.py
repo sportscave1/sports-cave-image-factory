@@ -53,6 +53,7 @@ def compact_retained(source,destination,context,generation,max_bytes,*,min_savin
         if len(names)!=len(set(names)) or len(names)>1010 or sum(i.file_size for i in entries)>EXPANDED_BYTES:
             raise ValueError('Retained package inventory changed.')
         if any(Path(n).name!=n or '\\' in n or packet.getinfo(n).file_size>ASSET_BYTES for n in names):raise ValueError('Unsafe retained member.')
+        if packet.getinfo('manifest.json').file_size>1024*1024:raise ValueError('Bounded retained manifest required.')
         manifest=json.loads(packet.read('manifest.json'))
         if ae.fingerprint(manifest)!=record.get('preparation_hash'):raise ValueError('Retained manifest identity changed.')
         if manifest['source']!=context['source'] or manifest['edition_total']!=context['total']:

@@ -49,3 +49,13 @@ def test_small_savings_and_existing_destinations_preserve_packet(tmp_path,monkey
     dest.write_bytes(b'existing')
     assert compact_retained(source,dest,ctx,generation(),LEGACY_BYTES)[0]==source
     assert dest.read_bytes()==b'existing'
+
+
+def test_manifest_is_bounded_before_parsing_or_extracting(tmp_path):
+    import zipfile
+    old=tmp_path/'old';old.mkdir();source=old/'prepared.zip'
+    with zipfile.ZipFile(source,'w') as packet:packet.writestr('manifest.json',b'x'*(1024*1024+1))
+    (old/'package-identity.json').write_text(json.dumps(dict(generation=generation(),sha256=ae.file_hash(source),preparation_hash='a'*64)))
+    dest=tmp_path/'new'/'prepared.zip';dest.parent.mkdir()
+    with pytest.raises(ValueError,match='Bounded retained manifest'):compact_retained(source,dest,{},generation(),LEGACY_BYTES)
+    assert source.exists() and not dest.exists()

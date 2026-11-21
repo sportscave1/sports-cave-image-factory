@@ -58,3 +58,44 @@ The large fixture is 277,954,191 bytes, beyond the legacy 256 MiB boundary.
 First interruption: server-confirmed 8 MiB; local state Awaiting companion restart.
 Final native verification, cleanup, reviewed evidence hash, rollout and queue
 resumption are recorded in the release evidence after completion.
+
+
+## Completed native acceptance
+
+The installed 3f7c5b150a1e9a5ab5c830552f9c01b6d733fd52 Companion resumed the
+same private session after the safe restart. Independent server verification
+finished Cloud Ready: 101 assets, three proofs, matching immutable master
+receipt after the injected partial-publication fault, and exactly one isolated
+expired-session cleanup while preserving the active main package.
+
+Native access logs contain exactly 34 canonical chunk requests for the 34-chunk
+packet: one deliberately lost acknowledgement (HTTP 503 after the first durable
+8 MiB) and 33 successful requests. The same session crossed three Render instances
+without starting a new packet. These are application request observations, not
+raw TCP/TLS wire-byte measurements. Saved native traces retain only six events;
+exact receiver/provider byte totals come from the separately measured loopback
+trial rather than a fabricated native aggregate counter. The resumed native
+fixture completed in 664.37 seconds including independent verification; it is
+not an apples-to-apples healthy-upload speed comparison with the earlier artwork.
+
+Reviewed evidence SHA256:
+231c876ce27181e9af7b2730fb31c853ebc7bf24103f7f9fec9eb1bf8bc853b4.
+The reviewed artifact includes source hashes for the actual protocol modules,
+raw-state and concurrent-create evidence hashes, request counts, cleanup results
+and sampled resources. It is retained outside Git at
+C:/Dev/SportsCaveWorktrees/.studio/runtime/20261121-9f98fab9/reviewed-acceptance.json.
+Native resource samples peaked at 647,925,760 bytes against 2,147,483,600 bytes;
+60-second samples do not establish an instantaneous peak or full-artwork memory
+performance. No compute or image/transfer limits were raised.
+
+Final focused coverage is 84 tests: the 82-test protocol/recovery/compaction suite,
+a real socket disconnect halfway through a later chunk, and the retained-manifest
+bound before parsing/extraction. Final follow-up adds that explicit 1 MiB parser
+bound plus the new test/evidence; preparation generation and native transport
+modules remain unchanged.
+
+After reviewing this evidence, rollout merges only the existing primary service's
+resumable-enabled, large-v2 scope, exact generation, reviewed evidence hash and
+cleared acceptance-run settings. It does not replace other environment values.
+Final deployment, endpoint-disabled check, installed release and queue resumption
+are tracked in the Studio task's release evidence.
