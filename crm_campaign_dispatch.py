@@ -33,7 +33,7 @@ def payload(common,recipient,config):
     if len(message['html'].encode('utf-8'))>LIMIT_BYTES:raise ValueError('Email size limit.')
     return {'from':config.sender,'reply_to':config.reply_to,'to':[address],
             'subject':str(message['subject']).strip(),'html':message['html'],'text':message['text'],
-            'headers':{'List-Unsubscribe':'<'+url+'>'}}
+            'headers':dict(recipient.get('unsubscribe_headers') or {'List-Unsubscribe':'<'+url+'>'})}
 
 
 def persist(conn,key,value):
@@ -112,10 +112,15 @@ def prepare(engine,campaign,content,provider_blocked):
                 if not recipient or recipient_hash(recipient['address'])!=row['recipient_hash']:raise ValueError()
                 from crm_smart_catalogue import enabled as smart_enabled
                 if smart_enabled(content['document']) and not recipient.get('message'):raise ValueError('Missing recipient catalogue snapshot')
+                # Freeze new headers with this batch. Retrying an older manifest
+                # above retains its original headers and provider payload hash.
+                from crm_unsubscribe_headers import headers as unsubscribe_headers
+                recipient=deepcopy(recipient)
+                recipient['unsubscribe_headers']=unsubscribe_headers(engine.config,row['id'],recipient['unsubscribe_url'])
                 mail=payload(common,recipient,sender)
             except (ValueError,KeyError,TypeError):reason=reason or 'invalid_frozen_payload'
             if reason:blocked.append({'id':str(row['id']),'code':reason})
-            else:jobs.append((row,mail,(time.monotonic()-payload_started)*1000))
+            else:jobs.append((row,mail,(time.monotonic()-payload_started)*1000,recipient))
         if blocked:
             conn.execute('''UPDATE crm_marketing_sends s SET status='BLOCKED',error_code=j.code,updated_at=now()
                 FROM jsonb_to_recordset(%s::jsonb) AS j(id uuid,code text) WHERE s.id=j.id''',(json.dumps(blocked),))
@@ -124,13 +129,13 @@ def prepare(engine,campaign,content,provider_blocked):
             group_started=time.monotonic()
             group=jobs[start:start+BATCH_SIZE];key=prefix+str(index)
             state={'campaign_id':str(campaign['id']),'campaign_send_id':str(campaign['campaign_send_id']),
-                'batch_index':index,'recipient_ids':[str(r['id']) for r,_,_ in group],
-                '_payloads':[m for _,m,_ in group],
-                'recipients':[dispatch['recipients'][r['recipient_hash']] for r,_,_ in group],
+                'batch_index':index,'recipient_ids':[str(r['id']) for r,_,_,_ in group],
+                '_payloads':[m for _,m,_,_ in group],
+                'recipients':[recipient for _,_,_,recipient in group],
                 'idempotency_key':f'sports-cave/{campaign["campaign_send_id"]}/batch/{index}',
                 'status':'SUBMITTING','attempt_count':0,'request_started_at':at.isoformat()}
             state['request_hash']=hashlib.sha256(json.dumps(state['_payloads'],sort_keys=True).encode()).hexdigest()
-            state['_prepare_ms']=sum(ms for _,_,ms in group)+(time.monotonic()-group_started)*1000
+            state['_prepare_ms']=sum(ms for _,_,ms,_ in group)+(time.monotonic()-group_started)*1000
             persist(conn,key,state)
             conn.execute("UPDATE crm_marketing_sends SET status='SUBMITTING',request_hash=%s,lease_until=now()+interval '5 minutes',updated_at=now() WHERE id=ANY(%s)",(state['request_hash'],state['recipient_ids']))
             plans.append((key,state))
