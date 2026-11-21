@@ -25,7 +25,7 @@ def replace_unposted(value):
     import design_publish_ad as ads
     from meta_posting_jobs import JOBS
 
-    if value.get('posting_id') or not obsolete(value.get('result')):
+    if value.get('posting_id') or value.get('blocked_collection') or not obsolete(value.get('result')):
         return False
     if value['stage'] in ('complete', 'cancelled', 'failed'):
         return False

@@ -53,6 +53,8 @@ def receive(token, job_id, name, chat_url, response_id, data):
                             detail=progress(value), reused=True)
         if value['stage'] != 'generating' or value.get('posting_id'):
             raise ValueError('This job is not accepting creative files.')
+        if name in (value.get('blocked_collection') or {}).get('excluded', []):
+            raise ValueError('This image slot was rejected; only completed exports may be collected.')
         if value.get('chat_url') != chat_url or (value.get('response_ids') or {}).get(name, response_id) != response_id:
             raise ValueError('The file belongs to a different conversation or response.')
         cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES (%s,%s::jsonb,now())
@@ -105,10 +107,11 @@ def progress(value):
 
 def delivery(value):
     return dict(id=value['upload'], stage=value['stage'], receipt=ads._source_token(value['upload']),
-                repair=value.get('attachment_repair'),
+                repair=None if value.get('blocked_collection') else value.get('attachment_repair'),
                 recover=bool(value.get('collect_only')),resume_token=value.get('resume_token'),response_ids=value.get('response_ids') or {},
                 chat_url=value.get('chat_url'),
-                missing=[name for name in FILES if name not in (value.get('artifacts') or {})])
+                missing=[name for name in FILES if name not in (value.get('artifacts') or {})
+                         and name not in (value.get('blocked_collection') or {}).get('excluded', [])])
 
 
 def resume(job_id, user, settings=None):
@@ -142,6 +145,14 @@ def resume(job_id, user, settings=None):
             raise ValueError('Use the existing Posting receipt to recover a submitted ad.')
         if not value.get('folder') or not ads.CHAT.fullmatch(value.get('chat_url', '')):
             raise ValueError('The original ad conversation and prepared folder are required.')
+        from ads_auto_recovery import POLICY_BLOCK
+        if POLICY_BLOCK.search(str(value.get('detail') or '')):
+            from ads_partial_delivery import begin
+            if not begin(value, str(value['detail'])):
+                raise ValueError('The rejected slots must be identified before collecting completed exports.')
+        if value.get('blocked_collection'):
+            # An explicit Resume Import may retry downloads, never generation.
+            value['blocked_collection'].update(started_at=time.time(), state='collecting')
         value.update(stage='generating', detail=progress(value), collect_only=True,resume_token=str(uuid4()))
         value.pop('timed_stage', None)
         value.pop('dependency_failed_at', None)
