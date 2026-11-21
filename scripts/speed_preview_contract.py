@@ -34,7 +34,7 @@ if synthetic_user:
     account = os_accounts.DEFAULT_STORE.get_user(str(synthetic_user['id']))
     assert os_accounts.account_is_active(account), 'Synthetic account refresh failed'
 day = speed.sydney_day()
-base = dict(id=str(uuid.uuid4()), date=day, section='Synthetic preview fixture',
+base = dict(id='00000000-0000-4000-8000-000000000001', date=day, section='Synthetic preview fixture',
             fingerprint='a' * 64, status='reviewed', summary='Synthetic acceptance report; no production performance claimed.',
             base_sha='a' * 40, measurements=[], tests=['Synthetic PostgreSQL and API contracts'],
             phases=['Verify owner-only report UI'], blockers=[], files=[],
@@ -44,8 +44,11 @@ old = dict(base, date=(dt.date.fromisoformat(day) - dt.timedelta(days=100)).isof
 with connect() as conn:
     conn.execute('INSERT INTO app_settings(key,value) VALUES (%s,%s::jsonb)',
                  (speed.PREFIX + old['date'] + ':' + old['id'], json.dumps(old)))
+historical = dict(base, id='ffffffff-ffff-4fff-bfff-ffffffffffff', status='blocked',
+                  section='Earlier synthetic setup', summary='Historical blocker before successful acceptance.')
+service.publish(historical)
 assert service.publish(base) == service.publish(base)
-assert service.recent() == [base]
+assert service.recent() == [base, historical], 'Random report IDs must not determine same-day chronology'
 try:
     service.publish(dict(base, summary='Must not overwrite immutable evidence'))
 except ValueError:
@@ -55,7 +58,7 @@ else:
 with connect() as conn:
     assert conn.execute("SELECT value FROM app_settings WHERE key='studio_speed_guard'").fetchone()['value'] == {'keep': True}
 storage = service.storage_review()
-assert storage['speed_reports']['reports'] == 1 and not storage['application_data_deleted']
+assert storage['speed_reports']['reports'] == 2 and not storage['application_data_deleted']
 
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -68,7 +71,7 @@ assert client.get('/api/speed/companion').status_code == 403
 headers = {'Authorization': 'Bearer ' + token}
 response = client.post('/api/speed/companion', json=base, headers=headers)
 assert response.status_code == 200 and response.json()['published'] == base['id']
-assert client.get('/api/speed/companion', headers=headers).json()['reports'] == [base]
+assert client.get('/api/speed/companion', headers=headers).json()['reports'] == [base, historical]
 assert client.post('/api/speed/companion', json={'execute': 'forbidden'}, headers=headers).status_code == 400
 
 # Reuse exactly the immutable entry guards without starting another application.
