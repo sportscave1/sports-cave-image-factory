@@ -7221,6 +7221,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
+    "Speed Optimisation": ":material/speed:",
     "Worker Health": ":material/monitor_heart:",
     "Upload Companion": ":material/upload:",
     "Task Recorder": ":material/videocam:",
@@ -7271,7 +7272,7 @@ def _active_sidebar_group(route):
         return "website"
     if route in {"Worker Health", "Upload Companion"}:
         return "companion"
-    if route in {"Developer", "Developer Studio", "Task Recorder", "Image Protection"}:
+    if route in {"Developer", "Developer Studio", "Task Recorder", "Image Protection", "Speed Optimisation"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
@@ -7462,7 +7463,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             child_button(children, 'Upload Companion', 'Companion Queues', icon=SIDEBAR_ICON_BY_ROUTE['Upload Companion'])
         if 'Worker Health' in allowed_routes:
             child_button(children, 'Worker Health', 'Editions Companion', icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
-    if ({'Task Recorder', 'Developer', 'Developer Studio'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
+    if ({'Task Recorder', 'Developer', 'Developer Studio', 'Speed Optimisation'}.intersection(allowed_routes) or 'Image Protection' in history_routes) and disclosure(
         'developer','Developer',':material/developer_mode:','Developer',
         can_open_overview='Developer' in allowed_routes,
     ):
@@ -7470,6 +7471,8 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
         if 'Task Recorder' in allowed_routes:
             child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
+        if 'Speed Optimisation' in allowed_routes:
+            child_button(children, 'Speed Optimisation', 'Speed Optimisation', icon=SIDEBAR_ICON_BY_ROUTE['Speed Optimisation'])
         if 'Image Protection' in history_routes:
             child_button(children, 'Image Protection', 'Image Protection', icon=SIDEBAR_ICON_BY_ROUTE['Image Protection'])
         if 'Developer Studio' in allowed_routes:
@@ -13870,6 +13873,9 @@ def render_selected_page(current_page):
         render_page(current_os_user())
     elif current_page == "Developer Studio":
         from developer_studio_page import render_page
+        render_page(current_os_user())
+    elif current_page == "Speed Optimisation":
+        from speed_optimisation_page import render_page
         render_page(current_os_user())
     elif current_page == 'Worker Health':
         from worker_health_page import render_page

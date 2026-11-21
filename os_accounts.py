@@ -50,6 +50,7 @@ REPORTING_OWNER_ENV_KEYS = (
 PAGE_REGISTRY = (
     {"key": "marketplace", "route": "Marketplace", "label": "Marketplace", "worker_assignable": False, "top_level": True},
     {"key": "prompts", "route": "Prompts", "label": "Prompts", "worker_assignable": False, "top_level": True},
+    {"key": "speed_optimisation", "route": "Speed Optimisation", "label": "Speed Optimisation", "worker_assignable": False, "top_level": True},
     {"key": "task_recorder", "route": "Task Recorder", "label": "Task Recorder", "worker_assignable": False, "top_level": True},
     {"key": "worker_health", "route": "Worker Health", "label": "Editions Companion", "worker_assignable": False, "top_level": True},
     {"key": "upload_companion", "route": "Upload Companion", "label": "Companion Queues", "worker_assignable": False, "top_level": True},
@@ -436,7 +437,7 @@ def can_access_page(user, route_or_key):
     page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
-    if page and page["key"] == "developer_studio":
+    if page and page["key"] in {"developer_studio", "speed_optimisation"}:
         return is_reporting_owner(user)
     if page and page['key'] in {'worker_health', 'upload_companion', 'task_recorder', 'prompts', 'marketplace'}:return is_admin(user)
     if page and page['key']=='crm_settings_view':

@@ -35,6 +35,7 @@ from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
 from website_recommendation_analytics import ROUTES as WEBSITE_RECOMMENDATION_ROUTES
 from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
 from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
+from speed_optimisation_api import ROUTES as SPEED_OPTIMISATION_ROUTES
 from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
 from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
 from marketplace_api import ROUTES as MARKETPLACE_ROUTES
@@ -54,6 +55,7 @@ routes = [
         *WEBSITE_RECOMMENDATION_ROUTES,
         *AUTO_EDITIONS_BULK_ROUTES,
         *WORKER_HEALTH_ROUTES,
+        *SPEED_OPTIMISATION_ROUTES,
         *PRODUCT_UPLOAD_ROUTES,
         *TASK_RECORDER_ROUTES,
         *MARKETPLACE_ROUTES,
