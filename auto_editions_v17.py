@@ -26,14 +26,23 @@ def dashboard(rows,mapped):
 
 
 def receipt_sql(alias):
+    # Expand patch names once per preparation, rather than once per receipt.
+    # UNION keeps the name join one-to-one. Preserve the original NULL truth
+    # table as well; full manifest/approval validation remains a separate fence.
     if alias not in ('p','prep'):raise ValueError('Fixed preparation SQL alias required.')
     total=f"(CASE WHEN {alias}.manifest->>'edition_total' ~ '^[1-9][0-9]{{0,3}}$' THEN ({alias}.manifest->>'edition_total')::int ELSE 0 END)"
     assets=f"CASE WHEN jsonb_typeof({alias}.receipts->'assets')='array' THEN {alias}.receipts->'assets' ELSE '[]'::jsonb END"
     return f"""COALESCE({alias}.receipts->>'preparation_hash'={alias}.hash AND
-      (SELECT count(*)={total}+1 AND count(DISTINCT a->>'name')={total}+1
+        (WITH allowed_names AS MATERIALIZED (
+           SELECT {alias}.manifest->'master'->>'name' AS name
+           UNION
+           SELECT patch.value->>'name'
+           FROM jsonb_each(CASE WHEN jsonb_typeof({alias}.manifest->'patches')='object'
+             THEN {alias}.manifest->'patches' ELSE '{{}}'::jsonb END) patch
+         )
+         SELECT count(*)={total}+1 AND count(DISTINCT a->>'name')={total}+1
         AND count(DISTINCT a->>'file_id')={total}+1
         AND bool_and(left(COALESCE(a->>'file_id',''),3)='id:' AND COALESCE(a->>'revision','')<>''
-          AND (a->>'name'={alias}.manifest->'master'->>'name' OR EXISTS(
-            SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof({alias}.manifest->'patches')='object' THEN {alias}.manifest->'patches' ELSE '{{}}'::jsonb END) patch
-            WHERE patch.value->>'name'=a->>'name')))
-       FROM jsonb_array_elements({assets}) a),false)"""
+            AND (allowed_names.name IS NOT NULL OR a->>'name'={alias}.manifest->'master'->>'name'))
+         FROM jsonb_array_elements({assets}) a
+         LEFT JOIN allowed_names ON allowed_names.name=a->>'name'),false)"""

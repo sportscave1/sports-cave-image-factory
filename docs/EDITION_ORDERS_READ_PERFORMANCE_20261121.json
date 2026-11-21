@@ -1,0 +1,145 @@
+{
+  "task": "20261121-8f67f59e",
+  "owner": "codex-01a1fb88-edition-orders-performance",
+  "base": "106c6114",
+  "state": "Validated for user-authorized live release",
+  "production_scope": [
+    "auto_editions_v17.py: expand allowed receipt names once per preparation instead of once per receipt; preserve counts, identity and SQL NULL decisions",
+    "auto_editions_status.py: omit intake-only manifest/approval columns when technical projection returns before using them"
+  ],
+  "preserved": [
+    "edition numbering and sales calculations",
+    "allocation/source/approval/receipt fences",
+    "repair and cancellation behavior",
+    "download/Open JPG policy",
+    "unsaved edits and save/Shopify-sync controls",
+    "authentication and permissions",
+    "service identities, plans and database schema"
+  ],
+  "read_only_live_comparison": {
+    "preparations": 286,
+    "before_valid": 286,
+    "after_valid": 286,
+    "differences": 0,
+    "query_execution_ms": {
+      "before": 2169.141,
+      "after": 344.42
+    },
+    "note": "One read-only EXPLAIN ANALYZE comparison; server aggregate output only, not a full-page speed claim. No records or credentials copied into development."
+  },
+  "synthetic_postgres_benchmark": [
+    {
+      "preparations": 8,
+      "editions_each": 100,
+      "before_median_ms": 6.027,
+      "after_median_ms": 3.316
+    },
+    {
+      "preparations": 8,
+      "editions_each": 500,
+      "before_median_ms": 61.783,
+      "after_median_ms": 11.697
+    },
+    {
+      "preparations": 8,
+      "editions_each": 1000,
+      "before_median_ms": 198.525,
+      "after_median_ms": 20.982
+    }
+  ],
+  "tests": [
+    {
+      "suite": "runtime, scoped readiness, status, V17 and receipt differential",
+      "passed": 67,
+      "failed": 4,
+      "skipped": 1,
+      "note": "All four existing status-label/count assertions reproduced on unmodified 106c6114."
+    },
+    {
+      "suite": "receipt differential, technical completion, Orders V20/bounded reader, allocation integrity, table editing, edition controls",
+      "passed": 100,
+      "subtests_passed": 18,
+      "failed": 0
+    },
+    {
+      "suite": "API, eligibility, speed, repair, row identity, badges and Edition Ops stability/catalogue/recovery",
+      "passed": 105,
+      "subtests_passed": 11,
+      "failed": 8,
+      "note": "All eight failures reproduced on unmodified 106c6114. Existing PSD-link assertion, incomplete settings mock and six onboarding-verification mocks. No new failures."
+    },
+    {
+      "suite": "final receipt differential, Orders preparation, status, runtime and Render topology",
+      "passed": 61,
+      "failed": 0,
+      "skipped": 1
+    }
+  ],
+  "browser": {
+    "isolation": "Headless Edge against loopback-only synthetic components; server environment allowlisted, external server sockets blocked; no full application preview or production writes",
+    "edition_ops": {
+      "initialMs": 1100,
+      "search": {
+        "ms": 358,
+        "fullRuns": 0,
+        "loads": 0
+      },
+      "sampledSearchFrames": 46,
+      "dialogMs": 231,
+      "archive": {
+        "ms": 119,
+        "fullRuns": 0
+      },
+      "warmReturnMs": 260
+    },
+    "orders": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "tableY": 245.59375,
+        "headingY": 80,
+        "tableHeight": 760,
+        "readyMs": 2600
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "tableY": 245.59375,
+        "headingY": 80,
+        "tableHeight": 656,
+        "readyMs": 2552
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "tableY": 245.59375,
+        "headingY": 80,
+        "tableHeight": 476,
+        "readyMs": 2041
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "mobileCards": true,
+        "searchAndSelection": true,
+        "readyMs": 6146
+      }
+    ],
+    "artifacts": ".local/performance-checks",
+    "harness_notes": [
+      "Existing Edition Ops browser harness adapted to current 28px row height. Its full-app responsive assertion was not used against the component-only shell.",
+      "Orders fixture mocks kept installed across fragment reruns; mobile checks use the current card layout rather than the old desktop-grid-only assertion.",
+      "Orders browser checks used the current mobile checkbox label/card layout; external host resolution blocked. No production UI source was modified."
+    ]
+  },
+  "validation": [
+    "Python compilation passed",
+    "git diff --check passed",
+    "Render topology validation passed"
+  ],
+  "limits": [
+    "Measured query speed is not an end-to-end page-load guarantee.",
+    "Existing unrelated suite failures are documented, not presented as a wholly green repository.",
+    "No new cache TTL, permission cache, plan change, migration or background service is introduced."
+  ]
+}

@@ -231,7 +231,9 @@ def batch(connect, ids, *, writable=False, evidence=False):
                    visual_join="LEFT JOIN (SELECT DISTINCT ON(preparation_hash) preparation_hash,detail FROM auto_edition_setup_audit WHERE event='automatic_visual_assessment' ORDER BY preparation_hash,id DESC) va ON va.preparation_hash=prep.hash" if __import__('auto_editions_visual').enabled() and not technical_enabled() else '')
     start=time.perf_counter()
     from product_upload_services import enabled as intake_enabled
-    if intake_enabled():
+    # Technical projection returns before intake-only approval is considered.
+    # Do not transfer every patch manifest for that unused branch on each poll.
+    if intake_enabled() and not technical_enabled():
         sql=sql.replace(' FROM unnest', ",prep.manifest AS intake_manifest,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.variant_id='*' AND l.preparation_hash=prep.hash AND l.approval->>'method'='product-upload-technical-v1') AS intake_approval FROM unnest",1)
     with connect() as conn,conn.cursor() as cur:
         cur.execute(sql,(ids,));raw=cur.fetchall()
