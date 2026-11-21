@@ -892,11 +892,11 @@ def process_posting_csv_upload(
 
 def _posting_form_ready(
     *, product_title, product_url, creatives, country, sport,
-    catalog_id, product_set_id, dataset_id, identities_ready,
+    catalog_id, product_set_id, dataset_id, identities_ready, expected_ads=3,
 ):
     return bool(
         product_title and product_url and country and sport and catalog_id and product_set_id
-        and dataset_id and identities_ready and len(tuple(creatives or ())) == 3
+        and dataset_id and identities_ready and expected_ads in (2, 3) and len(tuple(creatives or ())) == expected_ads
         and all(
             creative.get("image") and not creative.get("image_error")
             and str(creative.get("primary_text") or "").strip()
@@ -953,10 +953,12 @@ def _build_posting_request(
     ad_type=AD_TYPE,
     carousel_cards=(),
     carousel_primary_texts=(),
+    partial_pack=False,
 ):
     """Map reviewed local creative state into the existing Meta request contract."""
 
     return PostingRequest(
+        partial_pack=partial_pack,
         submission_id=submission_id,
         product_id=product_id,
         product_title=product_title,
@@ -1530,9 +1532,9 @@ def _render_success(result, *, compact=False):
             if carousel_mode and is_existing_mode
             else "1 Meta carousel ad created successfully — PAUSED"
             if carousel_mode
-            else "3 Meta ads added successfully — PAUSED"
+            else f"{len(posting_ad_results(result.get('ad_results')))} Meta ads added successfully — PAUSED"
             if is_existing_mode
-            else SUCCESS_MESSAGE
+            else '2 Meta ads created successfully — PAUSED' if len(posting_ad_results(result.get('ad_results'))) == 2 else SUCCESS_MESSAGE
         )
         _render_object_result(
             result,

@@ -806,6 +806,7 @@ class PostingRequest:
     carousel_cards: tuple[CarouselCard, ...] = ()
     carousel_primary_texts: tuple[str, ...] = ()
     carousel_card_count: int = CAROUSEL_CARD_COUNT
+    partial_pack: bool = False
 
 
 def normalize_account_id(value):
@@ -966,14 +967,18 @@ def _request_fingerprint(clean):
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def posting_ad_results(value, *, ad_names=()):
-    """Return three stable per-ad ledger entries, tolerating legacy/JSON rows."""
+def posting_ad_results(value, *, ad_names=(), expected_count=None):
+    """Normalize durable entries; old ledgers retain the three-ad default."""
 
     if isinstance(value, str):
         try:
             value = json.loads(value)
         except (TypeError, ValueError, json.JSONDecodeError):
             value = []
+    if expected_count is None:
+        expected_count = 2 if (len(value or ()) == 2 and all(isinstance(row, dict) and row.get('expected_ad_count') == 2 for row in value)) else 3
+    if expected_count not in (2, 3):
+        raise PostingValidationError('The posting ledger requires two or three ads.')
     existing = {}
     for row in value or ():
         if not isinstance(row, dict):
@@ -986,8 +991,10 @@ def posting_ad_results(value, *, ad_names=()):
             existing[index] = dict(row)
     names = tuple(str(name or "") for name in ad_names)
     results = []
-    for index in range(1, 4):
+    for index in range(1, expected_count + 1):
         row = existing.get(index, {})
+        if expected_count == 2:
+            row['expected_ad_count'] = 2
         row.setdefault("index", index)
         row.setdefault("ad_name", names[index - 1] if len(names) >= index else "")
         row.setdefault("instant_experience_name", f"{row['ad_name']} | Storefront" if row["ad_name"] else "")
@@ -1188,7 +1195,8 @@ def validate_posting_request(request):
         raise PostingValidationError("Select a product from Edition Ops.")
     destination_url = validate_destination_url(request.destination_url)
     raw_creatives = tuple(request.creatives or ())
-    if len(raw_creatives) != 3:
+    partial_pack = getattr(request, 'partial_pack', False) is True
+    if len(raw_creatives) != (2 if partial_pack else 3):
         raise PostingValidationError("Provide exactly three complete ads.")
     creatives = []
     for index, creative in enumerate(raw_creatives, start=1):
@@ -3231,9 +3239,9 @@ class MetaPostingService:
             else adset_name(clean["country"], clean["sport"], audience_label)
         )
         proposed_ad_names = next_instant_experience_ad_names(
-            clean["product_title"], existing_ad_names, count=3
+            clean["product_title"], existing_ad_names, count=len(clean['creatives'])
         )
-        initial_ad_results = posting_ad_results((), ad_names=proposed_ad_names)
+        initial_ad_results = posting_ad_results((), ad_names=proposed_ad_names, expected_count=len(clean['creatives']))
         fingerprint = _request_fingerprint(clean)
         submission_id = str(request.submission_id)
         claim = self.store.claim(
@@ -3354,7 +3362,7 @@ class MetaPostingService:
         campaign_label = str(record.get("campaign_name") or campaign_label)
         adset_label = str(record.get("adset_name") or adset_label)
         ad_results = posting_ad_results(
-            record.get("ad_results"), ad_names=proposed_ad_names
+            record.get("ad_results"), ad_names=proposed_ad_names, expected_count=len(clean['creatives'])
         )
         active_ad_index = None
 
