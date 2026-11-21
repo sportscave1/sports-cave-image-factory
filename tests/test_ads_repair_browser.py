@@ -6,7 +6,8 @@ pw=pytest.importorskip('playwright.sync_api')
 
 
 @pytest.mark.parametrize('paragraph_paste', [False, True])
-def test_repair_send_once_drafts_and_response_isolation(paragraph_paste):
+@pytest.mark.parametrize('mode', [None, 'complete_missing'])
+def test_repair_send_once_drafts_and_response_isolation(paragraph_paste, mode):
     root=Path(__file__).resolve().parents[1]/'windows-upload-companion'
     jid,rid=str(uuid4()),str(uuid4())
     url='https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/c/'+jid
@@ -43,7 +44,7 @@ def test_repair_send_once_drafts_and_response_isolation(paragraph_paste):
             }""")
         def request(kind='status',**extra):
             return page.evaluate("m=>new Promise(r=>listeners[0](m,{id:'fixture'},r))",
-                dict(type='project:ad-repair-'+kind,job=jid,repair=rid,chat=url,names=['ad_copy.csv'],**extra))
+                dict(type='project:ad-repair-'+kind,job=jid,repair=rid,chat=url,names=['ad_copy.csv'],mode=mode,**extra))
         assert request()['ready']
         assert not request('send')['found']
         assert page.evaluate('sends')==0
@@ -53,12 +54,17 @@ def test_repair_send_once_drafts_and_response_isolation(paragraph_paste):
         page.locator('#prompt-textarea').fill('')
         assert request('send',permit=True)['found']
         sent_prompt=page.locator('#turns [data-message-author-role="user"]').last.inner_text()
-        assert 'download recovery only' in sent_prompt
-        assert 'do not generate, recreate, redraw, restyle or replace an image' in sent_prompt
-        assert 'change the three-line footer' in sent_prompt
-        assert 'otherwise recreate' not in sent_prompt
-        assert 'all four required files exist' in sent_prompt
-        assert 'end with SC_AD_BLOCKED:' in sent_prompt
+        if mode == 'complete_missing':
+            assert 'Complete ONLY these missing deliverables: ad_copy.csv' in sent_prompt
+            assert 'Do not restart the job or regenerate completed artwork' in sent_prompt
+            assert 'Do not retry, rephrase around or bypass a provider safety or policy rejection' in sent_prompt
+        else:
+            assert 'download recovery only' in sent_prompt
+            assert 'do not generate, recreate, redraw, restyle or replace an image' in sent_prompt
+            assert 'change the three-line footer' in sent_prompt
+            assert 'otherwise recreate' not in sent_prompt
+            assert 'all four required files exist' in sent_prompt
+            assert 'end with SC_AD_BLOCKED:' in sent_prompt
         assert request('send',permit=True)['found']
         assert page.evaluate('sends')==1
         # Even if virtualized history hides the sent marker, the session journal

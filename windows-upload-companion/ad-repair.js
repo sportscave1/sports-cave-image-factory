@@ -11,6 +11,13 @@
   const keyFor=m=>'sc-ad-repair:'+m.repair;
   function promptFor(m) {
     if(!Array.isArray(m.names) || !m.names.length || m.names.some(n=>!files.includes(n)))return '';
+    if(m.mode==='complete_missing')return 'Sports Cave automatic ad job '+m.job+'\nSC_AD_REPAIR: '+m.repair+'\n'+
+      'Continue this interrupted ad workflow in this same chat. Complete ONLY these missing deliverables: '+m.names.join(', ')+'. '+
+      'First recover any existing original exports or associated Library files. If a listed deliverable was never completed because of a temporary interruption, finish only that deliverable using the original job brief and verified Black-frame reference already in this chat. '+
+      'Preserve all files already delivered, their artwork, copy, filenames, CSV schema, three-line footer, targeting and 1024x1024 JPEG dimensions. Do not restart the job or regenerate completed artwork. '+
+      'Do not retry, rephrase around or bypass a provider safety or policy rejection. If one occurred, report its exact blocker instead. '+
+      'Attach actual downloadable originals with exactly the requested filenames and a table of their original Library links when available. Do not create ads, activate campaigns or modify products. '+
+      'Emit SC_AD_READY: '+m.job+' only after verifying every required file is readable. Otherwise emit SC_AD_BLOCKED: with the exact unfinished checkpoint.';
     return 'Sports Cave automatic ad job '+m.job+'\nSC_AD_REPAIR: '+m.repair+'\n'+
       'Repair the broken attachment downloads in this same chat. Restore ONLY these missing files: '+m.names.join(', ')+'. '+
       'Recover the existing original bytes from this job’s completed exports or their associated Library files. This is download recovery only: do not generate, recreate, redraw, restyle or replace an image, rewrite copy, change the three-line footer or use a reserve room. Preserve the approved design, copy, CSV schema, targeting and 1024x1024 JPEG dimensions. '+

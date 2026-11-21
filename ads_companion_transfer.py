@@ -129,6 +129,8 @@ def resume(job_id, user, settings=None):
             raise ValueError('Ad job not found.')
         value = row['value']
         value.pop('catalog_retry', None)
+        value.pop('auto_recovery', None)
+        value.pop('resume_stage', None)
         if value.get('attachment_repair'):
             value.setdefault('attachment_repair_history', []).append(value.pop('attachment_repair'))
         if settings is not None:

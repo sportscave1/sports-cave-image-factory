@@ -58,7 +58,7 @@ def test_posting_deadline_survives_polling_and_restart(checkpoint, monkeypatch):
     ads._step('key', value, {}, {}, 0)
     value = deepcopy(value)
     clock[0] += 1801
-    with pytest.raises(ValueError, match='Posting needs review'):
+    with pytest.raises(ValueError, match='Restoring original posting inputs'):
         ads._step('key', value, {}, {}, 0)
 
 

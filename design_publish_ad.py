@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from urllib.parse import quote, urlencode
 from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
 
+from ads_auto_recovery import RetryAd
 from ads_image_contracts import INSTANT_EXPERIENCE_CONCEPTS
 from product_upload_staff_queue import connect, digest
 
@@ -81,7 +82,9 @@ def public(value):
     if not value:
         return None
     generating = value['stage']=='generating' and value.get('chat_generating') and time.time()-value.get('chat_observed_at', 0)<120
-    return dict(label=('Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
+    retry = value.get('auto_recovery') or {}
+    return dict(label=('Automatic recovery scheduled' if value['stage']=='waiting' and retry.get('state')=='scheduled' else
+                       'Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
                        'ChatGPT is thinking / generating' if generating else
                        'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else
                        'Restoring missing ad attachments' if value.get('attachment_repair', {}).get('state') in ('ready','sending','submitted') and value['stage']=='generating' else
@@ -137,7 +140,7 @@ def dashboard(job_id=None):
                          stage=value['stage'], control_action=row['control'] or '', chat_url=value.get('chat_url'), targeting=value.get('targeting'),
                          can_play=value['stage'] in ('waiting','failed','cancelled'), can_cancel=value['stage'] not in ('complete','cancelled'),
                          resumable=value['stage'] in ('failed','generating') and bool(value.get('chat_url') and value.get('folder')) and not value.get('posting_id'))
-            if value['stage'] == 'waiting' and row['upload_stage'] == 6:
+            if value['stage'] == 'waiting' and row['upload_stage'] == 6 and not value.get('auto_recovery'):
                 entry['label'] = 'Ready for the ad queue' if enabled else 'Ready · queue paused'
             elif value['stage'] == 'waiting' and row['upload_stage'] == 7:
                 entry['label'] = 'Product upload needs attention'
@@ -399,11 +402,19 @@ def _step(key, value, job, event, age):
         if not value.get('handoff_started_at'):
             value['handoff_started_at'] = time.time() - age
         write(key, value)
-    if stage in ('opening', 'generating') and not value.get('collect_only') and event.get('state') in ('failed', 'blocked'):
-        raise ValueError(str(event.get('reason') or 'Check the Meta Ads conversation for the blocked step.')[:600])
+    if stage in ('opening', 'generating') and event.get('state') in ('failed', 'blocked'):
+        from ads_auto_recovery import POLICY_BLOCK
+        reason = str(event.get('reason') or 'Check the Meta Ads conversation for the blocked step.')[:600]
+        if POLICY_BLOCK.search(reason):
+            raise ValueError(reason)
+        if not value.get('collect_only'):
+            if any(word in reason.lower() for word in ('network', 'temporar', 'timed out', 'interrupted', 'connection')):
+                raise RetryAd(reason, code='generation' if stage == 'generating' else 'handoff',
+                              mode='complete_missing' if stage == 'generating' else None)
+            raise ValueError(reason)
     if stage == 'opening':
         if time.time() - value.get('handoff_started_at', time.time() - age) > 3600:
-            raise ValueError('The desktop could not confirm the existing ChatGPT conversation. Reconnect the companion; do not resend the prompt.')
+            raise RetryAd('The desktop could not confirm the existing ChatGPT conversation. Rechecking its saved send receipt without resending the prompt.', code='handoff')
         return dict(id=value['upload'], project=PROJECT, receipt=_source_token(value['upload']),
                     prompt=value['prompt'], stage=stage)
     if stage == 'generating':
@@ -417,8 +428,14 @@ def _step(key, value, job, event, age):
             value.update(chat_generating=event['generating'], chat_observed_at=now, chat_activity=event.get('activity'))
             if event.get('finished') is True and not event['generating']:
                 value.setdefault('chat_finished_at', now)
+                if event.get('activity') != value.get('last_finished_activity'):
+                    value.update(last_finished_activity=event.get('activity'), last_finished_at=now)
             write(key, value)
         if float((value.get('catalog_retry') or {}).get('next_at', 0)) > time.time():
+            from ads_auto_recovery import schedule
+            schedule(value, 'Waiting for the existing Meta catalogue sync', code='catalogue',
+                     delay=value['catalog_retry']['next_at']-time.time())
+            write(key, value)
             return {}
         transfer_detail = str(event.get('transfer_detail') or '')[:600]
         from ads_attachment_repair import advance as advance_repair
@@ -428,10 +445,18 @@ def _step(key, value, job, event, age):
                             value.get('chat_finished_at', 0))
         idle = time.time() - (last_progress or value['stage_started_at'])
         repair_event = event
+        repair = value.get('attachment_repair') or {}
+        if (repair.get('state') == 'submitted' and idle > 300 and
+                event.get('chat_url') == value.get('chat_url') and
+                event.get('finished') is True and event.get('generating') is False and
+                event.get('activity') != repair.get('start_activity')):
+            repair_event = {**event, 'transfer_failed': True, 'repair_id': repair['id']}
         if (idle > 300 and value.get('chat_generating') is False and
                 (value.get('chat_finished_at') or value.get('artifacts')) and
                 not value.get('attachment_repair') and CHAT.fullmatch(value.get('chat_url', ''))):
             repair_event = {**event, 'transfer_failed': True}
+        if value.pop('completion_needed', False):
+            repair_event = {**repair_event, 'complete_missing': True, 'transfer_failed': True}
         repair_send = advance_repair(value, repair_event)
         if value.get('attachment_repair'):
             write(key, value)
@@ -447,13 +472,12 @@ def _step(key, value, job, event, age):
         except CatalogPending as error:
             now = time.time()
             retry = value.setdefault('catalog_retry', {'started_at': now, 'attempts': 0})
-            if now - retry['started_at'] >= 86400:
-                raise ValueError('Meta catalogue membership is still unverified after 24 hours. '
-                                 'All four files are saved. Check the Shopify Meta sync and product-set rules, then Resume import.') from error
             retry['attempts'] += 1
             delay = min(900, 60 * 2 ** min(retry['attempts'] - 1, 4))
             retry.update(next_at=now + delay, reason=str(error))
-            value.update(collect_only=True, detail=f'All ad files are saved. Waiting for Meta catalogue membership; checking again in {delay // 60} min. No regeneration needed.')
+            from ads_auto_recovery import schedule
+            value['collect_only'] = True
+            schedule(value, str(error), code='catalogue', delay=delay)
             write(key, value)
             return {}
         if request:
@@ -470,16 +494,37 @@ def _step(key, value, job, event, age):
             value.update(timed_stage=stage, stage_started_at=time.time())
             write(key, value)
         elif stage_age > 21600:
-            raise ValueError('Ad generation exceeded six hours. Saved files and the original chat are preserved; review the incomplete files before resuming.')
+            raise RetryAd('Ad generation exceeded six hours; retrying the saved chat.', code='generation', mode=None if value.get('collect_only') else 'complete_missing')
         elif time.time() - value.get('last_chat_activity_at', value['stage_started_at']) > 7200:
-            raise ValueError('The three covers and ad copy did not arrive in Dropbox. Check the Meta Ads conversation.')
+            raise RetryAd('The three covers and ad copy did not arrive; retrying the saved chat.', code='generation', mode=None if value.get('collect_only') else 'complete_missing')
     if stage == 'posting':
         row = JOBS.snapshot(value['posting_id'])
         if row.get('status') == 'COMPLETE' and confirmed_ads(row) == (3, 3):
             value.update(stage='complete', detail='')
+            if value.get('auto_recovery'):
+                value['auto_recovery'].update(state='complete', completed_at=time.time())
             write(key, value)
         elif row.get('status') in TERMINAL or (stage_age > 1800 and not row.get('running_here') and not row.get('lease_active')):
-            raise ValueError('Meta Posting needs review. Open the saved posting job to check its receipts.')
+            from ads_auto_recovery import posting_can_resume, schedule
+            from meta_posting_recovery import requires_reconciliation
+            if posting_can_resume(row):
+                # Rebuild from the same verified file receipts and frozen targeting.
+                # The service owns reconciliation and reuses all completed IDs.
+                request = _post_request(value)
+                if request is None:
+                    raise RetryAd('Restoring original posting inputs', code='posting')
+                if str(request.submission_id) != value['posting_id']:
+                    raise ValueError('The saved posting identity does not match this ad.')
+                JOBS.resume(request)
+                schedule(value, row.get('safe_error') or 'Continuing saved posting operations', code='posting')
+                write(key, value)
+            elif requires_reconciliation(row) or row.get('status') == 'AMBIGUOUS':
+                # Monitor the durable outcome automatically; never replay a write
+                # whose provider acceptance is unknown.
+                schedule(value, 'Checking the existing Meta submission for a reconciled outcome; no duplicate ads will be created.', code='reconciliation', delay=900)
+                write(key, value)
+            else:
+                raise ValueError('Meta Posting cannot resume because its saved objects were removed or changed. Open its existing receipt.')
         return {}
     if stage == 'generating':
         from ads_companion_transfer import delivery
@@ -515,8 +560,13 @@ def tick(token, event):
                               AND c.value->>'action' IN ('cancel','delete'))
               AND (a.value->>'stage' IN ('preparing','opening','generating','posting')
                OR (a.value->>'stage'='waiting' AND
-                   ((j.stage=6 OR a.value->>'source'='new_ads') AND %s)))
-            ORDER BY (a.value->>'stage'='waiting') ASC, a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled))
+                   ((j.stage=6 OR a.value->>'source'='new_ads') AND %s
+                    AND (NOT (a.value ? 'auto_recovery') OR
+                         COALESCE((a.value->'auto_recovery'->>'next_at')::double precision,0)<=EXTRACT(EPOCH FROM now()))))
+               OR (a.value->>'stage'='failed' AND %s AND NOT (a.value ? 'recovery_checked_version')))
+            ORDER BY CASE WHEN a.value->>'stage' IN ('preparing','opening','generating','posting') THEN 0
+                          WHEN a.value->>'stage'='failed' THEN 1 ELSE 2 END,
+                     a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled, enabled))
         job = cur.fetchone()
         if not job:
             return {}
@@ -546,8 +596,18 @@ def tick(token, event):
         cur.execute('''SELECT 1 FROM app_settings WHERE key=%s
             AND value->>'stage'='waiting' AND value ? 'resume_stage' ''', (PREFIX+reported,))
         deferred_report = reported != value['upload'] and cur.fetchone() is not None
+        recovering = False
+        if value['stage'] == 'failed':
+            from ads_auto_recovery import legacy
+            legacy(value)
+            cur.execute('UPDATE app_settings SET value=%s::jsonb, updated_at=now() WHERE key=%s', (json.dumps(value), key))
         if value['stage'] == 'waiting' and job['stage'] == 6:
-            value['stage'] = value.pop('resume_stage', 'preparing')
+            if (value.get('auto_recovery') or {}).get('state') == 'scheduled':
+                from ads_auto_recovery import activate
+                activate(value)
+                recovering = True
+            else:
+                value['stage'] = value.pop('resume_stage', 'preparing')
             age = 0
             cur.execute('UPDATE app_settings SET value=%s::jsonb, updated_at=now() WHERE key=%s',
                         (json.dumps(value), key))
@@ -561,26 +621,28 @@ def tick(token, event):
         requester = DEFAULT_STORE.get_user(value['requester'])
         if not requester or not all(can_access_page(requester, page) for page in ('Ads', 'Posting', 'Files')):
             raise ValueError('The requesting account no longer has Ads, Posting and Files access.')
-        delivered = event if event.get('id') == value['upload'] else {}
+        delivered = event if event.get('id') == value['upload'] and not recovering else {}
         response = {'job': _step(key, value, job, delivered, age)}
         if value.pop('dependency_failed_at', None) is not None:
             write(key, value)
         return response
+    except RetryAd as error:
+        from ads_auto_recovery import schedule
+        schedule(value, str(error), code=error.code, mode=error.mode)
+        write(key, value)
+        return {}
     except ValueError as error:
+        value['recovery_checked_version'] = 1
         value.pop('prompt', None)
         value.update(stage='failed', detail=str(error)[:600])
         write(key, value)
         return {}
     except Exception:
         LOG.warning('Publish + ad could not advance; retaining the saved checkpoint', exc_info=True)
-        first_failure = value.setdefault('dependency_failed_at', time.time() - age)
-        if time.time() - first_failure > 7200:
-            value.pop('prompt', None)
-            value.update(stage='failed', detail='A dependency did not respond. Review the saved ad job.')
-            write(key, value)
-            return {}
+        from ads_auto_recovery import schedule
+        schedule(value, 'A dependency is unavailable. Retrying the saved checkpoint automatically.', code='dependency')
         write(key, value)
-        return {'busy': True}
+        return {}
     finally:
         with connect() as conn, conn.cursor() as cur:
             cur.execute('DELETE FROM app_settings WHERE key=%s AND value=%s::jsonb',

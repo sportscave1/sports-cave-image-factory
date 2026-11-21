@@ -23,19 +23,21 @@ def setup(monkeypatch):
 
 
 def test_wait_backoff_and_no_duplicate_work(monkeypatch):
+    from ads_auto_recovery import activate
     clock, writes, value, calls = setup(monkeypatch)
     assert ads._step('key', value, {}, {}, 0) == {}
-    assert value['stage'] == 'generating' and value['collect_only']
+    assert value['stage'] == 'waiting' and value['collect_only']
     assert value['catalog_retry']['next_at'] == 1060
-    assert ads.public(value)['label'] == 'Waiting for Meta catalogue'
-    assert ads._step('key', value, {}, {}, 99999) == {}
-    assert len(calls) == 1 and len(writes) == 2  # stage clock, then catalogue checkpoint
+    assert ads.public(value)['label'] == 'Automatic recovery scheduled'
     clock[0] = 1060
-    ads._step('key', value, {}, {}, 60)
+    activate(value)
+    ads._step('key', value, {}, {}, 0)
     assert value['catalog_retry']['next_at'] == 1180
     clock[0] = 87400
-    with pytest.raises(ValueError, match='24 hours'):
-        ads._step('key', value, {}, {}, 0)
+    activate(value)
+    ads._step('key', value, {}, {}, 0)
+    assert value['stage'] == 'waiting' and value['auto_recovery']['next_at'] > clock[0]
+    assert len(calls) == 3
     assert value['chat_url'] == 'saved-chat'
 
 
@@ -44,6 +46,8 @@ def test_recovery_submits_same_durable_id_then_clears_wait(monkeypatch):
     clock, writes, value, calls = setup(monkeypatch)
     ads._step('key', value, {}, {}, 0)
     clock[0] = 1060
+    from ads_auto_recovery import activate
+    activate(value)
     request = SimpleNamespace(submission_id=ads._posting_id(value['upload']))
     monkeypatch.setattr(ads, '_post_request', lambda _: request)
     submissions=[]

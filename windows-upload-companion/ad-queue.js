@@ -16,7 +16,7 @@ async function repairAd(job,tab,token,local) {
   const repair=job.repair;
   local={...local,chat_url:job.chat_url};
   await staffWrite(adStorage,{...local,repair});
-  const message={job:job.id,repair:repair.id,chat:job.chat_url,names:repair.names};
+  const message={job:job.id,repair:repair.id,chat:job.chat_url,names:repair.names,mode:repair.mode};
   const status=await companionMessage(tab.id,{type:'project:ad-repair-status',...message},{frameId:0}).catch(()=>null);
   if(!status && local.repairReload!==repair.id) {
     await staffWrite(adStorage,{...local,repair,repairReload:repair.id});

@@ -35,6 +35,8 @@ def action(user, job, operation):
                 raise ValueError('This ad was removed from the queue. Add it again to create a new job.')
             operation='delete'  # Late Cancel/retry cannot undo a confirmed Delete.
         if operation=='play':
+            value.pop('auto_recovery', None)
+            value.pop('resume_stage', None)
             cur.execute("SELECT 1 FROM app_settings WHERE key=%s AND updated_at > now()-interval '10 minutes'", (ads.PREFIX+'lease',))
             if cur.fetchone(): raise ValueError('The companion is finishing a step. Press Play again shortly.')
             value.pop('catalog_retry', None)
