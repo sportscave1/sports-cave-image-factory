@@ -556,6 +556,21 @@ def upload_prepared(key,archive):
     row['phase']='Uploading';journal(row)
     row.setdefault('timings',{}).update(package_bytes=archive.stat().st_size,upload_attempts=0)
     try:
+        # A retained packet may already have been committed before a response
+        # was lost. Reconcile its exact owned lease before sending any bytes.
+        if row['context'].get('automatic') and row.get('reused_package'):
+            completed=reconnect(row)
+            if isinstance(completed,dict) and completed.get('preparation_hash'):
+                finish_upload(row,completed,started)
+                return
+        if row.get('reused_package') and row.get('upload_protocol')==1:
+            from companion_package_repack import verify_provenance
+            verify_provenance(archive,__import__('companion_package_identity').generation())
+        if row.get('reused_package') and row.get('package_transport')==1 and archive.parent!=row['folder']:
+            from companion_package_repack import compact_retained
+            archive,metrics=compact_retained(archive,row['folder']/'prepared.zip',row['context'],
+                row.get('generation'),package_budget(row))
+            row['timings'].update(metrics,package_bytes=archive.stat().st_size)
         for attempt in range(3):
             try:
                 boundary(row)

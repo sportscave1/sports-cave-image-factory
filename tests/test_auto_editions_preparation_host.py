@@ -301,3 +301,39 @@ def test_transient_upload_recovery_remains_bounded(tmp_path):
         local.upload_prepared('job',archive)
     assert row['status']=='Blocked' and row['recovery_failures']==3 and archive.exists()
     report.assert_called_once_with(row)
+
+
+def test_retained_package_reconciles_completed_receipt_before_any_body(tmp_path):
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'verified retained fixture')
+    row=dict(folder=tmp_path,grant={'base_url':'https://fixture.invalid','ticket':'fixture','secret':'fixture'},
+             context={'automatic':True},status='Working',reused_package=str(archive))
+    completed=dict(preparation_hash='a'*64,status='Cloud Ready')
+    with patch.object(local,'JOBS',{'job':row}),patch.object(local,'reconnect',return_value=completed) as reconcile, \
+         patch('requests.Session.send') as body,patch.object(local,'release_verified_temporary_files'):
+        local.upload_prepared('job',archive)
+    reconcile.assert_called_once_with(row);body.assert_not_called()
+    assert row['status']=='Prepared' and row['completion_state']=='Cloud Ready'
+
+
+def test_retained_package_reconciliation_outage_sends_no_blind_retry(tmp_path):
+    from urllib.error import HTTPError
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'verified retained fixture')
+    row=dict(folder=tmp_path,grant={'base_url':'https://fixture.invalid','ticket':'fixture','secret':'fixture'},
+             context={'automatic':True},status='Working',reused_package=str(archive))
+    with patch.object(local,'JOBS',{'job':row}),patch.object(local,'reconnect',side_effect=HTTPError('https://fixture.invalid',503,'fixture',{},None)), \
+         patch('requests.Session.send') as body,patch.object(local,'report_failure') as failed:
+        local.upload_prepared('job',archive)
+    body.assert_not_called();failed.assert_not_called()
+    assert row['status']=='Recovering' and archive.exists()
+
+
+def test_legacy_retained_packet_cannot_be_relabelled_as_current_resumable_generation(tmp_path):
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'legacy fixture without generation receipt')
+    row=dict(folder=tmp_path,grant={'base_url':'https://fixture.invalid','ticket':'fixture','secret':'fixture'},
+             context={'automatic':True},status='Working',reused_package=str(archive),upload_protocol=0)
+    def promoted(value):value['upload_protocol']=1
+    with patch.object(local,'JOBS',{'job':row}),patch.object(local,'reconnect',side_effect=promoted), \
+         patch('requests.Session.send') as body,patch.object(local,'report_failure'):
+        local.upload_prepared('job',archive)
+    body.assert_not_called()
+    assert row['status']=='Blocked' and 'generation' in row['error'] and archive.exists()
