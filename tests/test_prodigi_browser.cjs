@@ -5,7 +5,17 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-browser.js'),'utf8');
-const {prodigiExactRow,prodigiControls}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiExactRow,prodigiControls,prodigiFilePicker}=require('../windows-upload-companion/prodigi-page.js');
+
+test('remembered URL mode switches to file upload once and waits for its control',async()=>{
+  const events=[],input={type:'file'};let mode='url',renders=0;
+  const wait=async check=>{for(let n=0;n<4;n++){const result=check();if(result)return result;}throw Error('Not ready');};
+  const get=()=>mode==='file'&&++renders>=2?input:null;
+  const result=await prodigiFilePicker(get,async()=>events.push('options'),
+    ()=>({click(){events.push('file mode');mode='file';}}),wait);
+  assert.equal(result,input);assert.deepEqual(events,['options','file mode']);
+  assert.equal(await prodigiFilePicker(()=>input,()=>assert.fail('Already in file mode'),()=>null,wait),input);
+});
 
 test('placement controls include nested open shadow components within this editor only',()=>{
   const fit={id:'fit'},save={id:'save'},other={id:'other-editor'};

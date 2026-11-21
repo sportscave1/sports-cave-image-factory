@@ -11,7 +11,13 @@ function prodigiControls(scope,selector) {
   }
   return found;
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls};
+async function prodigiFilePicker(getInput,openOptions,findUploadChoice,wait) {
+  const existing=getInput();if(existing)return existing;
+  await openOptions();
+  const choice=await wait(findUploadChoice);choice.click();
+  return wait(getInput);
+}
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,prodigiFilePicker};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -42,6 +48,17 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls}
       throw Error('The exact supplier order heading is missing.');
     if(!document.querySelector('main')?.textContent.includes(plan.reference)) throw Error('The exact order reference is missing.');
   }
+  async function filePickerInput() {
+    const picker=await wait(()=>dialog('Select image'));
+    return prodigiFilePicker(()=>{
+      const inputs=document.querySelectorAll('input[data-test="image-library-upload-from-file-input"][type="file"]');
+      return inputs.length===1?inputs[0]:null;
+    },()=>button(picker,'Options').click(),()=>{
+      const choices=Array.from(document.querySelectorAll('[role="menuitem"]')).filter(e=>visible(e)&&text(e)==='Upload images');
+      if(choices.length>1)throw Error('The upload-mode control is ambiguous.');
+      return choices[0]||null;
+    },wait);
+  }
   let running=false;
   async function uploadCertificate(plan) {
     let stage='row';
@@ -50,11 +67,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls}
       if(rows.length!==1)throw Error('The exact certificate product/frame row is ambiguous.');
       button(document.querySelector('main'),'Add packing slip').click();
       stage='picker';
-      const input=await wait(()=>{
-        if(!dialog('Select image'))return null;
-        const inputs=document.querySelectorAll('input[data-test="image-library-upload-from-file-input"][type="file"]');
-        return inputs.length===1?inputs[0]:null;
-      });
+      const input=await filePickerInput();
       stage='transfer';
       const parts=[];let received=0;
       while(received<plan.bytes) {
@@ -100,11 +113,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls}
       if(!text(editor).includes(plan.sku)) throw Error('Editor product differs.');
       button(editor,'Add image').click();
       stage='picker';
-      const input=await wait(()=>{
-        if(!dialog('Select image'))return null;
-        const inputs=document.querySelectorAll('input[data-test="image-library-upload-from-file-input"][type="file"]');
-        return inputs.length===1?inputs[0]:null;
-      });
+      const input=await filePickerInput();
       stage='transfer';
       const parts=[];let received=0;
       while(received<plan.bytes) {
