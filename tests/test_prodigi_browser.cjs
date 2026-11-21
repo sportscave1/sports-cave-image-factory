@@ -5,6 +5,17 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-browser.js'),'utf8');
+const {prodigiExactRow}=require('../windows-upload-companion/prodigi-page.js');
+test('the supplier row matches exact SKU elements even when the row text is concatenated',()=>{
+  function row(sku,colour) {
+    const code={textContent:sku},frame={textContent:colour};
+    return{textContent:'UploadProduct(A2)'+sku+'Frame colour:'+colour+'Changex1qty',
+      querySelectorAll:selector=>selector==='strong'?[frame]:[code,frame]};
+  }
+  assert(prodigiExactRow(row('GLOBAL-CFP-A2','Natural'),'GLOBAL-CFP-A2','natural'));
+  assert(!prodigiExactRow(row('GLOBAL-CFP-A2-BACKLOADER','Natural'),'GLOBAL-CFP-A2','natural'));
+  assert(!prodigiExactRow(row('GLOBAL-CFP-A2','Black'),'GLOBAL-CFP-A2','natural'));
+});
 const plan={environment:'sandbox',order_id:'99',item_id:'88',key:'fixture',token:'fixture',reference:'SC-SANDBOX-fixture',
   order_url:'https://sandbox-beta-dashboard.pwinty.com/orders/99/detail',
   artwork_url:'https://sports-cave-image-factory.onrender.com/api/prodigi-artwork/'+'a'.repeat(43),

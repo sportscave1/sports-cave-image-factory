@@ -1,8 +1,15 @@
+function prodigiExactRow(row,sku,colour) {
+  const clean=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
+  return Array.from(row.querySelectorAll('*')).some(e=>clean(e)===sku) &&
+    (!colour||Array.from(row.querySelectorAll('strong')).some(e=>clean(e).toLowerCase()===colour.toLowerCase()));
+}
+if(typeof module!=='undefined') module.exports={prodigiExactRow};
 (() => {
   'use strict';
+  if(typeof document==='undefined') return;
   const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const visible=e=>e&&e.isConnected&&e.getClientRects().length;
-  const text=e=>(e?.textContent||'').replace(/\s+/g,' ').trim();
+  const text=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
   const dialogs=()=>Array.from(document.querySelectorAll('[role="dialog"]')).filter(visible);
   const dialog=name=>dialogs().find(e=>Array.from(e.querySelectorAll('h1,h2')).some(h=>text(h)===name));
   const button=(scope,label)=>{
@@ -33,11 +40,7 @@
       locationMatches(plan);
       if(dialogs().length) throw Error('An existing editor requires manual review.');
       stage='row';
-      const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(row=>{
-        const tokens=text(row).split(/\s+/);
-        return tokens.includes(plan.sku) && (!plan.colour ||
-          Array.from(row.querySelectorAll('strong')).some(e=>text(e).toLowerCase()===plan.colour.toLowerCase()));
-      });
+      const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(row=>prodigiExactRow(row,plan.sku,plan.colour));
       if(rows.length!==1) throw Error('The exact product/frame row is ambiguous.');
       button(rows[0],'Upload').click();
       stage='editor';
