@@ -112,4 +112,3 @@ def test_grid_success_links_only_to_exact_supplier_order():
     assert supplier_link('99/other')=='' and supplier_link('https://other')==''
     assert action_state({'status':'Checking QA'})['action']==''
     assert action_state({'status':'Needs QA'})['tone']=='warning'
-

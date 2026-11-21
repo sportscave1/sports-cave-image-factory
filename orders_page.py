@@ -2857,7 +2857,8 @@ def _render_send_artwork(row, placement):
         except Exception as error:
             st.error(str(error) if isinstance(error,ValueError) else 'Could not queue artwork. Open Fulfilment for review.')
         else:
-            st.success(value['message'])
+            if value['status'] in ('Needs QA','Needs review'):st.warning(value['message'])
+            else:st.success(value['message'])
 
 
 def _mobile_toggle(key, unit):

@@ -80,9 +80,10 @@ def render(rows,display_rows,*,grid_key,selected,actor):
     aid=str(by_id[rid].get('edition_order_id') or '')
     if not aid.isdigit():return
     if event.get('type')=='send':
-        try:queue.request(actor,int(aid))
+        try:
+            queued=queue.request(actor,int(aid))
         except Exception as error:st.error(str(error) if isinstance(error,ValueError) else 'Could not queue preparation. Open Fulfilment for review.')
-        else:st.toast('Preparing the existing Prodigi draft. Payment and Submit stay manual.')
+        else:st.toast((queued or {}).get('message') or 'Preparing the existing Prodigi draft. Payment and Submit stay manual.')
         st.rerun()
     if event.get('type')=='review':
         st.session_state['orders-grid-selected-ids']=[rid]

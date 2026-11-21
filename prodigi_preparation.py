@@ -203,8 +203,14 @@ def request(user, allocation_id, order_id='', item_id=''):
     if not enabled():
         raise ValueError('Prodigi preparation is disabled pending imported-order acceptance.')
     allocation_id = int(allocation_id)
-    preparing=False
-    try:snapshot = resolve(allocation_id)
+    preparing=False;preflight_error=''
+    try:
+        snapshot = resolve(allocation_id)
+        from prodigi_full_qa import live_enabled,native_gate
+        if live_enabled():
+            try:native_gate(snapshot,Client())
+            except MissingJPG:raise
+            except ValueError as error:preflight_error=str(error)
     except MissingJPG:
         from prodigi_full_qa import live_enabled
         if not live_enabled():raise
@@ -216,8 +222,9 @@ def request(user, allocation_id, order_id='', item_id=''):
     if order_id or item_id:
         order_id, item_id = identifier(order_id), identifier(item_id)
     value = dict(allocation_id=allocation_id, order_id=order_id, item_id=item_id,
-        fingerprint=digest(snapshot), snapshot=snapshot, status='Preparing JPG' if preparing else 'Queued',
+        fingerprint=digest(snapshot), snapshot=snapshot, status='Needs QA' if preflight_error else ('Preparing JPG' if preparing else 'Queued'),
         requester=str(user['id']), checks={}, message='Waiting for Orders companion', history=[],browser_requested=True)
+    if preflight_error:value.update(message=preflight_error,checks={'production_approval':False})
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         # A supplier item is reserved for one allocation, across every requester.
@@ -227,6 +234,12 @@ def request(user, allocation_id, order_id='', item_id=''):
             if order_id and item_id and (saved['order_id'], saved['item_id']) == (order_id, item_id) and saved['allocation_id'] != allocation_id:
                 raise ValueError('This Prodigi item is already bound to another numbered unit.')
             if saved['allocation_id'] == allocation_id:
+                if saved['status'] in ('Needs QA','Needs review') and not any(saved.get(k) for k in ('browser','write_intent','document_write_intent')):
+                    if order_id and any(saved.get(k) and saved[k]!=value[k] for k in ('order_id','item_id')):
+                        raise ValueError('The existing supplier target cannot be changed by a retry.')
+                    value.update(order_id=saved.get('order_id') or order_id,item_id=saved.get('item_id') or item_id,
+                        history=saved.get('history',[])+[dict(at=now(),actor=str(user['id']),event='untouched_preflight_rechecked')])
+                    save(cur,value);return value
                 if saved['status']=='Preparing JPG' and not preparing and saved['snapshot']['job_id']==snapshot['job_id']:
                     saved.update(snapshot=snapshot,fingerprint=digest(snapshot),status='Queued');save(cur,saved);return saved
                 if saved['fingerprint'] != value['fingerprint'] or (order_id and
@@ -361,6 +374,9 @@ def tick():
             if value['status']=='Checking QA':
                 from prodigi_full_qa import run as full_qa
                 return full_qa(value,Client(),resolve,persist)
+            from prodigi_full_qa import live_enabled,native_gate
+            if live_enabled() and not value.get('browser') and not value.get('write_intent'):
+                native_gate(value['snapshot'],Client())
             return run(value, Client(), resolve, artwork_link, persist)
         except UploadFenceLost as error:
             current = read(value['allocation_id'])
@@ -383,6 +399,8 @@ def reconcile(user, allocation_id):
     require_user(user)
     current = read(allocation_id)
     receipt = (current or {}).get('browser') or {}
+    if current and not receipt and not current.get('write_intent'):
+        return request(user,allocation_id,current.get('order_id',''),current.get('item_id',''))
     from prodigi_full_qa import live_enabled
     if receipt.get('verified') and live_enabled():
         current.update(status='Checking QA',message='Checking all QA evidence for this same draft')
