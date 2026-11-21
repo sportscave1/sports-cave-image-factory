@@ -40,17 +40,26 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow};
       locationMatches(plan);
       if(dialogs().length) throw Error('An existing editor requires manual review.');
       stage='row';
-      const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(row=>prodigiExactRow(row,plan.sku,plan.colour));
-      if(rows.length!==1) throw Error('The exact product/frame row is ambiguous.');
-      button(rows[0],'Upload').click();
+      const row=await wait(()=>{
+        const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));
+        if(rows.length>1) throw Error('The exact product/frame row is ambiguous.');
+        if(rows.length!==1) return null;
+        try {button(rows[0],'Upload');return rows[0];} catch {return null;}
+      });
+      button(row,'Upload').click();
       stage='editor';
-      const editor=await wait(()=>dialog('Image Editor'));
+      const editor=await wait(()=>{
+        const e=dialog('Image Editor');if(!e)return null;
+        try {button(e,'Add image');return e;} catch {return null;}
+      });
       if(!text(editor).includes(plan.sku)) throw Error('Editor product differs.');
       button(editor,'Add image').click();
       stage='picker';
-      const picker=await wait(()=>dialog('Select image'));
-      const input=picker.querySelector('input[data-test="image-library-upload-from-file-input"][type="file"]');
-      if(!input) throw Error('Prodigi upload input changed.');
+      const input=await wait(()=>{
+        if(!dialog('Select image'))return null;
+        const inputs=document.querySelectorAll('input[data-test="image-library-upload-from-file-input"][type="file"]');
+        return inputs.length===1?inputs[0]:null;
+      });
       stage='transfer';
       const parts=[];let received=0;
       while(received<plan.bytes) {
