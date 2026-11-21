@@ -85,3 +85,42 @@ def last_visit(journey):
     if source in ("direct","(direct)") or str(visit.get("source") or "").lower()=="direct":
         return {"channel":"Other", "reason":"recorded_direct_visit"}
     return {"channel":"Unresolved", "reason":"source_evidence_missing"}
+
+
+def observed_referral(visit):
+    """Allowlisted referral identity only; does not establish paid/organic."""
+    def label(value):
+        value = str(value or "").strip().lower()
+        origin = platform(value)
+        if origin == "google":
+            return "Google"
+        if origin == "facebook":
+            return "Instagram" if value in ("instagram", "ig") or (urlsplit(value if "://" in value else "https://" + value).hostname or "") in ("instagram.com", "www.instagram.com", "l.instagram.com") else "Facebook"
+        try:
+            host = urlsplit(value if "://" in value else "https://" + value).hostname
+        except ValueError:
+            return None
+        return "Brave Search" if host == "search.brave.com" else None
+    source = label(visit.get("source"))
+    referrer = label(visit.get("referrerUrl"))
+    if source and referrer and source != referrer:
+        return None
+    return source or referrer
+
+
+def order_source(order):
+    """Keep sales-channel evidence separate from storefront acquisition."""
+    source = str(order.get("sourceName") or "").strip().lower()
+    app_id = str((order.get("app") or {}).get("id") or "")
+    if source == "etsy":
+        if app_id == "gid://shopify/App/1777077":
+            return {"channel":"Etsy", "reason":"etsy_sales_channel"}
+        return {"channel":"Unresolved", "reason":"unverified_etsy_sales_channel"}
+    journey = order.get("customerJourneySummary")
+    evidence = last_visit(journey)
+    if evidence["reason"] in ("platform_without_paid_organic_evidence", "source_evidence_missing"):
+        visit = (journey or {}).get("lastVisit") or {}
+        referral = observed_referral(visit)
+        if referral:
+            evidence["observed_referral"] = referral
+    return evidence

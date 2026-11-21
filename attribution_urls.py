@@ -1,7 +1,7 @@
 """Start a new marketing link without inheriting another visit's acquisition IDs."""
 from urllib.parse import urlsplit, parse_qsl, urlencode
 
-CLICK_AND_AD_KEYS = {"gclid", "gbraid", "wbraid", "fbclid", "msclkid", "ttclid", "placement", "site_source", "ad_id", "adset_id"}
+CLICK_AND_AD_KEYS = {"gclid", "gbraid", "wbraid", "fbclid", "msclkid", "ttclid", "placement", "site_source", "ad_id", "adset_id", "sc_channel", "sc_network", "_gl"}
 
 
 def clean_destination(url):

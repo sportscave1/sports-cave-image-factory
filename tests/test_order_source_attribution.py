@@ -102,3 +102,35 @@ def test_paid_term_resolves_shared_feed_duplicate_medium_without_guessing_from_c
     assert last_visit(item)=={"channel":"Google paid","reason":"google_paid_utm_marker"}
     item["lastVisit"]["landingPage"] += "&utm_term=another"
     assert last_visit(item)["channel"]=="Unresolved"
+
+
+@pytest.mark.parametrize("source,app_id,expected", [("etsy","gid://shopify/App/1777077","Etsy"),("etsy","gid://shopify/App/580111","Unresolved"),
+    ("web","gid://shopify/App/1777077","Unresolved"),("etsy",None,"Unresolved"),(None,None,"Unresolved")])
+def test_native_marketplace_channel_is_not_inferred_from_missing_sessions(source,app_id,expected):
+    from order_source_attribution import order_source
+    evidence=order_source({"sourceName":source,"app":{"id":app_id}})
+    assert evidence["channel"]==expected
+
+
+@pytest.mark.parametrize("source,referrer,label", [("Facebook","https://m.facebook.com/","Facebook"),
+    ("https://search.brave.com/","https://search.brave.com/","Brave Search"),
+    ("https://search.brave.com.evil.test/",None,None),("Facebook","https://google.com/",None)])
+def test_referral_identity_is_visible_without_inventing_a_paid_status(source,referrer,label):
+    from order_source_attribution import order_source
+    evidence=order_source({"customerJourneySummary":{"ready":True,"lastVisit":{
+        "source":source,"referrerUrl":referrer,"landingPage":"https://example.test/"}}})
+    assert evidence["channel"]=="Unresolved"
+    assert evidence.get("observed_referral")==label
+
+
+def test_google_paid_diagnostics_and_linker_do_not_leak_into_new_social_links():
+    from social_media_creator import build_tracked_url
+    from meta_posting_service import validate_destination_url
+    old="https://example.test/products/fixture?variant=123&utm_term=sc_google_paid_123&SC_CHANNEL=google_paid&sc_network=x&_gl=old#details"
+    clean=validate_destination_url(old)
+    assert parse_qs(urlsplit(clean).query)=={"variant":["123"]}
+    organic=build_tracked_url(old,platform="Facebook",series="fixture",product_handle="fixture",market="AUS",content_format="post",hook="fixture",value=date(2026,11,21))
+    tags=parse_qs(urlsplit(organic).query)
+    assert tags["utm_medium"]==["organic_social"]
+    assert not ({"sc_channel","SC_CHANNEL","sc_network","_gl"}&tags.keys())
+    assert urlsplit(clean).fragment=="details"

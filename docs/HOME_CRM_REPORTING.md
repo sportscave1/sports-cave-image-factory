@@ -23,3 +23,8 @@ The earlier read-only audit of four non-test, non-cancelled orders created on 20
 The OS Meta posting path strips stale utm_* and previous network click/ad identifiers from new destination URLs before its canonical paid_social creative URL tags are applied. Variant, functional query parameters and page anchors are retained. Existing live creatives are untouched; default campaign/ad-set/ad IDs and placement tags remain in the shared Meta contract. Organic social publishing uses organic_social and now performs the same old-click/tag cleanup before adding its own source/campaign tags. Google paid auto-tagging and campaign suffix must be checked independently of the Home ledger; free-listing links must not be globally relabelled paid.
 
 Live read-only Ads audit confirmed account auto-tagging Yes, PM021126 final URL suffix utm_source=google&utm_medium=cpc&utm_campaign=PM021126&utm_id={campaignid}, and budget A$20/day. These settings needed no change.
+
+
+## Sales-channel and referral audit (version 5)
+
+Etsy imports now use native sourceName plus the observed Marketplace Connect app ID, appear in a separate Etsy row, and are separated from storefront GA4 match gaps. They are excluded from acquisition-model differences. Unresolved referrals retain allowlisted source names without treating Facebook or Brave referrals as proof of paid or organic. This follows version 4's exact-GA4 resolution of ambiguous Google feed visits. See [the remaining-order audit](UNRESOLVED_ORDER_AUDIT_20261121.md) for the nine-order trace and validation scope.

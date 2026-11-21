@@ -6,7 +6,7 @@ import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-CHANNELS = ("Facebook paid", "Google paid", "Organic", "Other", "Unresolved")
+CHANNELS = ("Facebook paid", "Google paid", "Organic", "Etsy", "Other", "Unresolved")
 
 
 def html(today, initial=None):
@@ -42,6 +42,10 @@ def html(today, initial=None):
     resolved = ledger.get("google_listing_resolutions", {})
     if sum(resolved.values()):
         warnings.append(f"Google listing orders resolved by exact Analytics transaction matches: {resolved.get('paid', 0)} paid · {resolved.get('organic', 0)} organic.")
+    referrals = ledger.get("unresolved_referrals", {})
+    if referrals:
+        detail = "; ".join(f"{name}: {amount}" for name, amount in sorted(referrals.items()))
+        warnings.append("Unresolved source evidence — " + detail + ". Referral names do not prove paid or organic.")
     tracking = google.get("tracking_health") or {}
     if tracking.get("status") == "attention":
         warnings.append("Google paid tracking settings need attention; see Google Ads Tracking.")
@@ -57,6 +61,9 @@ def html(today, initial=None):
         stamp = datetime.fromisoformat(data["checked_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Australia/Sydney")).strftime("%d %b %H:%M")
         status = (f"{ledger['orders']} Shopify orders · {ledger['matched']} exact GA4 matches · {ledger['unmatched']} unmatched"
                   if ledger else "Shopify count unavailable")
+        if ledger and ledger.get("marketplace_orders"):
+            status += (f" ({ledger['marketplace_unmatched']} Etsy; "
+                       f"{ledger['non_marketplace_unmatched']} other)")
         differences = sum(row["orders"] for row in ledger.get("source_reconciliation", [])) if ledger else 0
         if differences:
             status += f" · {differences} source-model differences"
@@ -81,7 +88,9 @@ def html(today, initial=None):
       <p class="sc-crm-comparison">{escape(comparison)}</p>
       {('<p class="sc-crm-warning">' + escape(' '.join(warnings)) + '</p>') if warnings else ''}
       <details class="sc-crm-coverage"><summary>Coverage &amp; attribution</summary><p class="sc-crm-basis">{escape(data.get("basis", ""))}</p>
-        <p>Other includes direct, email and other referrals. Unresolved includes missing or conflicting source evidence.
+        <p>Etsy identifies imported marketplace sales; it does not identify how a shopper found Etsy.
+        Etsy imports do not require storefront GA4 purchase matches and are excluded from source-model differences.
+        Other includes direct, email and other referrals. Unresolved includes missing or conflicting source evidence.
         Tablets and unknown devices stay in Other / unknown. Organic has no advertising ROAS.</p>
         <p>Raw GA4 → Shopify source differences: {escape("; ".join(f"{r['ga4_channel']} → {r['shopify_channel']}: {r['orders']}" for r in ledger.get("source_reconciliation", [])) or "None recorded")}</p>
         <p>Feed tags such as product_sync / sag_organic alone do not verify a free-listing sale.
