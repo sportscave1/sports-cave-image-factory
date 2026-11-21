@@ -48,7 +48,7 @@
   }
   function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&['/auto-editions/download','/auto-editions/open','/auto-editions/view'].includes(u.pathname)&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
   function paint(id,row){
-   const busy=row.starting||row.transferring||['Generating','Queued'].includes(row.status),label=busy?(row.transferring?'Downloading\u2026':'Preparing JPG\u2026'):row.downloadError?'Retry':row.status==='Ready'?'Open':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?(row.retryable===false?'Needs review':'Retry'):'Download JPG';
+   const busy=row.starting||row.transferring||['Generating','Queued'].includes(row.status),label=busy?(row.transferring?'Downloading\u2026':'Preparing JPG\u2026'):row.downloadError?'Retry':row.status==='Ready'?'Open JPG':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?(row.retryable===false?'Needs review':'Retry'):'Download JPG';
    const marker=immediate.get(id);if(marker){
     marker.classList.toggle('sc-edition-generating',!!busy);if(marker.textContent!==label)marker.textContent=label;
     marker.style.pointerEvents=busy?'none':'auto';marker.style.cursor=busy?'default':'pointer';marker.setAttribute('role',busy?'status':'link');marker.tabIndex=busy?-1:0;
@@ -72,7 +72,7 @@
    }
    const close=document.createElement('button');close.textContent='Dismiss';close.onclick=()=>box.remove();box.append(close);document.body.append(box);
   }
-  function navigateSaved(id,row){if(!window.SportsCaveFilesWindow)throw Error('Files navigation is loading. Retry Open.');const began=performance.now();window.SportsCaveFilesWindow.open({allocation:id,job:row.job_id});trace('popup_handoff',id,performance.now()-began);}
+  function navigateSaved(id,row){if(!/^\d+$/.test(id)||!/^[a-f0-9]{64}$/.test(row.job_id||''))throw Error('Saved JPG identity is missing.');const began=performance.now();nativeOpen.call(window,url('/api/auto-editions/file',id,row.job_id)+'&inline=1','_blank','noopener');trace('jpg_open',id,performance.now()-began);}
   async function initiateDownload(id,row){
    if(row.delivery)return row.delivery;
    const key='sc-edition-handoff:'+row.job_id;if(saved(key))return;

@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v10-phase1";
+  const CONTROLLER_VERSION = "companion-header-v11-orders";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -1070,6 +1070,25 @@
       #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-actions {grid-column:3;grid-row:2;justify-content:flex-end;}
       #sc-os-companion-status {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
     }
+
+    /* Five compact desktop cards; mobile rotates one active queue locally. */
+    #${ROOT_ID} .sc-os-topbar-brand-copy {display:none;}
+    @media(min-width:1101px) {
+      #${ROOT_ID},#${ROOT_ID}.sc-has-staff-upload {grid-template-columns:54px auto auto auto minmax(0,1fr);column-gap:6px;}
+      #${ROOT_ID}.sc-has-posting,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:54px auto auto auto 150px minmax(0,1fr);}
+      #${ROOT_ID} .sc-os-topbar-brand {padding-inline:4px;}
+      #${ROOT_ID} #sc-os-companion-status {gap:6px;}
+    }
+    @media(max-width:600px) {
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:168px!important;}
+      #${ROOT_ID}.sc-has-staff-upload,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-rows:56px 48px 64px;}
+      #${ROOT_ID} #sc-os-companion-status {display:flex;grid-template-columns:none;}
+      #sc-os-companion-status > .sc-companion-card:not(.sc-mobile-current) {display:none;}
+      #sc-os-companion-status > .sc-companion-card.sc-mobile-current:not([hidden]) {display:flex;flex:1;}
+      body:has(#${ROOT_ID}.sc-mobile-idle) {--sc-topbar-height:104px!important;}
+      #${ROOT_ID}.sc-mobile-idle.sc-has-staff-upload {grid-template-rows:56px 48px 0;}
+      #${ROOT_ID}.sc-mobile-idle #sc-os-companion-status {padding:0;}
+    }
   `;
 
   let style = doc.getElementById(STYLE_ID);
@@ -1157,6 +1176,12 @@
               <span id="sc-edition-message" role="status" aria-live="polite">Open to load current settings.</span>
               <small id="sc-edition-help">Blank download cap means uncapped. Upload cap is used only in Manual mode; measured upload is used for Balanced/Background. Speed limits transfers. Balanced reserves headroom; Background uses less bandwidth. Pause stops new jobs after current work finishes safely.</small>
             </form></div>
+        </details>
+      </div>
+      <div id="sc-os-orders-card" class="sc-companion-card" hidden>
+        <details id="sc-os-orders-status" class="sc-companion-details">
+          <summary><span class="sc-companion-name">Orders</span><span id="sc-os-orders-title" class="sc-companion-title"></span><span id="sc-os-orders-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-orders-meter" max="100" aria-label="Orders checkpoint"></progress></summary>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-orders-close" type="button" aria-label="Close Orders status">×</button><div id="sc-os-orders-list"></div></div>
         </details>
       </div>
     </div>
@@ -1256,7 +1281,7 @@
       queue, root.querySelector("#sc-os-queue-" + queue),
     ]));
     let queues = {};
-    const companionPanels = Object.fromEntries(["design", "ads", "editions"].map(name => [name, {
+    const companionPanels = Object.fromEntries(["design", "ads", "editions", "orders"].map(name => [name, {
       card:root.querySelector(`#sc-os-${name}-card`),
       panel:root.querySelector(`#sc-os-${name}-status`),
       title:root.querySelector(`#sc-os-${name}-title`),
@@ -1288,7 +1313,7 @@
       elements.panel.title = '';
       elements.panel.dataset.state = job?.state || 'idle';
       elements.panel.dataset.stale = String(Boolean(control.unavailable));
-      if (job?.state === 'running' && name === 'editions') elements.meter.removeAttribute('value');
+      if (job?.state === 'running' && ['editions','orders'].includes(name)) elements.meter.removeAttribute('value');
       else elements.meter.value = job?.percent || 0;
       elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
       if (rotating && changed && !parentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -1302,6 +1327,22 @@
       designRotation++;
       renderCompanionSummary('design', elements, control, lastCompanionStatus);
     }, 5000));
+    let mobileRotation=0;
+    const rotateMobileQueues = (advance=false) => {
+      if(doc.hidden || [...root.querySelectorAll('#sc-os-companion-status details')].some(item=>item.open))return;
+      const active=['design','upload','ads','editions','orders'].filter(name=>{
+        const control=queues[name],card=root.querySelector('#sc-os-'+name+'-card');
+        if(!card || card.hidden)return false;
+        if(control?.unavailable || control?.waiting)return true;
+        const jobs=name==='upload' ? lastCompanionStatus?.jobs : control?.jobs;
+        return (jobs||[]).some(job=>name==='upload' ? job.stage>=0 && job.stage<6 || job.stage===7 : ['running','waiting','pending','failed'].includes(job.state));
+      });
+      if(advance && active.length>1)mobileRotation++;
+      const shown=active[mobileRotation%active.length];
+      for(const card of root.querySelectorAll('#sc-os-companion-status > .sc-companion-card'))card.classList.toggle('sc-mobile-current',card.id==='sc-os-'+shown+'-card');
+      root.classList.toggle('sc-mobile-idle',active.length===0);
+    };
+    timers.add(parentWindow.setInterval(()=>rotateMobileQueues(true),5000));
     const companionFetch = async (url, options = {}) => {
       if(listenerController.signal.aborted)throw Error('This panel was closed. Reopen it to retry.');
       const controller = new parentWindow.AbortController();
@@ -1504,7 +1545,7 @@
           }else if(article._posting){article._posting.remove();article._posting=null;}
           return article;
         });
-        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href=name==='editions'?'/?page=edition_ops':'/?page=upload_companion';queueLink.textContent=name==='editions'?'Open Edition Ops':'Open Companion Queues';
+        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href=name==='orders'?'/?page=orders':name==='editions'?'/?page=edition_ops':'/?page=upload_companion';queueLink.textContent=name==='orders'?'Open Orders':name==='editions'?'Open Edition Ops':'Open Companion Queues';
         if(name==='ads'){
           const retained=new Set(jobs.slice(0,10).map(item=>item.id));
           for(const id of adRows.keys())if(!retained.has(id))adRows.delete(id);
@@ -1877,6 +1918,7 @@
         renderCompanions(status);
         staffProgress.hidden = !jobs.length && !queues.upload?.display && !pendingUploadReveal;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
+        rotateMobileQueues();
         staffProgress.dataset.stale=String(status.display_state === 'stale');
         for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale' || (panel.id==='sc-os-editions-status' && queues.editions?.unavailable));
         renderQueueButtons();

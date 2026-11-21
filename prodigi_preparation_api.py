@@ -39,6 +39,8 @@ async def tick(request):
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         await run_in_threadpool(desktop, auth[7:])
         value = await run_in_threadpool(queue.tick)
+        from prodigi_submission import kick
+        kick()
         from prodigi_browser import claim
         browser = (await run_in_threadpool(claim)
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)

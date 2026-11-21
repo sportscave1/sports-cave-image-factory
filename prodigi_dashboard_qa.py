@@ -64,7 +64,7 @@ def current(value,provider,resolver):
 def enqueue(value,provider,resolver,persist):
     current(value,provider,resolver)
     value.pop('last_failure',None)
-    value.update(status=WAITING,message='Checking branding inserts, Excellent quality, shipping and customer details. Payment and Submit stay manual.')
+    value.update(status=WAITING,message='Checking branding inserts, Excellent quality, shipping and customer details before the configured submission step.')
     persist(value)
     return value
 
@@ -189,8 +189,9 @@ def finish(key,token,evidence,error=''):
             if pinned_order(receipt['before'])!=pinned_order(order):raise ValueError('Product, artwork, address or inserts changed during QA.')
             result=evaluate(value,snap,order,item,evidence,identity_verified=identity_proof(snap))
             value.update(qa=result,checks=result['checks'],status='Ready for manual payment' if all(result['checks'].values()) else 'Needs QA',
-                message='Ready in Prodigi. Open this exact draft; payment and Submit remain manual.' if all(result['checks'].values()) else ' '.join(result['blockers']))
-            receipt.update(verified=True,evidence=evidence,checked_at=prep.now())
+                message='All QA passed. Submission follows the owner’s Orders companion setting.' if all(result['checks'].values()) else ' '.join(result['blockers']))
+            pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
+            receipt.update(verified=True,evidence=evidence,checked_at=prep.now(),validated_order_hash=prep.digest(pinned))
         except Exception as exc:
             value.update(status='Needs review',message=str(exc) if isinstance(exc,ValueError) else 'Dashboard QA could not be verified; recheck this exact draft.')
             prep.record_failure(value,'dashboard_qa',value['message'],type(exc).__name__)

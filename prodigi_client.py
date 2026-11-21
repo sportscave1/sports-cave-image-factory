@@ -1,6 +1,6 @@
 """Restricted Prodigi v5 adapter: read existing orders and edit draft artwork only.
 
-Deliberately has no create, submit, resume, payment or fulfilment operation.
+No create or resume operation. Submission has a separate owner-activated gate.
 """
 import os
 import re
@@ -80,6 +80,21 @@ class Client:
 
     def order(self, order_id):
         return self.request('GET', '/orders/' + identifier(order_id))
+
+    def submit(self,order_id):
+        from prodigi_submission import setting
+        if self.mode!='live' or not setting().get('enabled'):
+            raise ProdigiError('Automatic submission has not been activated by an owner.')
+        try:
+            response=self.transport.request('POST','https://api.prodigi.com/v5/orders/'+identifier(order_id)+':submit',
+                headers={'X-API-Key':self.key,'Content-Type':'application/json'},
+                json={},timeout=(5,20),allow_redirects=False)
+        except requests.RequestException:
+            raise ProdigiError('Submit acknowledgement uncertain. Read back the same order; never repeat Submit.') from None
+        if response.status_code not in (200,201,202):
+            raise ProdigiError(f'Submit returned HTTP {response.status_code}. Review the same order without retrying Submit.')
+        # Even a successful HTTP acknowledgement is not confirmed submission.
+        return None
 
     def find(self, reference):
         return self.request('GET', '/orders?' + urlencode({'merchantReference': reference, 'limit': 100}), listing=True)

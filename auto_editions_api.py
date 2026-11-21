@@ -268,14 +268,16 @@ async def location(request):
 
 
 async def view(request):
-    # Old bookmarked View URLs now resolve the saved location, never a preview.
+    """Open the exact saved JPG; never redirect back to the Orders workspace."""
     try:
         await actor(request)
         allocation(request)
+        if not re.fullmatch(r'[a-f0-9]{64}',request.query_params.get('job_id','')):
+            raise ValueError('Invalid saved artwork identity.')
     except Exception as error:return failure(error)
     from urllib.parse import urlencode
-    return RedirectResponse('/?page=orders&workspace=files&'+urlencode(dict(edition_allocation=allocation(request),
-        edition_job=request.query_params['job_id'])),headers=HEADERS)
+    return RedirectResponse('/api/auto-editions/file?'+urlencode(dict(allocation_id=allocation(request),
+        job_id=request.query_params['job_id'],inline='1')),headers=HEADERS)
 
 
 ROUTES=(('/auto-editions/download',page,('GET',)),('/api/auto-editions/start',start,('POST',)),
