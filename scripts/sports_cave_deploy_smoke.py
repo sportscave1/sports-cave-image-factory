@@ -2,12 +2,40 @@
 import argparse
 import importlib
 import json
+import os
 from pathlib import Path
 import re
 import socket
 import sys
 import unittest
 from unittest.mock import patch
+from contextlib import nullcontext
+
+_LOCAL_CONNECT = socket.socket.connect
+
+
+def local_test_socketpair(family=None, type=socket.SOCK_STREAM, proto=0):
+    """Windows asyncio IPC without granting application network access.
+
+    The saved primitive connects only a fresh socket to this function's own
+    ephemeral loopback listener. Returned sockets retain the blocked connect
+    method; HTTP and every application/provider connection remain denied.
+    """
+    if family not in (None, socket.AF_INET) or type != socket.SOCK_STREAM or proto != 0:
+        raise ValueError('Only local test IPC socket pairs are supported.')
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        _LOCAL_CONNECT(client, listener.getsockname())
+        accepted, _ = listener.accept()
+        return accepted, client
+    except Exception:
+        client.close()
+        raise
+    finally:
+        listener.close()
 
 
 def main():
@@ -27,7 +55,8 @@ def main():
                not f['path'].startswith(('docs/', 'tests/', 'scripts/', 'deploy/'))]
     if (runtime or manifest['mode'] == 'full') and not tests:
         raise ValueError('Application/full releases require explicit affected regression tests in the manifest.')
-    with patch.object(socket.socket, 'connect', side_effect=AssertionError('Deployment smoke forbids network')), \
+    pair_guard = patch.object(socket, 'socketpair', local_test_socketpair) if os.name == 'nt' else nullcontext()
+    with pair_guard, patch.object(socket.socket, 'connect', side_effect=AssertionError('Deployment smoke forbids network')), \
          patch.object(socket.socket, 'connect_ex', side_effect=AssertionError('Deployment smoke forbids network')), \
          patch('requests.sessions.Session.request', side_effect=AssertionError('Deployment smoke forbids HTTP')):
         from scripts.validate_render_topology import main as topology

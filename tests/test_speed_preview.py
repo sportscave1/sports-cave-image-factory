@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import sys
+import socket
+from unittest.mock import patch
 
 import pytest
 
@@ -67,3 +69,20 @@ def test_nightly_release_cannot_reuse_installation_exception_or_regress():
     module.reviewed_server_source(before, after)
     with pytest.raises(module.Stop, match='exceeds'):
         module.reviewed_server_source(before, after + b'run_migrations()\n')
+
+
+def test_windows_ipc_fix_keeps_application_network_denied():
+    from scripts.sports_cave_deploy_smoke import local_test_socketpair
+    with patch.object(socket.socket, 'connect', side_effect=AssertionError('network denied')):
+        a, b = local_test_socketpair()
+        try:
+            assert a.getsockname()[0] == b.getsockname()[0] == '127.0.0.1'
+            b.sendall(b'local-ipc')
+            assert a.recv(9) == b'local-ipc'
+            with pytest.raises(AssertionError, match='network denied'):
+                b.connect(('192.0.2.1', 443))
+            with socket.socket() as external:
+                with pytest.raises(AssertionError, match='network denied'):
+                    external.connect(('192.0.2.1', 443))
+        finally:
+            a.close(); b.close()
