@@ -13,7 +13,8 @@ from display_snapshot import Snapshots
 from google_direct_reporting import GoogleReports, MemoryReports
 
 SYDNEY = ZoneInfo("Australia/Sydney")
-PREFIX = "home_crm_v1:"
+VERSION = 2
+PREFIX = "home_crm_v2:"
 CHANNELS = ("Facebook paid", "Google paid", "Organic", "Other", "Unresolved")
 DEVICES = ("mobile", "desktop", "other")
 SNAPSHOTS = Snapshots(workers=2, limit=24, ttl=900, retry=60, max_age=21600, byte_limit=2_000_000)
@@ -26,7 +27,10 @@ PURCHASES = GA4ReportContract("home_crm_transactions", "Purchase source and devi
 ORDERS_QUERY = """query HomeCRMOrders($query: String!, $after: String) {
   currentAppInstallation { accessScopes { handle } }
   orders(first: 250, after: $after, query: $query, sortKey: CREATED_AT) {
-    nodes { id createdAt cancelledAt test }
+    nodes { id createdAt cancelledAt test
+      customerJourneySummary { ready lastVisit { source sourceType landingPage
+        utmParameters { source medium campaign } } }
+    }
     pageInfo { hasNextPage endCursor }
   }
 }"""
@@ -64,6 +68,7 @@ def orders(start, end):
     high = datetime.combine(end + timedelta(days=1), time.min, SYDNEY)
     search = f"status:any created_at:>='{low.isoformat()}' created_at:<'{high.isoformat()}'"
     cursor, cursors, ids = None, set(), set()
+    journeys = {}
     deadline = monotonic() + 50
     for _ in range(40):
         if monotonic() > deadline:
@@ -84,9 +89,11 @@ def orders(start, end):
                 if not identity:
                     raise ValueError("Shopify returned an invalid order ID.")
                 ids.add(identity)
+                from order_source_attribution import last_visit
+                journeys[identity] = last_visit(row.get("customerJourneySummary"))
         info = connection["pageInfo"]
         if not info["hasNextPage"]:
-            return {"status": "verified", "ids": ids, "fetched_at": datetime.now(timezone.utc).isoformat()}
+            return {"status": "verified", "ids": ids, "journeys": journeys, "fetched_at": datetime.now(timezone.utc).isoformat()}
         cursor = info["endCursor"]
         if not cursor or cursor in cursors:
             raise ValueError("Shopify pagination did not finish.")
@@ -105,7 +112,7 @@ def ga4(start, end):
     return {"status": "verified", "rows": result["rows"], "fetched_at": result["fetched_at"]}
 
 
-def ledger(order_ids, rows):
+def ledger(order_ids, rows, journeys=None):
     matches = {}
     for row in rows:
         if float(row["metrics"].get("ecommercePurchases", 0)) <= 0:
@@ -119,17 +126,29 @@ def ledger(order_ids, rows):
             channel(dims.get("sessionSourceMedium")), device if device in ("mobile", "desktop") else "other"))
     table = {name: dict(channel=name, mobile=0, desktop=0, other=0, total=0) for name in CHANNELS}
     conflicted = 0
+    reconciliations, reasons = {}, {}
     for identity in order_ids:
         observations = matches.get(identity, set())
         sources = {s for s, _ in observations}
         devices = {d for _, d in observations}
         source = next(iter(sources)) if len(sources) == 1 else "Unresolved"
+        if journeys is not None:
+            evidence = journeys.get(identity, {"channel":"Unresolved", "reason":"journey_pending_or_missing"})
+            chosen = evidence["channel"]
+            if chosen != source:
+                pair = (source, chosen)
+                reconciliations[pair] = reconciliations.get(pair, 0) + 1
+            source = chosen
+            reason = evidence["reason"]
+            reasons[reason] = reasons.get(reason, 0) + 1
         device = next(iter(devices)) if len(devices) == 1 else "other"
         conflicted += len(sources) > 1 or len(devices) > 1
         table[source][device] += 1
         table[source]["total"] += 1
     return {"rows": list(table.values()), "orders": len(order_ids),
-            "matched": len(matches), "unmatched": len(order_ids)-len(matches), "conflicted": conflicted}
+            "matched": len(matches), "unmatched": len(order_ids)-len(matches), "conflicted": conflicted,
+            "source_reconciliation": [{"ga4_channel":a,"shopify_channel":b,"orders":n} for (a,b),n in sorted(reconciliations.items())],
+            "source_reasons": reasons}
 
 
 def meta(start, end):
@@ -201,15 +220,15 @@ def build(start, end, *, readers=None):
         pending = {name: pool.submit(_available, lambda f=fetch: f(start, end)) for name, fetch in readers.items()}
         sources = {name: future.result() for name, future in pending.items()}
     shop, analytics = sources["shopify"], sources["ga4"]
-    cohort = ledger(shop["ids"], analytics.get("rows", [])) if shop["status"] == "verified" else None
+    cohort = ledger(shop["ids"], analytics.get("rows", []), shop.get("journeys", {})) if shop["status"] == "verified" else None
     # Only aggregate data leaves this function or enters durable storage.
-    coverage = {name: {k: v for k, v in result.items() if k not in ("rows", "ids")}
+    coverage = {name: {k: v for k, v in result.items() if k not in ("rows", "ids", "journeys")}
                 for name, result in sources.items()}
-    return {"version": 1, "start": str(start), "end": str(end), "timezone": "Australia/Sydney",
+    return {"version": VERSION, "start": str(start), "end": str(end), "timezone": "Australia/Sydney",
             "checked_at": datetime.now(timezone.utc).isoformat(), "partial_day": end >= datetime.now(SYDNEY).date(),
             "ledger": cohort, "coverage": coverage,
             "roas": {name: sources[name].get("roas") for name in ("facebook", "google")},
-            "basis": "One non-test, non-cancelled Shopify order per row, by creation date. Source/device from exactly matched GA4 purchase transaction IDs and purchase-session attribution. Conflicting or missing evidence stays unresolved. Platform ROAS can overlap and is separate from this order ledger."}
+            "basis": "One non-test, non-cancelled Shopify order per row, by creation date. Source is Shopify last recorded visit, using explicit paid/organic evidence. Device is from exact GA4 purchase transaction-ID matches. GA4 session-source differences are disclosed separately; missing/conflicting source evidence stays unresolved. Platform ROAS can overlap and is separate from this order ledger."}
 
 
 def key(start, end):
@@ -220,7 +239,7 @@ def saved(start, end):
     from supabase_backend import get_app_setting
     value = SAVED.read(key(start, end), 30,
         lambda: get_app_setting(key(start, end), ensure_schema_first=False))
-    return value if value and (value.get("start"), value.get("end"), value.get("version")) == (str(start), str(end), 1) else None
+    return value if value and (value.get("start"), value.get("end"), value.get("version")) == (str(start), str(end), VERSION) else None
 
 
 def refresh(start, end):

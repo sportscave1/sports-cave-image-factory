@@ -11,6 +11,7 @@ import re
 import time
 import uuid
 from urllib.parse import quote, unquote, urlparse
+from attribution_urls import clean_destination
 from zoneinfo import ZoneInfo
 
 from ads_image_workflow import AdsImageValidationError, prepare_meta_posting_image
@@ -825,7 +826,9 @@ def validate_destination_url(value):
     parsed = urlparse(clean)
     if parsed.scheme.casefold() != "https" or not parsed.netloc:
         raise PostingValidationError("The selected product does not have a valid https:// product URL.")
-    return clean
+    # New paid Meta destinations must not carry another visit's acquisition tags.
+    # Meta's creative url_tags supplies the canonical paid tags and stable IDs.
+    return clean_destination(clean)
 
 
 def default_ad_name(destination_url, *, now=None):

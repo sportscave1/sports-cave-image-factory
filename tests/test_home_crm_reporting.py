@@ -116,7 +116,7 @@ def test_snapshot_storage_roundtrip_aggregate_only(database,monkeypatch):
     jobs,sql=database
     sql.execute("CREATE TABLE app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz)")
     monkeypatch.setattr(db,"connect",jobs.connect)
-    value={"version":1,"start":str(START),"end":str(END),"ledger":{"orders":2}}
+    value={"version":crm.VERSION,"start":str(START),"end":str(END),"ledger":{"orders":2}}
     monkeypatch.setattr(crm,"build",lambda *a:value)
     assert crm.refresh(START,END)==value
     sql.execute("SELECT key,value FROM app_settings")
@@ -259,3 +259,15 @@ def test_initial_html_is_useful_without_javascript_and_escapes_payload():
     assert 'data-device="mobile">2</td>' in markup
     assert '2 exact GA4 matches' in markup
     assert not any(tag=="script" or "onmouseover" in attrs for tag,attrs in parsed.tags)
+
+
+def test_build_keeps_journey_records_transient_and_discloses_source_model():
+    readers={"shopify":lambda *a:{"status":"verified","ids":{"1"},"journeys":{"1":{"channel":"Facebook paid","reason":"explicit_paid_tags"}}},
+        "ga4":lambda *a:{"status":"verified","rows":[ga(1,"facebook / referral")]},
+        "facebook":lambda *a:{"status":"verified","roas":5},"google":lambda *a:{"status":"verified","roas":3}}
+    result=crm.build(START,END,readers=readers)
+    assert result["version"]==2
+    assert result["ledger"]["rows"][0]["mobile"]==1
+    assert result["ledger"]["source_reconciliation"]==[{"ga4_channel":"Unresolved","shopify_channel":"Facebook paid","orders":1}]
+    raw=json.dumps(result)
+    assert '"ids"' not in raw and '"journeys"' not in raw and '"transactionId"' not in raw
