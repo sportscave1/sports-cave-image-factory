@@ -5,19 +5,22 @@ from test_prodigi_preparation import store,snapshot
 from test_auto_editions_jobs import database
 
 
-def test_live_preflight_failure_is_recorded_before_any_supplier_upload(store,monkeypatch):
+def test_live_send_queues_low_resolution_artwork_without_quality_review(store,monkeypatch):
     monkeypatch.setattr(prep,'require_user',lambda _:None)
     monkeypatch.setattr(prep,'enabled',lambda:True)
     monkeypatch.setattr(prep,'resolve',lambda _:snapshot())
-    monkeypatch.setattr(prep,'Client',lambda:object())
+    from test_prodigi_preparation import Provider
+    provider=Provider()
+    monkeypatch.setattr(provider,'catalogue',lambda *_:pytest.fail('Send must not review supplier quality'),raising=False)
+    monkeypatch.setattr(prep,'Client',lambda:provider)
     monkeypatch.setattr('prodigi_full_qa.live_enabled',lambda:True)
-    def reject(*_):raise ValueError('Higher-resolution master required')
-    monkeypatch.setattr('prodigi_full_qa.native_gate',reject)
-    result=prep.request({'id':'staff'},1)
+    monkeypatch.setattr('auto_editions_runtime.job_for',lambda _:({'id':snapshot()['job_id'],'manifest':{'source_dimensions':[2835,2004]}},None))
+    result=prep.request({'id':'staff'},1,'99','88')
     saved=prep.read(1)
-    assert result['status']=='Needs QA' and saved['last_failure']['stage']=='preflight'
-    assert saved['last_failure']['message']=='Higher-resolution master required'
+    assert result['status']=='Queued' and not saved.get('last_failure')
     assert not saved.get('browser') and not saved.get('write_intent')
+    result=prep.tick()
+    assert result['status']=='Awaiting browser upload' and not provider.writes
 
 
 def test_source_failure_is_saved_even_before_a_preparation_can_be_created(store,monkeypatch):

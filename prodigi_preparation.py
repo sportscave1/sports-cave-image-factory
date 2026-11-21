@@ -240,14 +240,11 @@ def _request(user, allocation_id, order_id='', item_id=''):
     if not enabled():
         raise ValueError('Prodigi preparation is disabled pending imported-order acceptance.')
     allocation_id = int(allocation_id)
-    preparing=False;preflight_error=''
+    preparing=False
     try:
         snapshot = resolve(allocation_id)
-        from prodigi_full_qa import live_enabled,native_gate
-        if live_enabled():
-            try:native_gate(snapshot,Client())
-            except MissingJPG:raise
-            except ValueError as error:preflight_error=str(error)
+        from prodigi_full_qa import live_enabled,validate_current_artwork
+        if live_enabled():validate_current_artwork(snapshot)
     except MissingJPG:
         from prodigi_full_qa import live_enabled
         if not live_enabled():raise
@@ -259,11 +256,8 @@ def _request(user, allocation_id, order_id='', item_id=''):
     if order_id or item_id:
         order_id, item_id = identifier(order_id), identifier(item_id)
     value = dict(allocation_id=allocation_id, order_id=order_id, item_id=item_id,
-        fingerprint=digest(snapshot), snapshot=snapshot, status='Needs QA' if preflight_error else ('Preparing JPG' if preparing else 'Queued'),
+        fingerprint=digest(snapshot), snapshot=snapshot, status='Preparing JPG' if preparing else 'Queued',
         requester=str(user['id']), checks={}, message='Waiting for Orders companion', history=[],browser_requested=True)
-    if preflight_error:
-        value.update(message=preflight_error,checks={'production_approval':False})
-        record_failure(value,'preflight',preflight_error,'ArtworkQuality')
     with connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         # A supplier item is reserved for one allocation, across every requester.
@@ -415,10 +409,10 @@ def tick():
                 phase='QA'
                 from prodigi_full_qa import run as full_qa
                 return full_qa(value,Client(),resolve,persist)
-            from prodigi_full_qa import live_enabled,native_gate
+            from prodigi_full_qa import live_enabled,validate_current_artwork
             if live_enabled() and not value.get('browser') and not value.get('write_intent'):
-                phase='preflight'
-                native_gate(value['snapshot'],Client())
+                phase='source_identity'
+                validate_current_artwork(value['snapshot'])
             phase='artwork_readback' if value.get('write_intent') else 'supplier_match'
             return run(value, Client(), resolve, artwork_link, persist)
         except UploadFenceLost as error:

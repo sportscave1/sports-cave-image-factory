@@ -27,16 +27,12 @@ def test_print_area_uses_real_supplier_dimensions_and_native_resolution():
         full.print_area({'printAreas':[{'name':'default'}]},[100,80])
 
 
-def test_live_native_preflight_blocks_before_any_artwork_upload(monkeypatch):
-    from types import SimpleNamespace
+def test_send_checks_current_source_identity_without_reviewing_resolution(monkeypatch):
     snap=source();job={'id':snap['job_id'],'manifest':{'source_dimensions':[2835,2004]}}
     monkeypatch.setattr('auto_editions_runtime.job_for',lambda _: (job,None))
-    provider=SimpleNamespace(catalogue=lambda _: {'printAreas':[{'name':'default','widthMm':420,'heightMm':594,'recommendedDpi':300}]})
-    with pytest.raises(ValueError,match='No live artwork was uploaded'):full.native_gate(snap,provider)
-    job['manifest']['source_dimensions']=[7016,9933]
-    assert full.native_gate(snap,provider) is None
+    assert full.validate_current_artwork(snap) is None
     job['id']='new-current-master'
-    with pytest.raises(prep.MissingJPG):full.native_gate(snap,provider)
+    with pytest.raises(prep.MissingJPG):full.validate_current_artwork(snap)
 
 
 @pytest.mark.parametrize('field,value',[('sha256','other'),('job_id','other'),('sku','other'),('number',99),('dimensions',[1,2])])

@@ -17,6 +17,11 @@ def action_state(saved, fulfilment=""):
         return dict(label="✓ Complete",tone="complete",action="",url="",detail="This order is already complete.")
     if not saved:return dict(label='Send',tone='plain',action='send',url='',detail='Prepare this existing draft. Payment and Submit stay manual.')
     state=saved.get('status','Needs review')
+    failure=saved.get('last_failure') or {}
+    if (state in ('Needs QA','Needs review') and failure.get('stage')=='preflight'
+            and failure.get('error_type')=='ArtworkQuality'
+            and not any(saved.get(k) for k in ('browser','write_intent','document_write_intent'))):
+        return dict(label='Send',tone='plain',action='send',url='',detail='Attach artwork now. Print quality is checked in the later QA stage; payment stays manual.')
     if state=='Ready for manual payment':
         return dict(label='✓ Ready',tone='success',action='',url=supplier_link(saved.get('order_id')),detail='All QA passed. Open this exact order to review and submit manually.')
     if state in ACTIVE:return dict(label='Preparing…',tone='pending',action='',url='',detail=saved.get('message',''))

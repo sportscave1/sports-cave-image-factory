@@ -83,3 +83,12 @@ def test_selection_uses_snapshot_without_reloading_statuses(screen,monkeypatch):
     reply['event']={'event':'selection','type':'select','ids':['allocation:2']}
     grid.render([{'edition_order_id':2}],[{}],grid_key='selection',selected=[],actor={'id':'staff'},statuses={})
     assert calls==[('rerun',{'scope':'fragment'})]
+
+
+def test_old_preflight_quality_block_offers_send_but_uploaded_qa_failure_does_not():
+    saved={'status':'Needs QA','last_failure':{'stage':'preflight','error_type':'ArtworkQuality'}}
+    assert grid.action_state(saved)['action']=='send'
+    saved['browser']={'verified':True}
+    assert grid.action_state(saved)['action']=='review'
+    saved.pop('browser');saved['last_failure']['stage']='QA'
+    assert grid.action_state(saved)['action']=='review'

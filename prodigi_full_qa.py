@@ -27,15 +27,11 @@ def print_area(catalogue,dimensions):
     return physical,max(300,area.get('recommendedDpi') or 300)
 
 
-def native_gate(snapshot,provider):
-    """Cheap live preflight: do not upload a known low-resolution original."""
+def validate_current_artwork(snapshot):
+    """Send checks source identity only; print quality is evaluated after upload."""
     import auto_editions_runtime as runtime
     job,_=runtime.job_for(snapshot['allocation_id'])
     if job['id']!=snapshot['job_id']:raise prep.MissingJPG('Generate the current allocated edition from the updated master.')
-    physical,dpi=print_area(provider.catalogue(snapshot['mapping']['prodigi_code']),snapshot['dimensions'])
-    ppi=[n*25.4/mm for n,mm in zip(job['manifest']['source_dimensions'],physical)]
-    if min(ppi)<dpi:
-        raise ValueError(f'A higher-resolution master is required before sending this order: {min(ppi):.0f} native PPI, supplier recommendation {dpi} PPI. No live artwork was uploaded.')
 
 
 def approve(snapshot,provider,asset_id):

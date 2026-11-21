@@ -7,7 +7,7 @@ page, preserves stable selection identities across pages, and filters locally
 by saved status. The table makes one batched status read, with no supplier call
 per row. Only active, visible preparation polls for status.
 
-Send prepares the exact existing unpaid Prodigi draft. Auto Editions generates
+Send attaches artwork to the exact existing unpaid Prodigi draft without a native-resolution quality review. The current source, allocation and supplier target still have to match. Print-quality checks run in the later QA stage after upload. Auto Editions generates
 the allocated numbered JPG when required. The paired Edge companion uploads
 and saves it; Render validates the supplier identity, artwork, dimensions,
 frame, shipping, edition, certificate and packing slip. The certificate uses
@@ -22,8 +22,8 @@ release; raw supplier byte verification is reported separately when available.
 
 The original layout and archived bytes must match their saved approvals.
 Enlarging an export does not prove more native detail. Native resolution and
-embedded colour-profile failures block production approval. #SC3522 requires a
-higher-resolution master; no owner quality exception has been recorded. Exact
+embedded colour-profile failures block the later QA production approval, not Send. #SC3522 still requires a
+higher-resolution master to pass that QA; no owner quality exception has been recorded. Exact
 recipient/address matching stays mandatory and neither address is silently
 rewritten to resolve a mismatch.
 
