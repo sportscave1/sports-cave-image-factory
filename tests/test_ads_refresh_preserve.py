@@ -115,6 +115,10 @@ class PreserveWinnerTests(unittest.TestCase):
         self.assertEqual(ads._creative_refresh_asset_issues(r,workflow),[])
         workflow['slots'][slots[0]['id']]['data']=b'changed'
         self.assertTrue(ads._creative_refresh_asset_issues(r,workflow))
+        workflow['slots'][slots[0]['id']]['data']=b'original'
+        workflow['ad_notes']['refresh_executions'][0]['image_action']='local_edit'
+        self.assertIn('Identical output image assigned to multiple refresh slots.',
+                      ads._creative_refresh_asset_issues(r,workflow))
 
     def test_canonical_retrieval_uses_bytes_caches_success_and_retries_failure(self):
         from unittest.mock import MagicMock

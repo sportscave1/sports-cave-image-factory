@@ -13815,10 +13815,8 @@ def _creative_refresh_asset_issues(result, workflow):
     plan = context.get("refresh_plan") or {}
     if ads_refresh_generation.plan.preserve.active(plan):
         records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
-        # Reusing an unchanged source card is valid, but assigning the same output
-        # to two slots is not. Check all slots before filtering locally edited cards.
-        issues = ads_refresh_generation.plan.asset_issues(list((workflow.get('slots') or {}).values()))
-        edited = []
+        issues, edited, duplicate_candidates = [], [], []
+        reused_originals = set()
         refs = plan.get('references') or []
         for i, expected in enumerate(_result_image_slots(result)):
             slot = (workflow.get('slots') or {}).get(expected['id']) or {}
@@ -13827,12 +13825,22 @@ def _creative_refresh_asset_issues(result, workflow):
             execution = records[i] if i < len(records) and isinstance(records[i], dict) else {}
             reference = refs[i] if result.get('campaign_type') == 'Carousel' and i < len(refs) else (refs[0] if refs else {})
             digest = hashlib.sha256(slot['data']).hexdigest()
+            verified_reuse = (execution.get('image_action') == 'reuse_original'
+                              and digest == reference.get('image_sha256'))
+            # Historical copy-only IE variants may share their verified source.
+            # Edited outputs and separate Carousel cards still need distinct bytes.
+            if not (verified_reuse and result.get('campaign_type') != 'Carousel' and digest in reused_originals):
+                duplicate_candidates.append(slot)
+            if verified_reuse:
+                reused_originals.add(digest)
             if execution.get('image_action') == 'reuse_original':
                 if not reference.get('image_sha256') or digest != reference['image_sha256']:
                     issues.append(f'Refresh {i+1}: copy-only image must match the original winner bytes.')
             else:
                 edited.append(slot)
-        return issues + ads_refresh_generation.plan.asset_issues(edited, [r.get('image_sha256') for r in refs if r.get('image_sha256')])
+        issues += ads_refresh_generation.plan.asset_issues(duplicate_candidates)
+        issues += ads_refresh_generation.plan.asset_issues(edited, [r.get('image_sha256') for r in refs if r.get('image_sha256')])
+        return list(dict.fromkeys(issues))
     source_hashes = [r.get("image_sha256") for r in plan.get("references", []) if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:

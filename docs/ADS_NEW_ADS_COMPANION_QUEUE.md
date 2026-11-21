@@ -125,6 +125,9 @@ Two functional regressions were corrected: shared racing-copy instructions now
 precede the final CSV instead of becoming extra CSV rows, and refresh packages
 validate uploaded image uniqueness even
 across locally edited and reused original cards, preserving their saved notes.
+Saved copy-only IE variants may intentionally share the verified original bytes;
+this exception requires both an explicit reuse declaration and the exact source
+hash. Edited outputs and separate Carousel cards retain duplicate checks.
 Optional copy review is tested directly as a compatibility component while
 current generation retains its integrated review.
 
