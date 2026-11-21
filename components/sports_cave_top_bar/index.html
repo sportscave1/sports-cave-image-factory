@@ -1390,7 +1390,8 @@
       }
       lastCompanionStatus = status;
       const editionFreshness=root.querySelector('#sc-os-editions-freshness');
-      if(status.display_state!=='stale' && !status.queues?.editions?.unavailable){
+      if(!status.queues?.editions) delete editionFreshness.dataset.checkedAt;
+      if(status.queues?.editions && status.display_state!=='stale' && !status.queues.editions.unavailable){
         const checked=Date.parse(status.checked_at||'');
         editionFreshness.dataset.checkedAt=Number.isFinite(checked)?new Date(checked).toLocaleTimeString():new Date().toLocaleTimeString();
       }
