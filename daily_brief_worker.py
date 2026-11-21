@@ -299,6 +299,9 @@ def main():
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
+    from seo_companion import run as seo_run
+    seo_thread = threading.Thread(target=seo_run, args=(stop,), name='seo-companion', daemon=True)
+    seo_thread.start()
     while not stop.is_set():
         try:
             reconcile_morning()

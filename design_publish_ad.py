@@ -90,6 +90,7 @@ def public(value):
                        'Automatic recovery scheduled' if value['stage']=='waiting' and retry.get('state')=='scheduled' else
                        'Confirming the existing ChatGPT handoff' if value.get('handoff_pending') and value['stage']=='opening' else
                        'ChatGPT is thinking / generating' if generating else
+                       'Saving completed ad files' if value.get('blocked_collection') and value['stage']=='generating' else
                        'Waiting for Meta catalogue' if value.get('catalog_retry') and value['stage']=='generating' else
                        'Restoring missing ad attachments' if value.get('attachment_repair', {}).get('state') in ('ready','sending','submitted') and value['stage']=='generating' else
                        f"Collecting ad files · {sum(name in value['artifacts'] for name in COVERS.values())} of 3 covers" if value.get('artifacts') and value['stage']=='generating' else LABELS[value['stage']]), detail=detail,
@@ -190,8 +191,10 @@ def delivery_prompt(result, reference, folder, job):
 {reference}
 
 Apply the New Ads Instant Experience brief below. Generate the three full-resolution covers
-and actual UTF-8 ad_copy.csv. Return all FOUR original downloadable files together in your
-final response, with exactly these filenames (the companion will save them to these paths):
+and actual UTF-8 ad_copy.csv. For a complete package, return all FOUR original downloadable
+files together. If an image remains blocked, still attach every completed image and the
+CSV; report the missing filenames honestly without claiming success or regenerating a
+rejected slot. Use exactly these filenames (the companion saves them to these paths):
 {outputs}
 - CSV: {folder}/ad_copy.csv
 
@@ -310,6 +313,8 @@ def _download(provider, meta, size_limit):
 
 
 def _post_request(value):
+    if value.get('blocked_collection'):
+        raise ValueError('This package contains rejected image slots; preserve its completed exports for review.')
     from ads_creative_contract import obsolete
     if not value.get('posting_id') and obsolete(value.get('result')):
         raise ValueError('An obsolete creative release cannot create a new campaign; rebuild through the current ad queue.')
@@ -417,7 +422,9 @@ def _step(key, value, job, event, age):
         from ads_auto_recovery import POLICY_BLOCK
         reason = str(event.get('reason') or 'Check the Meta Ads conversation for the blocked step.')[:600]
         if POLICY_BLOCK.search(reason):
-            raise ValueError(reason)
+            from ads_partial_delivery import begin
+            if not begin(value, reason):
+                raise ValueError(reason)
         if not value.get('collect_only'):
             if stage == 'generating' and CHAT.fullmatch(value.get('chat_url', '')):
                 raise RetryAd(reason, code='generation', mode='complete_missing')
@@ -425,6 +432,9 @@ def _step(key, value, job, event, age):
                 raise RetryAd(reason, code='generation' if stage == 'generating' else 'handoff',
                               mode='complete_missing' if stage == 'generating' else None)
             raise ValueError(reason)
+    if value.get('blocked_collection'):
+        from ads_partial_delivery import advance
+        return advance(value, event)
     if stage == 'opening':
         if time.time() - value.get('handoff_started_at', time.time() - age) > 3600:
             raise RetryAd('The desktop could not confirm the existing ChatGPT conversation. Rechecking its saved send receipt without resending the prompt.', code='handoff')
@@ -578,7 +588,8 @@ def tick(token, event):
                          COALESCE((a.value->'auto_recovery'->>'next_at')::double precision,0)<=EXTRACT(EPOCH FROM now()))))
                OR (a.value->>'stage'='failed' AND %s AND NOT (a.value ? 'recovery_checked_version')))
             ORDER BY CASE WHEN a.value->>'stage' IN ('preparing','opening','generating','posting') THEN 0
-                          WHEN a.value->>'stage'='failed' THEN 1 ELSE 2 END,
+                          WHEN a.value->>'stage'='waiting' AND a.value ? 'blocked_collection' THEN 1
+                          WHEN a.value->>'stage'='failed' THEN 2 ELSE 3 END,
                      a.updated_at, a.key LIMIT 1""", (PREFIX, PREFIX + '%', enabled, enabled))
         job = cur.fetchone()
         if not job:

@@ -27,7 +27,7 @@ def test_new_design_composes_sources_type_and_badge_without_extra_checkpoints():
     assert 'continue with the hero and verified setting' in prompt
     assert 'Include the hero and selected secondary source with its distinct story role' in prompt
     assert "start with the supporting face smaller than the hero's face" in prompt
-    assert 'selective softness only on non-essential transitions' in prompt
+    assert 'faded archival tone and soft peripheral transitions' in prompt
     assert 'At 100%, verify the supporting likeness, crop and transition into the environment' in prompt
     assert 'not additional image-generation calls' in prompt
     assert '65–85% of the main title block’s width' in prompt
@@ -281,3 +281,36 @@ def test_integrated_collector_contract_survives_all_flows_and_waiting_snapshots(
         assert 'Keep the verified story.' in upgraded
         assert queue._receipt(saved) == queue._receipt(dict(saved, prompt=upgraded))
         assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded
+
+
+def test_focal_hierarchy_reaches_new_refresh_edit_and_upgrades_waiting_jobs():
+    from design_collector_background import NEW_COLLECTOR_BACKGROUND
+    from home_design_refresh import _refresh_prompt
+    import morning_design_queue as queue
+
+    story = 'Preserve the verified stadium and supporting photograph.'
+    prompts = [
+        _prompt('Collector', story),
+        _refresh_prompt(dict(title='Approved edition', product_id='123'), 'https://example.test/edition'),
+        _prompt('Collector', story, edit={
+            'source': {'id': 'id:art', 'rev': 'r1', 'path_display': '/Review/Collector.psd'},
+            'metadata': {'upload_intent': 'new_product'},
+        }),
+    ]
+    for prompt in prompts:
+        assert prompt.count('**ONE CLEAR FOCAL SUBJECT') == 1
+        assert prompt.index('**ONE CLEAR FOCAL SUBJECT') < prompt.index('**3.')
+        assert 'Keep all selected elements, verified stadium features and meaningful supporting imagery' in prompt
+        assert 'one cohesive focal unit' in prompt
+        assert 'rather than form competing focal areas' in prompt
+        assert 'Show the recognisable driver/rider and their actual race vehicle at thumbnail size' not in prompt
+        assert 'Preserve its identifying feature at normal size and its contribution to the setting at 250 px' not in prompt
+        assert 'Subdue competing accents rather than the selected venue or supporting story' not in prompt
+
+    key = queue.identity('2026-11-21', 'recommendations', {'title': 'Collector'})
+    current = queue._job_prompt(key, 'Collector', story)
+    saved = dict(id=key, title='Collector', prompt=current.replace(NEW_COLLECTOR_BACKGROUND, 'Older background rules.'))
+    upgraded = queue._waiting_prompt(saved)
+    assert NEW_COLLECTOR_BACKGROUND in upgraded and story in upgraded
+    assert queue._receipt(saved) == queue._receipt(dict(saved, prompt=upgraded))
+    assert queue._waiting_prompt(dict(saved, prompt=upgraded)) == upgraded

@@ -22,8 +22,24 @@ def html(today, initial=None):
     def ratio(name):
         value = data.get("roas", {}).get(name)
         return f"{value:.2f}×" if type(value) in (float, int) and math.isfinite(value) else "—"
+    def number(value):
+        return f"{value:,.2f}".rstrip("0").rstrip(".") if type(value) in (float, int) and math.isfinite(value) and value >= 0 else "—"
+    google = data.get("coverage", {}).get("google", {})
+    ads_purchases = number(google.get("purchases")) if google.get("status") == "verified" else "—"
+    ga4_status = data.get("coverage", {}).get("ga4", {}).get("status")
+    ga4_paid = number(ledger.get("ga4_channel_orders", {}).get("Google paid")) if ga4_status == "verified" else "—"
+    comparison = (f'Google paid orders: Shopify last visit {count("Google paid", "total")} · '
+                  f'GA4 purchase session {ga4_paid}. Google Ads: {ads_purchases} attributed purchases '
+                  '(ad interaction dates).') if ledger else ""
+    warnings = []
+    differences = ledger.get("paid_organic_differences", 0)
+    if differences:
+        warnings.append(f"{differences} {'order has' if differences == 1 else 'orders have'} paid/organic model differences; an organic last visit does not rule out an earlier ad.")
+    listings = ledger.get("source_reasons", {}).get("google_listing_paid_status_unknown", 0)
+    if listings:
+        warnings.append(f"{listings} Google listing {'order has' if listings == 1 else 'orders have'} unverified paid/organic status; counted as Unresolved.")
     rows = "".join('<tr data-channel="' + escape(name) + '"><th scope="row">' +
-        escape(name) + '</th>' + ''.join('<td data-device="' + key + '">' + count(name, key) + '</td>'
+        escape("Organic (last visit)" if name == "Organic" else name) + '</th>' + ''.join('<td data-device="' + key + '">' + count(name, key) + '</td>'
             for key in ("mobile", "desktop", "other", "total")) + '</tr>' for name in CHANNELS)
     def coverage_line():
         result = []
@@ -55,10 +71,15 @@ def html(today, initial=None):
         <thead><tr><th scope="col">Source</th><th scope="col">Mobile</th><th scope="col">Desktop</th>
         <th scope="col">Other /<br>unknown</th><th scope="col">Total</th></tr></thead><tbody>{rows}</tbody></table></div>
       <small class="sc-crm-status" role="status" aria-live="polite">{escape(status)}</small>
+      <p class="sc-crm-comparison">{escape(comparison)}</p>
+      {('<p class="sc-crm-warning">' + escape(' '.join(warnings)) + '</p>') if warnings else ''}
       <details class="sc-crm-coverage"><summary>Coverage &amp; attribution</summary><p class="sc-crm-basis">{escape(data.get("basis", ""))}</p>
         <p>Other includes direct, email and other referrals. Unresolved includes missing or conflicting source evidence.
         Tablets and unknown devices stay in Other / unknown. Organic has no advertising ROAS.</p>
         <p>Source-model differences: {escape("; ".join(f"{r['ga4_channel']} → {r['shopify_channel']}: {r['orders']}" for r in ledger.get("source_reconciliation", [])) or "None recorded")}</p>
+        <p>Feed tags such as product_sync / sag_organic alone do not verify a free-listing sale.
+        The GA4 comparison counts each matched order once; missing or conflicting sessions stay unresolved.
+        Google Ads purchases are platform conversion credit, not additional orders to add to the table.</p>
         <p class="sc-crm-sources">{coverage_line()}</p><p>Paid-platform ROAS can overlap and is separate from the order table.
         Facebook includes Instagram. Google covers PM021126. Values can change as conversions arrive.</p></details>
     </section>"""
@@ -78,6 +99,8 @@ CSS = """<style>
 .sc-home-crm th:first-child{text-align:left}.sc-home-crm tbody th{font-weight:500}
 .sc-home-crm thead th{font-size:.7rem;line-height:1.2}
 .sc-crm-status{display:block;margin-top:.45rem;opacity:.8}.sc-crm-coverage{font-size:.7rem;margin-top:.35rem}
+.sc-crm-comparison,.sc-crm-warning{font-size:.72rem;margin:.4rem 0 0;line-height:1.4}
+.sc-crm-warning{border-left:2px solid #b49048;padding-left:.4rem}
 .sc-crm-coverage summary{cursor:pointer;font-weight:600}.sc-crm-coverage p{margin:.35rem 0}
 </style>"""
 

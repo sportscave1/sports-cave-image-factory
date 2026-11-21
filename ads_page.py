@@ -8030,7 +8030,7 @@ def build_instant_experience_shared_template(physical_product=None, *, usa=False
         build_instant_experience_fixed_opaque_footer_rules(),
         build_instant_experience_on_image_copy_fit_rules(),
         build_instant_experience_creative_cta_rules("premium_scarcity_right"),
-        build_instant_experience_typography_quality_rules(shared=True),
+        SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 + "\nUse the single Baseline 2.0 footer specification above for typography, spacing and review.",
         ie_visuals.SCARCITY_RULE,
         ie_visuals.SCENE_REFERENCE_RULES.strip(),
         ie_visuals.SCENE_VISIBILITY_RULES.strip(),
@@ -8066,7 +8066,7 @@ def build_instant_experience_completed_csv_contract():
         "campaign_type": "Instant Experience", "workflow_mode": ADS_WORKFLOW_MODE_NEW,
     })
     return f"""COMPLETED DOWNLOADABLE CSV — ad_copy.csv
-After all three images, use the available file-creation/code tool to create and attach a real ad_copy.csv.
+After the image attempts and any eligible reserves, create and attach a real ad_copy.csv using the available file tool. Complete this independent step even if an image remains missing; the three copy rows do not establish that three images exist.
 Exact column order:
 {','.join(INSTANT_EXPERIENCE_COPY_CSV_HEADERS)}
 Exactly three rows in Image 1/2/3 order. Copy these compatibility cells exactly (they are parser identities, not writing frameworks):

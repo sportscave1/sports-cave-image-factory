@@ -28,5 +28,5 @@ REVIEW_UPDATES = (
     ("- Complete matching copy, the populated CSV and supplied setup.\n- Review the outputs and report unresolved defects.",
      "- Complete matching copy, then review and improve the images and copy together.\n- Export the reviewed copy to the populated CSV and provide the supplied setup."),
     ("5. Create and attach the completed downloadable ad_copy.csv from the final copy records.",
-     RESERVE_CHECKPOINT + "\n4b. Complete the final creative review of all three actual images and their copy; improve weak copy and regenerate any image needing improvement, then inspect the revised set.\n5. Create and attach the completed downloadable ad_copy.csv from the final reviewed copy records."),
+     RESERVE_CHECKPOINT + "\n4b. Complete the final creative review of available actual images and all three copy records. Correct quality defects in successful images through the existing review; do not regenerate a safety-blocked or unexplained rejected slot. If an image remains missing, finish independent copy, CSV and available-file delivery with the exact blocker.\n5. Create and attach the completed downloadable ad_copy.csv from the final reviewed copy records."),
 )
