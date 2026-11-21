@@ -28,9 +28,11 @@
   async function upload(plan) {
     if(running) throw Error('An upload is already in progress.');
     running=true;
+    let stage='page';
     try {
       locationMatches(plan);
       if(dialogs().length) throw Error('An existing editor requires manual review.');
+      stage='row';
       const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(row=>{
         const tokens=text(row).split(/\s+/);
         return tokens.includes(plan.sku) && (!plan.colour ||
@@ -38,12 +40,15 @@
       });
       if(rows.length!==1) throw Error('The exact product/frame row is ambiguous.');
       button(rows[0],'Upload').click();
+      stage='editor';
       const editor=await wait(()=>dialog('Image Editor'));
       if(!text(editor).includes(plan.sku)) throw Error('Editor product differs.');
       button(editor,'Add image').click();
+      stage='picker';
       const picker=await wait(()=>dialog('Select image'));
       const input=picker.querySelector('input[data-test="image-library-upload-from-file-input"][type="file"]');
       if(!input) throw Error('Prodigi upload input changed.');
+      stage='transfer';
       const parts=[];let received=0;
       while(received<plan.bytes) {
         const answer=await chrome.runtime.sendMessage({type:'prodigi:chunk',offset:received});
@@ -58,6 +63,7 @@
       locationMatches(plan);
       const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;
       input.dispatchEvent(new Event('change',{bubbles:true}));
+      stage='uploaded';
       const loaded=await wait(()=>{
         const e=dialog('Image Editor');return e&&!dialog('Select image')&&text(e).includes('Uploaded image:')&&e;
       },240000);
@@ -65,6 +71,7 @@
       if(!Array.isArray(plan.dimensions)||!compact.includes(plan.dimensions.join('x')+'px'))
         throw Error('Uploaded image dimensions differ from the numbered archive.');
       const orientation=plan.dimensions[0]>plan.dimensions[1]?'Landscape':'Portrait';
+      stage='orientation';
       const radios=Array.from(loaded.querySelectorAll('input[type="radio"],[role="radio"]'));
       const target=radios.find(e=>e.getAttribute('aria-label')===orientation||
         (e.labels&&Array.from(e.labels).some(l=>text(l)===orientation))||
@@ -73,12 +80,16 @@
       await delay(500);
       button(loaded,'fit').click();
       await delay(500); // Let the editor commit its orientation/fit state before Save.
+      stage='permit';
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:hash});
       if(permission?.permitted!==true) throw Error('The draft changed before Save.');
       locationMatches(plan);
+      stage='save';
       button(loaded,'Save').click();
       await wait(()=>!dialog('Image Editor'),120000);
-      return {saved:true};
+      return {saved:true,stage};
+    } catch {
+      return {saved:false,stage};
     } finally {running=false;}
   }
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{

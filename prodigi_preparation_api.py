@@ -69,12 +69,14 @@ async def browser_action(request):
             if len(raw)>512: raise ValueError('Orders receipt is too large.')
         body=json.loads(raw)
         is_permit=request.url.path.endswith('/permit')
-        if (not isinstance(body,dict) or set(body)!=({'key','token','sha256'} if is_permit else {'key','token'}) or
+        if (not isinstance(body,dict) or (set(body)!={'key','token','sha256'} if is_permit else set(body) not in ({'key','token'},{'key','token','stage'})) or
             not all(isinstance(v,str) for v in body.values()) or
             not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])):
             raise ValueError('Only an exact Orders handoff receipt is accepted.')
+        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','picker','transfer','uploaded','orientation','permit','save'):
+            raise ValueError('Unknown browser stage.')
         from prodigi_browser import permit,finish
-        result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'])
+        result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'))
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:
         return failure(error)

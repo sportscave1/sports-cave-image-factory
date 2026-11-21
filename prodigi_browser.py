@@ -236,12 +236,13 @@ def verify_original(provider,source,filename,output,dimensions):
     return str(asset['id']),bool(verify_file(asset['url'],output))
 
 
-def finish(key,token):
+def finish(key,token,stage='readback'):
     provider,resolver,_,sandbox=context(key)
     with prep.connect() as conn,conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
         cur.execute("SET LOCAL idle_in_transaction_session_timeout = '0'")
         value=authorised(cur,key,token)
+        value['browser']['last_stage']=stage
         if value['browser'].get('verified'):
             return {'status':value['status']}
         try:
@@ -278,5 +279,6 @@ def finish(key,token):
         except Exception as error:
             value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                 else 'Supplier artwork could not be verified. Review the exact draft; no automatic retry.')
+            value['message']+=' Browser stage: '+stage+'.'
         save(cur,key,value)
     return {'status':value['status']}
