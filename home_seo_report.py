@@ -79,6 +79,8 @@ def publish(raw, user):
         for key in (KEY, HISTORY + edition['date']):
             cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())
                 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''', (key, json.dumps(saved)))
+        from seo_companion import enqueue_daily
+        enqueue_daily(cur, edition)
     return edition
 
 

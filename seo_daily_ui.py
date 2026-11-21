@@ -53,6 +53,9 @@ def render(user, state, store, reports, navigate, *, legacy_route=None):
             st.download_button('Download daily report', json.dumps(saved, ensure_ascii=False, indent=2),
                                file_name='seo-' + saved['date'] + '.json', mime='application/json')
     edition_view()
+    if not model.local_mode():
+        from seo_companion_ui import results
+        results(user)
     active = [r for r in state['plan_items'] if r.get('status') in model.ACTIONABLE and
               (not r.get('admin_only') or os_accounts.is_admin(user))]
     cols = st.columns(3)
