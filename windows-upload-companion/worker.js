@@ -115,13 +115,15 @@ async function health(receipt) {
   const record = (await chrome.storage.local.get(key))[key] || {state:'ready'};
   const active = exact ? pending.has(receipt) : pending.size > 0;
   const version = chrome.runtime.getManifest().version;
+  const ordersState = await chrome.storage.local.get([staffDeviceKey, 'ordersCompanionLast']);
+  const orders = {paired: Boolean(ordersState[staffDeviceKey]), last: ordersState.ordersCompanionLast || null};
   if (record.state === 'sending' && !active) return {
     state:'uncertain', reason:'Check the last ChatGPT tab for the sent prompt.', time:record.time, version,
   };
   if (record.state === 'opening' && !active) return {
     state:'failed', reason:'Edge closed before the prompt was sent. Retry from Product Uploads.', time:record.time, version,
   };
-  return {...record, version};
+  return {...record, version, orders};
 }
 async function permit(message, sender) {
   const job = pending.get(message.id);
@@ -172,6 +174,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (message?.type === 'os:wake') action = staffRead(staffDeviceKey).then(async token => {
       if (!token) return {paired:false};
       await ensureStaffAlarm();
+      await ensureOrdersAlarm();
+      void ordersQueueTick();
       void staffQueueTick();
       return {paired:true};
     });
