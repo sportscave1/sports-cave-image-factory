@@ -12,7 +12,7 @@ def test_task_recorder_shares_developer_with_existing_controls():
     assert not page.exception
     page.button(key="sidebar-disclosure::developer").click().run()
     assert not page.exception
-    assert page.session_state["route"] == "Worker Health"
+    assert page.session_state["route"] == "Developer"
     assert page.button(key="sidebar-child::Task Recorder")
     assert page.button(key="sidebar-child::Image Protection")
     assert any("Developer%20Studio" in link.proto.url for link in page.get("link_button"))

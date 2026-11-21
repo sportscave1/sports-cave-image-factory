@@ -24,10 +24,16 @@ Reports use individual immutable keys in existing `app_settings`; no new table,
 schema migration or Render service is needed. Publishing a report cannot execute
 code, change configuration or trigger deployment.
 
-Before enabling automatic releases, the exact source base must be reconciled
-with current production and safe synthetic workflow/browser checks must exist.
+Before enabling automatic releases, safe synthetic workflow/browser checks must exist.
 The initial task's approved Studio base is `7f9f617e2bce2f150d51561c2f0873412312b036`;
 GitHub main observed on 21 November 2026 was
-`106c611462c3832c7734762c87e677bde7d1f031`. They must not be treated as identical.
+`106c611462c3832c7734762c87e677bde7d1f031`. The Speed-only commit was subsequently
+rebased onto that exact GitHub revision, also verified live on the canonical
+Render primary (deploy `dep-dc0es7u0tbcc73auu910`). Source reconciliation is complete
+for this draft; its initial queued report retains the earlier setup observations.
+Current main already includes Marketplace, so section discovery now enrols it.
+Conflict resolution preserved current main's separate Companion menu and its
+Marketplace/Prompts routes. Two old navigation expectations also failed against
+unmodified main; they were updated to verify its actual existing menu behaviour.
 Preview is disabled under the current Studio policy. A report must expose these
 blockers, and cannot label a proposed change live or verified.
