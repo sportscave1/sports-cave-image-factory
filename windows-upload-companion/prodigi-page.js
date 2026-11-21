@@ -93,14 +93,19 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow};
         (e.id&&Array.from(loaded.querySelectorAll('label')).some(l=>l.htmlFor===e.id&&text(l)===orientation)));
       if(target && !(target.checked||target.getAttribute('aria-checked')==='true')) target.click();
       await delay(500);
-      button(loaded,'fit').click();
+      // Orientation rerenders Prodigi's editor; resolve its current controls.
+      const fitted=await wait(()=>{
+        const e=dialog('Image Editor');if(!e)return null;
+        try {button(e,'fit');return e;} catch {return null;}
+      });
+      button(fitted,'fit').click();
       await delay(500); // Let the editor commit its orientation/fit state before Save.
       stage='permit';
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:hash});
       if(permission?.permitted!==true) throw Error('The draft changed before Save.');
       locationMatches(plan);
       stage='save';
-      button(loaded,'Save').click();
+      button(dialog('Image Editor'),'Save').click();
       await wait(()=>!dialog('Image Editor'),120000);
       return {saved:true,stage};
     } catch {
