@@ -267,6 +267,7 @@ def test_desktop_route_requires_pairing_and_accepts_no_external_instructions(mon
     user_calls=[];queue_calls=[]
     monkeypatch.setattr(api,'desktop',lambda token:user_calls.append(token))
     monkeypatch.setattr(queue,'tick',lambda:queue_calls.append(True))
+    monkeypatch.setattr('prodigi_sandbox.tick',lambda:None)
     with TestClient(app) as client:
         assert client.post('/tick',json={}).status_code==403
         assert not user_calls and not queue_calls
