@@ -71,9 +71,9 @@ def test_new_design_replaces_generation_conflicts_without_blocking_review():
         assert requirement in prompt
 
 
-def test_layout_review_precedes_only_generation_and_final_handoff():
+def test_composition_direction_precedes_generation_without_a_review_gate():
     prompt = _prompt('Collector', 'Verified story')
-    assert prompt.index('**Creative review before generation.**') < prompt.index('**3.')
+    assert prompt.index('**Composition direction for the single generation.**') < prompt.index('**3.')
     assert 'build a scaled layout' in prompt
     assert 'one creative image-generation call' in prompt
     assert 'never triggers another generation' in prompt

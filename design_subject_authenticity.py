@@ -17,7 +17,7 @@ IDENTITY_OVERRIDES_CONTINUITY = (
 AUTHENTICITY_HEADING = "**MANDATORY PHOTOGRAPHIC AUTHENTICITY AND INTEGRATION CHECK**"
 _SOURCE_COMPARISON = (
     "At 100% zoom, compare the final assembled PSD directly and side by side with the actual "
-    "verified full-resolution photographs. Inspect the story-carrying areas first: every visible "
+    "available source photographs. Inspect the story-carrying areas first: every visible "
     "face and expression, eyes and gaze, eyelids, eyebrows, nose, mouth and teeth, jaw, ears, "
     "hairline, natural skin and proportions; both hands with their contact points, limb connections, "
     "jersey numbers, equipment markings, ball seams and lettering, and any background figure "
@@ -51,7 +51,7 @@ AUTHENTICITY_CHECK = f"{AUTHENTICITY_HEADING}\n\n{_SOURCE_COMPARISON}{_SOURCE_FI
 
 CREATE_DESIGN_AUTHENTICITY_CHECK = (
     f"{AUTHENTICITY_HEADING}\n\n"
-    "Verify every visible athlete and sporting object against the full-resolution originals. "
+    "Verify every visible athlete and sporting object against the available source photographs. "
     "Preserve successful generated integration when facial features, expression, hair, body, "
     "hands, pose, uniform, lettering, equipment, vehicle and ball remain faithful. A rough "
     "pre-generation cutout is a layout guide, not a required final layer. Do not automatically "
