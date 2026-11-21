@@ -21,9 +21,9 @@ class ChangeOfMindTests(unittest.TestCase):
         self.assertEqual(context['current_customer_email']['sender_name'], 'Kylie')
         for text in ('individually numbered', 'retired from the available allocation',
                      'cannot simply be placed back', 'Return shipping back to Sports Cave',
-                     'Edition reallocation/restocking fee', 'Shipping for the replacement artwork',
+                     'Edition reallocation/restocking fee', 'Shipping for the replacement edition',
                      'original condition and packaging', 'just reply to this email',
-                     '50% off another Sports Cave artwork of your choice', 'keep both pieces',
+                     '50% off another Sports Cave edition of your choice', 'keep both pieces',
                      'Kind regards,\nSports Cave Team', '18th birthday'):
             self.assertIn(text, CHANGE_OF_MIND_TEMPLATE)
         self.assertLess(CHANGE_OF_MIND_TEMPLATE.index(RETURNS_POLICY_URL),

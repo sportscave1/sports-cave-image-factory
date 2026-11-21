@@ -1,0 +1,37 @@
+{
+  "label": "inbox-20261121-release",
+  "method": "50 fabricated provider/controller iterations; no external network or browser timing; cold setup includes mocked settings and initial 50-row load",
+  "samples": {
+    "cold_mailbox": {
+      "n": 50,
+      "median_ms": 46.092,
+      "p95_ms": 66.989
+    },
+    "warm_mailbox": {
+      "n": 50,
+      "median_ms": 0.356,
+      "p95_ms": 0.674
+    },
+    "cold_conversation": {
+      "n": 50,
+      "median_ms": 0.679,
+      "p95_ms": 1.251
+    },
+    "warm_conversation": {
+      "n": 50,
+      "median_ms": 0.06,
+      "p95_ms": 0.087
+    },
+    "manual_refresh": {
+      "n": 50,
+      "median_ms": 2.158,
+      "p95_ms": 3.566
+    }
+  },
+  "provider_calls_per_iteration": {
+    "headers": 2,
+    "body": 1,
+    "attachment": 0
+  },
+  "call_counts_consistent": true
+}
