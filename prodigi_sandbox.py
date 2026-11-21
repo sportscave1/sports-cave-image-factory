@@ -52,9 +52,9 @@ def list_tests():
         return [r['value'] for r in cur.fetchall()]
 
 
-def adapted(source, reference, recipient):
+def adapted(source, reference, recipient, shipping=None):
     snap = deepcopy(source)
-    snap.update(order_reference=reference, recipient=deepcopy(recipient))
+    snap.update(order_reference=reference, recipient=deepcopy(recipient), shipping=shipping or source['shipping'])
     snap['identity'].update(order_id=reference, line_id=reference+'-unit', ordinal=1)
     return snap
 
@@ -91,7 +91,10 @@ def request(user, allocation_id):
     reference = 'SC-SANDBOX-' + key
     recipient = deepcopy(order['recipient'])
     recipient['state_aliases'] = source['recipient'].get('state_aliases', [])
-    snap = adapted(source, reference, recipient)
+    shipping = order.get('shippingMethod')
+    if shipping not in ('Budget','Standard','Express','Overnight'):
+        raise ValueError('The supplier shipping service could not be copied safely.')
+    snap = adapted(source, reference, recipient, shipping)
     value = dict(id=key, environment='sandbox', allocation_id=int(allocation_id),
         source_order_id=order_id, source_item_id=item_id, source_snapshot=source,
         snapshot=snap, fingerprint=prep.digest(snap), order_id='', item_id='',
@@ -139,7 +142,7 @@ def run(value, provider, resolver, link, persist):
         fresh = resolver(value['allocation_id'])
         if prep.digest(fresh) != prep.digest(value['source_snapshot']):
             raise ValueError('Source artwork or allocation changed.')
-        return adapted(fresh, value['snapshot']['order_reference'], value['snapshot']['recipient'])
+        return adapted(fresh, value['snapshot']['order_reference'], value['snapshot']['recipient'], value['snapshot']['shipping'])
     result = prep.run(value, provider, current, link, persist)
     final = provider.order(value['order_id'])
     if final.get('status') != 'draft' or final.get('charges'):

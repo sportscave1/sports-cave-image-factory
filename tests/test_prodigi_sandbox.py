@@ -140,7 +140,7 @@ def test_durable_test_queue_and_cleanup_never_touch_live_preparation_records(sto
 
 
 def test_duplicate_request_is_rejected_without_creating_a_supplier_order(store,monkeypatch):
-    p=Provider();p.data.update(recipient=source()['recipient'])
+    p=Provider();p.data.update(recipient=source()['recipient'],shippingMethod='Standard')
     monkeypatch.setattr(sandbox,'SandboxClient',lambda:SimpleNamespace())
     monkeypatch.setattr(sandbox,'Client',lambda:p)
     monkeypatch.setattr(prep,'resolve',lambda _:source())
@@ -149,6 +149,13 @@ def test_duplicate_request_is_rejected_without_creating_a_supplier_order(store,m
         sandbox.request({'id':'fixture'},1)
     assert first['source_order_id']=='99' and len(sandbox.list_tests())==1
     assert not p.writes
+
+
+def test_sandbox_copies_supplier_shipping_enum_instead_of_shopify_display_label():
+    s=source();s['shipping']='US Standard Tracked Shipping'
+    test=sandbox.adapted(s,'SC-SANDBOX-fixture',s['recipient'],'Standard')
+    assert sandbox.payload(test)['shippingMethod']=='Standard'
+    assert s['shipping']=='US Standard Tracked Shipping'
 
 
 def test_prepare_action_is_visible_before_selection_and_opens_selected_unit(monkeypatch):
