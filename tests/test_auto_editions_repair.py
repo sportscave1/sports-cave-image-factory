@@ -147,3 +147,23 @@ def test_repair_enqueues_all_valid_orders_and_isolates_blocked_unit(broken):
     assert calls==['1','3']
     with d.connect() as c,c.cursor() as cur:detail=repair.latest(cur,PID)['detail']
     assert detail['state']=='Needs help' and detail['jpg_ready']==[1,3] and '2' in detail['jpg_blocked']
+
+
+def test_preparing_product_is_never_claimed_for_codex(broken):
+    d,sql=broken;repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Codex queued',prompt='scoped source repair')
+    sql.execute("UPDATE auto_edition_onboarding SET status='Awaiting preparation',reason='Approved colour interpretation'")
+    assert repair.claim(d.connect) is None
+    repair.run_one(d.connect)
+    with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
+
+
+def test_failed_handoff_cannot_stop_a_resumed_native_queue(broken):
+    d,sql=broken;repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Codex queued',prompt='scoped source repair')
+    receipt=repair.claim(d.connect)
+    sql.execute("UPDATE auto_edition_onboarding SET status='Awaiting preparation'")
+    repair.returned(d.connect,PID,receipt['request_id'],receipt['handoff_token'],False)
+    with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'

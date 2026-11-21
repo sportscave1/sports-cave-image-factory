@@ -77,8 +77,6 @@ def health_payload():
         checkpoint_pending=bool(row.get('checkpoint_pending')),processor_lock=locked and not bool(active))
     if row.get('diagnostic') or HOST_LAST_DIAGNOSTIC:result['diagnostic']=row.get('diagnostic') or HOST_LAST_DIAGNOSTIC
     result['transfer_control']=transfer_controller().snapshot()
-    from edition_repair_local import LAST_STATUS
-    result['repair_handoff']=dict(LAST_STATUS)
     byte_count=result['transfer_control']['transfer'].get('transport_bytes')
     if active and byte_count is not None and row.get('_last_transfer_bytes')!=byte_count:
         row['_last_transfer_bytes']=byte_count;row['last_progress_at']=time.time()
@@ -323,7 +321,8 @@ def host_loop():
             failures=0
             HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
-                companion_pid=os.getpid(),version='unattended-recovery-v1'))
+                companion_pid=os.getpid(),version='unattended-recovery-v1',
+                repair_handoff=dict(__import__('edition_repair_local').LAST_STATUS)))
         except Exception as error:
             failures=min(failures+1,5);delay=min(30*2**(failures-1),300)
             HOST_FAILURES=failures;HOST_RETRY_AT=time.time()+delay

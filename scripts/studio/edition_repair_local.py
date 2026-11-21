@@ -89,7 +89,10 @@ def execute(state):
     saved=json.loads(protect(state.read_bytes(),decrypt=True))
     target=saved['target'];ok=False
     # Keep ordinary Codex permission/sandbox configuration. Never bypass it.
-    command=[saved['executable'],'exec','resume','--json',target['thread_id'],'-']
+    # The desktop can keep the configured chat's writer open indefinitely.
+    # Each durable repair gets its own CLI session; the bounded server prompt
+    # carries its complete scope and the configured working directory is kept.
+    command=[saved['executable'],'exec','--json','-']
     try:
         with state.with_suffix('.log').open('wb') as log:
             result=subprocess.run(command,input=saved['repair']['prompt'].encode(),cwd=target['cwd'],
