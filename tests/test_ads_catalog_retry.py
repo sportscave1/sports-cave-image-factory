@@ -29,7 +29,7 @@ def test_wait_backoff_and_no_duplicate_work(monkeypatch):
     assert value['catalog_retry']['next_at'] == 1060
     assert ads.public(value)['label'] == 'Waiting for Meta catalogue'
     assert ads._step('key', value, {}, {}, 99999) == {}
-    assert len(calls) == 1 and len(writes) == 1
+    assert len(calls) == 1 and len(writes) == 2  # stage clock, then catalogue checkpoint
     clock[0] = 1060
     ads._step('key', value, {}, {}, 60)
     assert value['catalog_retry']['next_at'] == 1180

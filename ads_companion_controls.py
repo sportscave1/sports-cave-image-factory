@@ -59,6 +59,11 @@ def action(user, job, operation):
             if cur.fetchone() and value['stage'] != 'waiting':
                 value.update(resume_stage=value['stage'], stage='waiting',
                              detail='Queued to resume after the active ad finishes or stops')
+            value.pop('timed_stage', None)
+            value.pop('dependency_failed_at', None)
+            value['generation_started_at'] = ads.time.time()
+            value['last_chat_activity_at'] = ads.time.time()
+            value.pop('chat_finished_at', None)
             cur.execute('UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s',(json.dumps(value),ads.PREFIX+job))
             cur.execute('DELETE FROM app_settings WHERE key=%s',(PREFIX+job,))
             cur.execute("INSERT INTO app_settings(key,value) VALUES(%s,'true') ON CONFLICT(key) DO UPDATE SET value='true',updated_at=now()",(ads.CONTROL_KEY,))

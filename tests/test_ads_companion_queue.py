@@ -189,3 +189,24 @@ def test_queue_only_button_preserves_validation_and_automation(monkeypatch):
     assert any('Added to the companion' in item.value for item in app.success)
     next(widget for widget in app.selectbox if widget.label == 'Campaign type').select('Carousel').run()
     assert app.button(key='ads-add-to-queue').disabled
+
+
+def test_dependency_outage_deadline_survives_poll_writes_and_releases_queue(queued_store, monkeypatch):
+    import time
+    first = queue.enqueue(USER, brief(), {'row': ROW})
+    second = queue.enqueue(USER, {**brief(), 'country': 'Canada'}, {'row': ROW})
+    token = uploads.pair({'id': 'desktop'})
+    clock = [time.time()]
+    monkeypatch.setattr(companion.time, 'time', lambda: clock[0])
+    def offline(value):
+        raise RuntimeError('synthetic dependency outage')
+    monkeypatch.setattr(queue, 'prepare', offline)
+    assert companion.tick(token, {}) == {'busy': True}
+    clock[0] += 3600
+    assert companion.tick(token, {}) == {'busy': True}
+    clock[0] += 3601
+    assert companion.tick(token, {}) == {}
+    rows = {row['id']: row for row in companion.dashboard()['jobs']}
+    assert rows[first['id']]['stage'] == 'failed'
+    monkeypatch.setattr(queue, 'prepare', lambda _: dict(stage='opening', prompt='brief'))
+    assert companion.tick(token, {})['job']['id'] == second['id']

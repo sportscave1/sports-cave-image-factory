@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import asyncio
+import time
 from threading import BoundedSemaphore
 
 _BODY_SLOTS = BoundedSemaphore(2)
@@ -88,6 +89,7 @@ def receive(token, job_id, name, chat_url, response_id, data):
             raise ValueError('A different file already occupies this ad slot. Existing files were preserved.')
         value.setdefault('artifacts', {})[name] = dict(id=existing['id'], rev=existing['rev'], hash=digest, size=len(data))
         value.setdefault('response_ids', {})[name] = response_id
+        value['last_artifact_at'] = time.time()
         value['detail'] = progress(value)
         ads.write(key, value)
         return dict(received=name, ready=all(filename in value['artifacts'] for filename in FILES), detail=value['detail'])
@@ -139,6 +141,10 @@ def resume(job_id, user, settings=None):
         if not value.get('folder') or not ads.CHAT.fullmatch(value.get('chat_url', '')):
             raise ValueError('The original ad conversation and prepared folder are required.')
         value.update(stage='generating', detail=progress(value), collect_only=True,resume_token=str(uuid4()))
+        value.pop('timed_stage', None)
+        value.pop('dependency_failed_at', None)
+        value.update(generation_started_at=time.time(), last_chat_activity_at=time.time())
+        value.pop('chat_finished_at', None)
         cur.execute('DELETE FROM app_settings WHERE key=%s',('ads_job_control:'+str(UUID(job_id)),))
         cur.execute('UPDATE app_settings SET value=%s::jsonb,updated_at=now() WHERE key=%s',
                     (json.dumps(value), ads.PREFIX+str(UUID(job_id))))

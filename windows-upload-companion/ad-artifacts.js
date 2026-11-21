@@ -9,7 +9,7 @@
     if(!downloadAttempt)return;
     for(const record of records)for(const node of record.addedNodes) {
       const text=(node.textContent||'').trim();
-      if(text.length<300 && text.includes('Failed to download file'))
+      if(text.length<300 && /Failed to download (?:file|ad_copy\.csv|collector-hallway\.jpg|architectural-wall\.jpg|man-cave\.jpg)/i.test(text))
         downloadAttempt.error='ChatGPT could not download '+downloadAttempt.name;
     }
   }).observe(document.documentElement,{childList:true,subtree:true});
