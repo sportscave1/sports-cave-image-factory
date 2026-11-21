@@ -62,3 +62,8 @@ def test_nightly_release_cannot_reuse_installation_exception_or_regress():
     module.check_gate(gate, 'a' * 40, 'b' * 40, 'nightly-task')
     with pytest.raises(module.Stop, match='Exact-commit'):
         module.check_gate(gate, 'c' * 40, 'b' * 40, 'nightly-task')
+    before = b'from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES\n        *WORKER_HEALTH_ROUTES,\n'
+    after = b'from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES\nfrom speed_optimisation_api import ROUTES as SPEED_OPTIMISATION_ROUTES\n        *WORKER_HEALTH_ROUTES,\n        *SPEED_OPTIMISATION_ROUTES,\n'
+    module.reviewed_server_source(before, after)
+    with pytest.raises(module.Stop, match='exceeds'):
+        module.reviewed_server_source(before, after + b'run_migrations()\n')

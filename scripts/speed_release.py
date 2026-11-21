@@ -23,6 +23,19 @@ INSTALLATION_BASE = '27ce65fb97ba046b6ad5f3692dd2e6e0eb6dea0f'
 INSTALLATION_TASK = '20261121-d5f7b916'
 
 
+def reviewed_server_source(before, after):
+    # Fresh user authorisation covers installing Speed's report routes. Accept
+    # only those two additions, never a general sensitive-file override.
+    anchor = b'from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES\n'
+    route = b'        *WORKER_HEALTH_ROUTES,\n'
+    if before.count(anchor) != 1 or before.count(route) != 1:
+        raise Stop('Server route anchors changed; separate source review required.')
+    expected = before.replace(anchor, anchor + b'from speed_optimisation_api import ROUTES as SPEED_OPTIMISATION_ROUTES\n')
+    expected = expected.replace(route, route + b'        *SPEED_OPTIMISATION_ROUTES,\n')
+    if after != expected:
+        raise Stop('Server change exceeds the authorised Speed route registration.')
+
+
 def check_gate(gate, head, base, task_id):
     if gate.get('commit') != head or gate.get('phase2_verified') is not True or gate.get('functional_checks_passed') is not True:
         raise Stop('Exact-commit synthetic preview and functional evidence required.')
@@ -70,7 +83,10 @@ def release(root, task_id, owner, base, evidence, push=False):
     check_gate(gate, head, base, task_id)
     selected = {name: git.run('show', head + ':' + name) if (root / name).exists() else None for name in paths}
     for name in paths:
-        safe_path(root, name)
+        if name == 'sports_cave_server.py' and base == INSTALLATION_BASE and task_id == INSTALLATION_TASK:
+            reviewed_server_source(git.run('show', base + ':' + name), selected[name])
+        else:
+            safe_path(root, name)
     manifest = {'version': 1, 'mode': 'normal', 'base': base,
                 'tests': ['tests.test_speed_release.SpeedReleaseChecks'],
                 'imports': ['speed_optimisation', 'speed_optimisation_api'],
