@@ -14,6 +14,10 @@ for line in sys.stdin.buffer:
         payload=r.read(2000001)
         if len(payload)>2000000:raise ValueError('Oversized frame')
         result={'ok':True,'result':json.loads(payload)}
+    except urllib.error.HTTPError as error:
+        try:detail=json.loads(error.read(3000)).get('error','Preview operation rejected')
+        except (ValueError,AttributeError):detail='Preview operation rejected'
+        result={'ok':False,'error':str(detail)[:1000]}
     except Exception as error:
         result={'ok':False,'error':str(error)[:600]}
     sys.stdout.write(json.dumps(result,separators=(',',':'))+'\\n');sys.stdout.flush()

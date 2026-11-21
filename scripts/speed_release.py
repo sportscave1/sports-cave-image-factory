@@ -1,0 +1,102 @@
+"""Exact-commit Speed release from its owned Studio branch; never touches local main.
+
+Reuses the normal deployment helper's Git-object export and offline validation.
+The only new path is publishing an already committed, preview-verified task SHA.
+Render verification remains explicit after GitHub's normal auto-deploy trigger.
+"""
+import argparse
+import json
+import math
+from pathlib import Path
+import re
+import statistics
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / 'scripts' / 'studio'), str(ROOT / 'scripts'), str(ROOT)]
+import studio
+from sports_cave_deploy import Git, ORIGINS, Stop, export_tree, safe_path, validate
+
+INSTALLATION_BASE = '27ce65fb97ba046b6ad5f3692dd2e6e0eb6dea0f'
+INSTALLATION_TASK = '20261121-d5f7b916'
+
+
+def check_gate(gate, head, base, task_id):
+    if gate.get('commit') != head or gate.get('phase2_verified') is not True or gate.get('functional_checks_passed') is not True:
+        raise Stop('Exact-commit synthetic preview and functional evidence required.')
+    if gate.get('purpose') == 'installation':
+        if base != INSTALLATION_BASE or task_id != INSTALLATION_TASK:
+            raise Stop('Installation exception is limited to the initial authorised Speed task and base.')
+        return
+    if gate.get('behaviour_preserved') is not True:
+        raise Stop('Nightly fixes require behaviour and visual parity.')
+    samples = [gate.get(key) for key in ('baseline_samples_ms', 'candidate_samples_ms')]
+    if any(not isinstance(values, list) or len(values) < 3 or any(
+            type(n) not in (int, float) or not math.isfinite(n) or n <= 0 for n in values) for values in samples):
+        raise Stop('Repeated finite baseline/candidate workflow measurements required.')
+    before, after = (statistics.median(values) for values in samples)
+    if not (after < before or (gate.get('code_smaller') is True and after <= before)):
+        raise Stop('No proven improvement or non-regressing cleanup.')
+
+
+def release(root, task_id, owner, base, evidence, push=False):
+    git = Git(root)
+    with studio.locked(studio.DEFAULT_HOME) as file:
+        registry = studio.read(file)
+        task = studio.task_by_id(registry, task_id, owner)
+        if studio.identity(registry, task).resolve() != root.resolve():
+            raise Stop('Release must use its exact owned Studio worktree.')
+    if git.text('status', '--porcelain'):
+        raise Stop('Commit and test only the focused task files first. Working tree must be clean.')
+    if git.text('remote', 'get-url', 'origin') not in ORIGINS or git.text('remote', 'get-url', '--push', 'origin') not in ORIGINS:
+        raise Stop('Unexpected GitHub origin.')
+    head = git.text('rev-parse', 'HEAD')
+    if not re.fullmatch('[0-9a-f]{40}', base):
+        raise Stop('Pin the exact reviewed main revision.')
+    git.run('merge-base', '--is-ancestor', base, head)
+    paths = git.text('diff', '--name-only', base, head).splitlines()
+    if not paths:
+        raise Stop('No Speed changes selected.')
+    gate = json.loads(evidence.read_text(encoding='utf-8'))
+    check_gate(gate, head, base, task_id)
+    selected = {name: git.run('show', head + ':' + name) if (root / name).exists() else None for name in paths}
+    for name in paths:
+        safe_path(root, name)
+    manifest = {'version': 1, 'mode': 'normal', 'base': base,
+                'tests': ['tests.test_speed_release.SpeedReleaseChecks'],
+                'imports': ['speed_optimisation', 'speed_optimisation_api'],
+                'files': [{'path': name} for name in paths]}
+    with tempfile.TemporaryDirectory(prefix='sports-cave-speed-release-') as directory:
+        candidate = Path(directory) / 'candidate'
+        candidate.mkdir()
+        export_tree(git, head, candidate)
+        validate(candidate, selected, manifest)
+    if git.text('status', '--porcelain') or git.text('rev-parse', 'HEAD') != head:
+        raise Stop('Source changed during release validation.')
+    git.run('fetch', 'origin', 'refs/heads/main:refs/remotes/origin/main')
+    if git.text('rev-parse', 'origin/main') != base:
+        raise Stop('GitHub main advanced. Reconcile, retest and refresh exact preview evidence.')
+    receipt = {'commit': head, 'base': base, 'files': paths, 'validated': True, 'pushed': False}
+    if push:
+        git.run('push', 'origin', head + ':refs/heads/main')
+        remote = git.text('ls-remote', 'origin', 'refs/heads/main').split()[0]
+        if remote != head:
+            raise Stop('GitHub push revision mismatch. Stop and inspect; do not push again.')
+        receipt['pushed'] = True
+    return receipt
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--id', required=True)
+    parser.add_argument('--owner', required=True)
+    parser.add_argument('--base', required=True)
+    parser.add_argument('--evidence', type=Path, required=True)
+    parser.add_argument('--push', action='store_true')
+    args = parser.parse_args()
+    print(json.dumps(release(ROOT, args.id, args.owner, args.base, args.evidence, args.push), indent=2))
+
+
+if __name__ == '__main__':
+    main()

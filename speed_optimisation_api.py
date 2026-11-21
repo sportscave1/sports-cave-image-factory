@@ -1,6 +1,9 @@
 """Owner-session report handoff; no deploy, credentials or arbitrary job endpoint."""
 import json
 import logging
+import hashlib
+import hmac
+import os
 from urllib.parse import parse_qs
 
 from starlette.concurrency import run_in_threadpool
@@ -79,3 +82,33 @@ async def publish(request):
 
 ROUTES = (('/ops/speed/publish', publish, ('GET', 'POST')),
           ('/api/speed/reports', reports, ('GET',)))
+
+
+async def companion(request):
+    """Scoped machine credential: Speed evidence only, never an execution API."""
+    expected = os.environ.get('SPEED_REPORT_TOKEN_SHA256', '')
+    supplied = request.headers.get('authorization', '')
+    token = supplied.removeprefix('Bearer ') if supplied.startswith('Bearer ') else ''
+    if len(expected) != 64 or not 32 <= len(token) <= 200 or not hmac.compare_digest(
+            hashlib.sha256(token.encode()).hexdigest(), expected):
+        return JSONResponse({'error': 'Speed companion credential required.'}, status_code=403, headers=HEADERS)
+    try:
+        service = store()
+        if request.method == 'GET':
+            return JSONResponse({'reports': await run_in_threadpool(service.recent),
+                                 'storage': await run_in_threadpool(service.storage_review),
+                                 'revision': os.environ.get('RENDER_GIT_COMMIT', '')}, headers=HEADERS)
+        if request.headers.get('content-type', '').split(';')[0] != 'application/json':
+            return JSONResponse({'error': 'Expected JSON.'}, status_code=415, headers=HEADERS)
+        encoded = bytearray()
+        async for chunk in request.stream():
+            if len(encoded) + len(chunk) > MAX_BYTES:
+                return JSONResponse({'error': 'Report too large.'}, status_code=413, headers=HEADERS)
+            encoded.extend(chunk)
+        report = await run_in_threadpool(service.publish, json.loads(encoded))
+        return JSONResponse({'published': report['id'], 'date': report['date']}, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
+ROUTES += (('/api/speed/companion', companion, ('GET', 'POST')),)

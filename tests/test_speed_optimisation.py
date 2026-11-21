@@ -95,10 +95,15 @@ class SqliteCursor:
     def __enter__(self): return self
     def __exit__(self, *args): self.cur.close()
     def execute(self, sql, args):
+        if sql.startswith('SELECT pg_advisory_xact_lock'):
+            return self.cur.execute('SELECT 1')
         return self.cur.execute(sql.replace('%s::jsonb', '?').replace('%s', '?').replace('now()', 'CURRENT_TIMESTAMP'), args)
     def fetchone(self):
         row = self.cur.fetchone()
-        return {'value': json.loads(row[0])} if row else None
+        if row is None: return None
+        result = dict(zip([c[0] for c in self.cur.description], row))
+        if 'value' in result: result['value'] = json.loads(result['value'])
+        return result
     def fetchall(self):
         return [{'value': json.loads(row[0])} for row in self.cur.fetchall()]
 

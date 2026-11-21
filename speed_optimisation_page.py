@@ -9,6 +9,7 @@ def render_page(user):
         return
     st.title('Speed Optimisation')
     st.caption('Daily review: 1am Australia/Sydney · One section per run · Design and behaviour preserved')
+    st.caption('Reviews include unused-code evidence and Supabase growth. Compact daily reports are retained for 90 days.')
     st.link_button('Publish daily report', '/ops/speed/publish')
     try:
         from speed_optimisation import Reports
@@ -35,7 +36,8 @@ def render_page(user):
                                'Samples': len(m['samples_ms']), 'Revision': m['revision']}
                               for m in report['measurements']], hide_index=True)
             for field, label in [('phases', 'Work phases'), ('tests', 'Validation'),
-                                 ('files', 'Changed files'), ('blockers', 'Blocked work')]:
+                                 ('files', 'Changed files'), ('cleanup_checks', 'Code cleanup'),
+                                 ('storage_checks', 'Supabase storage review'), ('blockers', 'Blocked work')]:
                 if report.get(field):
                     st.write(label)
                     for line in report[field]:

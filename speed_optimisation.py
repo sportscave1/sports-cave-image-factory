@@ -13,6 +13,8 @@ from zoneinfo import ZoneInfo
 TIMEZONE = ZoneInfo('Australia/Sydney')
 PREFIX = 'speed_report:v1:'
 MAX_BYTES = 96_000
+RETENTION_DAYS = 90
+MAX_REPORTS_PER_DAY = 5  # Allows corrections without unlimited report growth.
 STATUSES = {'reviewed', 'prepared', 'blocked', 'no_change', 'released', 'release_failed'}
 SHA = re.compile(r'[0-9a-f]{40}')
 
@@ -31,7 +33,8 @@ def validate_report(value):
     if not isinstance(value, dict):
         raise ValueError('Expected a report object.')
     allowed = {'id', 'date', 'section', 'fingerprint', 'status', 'summary', 'base_sha',
-               'candidate_sha', 'live_sha', 'measurements', 'tests', 'phases', 'blockers', 'files'}
+               'candidate_sha', 'live_sha', 'measurements', 'tests', 'phases', 'blockers', 'files',
+               'cleanup_checks', 'storage_checks'}
     if set(value) - allowed:
         raise ValueError('Unknown report fields.')
     result = dict(value)
@@ -46,7 +49,9 @@ def validate_report(value):
     for name in ('base_sha', 'candidate_sha', 'live_sha'):
         if value.get(name) and not SHA.fullmatch(value[name]):
             raise ValueError(f'Invalid {name}.')
-    for name in ('tests', 'phases', 'blockers', 'files'):
+    for name in ('tests', 'phases', 'blockers', 'files', 'cleanup_checks', 'storage_checks'):
+        if name not in value and name in {'cleanup_checks', 'storage_checks'}:
+            continue
         rows = value.get(name, [])
         if not isinstance(rows, list) or len(rows) > 40:
             raise ValueError(f'Invalid {name}.')
@@ -86,6 +91,14 @@ class Reports:
         key = PREFIX + report['date'] + ':' + report['id']
         with self.connect() as conn:
             with conn.cursor() as cur:
+                cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (PREFIX,))
+                cur.execute('SELECT value FROM app_settings WHERE key=%s', (key,))
+                existing = cur.fetchone()
+                if not existing:
+                    cur.execute('SELECT count(*) AS reports FROM app_settings WHERE key LIKE %s',
+                                (PREFIX + report['date'] + ':%',))
+                    if cur.fetchone()['reports'] >= MAX_REPORTS_PER_DAY:
+                        raise ValueError('Daily Speed report limit reached; retry the existing report ID.')
                 cur.execute('''INSERT INTO app_settings(key, value, updated_at)
                     VALUES (%s, %s::jsonb, now()) ON CONFLICT (key) DO NOTHING''',
                             (key, json.dumps(report, allow_nan=False)))
@@ -93,8 +106,36 @@ class Reports:
                 stored = cur.fetchone()['value']
                 if stored != report:
                     raise ValueError('Report ID already exists with different evidence.')
+                self._prune(cur)
             conn.commit()
         return report
+
+    def _prune(self, cur):
+        # Only compact Speed reports expire. No shared settings, orders, assets,
+        # ledgers, provider history or customer data can match this namespace.
+        cutoff = (dt.date.fromisoformat(sydney_day()) - dt.timedelta(days=RETENTION_DAYS - 1)).isoformat()
+        pattern = PREFIX + '____-__-__:________-____-____-____-____________'
+        cur.execute('''DELETE FROM app_settings WHERE key IN (
+            SELECT key FROM app_settings WHERE key LIKE %s AND key < %s
+            ORDER BY key LIMIT 500)''', (pattern, PREFIX + cutoff))
+
+    def storage_review(self):
+        """Aggregate-only read: never reads customer rows or deletes application data."""
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout = '3s'")
+                cur.execute('''SELECT count(*) AS reports,
+                    COALESCE(sum(octet_length(value::text)),0) AS bytes
+                    FROM app_settings WHERE key LIKE %s''', (PREFIX + '%',))
+                speed = {key: int(value) for key, value in cur.fetchone().items()}
+                cur.execute('''SELECT schemaname, relname AS table_name,
+                    n_live_tup AS estimated_rows, n_dead_tup AS estimated_dead_rows,
+                    pg_total_relation_size(relid) AS bytes
+                    FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 15''')
+                tables = [dict(row) for row in cur.fetchall()]
+        return {'speed_reports': speed, 'largest_tables': tables,
+                'retention_days': RETENTION_DAYS, 'automatic_deletion_scope': PREFIX,
+                'application_data_deleted': False}
 
     def recent(self, limit=60):
         limit = max(1, min(100, int(limit)))

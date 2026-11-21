@@ -17,6 +17,8 @@ Render service, blind merges, force pushes or bypassing failed checks.
    connection. Reconcile the approved Studio base with the live source before
    attempting releases. Do not silently change the approved-base registry.
 2. Run `python scripts/speed_daily.py begin` from the coordination task worktree.
+   Start/ensure `python scripts/speed_companion.py start` first. Its authenticated
+   report publisher and crash-recovering supervisor are separate from coding.
    Use its returned ID and date in the report. If already_reported, retry only
    publication of that report. The active.json claim prevents overlapping runs;
    interrupted claims require inspection, never blind expiry or lock deletion.
@@ -25,6 +27,9 @@ Render service, blind merges, force pushes or bypassing failed checks.
    speed task instead of creating duplicates. A retry of a finished daily review
    republishes its existing immutable report ID, not a second coding task.
 3. Read OS history at /api/speed/reports using the existing owner browser session.
+   Prefer `python scripts/speed_companion.py review` for unattended history and
+   read-only aggregate Supabase table sizes/estimated rows/dead rows. It uses a
+   Speed-only credential, not production database credentials in the preview.
    Merge any locally queued reports. Run python scripts/speed_review.py and inspect
    new modules, route definitions and recent Git changes, including changes to
    deeper directories and shared dependencies that static discovery may miss.
@@ -37,20 +42,41 @@ Render service, blind merges, force pushes or bypassing failed checks.
    order; HTML response time alone is insufficient. Distinguish browser, server,
    network and provider latency. Read-only live checks must not submit orders,
    send email, allocate editions, publish ads or trigger customer automations.
-   Use synthetic data with enforced isolation for behavioural tests. Do not start
-   the application while Studio's Phase 1 preview restriction remains in force.
+   Use synthetic data with enforced isolation for behavioural tests. Use the
+   reviewed Docker preview verifier; host app/server startup remains prohibited.
+   Extend synthetic fixtures for the selected section before claiming parity.
 5. Write phases for the selected section. Prepare at most one focused improvement
    if a repeatable bottleneck is demonstrated. No speculative rewrite, removed
    feature, arbitrary cache freshness change or reduced row count. Add appropriate
    regression coverage, compare baseline/candidate timings under the same workload,
    and verify unchanged appearance, outputs, permissions and actions. A section
    with no justified improvement should produce a no_change report.
+   Review code cleanliness in that same section using
+   `python scripts/speed_code_review.py <selected-source-files>`. Its unused-import
+   output is candidate evidence only. Search repository references, dynamic imports,
+   configuration, route registration, exports, CLI entry points and side effects.
+   Remove code/assets/dependencies only when lack of use is established and the
+   focused checks prove preserved behaviour. Retain tests, migrations, recovery
+   paths, access controls, audit evidence and features that are merely infrequent.
+   Record deleted files/lines or reduced payload/memory/import cost. Never delete
+   a working feature to achieve a speed score. Cleanup-only work must demonstrate
+   smaller code/payload and no measured workflow regression, plus behaviour parity.
+   Review Supabase storage growth, unnecessary repeated writes, duplicate generated
+   artefacts and retention in the selected section. Use aggregate metadata first.
+   Speed reports expire after 90 days and contain no raw logs, screenshots, code
+   dumps or customer records. No automatic SQL/table/index drops, VACUUM FULL,
+   customer/order/edition/financial deletion, retention changes for shared data or
+   bulk cleanup based only on table size. Report such candidates with dependencies
+   and a reversible plan; optimise writes/queries without changing operational data.
 6. Publish automatically only when exact candidate tests, measured improvement,
-   synthetic functional/browser parity and release readiness all pass. Current
-   Phase 1 restrictions or missing parity evidence mean blocked, not approved.
+   synthetic functional/browser parity and release readiness all pass. Missing
+   isolation or parity evidence means blocked, not approved.
    Use the existing manifest-based deployment process, an isolated release
    checkout and only selected Speed files. Inspect helper requirements before
-   invoking it; it expects main and must never be run in someone else's checkout.
+   invoking it. The normal helper expects main and must never run in someone
+   else's checkout. The owned-branch path is scripts/speed_release.py; it reuses
+   normal offline validation and fences main before push. Its initial installation
+   exception cannot be reused by nightly improvements.
    Check origin/main has not advanced, validate Render topology and preserve the
    canonical sports-cave-os ID srv-d8kl4on7f7vs73dvavv0 and supporting services.
    No Blueprint changes are required. If one is ever needed, inspect its preview
@@ -75,5 +101,9 @@ Render service, blind merges, force pushes or bypassing failed checks.
    JSON POST) and verify the ID via /api/speed/reports. If the endpoint/session is
    unavailable, retain the exact payload for retry and report publication blocked.
    Never overwrite or guess successful publication. Record tests/status in Studio.
+   Include cleanup_checks and storage_checks in the report, even when there is
+   nothing proven safe to remove. Run `python scripts/speed_companion.py flush`
+   after completion. The companion retains failed publications and retries them;
+   its publisher endpoint cannot execute code, modify the app or release anything.
    The daily result belongs in Developer → Speed Optimisation; no duplicate email
    or ChatGPT scheduled report is necessary. End with a concise factual result.
