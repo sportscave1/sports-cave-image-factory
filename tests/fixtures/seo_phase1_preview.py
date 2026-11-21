@@ -29,7 +29,7 @@ class FixtureReports:
 
 st.set_page_config(layout='wide')
 st.caption('OFFLINE TEST FIXTURE — synthetic reports; no production connections')
-route=st.selectbox('Workspace',(*nav.SEO_MENU_ROUTES, nav.SEO_ANALYTICS_ROUTE),format_func=lambda r:nav.SEO_NAV_LABELS[r],key='fixture-route')
+route=st.selectbox('Workspace',(nav.SEO_OVERVIEW_ROUTE, nav.SEO_PLAN_ROUTE, nav.SEO_REVIEW_ROUTE, nav.SEO_HISTORY_ROUTE, nav.SEO_ANALYTICS_ROUTE),format_func=lambda r:nav.SEO_NAV_LABELS[r],key='fixture-route')
 user={'id':'fixture','role':'admin','display_name':'Offline test'}
 root=Path(os.environ.get('SEO_PHASE1_FIXTURE_DIR',str(Path(__file__).resolve().parents[2]/'.local'/'fixture')))
 store=seo_workspace.LocalSEOStore(root/'workspace.json')

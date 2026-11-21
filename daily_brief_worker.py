@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import home_seo_report as seo_report
 import home_design_refresh as refresh
 import home_meta_morning_brief as meta
 import home_sports_morning_brief as sports
@@ -22,11 +23,12 @@ LOG = logging.getLogger(__name__)
 PREFIX = "hosted_daily_brief:"
 MAX_ATTEMPTS = 30
 BRIEFS = {
+    "seo": (seo_report.parse, seo_report.publish, seo_report.MAX_PAYLOAD),
     "sports": (sports.parse_edition, sports.publish, sports.MAX_PAYLOAD),
     "meta": (meta.parse_edition, meta.publish, meta.MAX_PAYLOAD),
     "design_refresh": (refresh.parse, refresh.publish, refresh.MAX_PAYLOAD),
 }
-LATEST_KEYS = {"sports": sports.SETTING_KEY, "meta": meta.SETTING_KEY,
+LATEST_KEYS = {"seo": seo_report.KEY, "sports": sports.SETTING_KEY, "meta": meta.SETTING_KEY,
                "design_refresh": refresh.KEY}
 
 
@@ -72,6 +74,8 @@ def publication(kind, today):
             # These metrics are independently enriched by the Home publisher.
             parsed.pop("ga4_orders", None)
             parsed["roas"] = None
+        elif kind == "seo":
+            parsed = seo_report.parse(json.dumps({k: current[k] for k in ("date", "summary", "period_start", "period_end", "source_gaps", "opportunities", "next_action")}), today)
         elif kind == "design_refresh":
             parsed = refresh.parse(json.dumps({k: current[k] for k in ("date", "candidates")}), today)
         else:
@@ -98,6 +102,10 @@ def enqueue(kind, edition, claims):
     if len(raw) > limit or edition.get("date") != today.isoformat():
         raise ValueError("Send today's completed Sydney edition within the brief size limit.")
     validated = parse(raw, today)
+    if kind == "seo":
+        owner = os_accounts.DEFAULT_STORE.get_user(claims["sub"])
+        if not os_accounts.can_access_page(owner, "seo"):
+            raise PermissionError("SEO access required")
     if kind == "sports" and "design_recommendations" in validated:
         with connect() as conn, conn.cursor() as cur:
             sports.validate_fresh_designs(validated, cur)

@@ -387,13 +387,26 @@ def render(st, user, today, *, snapshot=None):
             f'<p>{escape(edition["summary"])}</p>'
             f'<details><summary>Ad recommendations</summary>{ad_rows_html(edition, today, compact=True)}</details></section>'
         )
+    saved_seo = {}
+    if os_accounts.can_access_page(user, 'seo'):
+        import home_seo_report
+        try:
+            saved_seo = snapshot.get('seo', {}) if snapshot is not None else home_seo_report.latest()
+        except Exception:
+            pass
     insights = (edition or {}).get("insights", {})
     insight_cards = "".join(
         f'<details class="sc-meta-insight"><summary>{label}</summary><ul>'
         + "".join(f"<li>{escape(item)}</li>" for item in insights[section])
         + "</ul></details>"
-        for section, label in INSIGHT_LABELS.items() if section in insights
+        for section, label in INSIGHT_LABELS.items() if section in insights and (section != "seo" or not saved_seo)
     )
+    if os_accounts.can_access_page(user, 'seo'):
+        import home_seo_report
+        try:
+            insight_cards += home_seo_report.compact_html(saved_seo, today)
+        except Exception:
+            insight_cards += '<p>SEO report temporarily unavailable.</p>'
     try:
         refresh = snapshot['refresh'] if snapshot is not None else home_design_refresh.render_html(today)
     except Exception as error:
