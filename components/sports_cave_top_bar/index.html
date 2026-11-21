@@ -39,13 +39,22 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v6-ads-reliability";
+  const CONTROLLER_VERSION = "companion-header-v7-order-status-recovery";
   const TEMPORARY_TOAST_MS = 3000;
-  const incomingNavigationEpoch = Number(config.navigationEpoch || 0);
+  let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
     doc.getElementById(ROOT_ID)?.dataset.navigationEpoch || 0,
   );
-  if (liveNavigationEpoch > incomingNavigationEpoch) return;
+  if (liveNavigationEpoch > incomingNavigationEpoch) {
+    // A reconnect/deploy can reset Python's session epoch while the persistent
+    // header remains mounted. Refresh its credentials/status on the settled
+    // current page, without accepting a late response for another navigation.
+    const liveRoot = doc.getElementById(ROOT_ID);
+    const documentRoute = new URL(parentWindow.location.href).searchParams.get('page') || 'dashboard';
+    if (config.currentRouteKey !== documentRoute || liveRoot?.dataset.currentRouteKey !== documentRoute
+        || liveRoot?.dataset.pendingRouteKey || doc.body.classList.contains('sc-navigation-pending')) return;
+    config.navigationEpoch = incomingNavigationEpoch = liveNavigationEpoch;
+  }
 
   const icon = (name) => {
     const paths = {
@@ -391,6 +400,12 @@
     section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button span.sc-orders-action-badge,
     section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-social-"] button span.sc-orders-action-badge {
       right: 34px;
+    }
+    #sc-os-notifications { position: relative; }
+    #sc-os-orders-notification-count {
+      position: absolute; right: -3px; top: -2px; min-width: 17px;
+      padding: 1px 3px; border-radius: 999px; background: #c9a23b;
+      color: #171610; font: 700 10px/15px sans-serif; pointer-events: none;
     }
     #sc-os-order-toast-region {
       position: fixed;
@@ -1879,6 +1894,8 @@
       recordingStream: null,
       recordingChunks: [],
       orderStatusStarted: false,
+      orderStatusPending: false,
+      orderStatusTimer: null,
       plannerStatusStarted: false,
       plannerCountdownStarted: false,
       shownPlannerEvents: new Set(),
@@ -1919,7 +1936,7 @@
         }));
       } catch (_error) {}
     };
-    const ORDER_STATUS_REFRESH_MS = 60000;
+    const ORDER_STATUS_REFRESH_MS = 30000;
     const EMAIL_HEARTBEAT_MS = 30000;
     const PLANNER_STATUS_REFRESH_MS = 30000;
     const statusRefreshDelay = (
@@ -2246,23 +2263,28 @@
       });
     };
     let sidebarPresentationObserver = null;
+    let observedSidebar = null;
     let sidebarPresentationTimer = null;
     const restoreSidebarPresentation = () => {
+      watchSidebarPresentation();
       bindPersistentSidebarRoutes();
       const orders = readStatusCache("orders").payload;
       if (Number.isInteger(orders?.action_required_count)) {
-        updateSidebarBadge("orders", orders.action_required_count, orders.badge_label || "");
+        updateOrdersBadge(orders.action_required_count, orders.badge_label || "");
       }
       const email = readStatusCache("email").payload;
       if (Number.isInteger(email?.unread_count)) updateSidebarBadge("email", email.unread_count, "");
     };
     const watchSidebarPresentation = () => {
-      if (sidebarPresentationObserver || !parentWindow.MutationObserver) return;
+      if (!parentWindow.MutationObserver) return;
       const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
-      if (!sidebar) return;
+      if (!sidebar || sidebar === observedSidebar) return;
+      sidebarPresentationObserver?.disconnect();
+      observedSidebar = sidebar;
       sidebarPresentationObserver = new parentWindow.MutationObserver((records) => {
         // Ignore our own badge/text changes, avoiding observer feedback loops.
         const rowsChanged = records.some((record) =>
+          [...record.removedNodes].some((node) => node.nodeType === 1 && node.matches?.('.sc-orders-action-badge')) ||
           [...record.addedNodes, ...record.removedNodes].some((node) =>
             node.nodeType === 1 && (node.matches?.("button") || node.querySelector?.("button"))
           )
@@ -2274,6 +2296,7 @@
         }, 0);
       });
       sidebarPresentationObserver.observe(sidebar, {childList: true, subtree: true});
+      if (sidebar.parentElement) sidebarPresentationObserver.observe(sidebar.parentElement, {childList: true});
     };
     const reconcileAcceptedNavigation = () => {
       const pending = readPendingNavigation();
@@ -2566,7 +2589,21 @@
       button.dataset.actionRequiredCount = String(numericCount);
       button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `${routeLabel}, ${numericCount} unread`);
     };
-    const updateOrdersBadge = (count, label) => updateSidebarBadge("orders", count, label);
+    const updateOrdersBadge = (count, label) => {
+      updateSidebarBadge("orders", count, label);
+      root.dataset.ordersCount = String(count);
+      let badge = notificationsButton.querySelector('#sc-os-orders-notification-count');
+      if (count > 0 && state.config.ordersEnabled) {
+        if (!badge) {
+          badge = doc.createElement('span'); badge.id = 'sc-os-orders-notification-count';
+          badge.setAttribute('aria-hidden', 'true'); notificationsButton.appendChild(badge);
+        }
+        badge.textContent = count > 99 ? '99+' : String(count);
+        notificationsButton.setAttribute('aria-label', `Open notifications, ${count} orders require action`);
+      } else {
+        badge?.remove(); notificationsButton.setAttribute('aria-label', 'Open notifications');
+      }
+    };
     const applyEmailStatus = (payload) => {
       if (!state.config.emailEnabled) return;
       const previous = readStatusCache("email").payload || {};
@@ -2844,32 +2881,40 @@
         repairToastRegion.replaceChildren(toast);
       }, {remember: true});
     };
-    const refreshOrderStatus = async () => {
-      if (state.destroyed) return;
-      if (doc.hidden) { later(refreshOrderStatus, ORDER_STATUS_REFRESH_MS); return; }
+    const scheduleOrderStatus = (delay) => {
+      if (state.orderStatusTimer) {
+        parentWindow.clearTimeout(state.orderStatusTimer); timers.delete(state.orderStatusTimer);
+      }
+      state.orderStatusTimer = later(() => { state.orderStatusTimer = null; void refreshOrderStatus(); }, delay);
+    };
+    const refreshOrderStatus = async ({force = false} = {}) => {
+      if (state.destroyed || state.orderStatusPending) return;
+      if (doc.hidden) { scheduleOrderStatus(ORDER_STATUS_REFRESH_MS); return; }
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
-        if (state.config.emailEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
+        if (state.config.emailEnabled) scheduleOrderStatus(EMAIL_HEARTBEAT_MS);
         return;
       }
-      // One timer, with Orders retaining its existing 60-second request cadence.
-      const remaining = statusRefreshDelay("orders", ORDER_STATUS_REFRESH_MS);
+      // One request/timer per controller. Focus/open can refresh, but never flood.
+      const remaining = statusRefreshDelay("orders", force ? 5000 : ORDER_STATUS_REFRESH_MS);
       if (remaining > 0) {
-        later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
+        scheduleOrderStatus(remaining);
         return;
       }
       const previousOrders = readStatusCache("orders");
       const confirmedAt = Number(previousOrders.payload?.confirmed_at || previousOrders.checked_at || 0);
       const expireOrdersBadge = () => {
         if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) {
+          root.dataset.ordersState = 'delayed';
           const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
           if (badge) { badge.title = "Last known count · status delayed"; badge.dataset.stale = "true"; }
         }
       };
       expireOrdersBadge();
       writeStatusCache("orders", {...(previousOrders.payload || {}), confirmed_at: confirmedAt});
+      state.orderStatusPending = true;
       try {
         const payload = await requestJson(state.config.orderStatusUrl);
         if (Number.isInteger(payload.action_required_count)) {
@@ -2879,18 +2924,26 @@
             confirmed_at: Date.now(),
           });
           updateOrdersBadge(payload.action_required_count, payload.badge_label);
+          root.dataset.ordersState = 'ready';
           const badge = doc.querySelector(".st-key-sidebar-row-orders .sc-orders-action-badge");
           if (badge) { badge.title = "Orders requiring action"; badge.dataset.stale = "false"; }
         }
         else expireOrdersBadge();
         showOrderToast(payload.notification);
+        if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
       } catch (_error) {
         // A temporary failure cannot keep an unverified count visible indefinitely.
-        expireOrdersBadge();
+        if (!state.destroyed) {
+          expireOrdersBadge();
+          if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
+        }
       } finally {
-        later(refreshOrderStatus, (state.config.emailEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
+        state.orderStatusPending = false;
+        scheduleOrderStatus(ORDER_STATUS_REFRESH_MS);
       }
     };
+    parentWindow.addEventListener('focus', () => { void refreshOrderStatus({force:true}); }, listenerOptions);
+    doc.addEventListener('visibilitychange', () => { if (!doc.hidden) void refreshOrderStatus({force:true}); }, listenerOptions);
     const compactTimerLabel = (seconds) => {
       const remaining = Math.max(Number(seconds) || 0, 0);
       if (!remaining) return "0m";
@@ -3543,6 +3596,16 @@
     };
     const renderNotifications = (items) => {
       if (state.destroyed) return;
+      const orders = readStatusCache('orders').payload || {};
+      if (state.config.ordersEnabled && Number.isInteger(orders.action_required_count) && orders.action_required_count > 0) {
+        const count = orders.action_required_count;
+        const delayed = Date.now() - Number(orders.confirmed_at || 0) > 2 * ORDER_STATUS_REFRESH_MS;
+        items = [{title: `${count} ${count === 1 ? 'order requires' : 'orders require'} action`,
+          subtitle: delayed ? 'Last known count · refreshing' : 'Review unfinished orders', route_key:'orders'}, ...items];
+      } else if (state.config.ordersEnabled && (root.dataset.ordersState === 'delayed' || !Number.isInteger(orders.action_required_count))) {
+        items = [{title: root.dataset.ordersState === 'delayed' ? 'Orders status delayed' : 'Checking Orders',
+          subtitle:'Open Orders to review · status will retry automatically', route_key:'orders'}, ...items];
+      }
       notificationsPanel.innerHTML = '<div class="sc-os-topbar-panel-title">Notifications</div>';
       if (!items.length) {
         notificationsPanel.innerHTML += '<div class="sc-os-topbar-state">No new notifications</div>';
@@ -3765,6 +3828,7 @@
     }, listenerOptions);
     notificationsButton.addEventListener("click", async () => {
       if (!openPanel("notifications")) return;
+      void refreshOrderStatus({force:true});
       notificationsPanel.innerHTML = '<div class="sc-loading-only sc-loading-only--compact" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>';
       renderNotifications(await loadNotifications());
       notificationsPanel.querySelector("button")?.focus({preventScroll: true});
@@ -4056,6 +4120,7 @@
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
           const cachedOrders = readStatusCache("orders");
+          root.dataset.ordersState = 'checking';
           if (cachedOrders.payload && Date.now() - Number(cachedOrders.payload.confirmed_at || cachedOrders.checked_at || 0) <= 2 * ORDER_STATUS_REFRESH_MS) {
             updateOrdersBadge(
               cachedOrders.payload.action_required_count,
