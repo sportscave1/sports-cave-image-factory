@@ -151,6 +151,22 @@ def test_duplicate_request_is_rejected_without_creating_a_supplier_order(store,m
     assert not p.writes
 
 
+def test_lost_worker_lock_cannot_resurrect_a_removed_test(store,monkeypatch):
+    import uuid
+    v=value();v['id']=str(uuid.uuid4())
+    with store() as c,c.cursor() as q:sandbox.save(q,v)
+    monkeypatch.setattr(sandbox,'SandboxClient',lambda:SimpleNamespace())
+    def concurrent_remove(value,provider,resolver,link,persist):
+        with store() as c,c.cursor() as q:
+            q.execute("UPDATE app_settings SET value=jsonb_set(value,'{hidden}','true'::jsonb) WHERE key=%s",
+                      (sandbox.PREFIX+v['id'],))
+        persist(value)
+        pytest.fail('A removed row must stop a stale worker')
+    monkeypatch.setattr(sandbox,'run',concurrent_remove)
+    assert sandbox.tick() is None
+    assert sandbox.list_tests()[0]['hidden'] is True
+
+
 def test_sandbox_copies_supplier_shipping_enum_instead_of_shopify_display_label():
     s=source();s['shipping']='US Standard Tracked Shipping'
     test=sandbox.adapted(s,'SC-SANDBOX-fixture',s['recipient'],'Standard')

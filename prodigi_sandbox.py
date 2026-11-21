@@ -187,13 +187,19 @@ def tick():
                 new_fence = next((field for field in fenced if v.get(field) and not fenced[field]), None)
                 if new_fence:
                     q.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
-                        WHERE key=%s AND NOT COALESCE((value->>%s)::boolean,false) RETURNING key''',
+                        WHERE key=%s AND NOT COALESCE((value->>'hidden')::boolean,false)
+                        AND NOT COALESCE((value->>%s)::boolean,false) RETURNING key''',
                         (json.dumps(v), PREFIX+v['id'], new_fence))
                     if not q.fetchone():
                         raise prep.UploadFenceLost('Another worker owns this sandbox attempt.')
                     fenced[new_fence] = True
                 else:
-                    save(q, v)
+                    v['updated_at'] = prep.now()
+                    q.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
+                        WHERE key=%s AND NOT COALESCE((value->>'hidden')::boolean,false) RETURNING key''',
+                        (json.dumps(v), PREFIX+v['id']))
+                    if not q.fetchone():
+                        raise prep.UploadFenceLost('The sandbox test was removed; no stale update is allowed.')
         try:
             return run(value, SandboxClient(), resolve, lambda s:artwork_link(s,value['id']), persist)
         except prep.UploadFenceLost:
