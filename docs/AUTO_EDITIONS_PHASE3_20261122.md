@@ -36,6 +36,11 @@ Retry-After is respected; an exhausted rate-limit response also imposes a shared
 cooldown on subsequent calls from the three publishing workers. General Files
 uploads keep their existing conflict choices.
 
+Typed namespace-write contention also backs off across the pool. A closed or
+missing upload session after an SDK finish retry is reconciled against the final
+immutable receipt before a new session is considered; it cannot hide a committed
+save behind the lost first response.
+
 New preparation metrics count direct SDK calls, reconciliation reads, recovered
 assets, application retry cycles and exhausted SDK rate limits. SDK internal
 retries are excluded from direct-call counts; these are not wire-byte metrics.

@@ -49,7 +49,15 @@ class ImmutableAssetUploader:
         return method(*args, **kwargs)
 
     def _transient(self, error):
-        return (isinstance(error, (requests.ConnectionError, requests.Timeout,
+        detail = getattr(error, 'error', None)
+        # An SDK retry of a committed finish can report a closed/missing
+        # session instead of the original lost acknowledgement. Reconcile it.
+        session = (detail.get_lookup_failed() if detail and
+                   getattr(detail, 'is_lookup_failed', lambda: False)() else None)
+        return (bool(session and (getattr(session, 'is_closed', lambda: False)()
+                                  or getattr(session, 'is_not_found', lambda: False)()))
+                or bool(detail and getattr(detail, 'is_too_many_write_operations', lambda: False)())
+                or isinstance(error, (requests.ConnectionError, requests.Timeout,
                                    self.sdk.exceptions.RateLimitError))
                 or isinstance(error, self.sdk.exceptions.HttpError)
                 and (error.status_code in (408, 429) or error.status_code >= 500))
@@ -135,6 +143,9 @@ class ImmutableAssetUploader:
                     self._count('rate_limits')
                     # Share the provider's Retry-After across all three workers.
                     self._cooldown(max(1.0, float(error.backoff if error.backoff is not None else 5)))
+                elif getattr(getattr(error, 'error', None), 'is_too_many_write_operations', lambda: False)():
+                    self._count('rate_limits')
+                    self._cooldown(5)
                 else:
                     self._cooldown(2 ** attempt if transient else 0)
                 self._wait()

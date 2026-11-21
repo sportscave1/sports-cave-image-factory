@@ -124,7 +124,7 @@ def test_permission_failure_is_terminal_without_retry_or_metadata_read(setup):
     assert len(e.client.calls)==1 and e.client.reads==0 and not e.sleeps
 
 
-@pytest.mark.parametrize('lost_ack',[False,True])
+@pytest.mark.parametrize('lost_ack',[False,'connection','closed','not_found'])
 def test_large_asset_streams_eight_mib_chunks_with_strict_commit(setup,lost_ack):
     e=setup; e.path.write_bytes(b'x'*(17*1024*1024+11)); chunks=[]
     e.client.files_upload_session_start=lambda data: (chunks.append(len(data)) or SimpleNamespace(session_id='s'))
@@ -137,11 +137,21 @@ def test_large_asset_streams_eight_mib_chunks_with_strict_commit(setup,lost_ack)
         result=dict(id='id:large',rev='r1',path_lower=commit.path.lower(),size=sum(chunks),
                     content_hash=ae.file_hash(e.path,dropbox=True))
         e.client.records[commit.path]=result
-        if lost_ack:raise requests.ConnectionError('Synthetic lost session finish response')
+        if lost_ack=='connection':raise requests.ConnectionError('Synthetic lost session finish response')
+        if lost_ack in ('closed','not_found'):
+            raise dropbox.exceptions.ApiError('synthetic',dropbox.files.UploadSessionFinishError.lookup_failed(
+                getattr(dropbox.files.UploadSessionLookupError,lost_ack)),None,None)
         return result
     e.client.files_upload_session_finish=finish
     assert e.uploader('/synthetic/large.png',e.path)['size']==e.path.stat().st_size
-    assert max(chunks)==8*1024*1024 and len(chunks)==3 and e.client.reads==int(lost_ack)
+    assert max(chunks)==8*1024*1024 and len(chunks)==3 and e.client.reads==int(bool(lost_ack))
+
+
+def test_namespace_write_contention_has_shared_backoff(setup):
+    e=setup;e.client.errors=[dropbox.exceptions.ApiError('synthetic',
+        dropbox.files.UploadSessionFinishError.too_many_write_operations,None,None)]
+    assert e.uploader('/synthetic/master.png',e.path)['rev']=='r1'
+    assert e.sleeps==[5] and e.client.reads==1 and len(e.client.calls)==2
 
 
 def test_real_publisher_uses_strict_uploader_and_reuses_complete_listing(tmp_path,monkeypatch):
