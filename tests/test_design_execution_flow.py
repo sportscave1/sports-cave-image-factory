@@ -70,3 +70,15 @@ def test_queued_refresh_keeps_edition_identity_and_exact_receipt():
     assert "Existing edition/product title (preserve): Existing Edition" in upgraded
     assert queue._receipt(job) == queue._receipt(dict(job, prompt=upgraded))
     assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+
+
+def test_unclaimed_old_edit_gets_scope_and_closeout_recovery_without_changing_brief():
+    from design_review_prompt import EDIT_EXECUTION_RULES
+    prompt = '**USER-REQUESTED DESIGN CHANGES**\nRemove only the score.\n\n' + prompts()[2]
+    legacy = prompt.replace(EDIT_EXECUTION_RULES, '')
+    job = dict(id=RECEIPT, title='Collector', section='edit', prompt=legacy)
+    upgraded = queue._waiting_prompt(job)
+    assert upgraded == EDIT_EXECUTION_RULES + legacy
+    assert 'Remove only the score.' in upgraded and '"rev": "r1"' in upgraded
+    assert queue._waiting_prompt(dict(job, prompt=upgraded)) == upgraded
+    assert queue._receipt(job) == queue._receipt(dict(job, prompt=upgraded))

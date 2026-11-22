@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 
 from design_review_metadata import read_handoff_record
 from product_upload_dropbox import REVIEW, approved, within, validate_structure
+from product_upload_intake import MAX_BYTES
 
 
 def _same(actual, expected, keys=('id', 'rev', 'path_display', 'content_hash')):
@@ -94,7 +95,7 @@ def _inspect(original, trial, staged):
     from auto_editions_colour_source import inspect_psd
     from psd_tools import PSDImage
 
-    for path in (original, trial, staged):
+    for path in dict.fromkeys((original, trial, staged)):
         validate_structure(path)
     first, final = (inspect_psd(p) for p in (original, staged))
     for field in ('width', 'height', 'icc', 'mode', 'depth'):
@@ -115,10 +116,19 @@ def _inspect(original, trial, staged):
             raise ValueError('SC_EDITION_NUMBER must contain editable text.')
         return document, number, plaque
 
-    _, original_number, original_plaque = collector(original)
+    # Retain scalar collector facts, not a second large PSD's layer tree.
+    def original_collector():
+        _, number, plaque = collector(original)
+        return number.text, number.layer_id, plaque.kind, plaque.layer_id
+
+    original_text, original_number_id, original_plaque_kind, original_plaque_id = original_collector()
+    # psd-tools layers reference their parent document; release cycles before
+    # loading another master, especially for large layered Review files.
+    import gc
+    gc.collect()
     document, number, plaque = collector(staged)
-    if (number.text != original_number.text or number.layer_id < 0 or number.layer_id != original_number.layer_id
-            or plaque.kind != original_plaque.kind or plaque.layer_id < 0 or plaque.layer_id != original_plaque.layer_id):
+    if (number.text != original_text or number.layer_id < 0 or number.layer_id != original_number_id
+            or plaque.kind != original_plaque_kind or plaque.layer_id < 0 or plaque.layer_id != original_plaque_id):
         raise ValueError('The staged PSD must preserve the original plaque and editable number layers.')
     if not (plaque.left <= number.left < number.right <= plaque.right
             and plaque.top <= number.top < number.bottom <= plaque.bottom):
@@ -140,9 +150,9 @@ def apply(provider, original, trial_path, staged_path, *, title='', review_notes
     current = provider.metadata_if_present(original['id'])
     if not _same(current, original):
         raise ValueError('The original revision changed. The current original and staged result were retained.')
-    if any(type(item.get('size')) is not int or not 40 <= item['size'] <= 150 * 1024**2
+    if any(type(item.get('size')) is not int or not 40 <= item['size'] <= MAX_BYTES
            for item in (original, trial, staged)):
-        raise ValueError('Server replacement supports PSDs up to 150 MiB per file. Keep the staged result for a revision-aware desktop replacement.')
+        raise ValueError('Review replacement supports layered PSDs up to 1 GiB per file. Keep the original and staged result for a revision-aware desktop replacement.')
     api, token, root = provider.api, provider.token, provider.context['root_path']
     path = original['path_display']
     record = read_handoff_record(provider, original)
@@ -170,11 +180,18 @@ def apply(provider, original, trial_path, staged_path, *, title='', review_notes
     backup_path = path[:-4] + f' - EDIT-{original["rev"]} - BACKUP.psd'
     from auto_editions import file_hash
     with TemporaryDirectory(prefix='sc-design-edit-') as directory:
-        files = [Path(directory) / f'{name}.psd' for name in ('original', 'trial', 'staging')]
-        for source, file in zip((original, trial, staged), files):
+        files, downloaded = [], {}
+        for name, source in zip(('original', 'trial', 'staging'), (original, trial, staged)):
+            identity = (source['id'], source['rev'])
+            if identity in downloaded:
+                files.append(downloaded[identity])
+                continue
+            file = Path(directory) / f'{name}.psd'
             provider.download(source, file)
             if file_hash(file, dropbox=True) != source['content_hash']:
                 raise ValueError('A downloaded PSD did not match its exact Dropbox revision.')
+            files.append(file)
+            downloaded[identity] = file
         _inspect(*files)
         if not _same(provider.metadata_if_present(original['id']), original):
             raise ValueError('The original changed during verification. The staged result was retained.')

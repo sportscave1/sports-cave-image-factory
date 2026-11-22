@@ -127,8 +127,11 @@ def _waiting_prompt(job):
     prompt = job['prompt']
     if job.get('section') == 'edit':
         from design_execution_flow import CONTINUOUS_DESIGN_FLOW
+        from design_review_prompt import EDIT_EXECUTION_RULES
         if CONTINUOUS_DESIGN_FLOW not in prompt:
-            return CONTINUOUS_DESIGN_FLOW + prompt
+            prompt = CONTINUOUS_DESIGN_FLOW + prompt
+        if EDIT_EXECUTION_RULES not in prompt:
+            prompt = EDIT_EXECUTION_RULES + prompt
         return prompt
     if prompt.startswith('SPORTS CAVE EXISTING DESIGN REFRESH\n'):
         return _waiting_refresh_prompt(job)
