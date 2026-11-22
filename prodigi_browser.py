@@ -19,6 +19,7 @@ from prodigi_client import Client
 
 LOCK = 19721124
 WAITING = 'Awaiting browser upload'
+READINESS_POLICY='owned-page-ready-v1'
 
 
 def context(key):
@@ -316,7 +317,7 @@ def resume_unstarted(user,key):
         return value
 
 
-def recover_selected_empty_editors(user):
+def recover_selected_empty_editors(user,*,page_supported=False):
     """Recover this known pre-permit handoff bug, never uncertain supplier writes.
 
     Called only by companions advertising the empty-editor transition fix.
@@ -332,18 +333,20 @@ def recover_selected_empty_editors(user):
             AND ((value->'browser'->>'last_stage'='page'
                   AND value->'browser'->>'client_error'='An existing editor requires manual review.'
                   AND value->'product_browser'->>'verified'='true')
-              OR (value->'browser'->>'last_stage'='signin'
-                  AND value->'browser'->>'client_error'='Sign into Prodigi in Edge, then review the same draft.'
-                  AND COALESCE((value->>'readiness_recoveries')::int,0)<1
+              OR (value->'browser'->>'last_stage' IN ('signin','readiness')
+                  AND value->'browser'->>'client_error' IN ('Sign into Prodigi in Edge, then review the same draft.',
+                    'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
+                  AND (COALESCE((value->>'readiness_recoveries')::int,0)<1
+                    OR (%s AND COALESCE(value->>'readiness_recovery_policy','')<>'owned-page-ready-v1'))
                   AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation')))
             AND NOT value ? 'submission'
             AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 2""")
+            ORDER BY updated_at LIMIT 2""",(page_supported,))
         keys=[row['key'] for row in cur.fetchall()]
     recovered=0
     for key in keys:
         try:
-            recovered+=bool(_recover_ready_editor(user,key))
+            recovered+=bool(_recover_ready_editor(user,key,page_supported=page_supported))
         except (ValueError,PermissionError):
             pass  # Changed artwork/address/source stays stopped for review.
     if recovered:
@@ -353,14 +356,18 @@ def recover_selected_empty_editors(user):
 
 
 @stages.stale_result(False)
-def _recover_ready_editor(user,key):
+def _recover_ready_editor(user,key,*,page_supported=False):
     provider,resolver,_,sandbox=context(key)
     with stages.edit(LOCK) as q:
         value=read(q,key);receipt=value.get('browser') or {}
         if value.get('status')!='Needs review' or receipt.get('started') is not False or value.get('submission'):return False
-        readiness=receipt.get('last_stage')=='signin' and receipt.get('client_error')=='Sign into Prodigi in Edge, then review the same draft.'
+        readiness=receipt.get('last_stage') in ('signin','readiness') and receipt.get('client_error') in (
+            'Sign into Prodigi in Edge, then review the same draft.',
+            'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
         if readiness:
-            if value.get('readiness_recoveries',0)>=1:return False
+            attempts=value.get('readiness_recoveries',0)
+            if page_supported and value.get('readiness_recovery_policy')!=READINESS_POLICY:attempts=0
+            if attempts>=1:return False
             _,order,item=checked(value,provider,resolver,sandbox)
             from prodigi_reset import replacement_allowed
             if not ((value.get('product_browser') or {}).get('verified') is True or replacement_allowed(value,order,item)):return False
@@ -371,7 +378,9 @@ def _recover_ready_editor(user,key):
         if (has_existing_artwork(item) or (item.get('assets') or [])!=receipt.get('empty_slots',[])
             or business(order,item['id'])!=receipt.get('before')):return False
         value.setdefault('browser_history',[]).append({k:receipt.get(k) for k in ('claimed_at','filename','started','last_stage')})
-        if readiness:value['readiness_recoveries']=value.get('readiness_recoveries',0)+1
+        if readiness:
+            value['readiness_recoveries']=attempts+1
+            if page_supported:value['readiness_recovery_policy']=READINESS_POLICY
         value.pop('browser',None);value.pop('last_failure',None)
         value.update(status=WAITING,message='Retrying the unchanged empty item in a fresh companion page; no Save was repeated.')
         save(q,key,value)

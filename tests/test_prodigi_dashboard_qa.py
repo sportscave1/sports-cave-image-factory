@@ -24,7 +24,8 @@ def fixture():
     return value,snap,provider,evidence
 
 @pytest.mark.parametrize('case',['unchanged','old_policy','started','changed_address','changed_shipping','changed_asset','exhausted'])
-@pytest.mark.parametrize('message',['QA shipping: The exact draft or shipping quotes changed before QA.','QA inserts: The expected Prodigi control did not finish loading.'])
+@pytest.mark.parametrize('message',['QA shipping: The exact draft or shipping quotes changed before QA.','QA inserts: The expected Prodigi control did not finish loading.',
+    'Interrupted QA; recheck the saved order without repeating an upload.','QA open: Receiving end does not exist'])
 def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(store,monkeypatch,case,message):
     value,snap,p,_=fixture()
     monkeypatch.setattr(prep,'require_user',lambda _:None)
@@ -41,7 +42,7 @@ def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(stor
     if case=='changed_address':p.data['recipient']['address']['line1']='Changed'
     if case=='changed_shipping':p.data['shippingMethod']='Express'
     if case=='changed_asset':p.data['items'][0]['assets'][0]['url']='https://fixture/other'
-    assert qa.recover_waiting_item_qa({'id':'fixture'})==(1 if case in ('unchanged','old_policy') else 0)
+    assert qa.recover_waiting_item_qa({'id':'fixture'},page_supported=True)==(1 if case in ('unchanged','old_policy') else 0)
     saved=prep.read(1)
     assert saved['browser']['verified'] and not p.writes
     if case in ('unchanged','old_policy'):assert saved['qa_prepermit_recoveries']==1 and saved['status']==qa.WAITING and saved['qa_prepermit_recovery_policy']==qa.RECOVERY_POLICY
@@ -242,3 +243,16 @@ def test_tax_timeout_recovery_requires_independent_saved_tax_and_unchanged_draft
         next_plan=qa.claim(exact_item_supported=True,tax_supported=True)
         assert next_plan and next_plan['token']!=plan['token']
         assert prep.read(1)['dashboard_qa']['started'] is False
+
+
+
+def test_page_wait_recovery_requires_fixed_page_ready_companion(store,monkeypatch):
+    v,s,p,_=fixture()
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:s,None,False))
+    with prep.connect() as c,c.cursor() as q:prep.save(q,v)
+    plan=qa.claim(exact_item_supported=True,tax_supported=True)
+    qa.finish(plan['key'],plan['token'],None,error='Interrupted QA; recheck the saved order without repeating an upload.')
+    assert qa.recover_waiting_item_qa({'id':'fixture'})==0
+    assert qa.recover_waiting_item_qa({'id':'fixture'},page_supported=True)==1
+    assert prep.read(1)['browser']['verified'] and not p.writes

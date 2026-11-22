@@ -123,3 +123,19 @@ def test_only_successful_qa_completion_wakes_existing_guarded_submission_worker(
     assert client.post('/qa/permit',json=body,headers=headers).status_code==200 and not calls
     assert client.post('/qa/finish',json=body,headers=headers).status_code==200
     assert calls==(['guarded-submit-worker'] if status=='Ready for manual payment' else [])
+
+
+
+def test_fixed_page_ready_capability_reaches_qa_recovery(monkeypatch):
+    calls=[];actor={'id':'fixture'}
+    monkeypatch.setattr(prep,'enabled',lambda:True)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:actor)
+    monkeypatch.setattr('orders_automatic.kick',lambda:None)
+    monkeypatch.setattr('prodigi_submission.kick',lambda:None)
+    monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
+    monkeypatch.setattr('prodigi_dashboard_qa.recover_waiting_item_qa',lambda user,**kw:calls.append((user,kw)))
+    async def ready(*_):return {'key':'fixture'}
+    monkeypatch.setattr(api,'ready_handoff',ready)
+    headers={'Authorization':'Bearer '+'x'*43,'X-Sports-Cave-Orders-Item-QA':'1','X-Sports-Cave-Orders-Page-Ready':'1'}
+    response=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])])).post('/tick',content='{}',headers=headers)
+    assert response.status_code==200 and calls==[(actor,dict(page_supported=True))]

@@ -71,7 +71,7 @@ def current(value,provider,resolver):
     return current_for_order(value,provider.order(value['order_id']),resolver)
 
 
-def recover_waiting_item_qa(user):
+def recover_waiting_item_qa(user,*,page_supported=False):
     """Retire known pre-permit UI waits; preserve independently saved artwork."""
     prep.require_user(user)
     from companion_poll_transaction import connection
@@ -82,8 +82,9 @@ def recover_waiting_item_qa(user):
                  AND value->'dashboard_qa'->>'item_only'='true'
                  OR value->>'message'='QA product-row: Close the existing order editor before QA.'
                  OR value->>'message'='QA tax-declaration: The expected Prodigi control did not finish loading.'
-                 OR (value->>'message' IN ('QA shipping: The exact draft or shipping quotes changed before QA.',
-                     'QA inserts: The expected Prodigi control did not finish loading.')
+                 OR ((value->>'message' IN ('QA shipping: The exact draft or shipping quotes changed before QA.',
+                     'QA inserts: The expected Prodigi control did not finish loading.') OR (%s AND
+                     (value->>'message'='Interrupted QA; recheck the saved order without repeating an upload.' OR value->>'message' LIKE 'QA open: %%')))
                      AND (COALESCE(value->>'qa_prepermit_recovery_policy','')<>'nonblocking-telemetry-v1'
                           OR COALESCE((value->>'qa_prepermit_recoveries')::int,0)<2)))
             AND (value->'dashboard_qa'->>'started'='false' OR
@@ -92,18 +93,21 @@ def recover_waiting_item_qa(user):
                   AND COALESCE((value->>'qa_tax_readback_recoveries')::int,0)<1))
             AND value->'browser'->>'verified'='true'
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 2""")
+            ORDER BY updated_at LIMIT 2""",(page_supported,))
         keys=[row['key'] for row in cur.fetchall()]
-    return sum(_recover_item_qa(key) for key in keys)
+    return sum(_recover_item_qa(key,page_supported=page_supported) for key in keys)
 
 
 @stages.stale_result(False)
-def _recover_item_qa(key):
+def _recover_item_qa(key,*,page_supported=False):
     provider,resolver,_,_=browser.context(key)
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key);receipt=value.get('dashboard_qa') or {}
+        page_wait=(value.get('message')=='Interrupted QA; recheck the saved order without repeating an upload.' or value.get('message','').startswith('QA open: '))
+        if page_wait and not page_supported:return False
         prepermit=value.get('message') in ('QA shipping: The exact draft or shipping quotes changed before QA.',
-            'QA inserts: The expected Prodigi control did not finish loading.')
+            'QA inserts: The expected Prodigi control did not finish loading.',
+            'Interrupted QA; recheck the saved order without repeating an upload.') or value.get('message','').startswith('QA open: ')
         tax_readback=(value.get('message')=='QA tax-declaration: The expected Prodigi control did not finish loading.'
                       and receipt.get('started') is True and receipt.get('tax_policy')==TAX_POLICY
                       and value.get('qa_tax_readback_recoveries',0)<1)

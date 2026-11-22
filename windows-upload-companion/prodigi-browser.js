@@ -88,6 +88,9 @@ async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
     try{const state=await probe();
       if(state?.ready&&(!reloaded||(typeof state.page_instance==='string'&&state.page_instance!==previousPage)))return true;
     }catch(error){if(error.prodigiOwnershipLost)throw error;}
+    // A missing receiver or a responsive Loading page does not hit the probe
+    // timeout. Wake this owned exact tab once after bounded unsuccessful probes.
+    if(n>=2&&!woke&&orderUrl){await prodigiWakeOwnedTab(tab,orderUrl);woke=true;}
     await ordersDelay(1000);
   }
   return false;
@@ -128,7 +131,7 @@ async function prodigiQAReceipt(plan,action,evidence=null,error='') {
   if(!response.ok)throw Error('The pinned QA receipt could not be verified.');return response.json();
 }
 async function prodigiReceipt(plan,action,stage='readback',error='') {
-  if(plan.kind==='qa')return prodigiQAReceipt(plan,action,null,'Interrupted QA; recheck the saved order without repeating an upload.');
+  if(plan.kind==='qa')return prodigiQAReceipt(plan,action,null,error?('QA '+stage+': '+String(error)).slice(0,240):'Interrupted QA; recheck the saved order without repeating an upload.');
   const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
   if(!token) throw Error('Desktop pairing is unavailable.');
   const requestFetch=action==='finish'&&!['merge-add','merge-hold'].includes(plan.kind)?prodigiReadFetch:fetch;
@@ -146,6 +149,7 @@ async function prodigiBrowserRun(plan) {
   let stage='download';if(typeof ordersProgressStage==='function')ordersProgressStage(plan.kind==='qa'?'open':plan.kind==='product'?'product':'download');
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
+      stage='open';
       const tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
       let refresh=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true);
       if(plan.kind==='merge-hold'&&tab.ordersReused){
@@ -156,6 +160,7 @@ async function prodigiBrowserRun(plan) {
       // Read verified persisted artwork, not a leftover post-Save editor.
       const ready=await prodigiWaitForPage(tab,refresh,30,plan.order_url);
       if(!ready)throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');
+      stage=plan.kind==='qa'?'qa':'product';
       const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
       return plan.kind==='qa'?await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||''):await prodigiReceipt(plan,'finish',result?.stage||'product',result?.error||'');
     }
@@ -166,12 +171,12 @@ async function prodigiBrowserRun(plan) {
     if(bytes.length!==plan.bytes) throw Error('The JPG byte count changed.');
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
     if(hash!==plan.sha256) throw Error('The numbered JPG checksum changed.');
-    stage='open';
+    stage='open';if(typeof ordersProgressStage==='function')ordersProgressStage('open');
     const tab=await prodigiWorkerTab(plan);
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
     // Only a server-verified empty item may clear a product-selection shell.
     const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true||plan.replace_artwork===true,60,plan.order_url);
-    if(!ready) {stage='signin';throw Error('Sign into Prodigi in Edge, then review the same draft.');}
+    if(!ready) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
     const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
     stage=result?.stage||'page';
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');

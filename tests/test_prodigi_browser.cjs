@@ -435,3 +435,24 @@ for(const alreadyHeld of [false,true])test('duplicate hold is source-scoped and 
  const result=await new Promise(resolve=>listeners[0]({type:'prodigi:merge-hold',plan:{environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',order_id:'99',reference:'reference-source',sha256:'a'.repeat(64)}},{id:'same'},resolve));
  assert.equal(result.stage,'merge-hold-confirmed');assert.deepEqual(events,alreadyHeld?['permit-source']:['permit-source','hold-source']);
 });
+
+
+for(const missing of [false,true])test('owned responsive Loading or missing receiver is woken once '+missing,async()=>{
+ const {context,storage}=setup();let awake=false,wakes=0;
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.equal(options.active,true);awake=true;wakes++;};
+ context.chrome.tabs.sendMessage=async()=>{if(awake)return{ready:true,page_instance:'same'};if(missing)throw Error('Receiving end does not exist');return{ready:false,page_instance:'same'}};
+ context.tab={id:9};context.orderUrl=plan.order_url;
+ context.setTimeout=(fn,ms)=>setTimeout(fn,ms===1000?0:ms);
+ assert.equal(await vm.runInContext('prodigiWaitForPage(tab,false,5,orderUrl)',context),true);
+ assert.equal(wakes,1);
+});
+
+test('QA connection failure preserves stage and original cause in finish receipt',async()=>{
+ const {context,calls}=setup();context.qaPlan={...plan,kind:'qa'};
+ await vm.runInContext("prodigiReceipt(qaPlan,'finish','open','Receiving end does not exist')",context);
+ const body=JSON.parse(calls[0].options.body);
+ assert.equal(body.error,'QA open: Receiving end does not exist');
+ assert(calls[0].url.endsWith('/qa/finish'));
+});

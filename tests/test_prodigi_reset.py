@@ -165,3 +165,18 @@ def test_empty_reset_readiness_recovers_once_without_new_owner_click(draft,case)
         next_plan=browser.claim(exact_item_supported=True,reset_supported=True)
         assert next_plan['token']!=plan['token'] and next_plan['selected_empty_product']
         assert not prep.read(1)['browser']['started'] and prep.read(1)['readiness_recoveries']==1
+
+
+
+def test_fixed_page_ready_worker_gets_one_new_guarded_recovery_budget(draft):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    browser.finish(plan['key'],plan['token'],'signin',error='Sign into Prodigi in Edge, then review the same draft.')
+    v=prep.read(1);v['readiness_recoveries']=1;save(v)
+    assert browser.recover_selected_empty_editors({'id':'owner'})==0
+    assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==1
+    next_plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    browser.finish(next_plan['key'],next_plan['token'],'readiness',error='The exact Prodigi order page did not become ready; check its loading or sign-in state.')
+    assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==0
+    assert prep.read(1)['readiness_recovery_policy']==browser.READINESS_POLICY and not p.writes

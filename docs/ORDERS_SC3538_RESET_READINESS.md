@@ -29,3 +29,15 @@ Tyson allocation967 successfully repaired its PSD and generated JPG, then failed
 ## Proven Tyson comparison blocker
 
 The first live independent readback recorded only items[0/1].unitPrice.amount and lineTotal.amount changed: Prodigi repriced the two saved sibling items when the third product was selected. No artwork/address/variant/quantity path changed. Normalise only Money.amount for existing draft line prices during post-Select completion; retain currency and all other business fields. Pre-Select permit comparison stays fully strict. New policy supplier-price-readback-v1 supplies a bounded fresh readback-only budget after the fix; consumed Select permits remain intact. Independently require correct SKU/frame, no existing target artwork, no charges and unchanged source before admitting upload.
+
+
+## Live results and companion1.7.46
+
+SC3538's guarded recovery uploaded and independently verified its JPG at23:10:30UTC. Its QA pass then stopped before the shipping/tax permit with the generic Interrupted QA receipt. Code review proves the companion catch path discarded all actual QA transport/readiness exceptions in favour of that generic message. This record does not prove a worker reload or an actual logout.
+
+1.7.46 preserves the original QA connection error and stage, labels artwork readiness honestly, and wakes the exact worker-owned tab once after repeated responsive Loading/missing-receiver probes (the existing wake handled only a hanging response). Ownership/URL checks and new-document fences remain; no user tab/global browser setting changes. Test both previously missed readiness behaviours and diagnostic preservation. A separate advertised Page-Ready capability is required for bounded pre-permit interrupted/open-stage QA recovery; source/business/shipping and saved JPG checks remain mandatory. No artwork Save or Select permit is replayed.
+
+Tyson's readback after the price fix independently verified the canonical product. Upload then continued; the two saved sibling JPGs and their item QA receipts were retained. Final order-wide QA/submission still must be observed for all three.
+
+
+Tyson subsequently hit the same pre-Save signin/readiness fallback under1.7.45, even after one old-policy retry; no Save permit was committed. The Page-Ready capability in1.7.46 is also required for a single fresh owned-page-ready-v1 recovery budget. Existing source/business/empty-slot/generation checks remain, and that fixed-policy exhausted retry stays blocked. This prevents older companions repeatedly consuming readiness attempts and does not reset any saved sibling artwork.
