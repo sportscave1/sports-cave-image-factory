@@ -1,6 +1,6 @@
-"""Bounded recorded-item videos in the existing private assets bucket.
+"""Bounded recorded-item videos, routed to each listing's private media source.
 
-Only the approved listing route serves these objects. No public bucket URLs or
+Only the approved listing route serves these objects. No public storage URLs or
 presigned links are issued, including for pending moderation previews.
 """
 import base64
@@ -21,8 +21,8 @@ _ENCODERS = threading.BoundedSemaphore(1)
 
 
 def configured():
-    from services.r2_storage import safe_r2_enabled, get_bucket_name
-    return bool(safe_r2_enabled() and get_bucket_name('assets'))
+    from marketplace_dropbox import configured as source_configured
+    return source_configured()
 
 
 @contextmanager
@@ -95,7 +95,7 @@ def prepare_video(value):
         return {'bytes': output.read_bytes(), 'seconds': round(duration, 2)}
 
 
-class VideoStorage:
+class LegacyVideoStorage:
     def __init__(self, client=None, bucket=None):
         from services.r2_storage import get_r2_client, get_bucket_name
         self.bucket = bucket or get_bucket_name('assets')
@@ -122,6 +122,26 @@ class VideoStorage:
         end = metadata['size'] - 1 if end is None else end
         return self.client.get_object(Bucket=self.bucket, Key=self.key(listing_id, metadata['token']),
                                       Range=f'bytes={start}-{end}')['Body']
+
+    def preview(self, listing_id, metadata):
+        stream = self.open(listing_id, metadata)
+        try:
+            data = stream.read(MAX_OUTPUT + 1)
+            if len(data) > MAX_OUTPUT:
+                raise ValueError('Item video exceeds the preview limit.')
+            return data
+        finally:
+            stream.close()
+
+
+class VideoStorage:
+    """Read reviewed media from its recorded source, preserving older listings."""
+    def open(self, listing_id, metadata, start=0, end=None):
+        identifier(listing_id)
+        if metadata.get('provider') == 'dropbox':
+            from marketplace_dropbox import MarketplaceDropboxStorage
+            return MarketplaceDropboxStorage().open(metadata, start, end)
+        return LegacyVideoStorage().open(listing_id, metadata, start, end)
 
     def preview(self, listing_id, metadata):
         stream = self.open(listing_id, metadata)

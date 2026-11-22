@@ -19,7 +19,7 @@ import marketplace_api as api
 import marketplace_media as media
 from marketplace_store import MarketplaceStore
 from crm_store import StoreUnavailable
-from tests.test_marketplace import FakeDatabase, sample, photograph
+from tests.test_marketplace import FakeDatabase, sample, photograph, memory_store
 
 
 class VideoEncodingTests(unittest.TestCase):
@@ -64,14 +64,13 @@ class VideoEncodingTests(unittest.TestCase):
 class VideoStorageTests(unittest.TestCase):
     def setUp(self):
         self.database = FakeDatabase()
-        self.store = MarketplaceStore(self.database.connect)
-        self.metadata = {'token': str(uuid4()), 'seconds': 1, 'size': 10}
-        self.storage = Mock()
-        self.storage.save.return_value = self.metadata
+        self.store = MarketplaceStore(self.database.connect, media_storage=self.database.media)
 
     def submit(self):
-        return self.store.submit(core.submission(sample()), [photograph(), photograph()],
-            {'bytes': b'0123456789', 'seconds': 1}, video_storage=self.storage)['id']
+        key = self.store.submit(core.submission(sample()), [photograph(), photograph()],
+            {'bytes': b'0123456789', 'seconds': 1})['id']
+        self.metadata = self.store.video(key, public=False)
+        return key
 
     def test_video_metadata_stays_private_and_approval_gates_bytes(self):
         key = self.submit()
@@ -81,28 +80,27 @@ class VideoStorageTests(unittest.TestCase):
         row = self.store.listing(key, public=True)
         self.assertTrue(row['has_video'])
         self.assertNotIn('video', row)
-        self.assertNotIn(self.metadata['token'], json.dumps(row))
+        self.assertNotIn(self.metadata['id'], json.dumps(row))
         self.assertEqual(self.store.video(key), self.metadata)
         self.store.moderate(key, 'withdrawn', 2, 'test-admin')
         self.assertIsNone(self.store.video(key))
 
-    def test_database_rollback_removes_only_the_just_uploaded_private_object(self):
-        self.database.fail_photo = True
+    def test_database_failure_preserves_the_complete_source_submission(self):
+        self.database.fail_listing = True
         with self.assertRaises(StoreUnavailable):
             self.submit()
         self.assertEqual(self.database.values, {})
-        self.storage.discard.assert_called_once()
-        self.assertEqual(self.storage.discard.call_args.args[1], self.metadata)
+        self.assertTrue(any(path.endswith('/listing.json') for path in self.database.media.backend.paths))
 
     def test_failed_upload_does_not_create_a_listing(self):
-        self.storage.save.side_effect = OSError('synthetic unavailable')
+        self.database.media.backend.fail_upload = 'video.mp4'
         with self.assertRaises(OSError):
             self.submit()
         self.assertEqual(self.database.values, {})
 
     def test_object_keys_are_server_owned_and_never_public_urls(self):
         client = Mock()
-        storage = media.VideoStorage(client=client, bucket='synthetic-private')
+        storage = media.LegacyVideoStorage(client=client, bucket='synthetic-private')
         key = str(uuid4())
         result = storage.save(key, {'bytes': b'video', 'seconds': 1})
         call = client.put_object.call_args.kwargs
@@ -121,20 +119,20 @@ class Body(io.BytesIO):
 
 class MediaPageTests(unittest.TestCase):
     def setUp(self):
-        self.store = MarketplaceStore(FakeDatabase().connect)
+        self.store = memory_store()
         self.store_patch = patch.object(api, 'MarketplaceStore', return_value=self.store)
         self.store_patch.start()
         self.addCleanup(self.store_patch.stop)
         api._RATE.clear()
         self.client = TestClient(Starlette(routes=[Route(path, endpoint, methods=list(methods)) for path, endpoint, methods in api.ROUTES]), base_url=core.PUBLIC_ORIGIN)
         self.headers = {'Origin': core.PUBLIC_ORIGIN}
-        self.metadata = {'token': str(uuid4()), 'size': 10, 'seconds': 1}
         self.storage = Mock()
-        self.storage.save.return_value = self.metadata
 
     def listing(self):
-        return self.store.submit(core.submission(sample()), [photograph(), photograph()],
-            {'bytes': b'0123456789', 'seconds': 1}, self.storage)['id']
+        key = self.store.submit(core.submission(sample()), [photograph(), photograph()],
+            {'bytes': b'0123456789', 'seconds': 1})['id']
+        self.metadata = self.store.video(key, public=False)
+        return key
 
     def test_public_video_ranges_head_and_withdrawal(self):
         key = self.listing()
@@ -172,7 +170,7 @@ class MediaPageTests(unittest.TestCase):
             key = response.json()['reference']
             self.assertIsNone(self.store.listing(key, public=True))
             self.assertTrue(self.store.listing(key)['has_video'])
-            self.storage.save.side_effect = OSError('synthetic unavailable')
+            self.store.media_storage.backend.fail_upload = 'video.mp4'
             response = self.client.post('/marketplace/api/submissions', json=payload, headers=self.headers)
             self.assertEqual(response.status_code, 503)
             self.assertFalse(response.json()['ok'])
@@ -204,7 +202,7 @@ class MediaPageTests(unittest.TestCase):
         self.assertIn('playsinline preload="none"', response.text)
         self.assertNotIn('autoplay', response.text)
         self.assertIn('media-src \'self\'', response.headers['content-security-policy'])
-        self.assertNotIn(self.metadata['token'], response.text)
+        self.assertNotIn(self.metadata['id'], response.text)
         self.assertNotIn('seller@example.invalid', response.text)
         self.assertNotIn('Buy now', response.text)
         self.assertNotIn('Live stream', response.text)
@@ -226,6 +224,9 @@ class MediaPageTests(unittest.TestCase):
             self.assertFalse(page.exception)
             self.assertTrue(page.get('video')[0].proto.url.startswith('data:video/mp4;base64,'))
             self.assertNotIn('/media/', page.get('video')[0].proto.url)
+            images = [image for element in page.get('imgs') for image in element.proto.imgs]
+            self.assertEqual(len(images), 2)
+            self.assertTrue(all(image.url.startswith('data:image/webp;base64,') for image in images))
 
     def test_payment_pages_footer_canonicals_and_sitemap_are_complete(self):
         for path, heading in (('/paypal', 'A familiar way to pay.'), ('/buyer-protection', 'Confidence starts with the details.')):

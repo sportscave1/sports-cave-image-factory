@@ -20,6 +20,7 @@ import marketplace_api as api
 from marketplace_publish import publish_website
 from marketplace_store import MarketplaceStore
 from prompt_releases import ReleaseError
+from tests.marketplace_storage_fakes import MemorySource
 
 
 def sample():
@@ -56,6 +57,8 @@ class FakeConnection:
             key, value = args
             if self.database.fail_photo and ':image:' in key:
                 raise OSError('synthetic failure')
+            if self.database.fail_listing and ':listing:' in key:
+                raise OSError('synthetic index failure')
             self.database.values[key] = json.loads(value)
             self.rows = []
         elif 'WHERE key=%s' in sql:
@@ -77,8 +80,15 @@ class FakeDatabase:
         self.values = {}
         self.mutex = threading.RLock()
         self.fail_photo = False
+        self.fail_listing = False
+        self.media = MemorySource()
     def connect(self):
         return FakeConnection(self)
+
+
+def memory_store():
+    database = FakeDatabase()
+    return MarketplaceStore(database.connect, media_storage=database.media)
 
 
 class OutreachTests(unittest.TestCase):
@@ -127,7 +137,7 @@ class ContractTests(unittest.TestCase):
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.database = FakeDatabase()
-        self.store = MarketplaceStore(self.database.connect)
+        self.store = MarketplaceStore(self.database.connect, media_storage=self.database.media)
     def submit(self):
         return self.store.submit(core.submission(sample()), core.prepare_photos([photograph(), photograph()]))['id']
     def test_approval_gate_privacy_images_and_withdrawal(self):
@@ -145,8 +155,8 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(self.store.photo(key, 0))
         with self.assertRaises(ValueError):
             self.store.enquire(key, 'Buyer', 'buyer@example.invalid', 'Is this available?')
-    def test_partial_image_failure_rolls_back_the_submission(self):
-        self.database.fail_photo = True
+    def test_partial_source_upload_does_not_create_an_approval_record(self):
+        self.database.media.backend.fail_upload = 'photo-2.webp'
         with self.assertRaises(Exception):
             self.submit()
         self.assertEqual(self.database.values, {})
@@ -174,7 +184,7 @@ class StoreTests(unittest.TestCase):
         config = deepcopy(core.DEFAULT_SITE)
         self.store.save_draft({**config, 'headline': 'A new chapter.'}, config, 0)
         first = self.store.begin_publish(1)
-        new_session = MarketplaceStore(self.database.connect)
+        new_session = MarketplaceStore(self.database.connect, media_storage=self.database.media)
         second = new_session.begin_publish(1)
         self.assertEqual(first['release_id'], second['release_id'])
         with self.assertRaises(ValueError):
@@ -186,7 +196,7 @@ class StoreTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.database = FakeDatabase()
-        self.store = MarketplaceStore(self.database.connect)
+        self.store = MarketplaceStore(self.database.connect, media_storage=self.database.media)
         self.override = patch.object(api, 'MarketplaceStore', return_value=self.store)
         self.override.start()
         api._RATE.clear()
@@ -361,7 +371,7 @@ class AdminTests(unittest.TestCase):
     def test_website_draft_controls_save_and_publish_through_mocked_git(self):
         from streamlit.testing.v1 import AppTest
         import marketplace_page
-        store = MarketplaceStore(FakeDatabase().connect)
+        store = memory_store()
         fake_git = Mock(token='synthetic', render_token='')
         result = {'release_id': 'synthetic-release', 'commit': 'c' * 40, 'published_at': core.now()}
         with patch.object(marketplace_page, 'MarketplaceStore', return_value=store), \
@@ -384,7 +394,7 @@ class AdminTests(unittest.TestCase):
         import marketplace_page
         accounts = types.ModuleType('os_accounts')
         accounts.is_admin = lambda user: user.get('role') == 'admin'
-        store = MarketplaceStore(FakeDatabase().connect)
+        store = memory_store()
         with patch.dict(sys.modules, {'os_accounts': accounts}), patch.object(marketplace_page, 'MarketplaceStore', return_value=store):
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'admin'})").run()
             self.assertFalse(page.exception)
