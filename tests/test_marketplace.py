@@ -260,18 +260,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get('/marketplace/assets/marketplace.css', headers={'If-None-Match': response.headers['etag']}).status_code, 304)
 
-    def test_home_has_responsive_priority_hero_and_real_search_schema(self):
+    def test_home_keeps_responsive_hero_without_empty_catalogue_navigation(self):
         import re
         response = self.client.get('/marketplace')
         self.assertIn('class="hero-photo"', response.text)
         self.assertIn('fetchpriority="high"', response.text)
         self.assertIn('collector-room-800.webp 800w', response.text)
-        self.assertIn('action="/marketplace/browse"', response.text)
-        self.assertIn('class="browse-menu"', response.text)
+        self.assertNotIn('class="browse-menu"', response.text)
+        self.assertNotIn('Browse by sport', response.text)
+        self.assertNotIn('Popular collections', response.text)
+        self.assertIn('href="#finds"', response.text)
+        self.assertIn('/marketplace/buyer-protection', response.text)
         self.assertEqual(len(re.findall(r'<h1\b', response.text)), 1)
         graph = json.loads(re.search(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', response.text, re.S).group(1))
         website = next(row for row in graph['@graph'] if row['@type'] == 'WebSite')
-        self.assertEqual(website['potentialAction']['@type'], 'SearchAction')
+        self.assertNotIn('potentialAction', website)
         self.assertNotIn('stillwhite', response.text.lower())
         self.assertNotIn('5 Star Reviews', response.text)
 

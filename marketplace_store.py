@@ -45,16 +45,40 @@ class MarketplaceStore(Store):
             rows = [r['value'] for r in conn.execute(query, (PREFIX + 'listing:%',)).fetchall()]
         return [public_listing(row) for row in rows] if public else rows
 
-    def submit(self, row, photos):
+    def submit(self, row, photos, video=None, video_storage=None):
         listing_id = str(uuid4())
+        metadata = None
+        if video:
+            from marketplace_media import VideoStorage
+            video_storage = video_storage or VideoStorage()
+            metadata = video_storage.save(listing_id, video)
         record = {**row, 'id': listing_id, 'status': 'pending', 'revision': 1,
-                  'photo_count': len(photos), 'submitted_at': now(), 'history': []}
-        with self.db() as conn:
-            # One transaction includes every image; a partial submission never succeeds.
-            put(conn, 'listing:' + listing_id, record)
-            for index, data in enumerate(photos):
-                put(conn, f'image:{listing_id}:{index}', {'webp': data})
+                  'photo_count': len(photos), 'submitted_at': now(), 'history': [],
+                  'has_video': bool(metadata), 'video_seconds': metadata['seconds'] if metadata else 0}
+        if metadata:
+            record['video'] = metadata
+        try:
+            with self.db() as conn:
+                # One transaction includes all photographs and the private video reference.
+                put(conn, 'listing:' + listing_id, record)
+                for index, data in enumerate(photos):
+                    put(conn, f'image:{listing_id}:{index}', {'webp': data})
+        except Exception:
+            if metadata:
+                try:
+                    # A failed commit acknowledgement must not delete a committed object's video.
+                    if self.listing(listing_id) is None:
+                        video_storage.discard(listing_id, metadata)
+                except Exception:
+                    pass  # Leave an unreferenced private object rather than risk a valid listing.
+            raise
         return {'id': listing_id, 'status': 'pending'}
+
+    def video(self, listing_id, *, public=True):
+        row = self.listing(listing_id)
+        if not row or public and row.get('status') != 'published':
+            return None
+        return deepcopy(row.get('video'))
 
     def photo(self, listing_id, index, *, public=True):
         listing_id = identifier(listing_id)

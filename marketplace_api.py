@@ -10,14 +10,17 @@ import time
 from xml.sax.saxutils import escape as xml_escape
 
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.background import BackgroundTask
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 import marketplace as core
 import marketplace_views as views
+import marketplace_media as media
 from marketplace_store import MarketplaceStore
 
 _RATE = OrderedDict()
 _RATE_LOCK = threading.Lock()
+_UPLOADS = threading.BoundedSemaphore(2)
 ASSET_ROOT = Path(__file__).resolve().parent / 'static' / 'marketplace'
 
 
@@ -26,7 +29,7 @@ def security(nonce=''):
             'X-Frame-Options': 'DENY', 'Cache-Control': 'no-store',
             'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
                 "form-action 'self'; connect-src 'self'; img-src 'self' data:; "
-                "style-src 'self'; font-src 'self' https://www.sportscaveshop.com; "
+                "media-src 'self'; style-src 'self'; font-src 'self' https://www.sportscaveshop.com; "
                 f"script-src 'self' 'nonce-{nonce}'; object-src 'none'"}
 
 
@@ -36,9 +39,11 @@ async def page(request):
     path = request.url.path.rstrip('/')
     try:
         if path == core.BASE_PATH + '/sell':
-            document = views.sell(config, nonce)
+            document = views.sell(config, nonce, video_available=media.configured())
         elif path == core.BASE_PATH + '/terms':
             document = views.terms(nonce)
+        elif path in (core.BASE_PATH + '/paypal', core.BASE_PATH + '/buyer-protection'):
+            document = views.payment_page(path.endswith('/buyer-protection'), nonce)
         elif 'listing_id' in request.path_params:
             listing_id = core.identifier(request.path_params['listing_id'])
             row = await run_in_threadpool(MarketplaceStore().listing, listing_id, public=True)
@@ -54,7 +59,7 @@ async def page(request):
             document = views.home(config, rows, request.query_params, nonce, unavailable, browse=path == core.BASE_PATH + '/browse')
         headers = security(nonce)
         headers['X-Sports-Cave-Marketplace-Release'] = config['release_id']
-        if path in (core.BASE_PATH, core.BASE_PATH + '/terms'):
+        if path in (core.BASE_PATH, core.BASE_PATH + '/terms', core.BASE_PATH + '/paypal', core.BASE_PATH + '/buyer-protection'):
             headers['Cache-Control'] = 'public, max-age=0, s-maxage=15, must-revalidate'
         return HTMLResponse(document, headers=headers)
     except ValueError:
@@ -74,6 +79,7 @@ async def asset(request):
     name = request.path_params['asset']
     paths = {'marketplace.css': (ASSET_ROOT / 'marketplace.css', 'text/css'),
              'marketplace-home.css': (ASSET_ROOT / 'marketplace-home.css', 'text/css'),
+             'marketplace-collect.css': (ASSET_ROOT / 'marketplace-collect.css', 'text/css'),
              'collector-room-1600.webp': (ASSET_ROOT / 'collector-room-1600.webp', 'image/webp'),
              'collector-room-800.webp': (ASSET_ROOT / 'collector-room-800.webp', 'image/webp'),
              'marketplace.js': (ASSET_ROOT / 'marketplace.js', 'text/javascript'),
@@ -107,6 +113,37 @@ async def photo(request):
         return Response(status_code=503)
 
 
+async def video(request):
+    headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes'}
+    try:
+        listing_id = core.identifier(request.path_params['listing_id'])
+        metadata = await run_in_threadpool(MarketplaceStore().video, listing_id, public=True)
+        if not metadata:
+            return Response(status_code=404, headers=headers)
+        try:
+            start, end, partial = media.byte_range(request.headers.get('range'), metadata['size'])
+        except ValueError:
+            return Response(status_code=416, headers={**headers, 'Content-Range': f'bytes */{metadata["size"]}'})
+        headers['Content-Length'] = str(end - start + 1)
+        if partial:
+            headers['Content-Range'] = f'bytes {start}-{end}/{metadata["size"]}'
+        status = 206 if partial else 200
+        if request.method == 'HEAD':
+            return Response(status_code=status, media_type='video/mp4', headers=headers)
+        stream = await run_in_threadpool(media.VideoStorage().open, listing_id, metadata, start, end)
+        def chunks():
+            try:
+                yield from stream.iter_chunks(chunk_size=65536)
+            finally:
+                stream.close()
+        return StreamingResponse(chunks(), status_code=status, media_type='video/mp4', headers=headers,
+                                 background=BackgroundTask(stream.close))
+    except ValueError:
+        return Response(status_code=404, headers=headers)
+    except Exception:
+        return Response(status_code=503, headers=headers)
+
+
 def allow_rate(request, address=''):
     # Bounded ephemeral abuse buckets. Identity is hashed and never logged/stored.
     host = request.client.host if request.client else 'unknown'
@@ -135,7 +172,7 @@ async def body(request, limit):
     data = bytearray()
     async for chunk in request.stream():
         if len(data) + len(chunk) > limit:
-            raise BufferError('The submission is too large. Use photos up to 2 MB each.')
+            raise BufferError('Use photos up to 2 MB each and one video up to 15 MB.')
         data.extend(chunk)
     payload = json.loads(data)
     if not isinstance(payload, dict) or payload.get('website'):
@@ -145,18 +182,26 @@ async def body(request, limit):
 
 async def submit(request):
     headers = security()
+    if not _UPLOADS.acquire(blocking=False):
+        return JSONResponse({'ok': False, 'error': 'A few items are being uploaded. Please try again shortly.'},
+                            status_code=429, headers={**headers, 'Retry-After': '30'})
     try:
-        payload = await body(request, 11500000)
+        payload = await body(request, 31500000)
         if not core.deployed_site()['intake_open']:
             return JSONResponse({'error': 'New seller submissions are currently paused.'}, status_code=503, headers=headers)
         row = core.submission(payload)
         if not allow_rate(request, row['seller_email']):
             raise OverflowError('You have sent several submissions. Please try again later.')
         photos = await run_in_threadpool(core.prepare_photos, payload.get('photos'))
-        result = await run_in_threadpool(MarketplaceStore().submit, row, photos)
+        if payload.get('video') and not media.configured():
+            return JSONResponse({'ok': False, 'error': 'Video uploads are temporarily unavailable. Remove the video to submit your photos, or try again later.'}, status_code=503, headers=headers)
+        prepared = await run_in_threadpool(media.prepare_video, payload.get('video'))
+        result = await run_in_threadpool(MarketplaceStore().submit, row, photos, prepared)
         return JSONResponse({'ok': True, 'reference': result['id']}, status_code=201, headers=headers)
     except Exception as exc:
         return form_error(exc, headers)
+    finally:
+        _UPLOADS.release()
 
 
 async def enquire(request):
@@ -195,7 +240,7 @@ def form_error(error, headers):
 async def sitemap(request):
     try:
         rows = await run_in_threadpool(MarketplaceStore().listings, public=True)
-        paths = [core.BASE_PATH, core.BASE_PATH + '/browse', core.BASE_PATH + '/sell', core.BASE_PATH + '/terms'] + [core.listing_url(row) for row in rows]
+        paths = [core.BASE_PATH, core.BASE_PATH + '/browse', core.BASE_PATH + '/sell', core.BASE_PATH + '/terms', core.BASE_PATH + '/paypal', core.BASE_PATH + '/buyer-protection'] + [core.listing_url(row) for row in rows]
         urls = ''.join('<url><loc>' + xml_escape(core.PUBLIC_ORIGIN + p) + '</loc></url>' for p in paths)
         return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + urls + '</urlset>', media_type='application/xml', headers={'Cache-Control': 'no-store'})
     except Exception:
@@ -213,9 +258,12 @@ ROUTES = (
     (BASE + '/browse', page, ('GET', 'HEAD')),
     (BASE + '/sell', page, ('GET', 'HEAD')),
     (BASE + '/terms', page, ('GET', 'HEAD')),
+    (BASE + '/paypal', page, ('GET', 'HEAD')),
+    (BASE + '/buyer-protection', page, ('GET', 'HEAD')),
     (BASE + '/item/{listing_id}', page, ('GET', 'HEAD')),
     (BASE + '/assets/{asset}', asset, ('GET', 'HEAD')),
     (BASE + '/images/{listing_id}/{index:int}.webp', photo, ('GET', 'HEAD')),
+    (BASE + '/videos/{listing_id}/item.mp4', video, ('GET', 'HEAD')),
     (BASE + '/api/submissions', submit, ('POST',)),
     (BASE + '/api/enquiries', enquire, ('POST',)),
     (BASE + '/sitemap.xml', sitemap, ('GET', 'HEAD')),

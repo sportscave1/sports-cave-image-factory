@@ -85,8 +85,20 @@ def render_listings(st, store, rows, user):
                     image = store.photo(row['id'], i, public=False)
                     if image:
                         st.image(base64.b64decode(image), width='stretch')
+        if row.get('has_video'):
+            st.caption('Recorded item video · ' + str(row.get('video_seconds', 0)) + ' seconds')
+            if st.button('Load video for review', key='video-review-' + row['id']):
+                try:
+                    from marketplace_media import VideoStorage
+                    metadata = store.video(row['id'], public=False)
+                    data = VideoStorage().preview(row['id'], metadata)
+                    # Keep pending media inside the authenticated OS session rather
+                    # than registering bytes with Streamlit's shared media server.
+                    st.video('data:video/mp4;base64,' + base64.b64encode(data).decode('ascii'), format='video/mp4')
+                except Exception:
+                    st.error('Video could not be loaded. Review it before approving this listing.')
     if status in ('pending', 'withdrawn'):
-        checked = st.checkbox('I reviewed the photos, condition, seller and provenance. The listing is suitable to publish.', key='review-' + row['id'])
+        checked = st.checkbox('I reviewed all photos and video, condition, seller and provenance. The listing is suitable to publish.', key='review-' + row['id'])
         approve, decline = st.columns(2)
         action = 'published' if approve.button('Approve & publish listing', type='primary', disabled=not checked, width='stretch') else None
         if decline.button('Decline listing', width='stretch'):

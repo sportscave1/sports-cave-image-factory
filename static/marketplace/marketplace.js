@@ -1,16 +1,43 @@
 'use strict';
 (() => {
-  for (const menu of document.querySelectorAll('.browse-menu')) {
-    document.addEventListener('click', event => {
-      if (menu.open && !menu.contains(event.target)) menu.open = false;
+  for (const gallery of document.querySelectorAll('[data-gallery]')) {
+    const panels = Array.from(gallery.querySelectorAll('[data-media-panel]'));
+    const links = Array.from(gallery.querySelectorAll('[data-media-target]'));
+    const caption = gallery.querySelector('[data-media-caption]');
+    const photos = panels.filter(panel => !panel.querySelector('video')).length;
+    function show(index) {
+      panels.forEach((panel, i) => {
+        panel.hidden = i !== index;
+        const video = panel.querySelector('video');
+        if (video && i !== index) video.pause();
+        if (i === index) links[i].setAttribute('aria-current', 'true');
+        else links[i].removeAttribute('aria-current');
+      });
+      caption.textContent = panels[index].querySelector('video') ? 'Recorded item video' : `Photo ${index + 1} of ${photos}`;
+    }
+    links.forEach((link, index) => {
+      link.addEventListener('click', event => { event.preventDefault(); show(index); });
+      link.addEventListener('keydown', event => {
+        let target = index;
+        if (event.key === 'ArrowRight') target = (index + 1) % links.length;
+        else if (event.key === 'ArrowLeft') target = (index + links.length - 1) % links.length;
+        else if (event.key === 'Home') target = 0;
+        else if (event.key === 'End') target = links.length - 1;
+        else return;
+        event.preventDefault();
+        show(target);
+        links[target].focus();
+      });
     });
-    menu.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        menu.open = false;
-        menu.querySelector('summary').focus();
-      }
-    });
+    show(0);
   }
+  const videoInput = document.querySelector('#video');
+  if (videoInput) videoInput.addEventListener('change', () => {
+    const file = videoInput.files[0];
+    videoInput.setCustomValidity(file && file.size > 15000000 ? 'Choose a video up to 15 MB.' : '');
+    document.querySelector('#video-selection').textContent = file
+      ? `${file.name} · ${(file.size / 1000000).toFixed(1)} MB${file.size > 15000000 ? ' — choose a smaller clip.' : ''}` : '';
+  });
   const price = document.querySelector('#price');
   if (price) price.addEventListener('input', () => {
     const value = Number(price.value);
@@ -53,6 +80,10 @@
             throw new Error('Use JPG, PNG or WebP photographs, up to 2 MB each.');
           }
           data.photos = await Promise.all(photos.map(readPhoto));
+          const video = form.elements.video.files[0];
+          if (video && video.size > 15000000) throw new Error('Choose a video up to 15 MB and 60 seconds.');
+          data.video = video ? await readPhoto(video) : '';
+          status.textContent = video ? 'Uploading and preparing your video… This can take a minute.' : 'Sending your photographs…';
         }
         const response = await fetch(form.dataset.endpoint, {method: 'POST', credentials: 'omit',
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
