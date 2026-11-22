@@ -294,12 +294,13 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
         self.assertFalse(app.exception)
         self.assertIn(("delete", "Facebook", "comment", ""), EVENTS)
 
-    def test_instagram_hides_unavailable_like_actions(self):
+    def test_instagram_disables_unauthorized_like_actions(self):
         app = self.app()
         app.segmented_control[0].set_value("Comments").run()
         self.open_comment(app, "Instagram")
         self.assertFalse(app.exception)
-        self.assertNotIn("like-Instagram-comment", [b.key for b in app.button])
+        self.assertTrue(app.button(key="like-Instagram-comment").disabled)
+        self.assertTrue(app.button(key="unlike-Instagram-comment").disabled)
         self.assertIn("Hide", [b.label for b in app.button])
 
     def test_discovery_saves_ranked_prospect_and_draft(self):

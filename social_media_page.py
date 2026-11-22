@@ -183,7 +183,7 @@ def _collaborations(api, store):
 
 def _connection(api):
     toolbar, check = st.columns([3, 1])
-    toolbar.caption("Facebook and Instagram · one connection, four independent checks")
+    toolbar.caption("Facebook and Instagram · messages, comments and Instagram likes checked separately")
     if check.button("Check Meta connection", icon=":material/sync:", type="primary", width="stretch"):
         try:
             details = api.connection()
@@ -193,6 +193,10 @@ def _connection(api):
             st.session_state.pop("community-connection-account", None)
             st.warning(str(exc))
         st.session_state["community-connection-checks"] = api.connection_checks()
+        if hasattr(api, "instagram_like_status"):
+            likes = api.instagram_like_status()
+            st.session_state["community-connection-checks"].append({"Channel": "Instagram", "Feature": "Like / Unlike",
+                "Status": "Available" if likes["available"] else "Needs attention", "Details": likes["reason"]})
         from datetime import datetime, timezone
         st.session_state["community-connection-checked-at"] = datetime.now(timezone.utc).isoformat()
     checks = st.session_state.get("community-connection-checks")
@@ -208,6 +212,8 @@ def _connection(api):
                         "The connected Page administrator also needs the Messaging task.")
             st.markdown("**Comments**: only posts and comments available to this app can be returned. "
                         "Advertising comments are checked for live ads only.")
+            st.markdown("**Instagram Like / Unlike**: authorize `instagram_manage_engagement` and its dependencies "
+                        "on a separate Facebook User community token. Keep existing ads and Page credentials unchanged.")
             st.caption("Checks verify reading. Meta separately checks permission when you send a reply or moderate a comment.")
             st.link_button("Meta connection requirements", "https://developers.facebook.com/docs/graph-api/reference/page/conversations/")
     with details, st.container(key="community-detail"):

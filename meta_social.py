@@ -8,11 +8,18 @@ import os
 import logging
 import re
 import time
+import threading
+from collections import deque
 from datetime import datetime, timedelta, timezone
 
 import requests
 
 import os_accounts
+
+# Manual engagement is paced below Meta's 50 requests / 5 seconds threshold.
+# These process-local buckets contain account IDs and timestamps, never tokens.
+_like_lock = threading.Lock()
+_like_windows = {}
 
 
 class CommunityError(RuntimeError):
@@ -66,6 +73,10 @@ class MetaCommunity:
         # A Facebook User token can be added for community ad comments without
         # replacing the System User token used by posting, reporting and CRM.
         self._ads_token = env.get("META_SOCIAL_ACCESS_TOKEN") or env.get("META_ACCESS_TOKEN", "")
+        self._engagement_token = env.get("META_SOCIAL_ACCESS_TOKEN", "")
+        self._engagement_config = {"app_id": env.get("META_APP_ID", ""),
+            "app_secret": env.get("META_APP_SECRET", ""), "api_version": "v27.0",
+            "access_token": self._engagement_token}
         account = str(env.get("META_AD_ACCOUNT_ID", "")).strip()
         self.ad_account = (account if account.startswith("act_") else "act_" + account) if account else ""
         self.writes = env.get("META_SOCIAL_WRITES_ENABLED") == "1"
@@ -85,11 +96,11 @@ class MetaCommunity:
             raise CommunityError(f"{platform} connection is not configured. See Connection.")
         return identifier(owner)
 
-    def _request(self, method, path, *, params=None, data=None, discovery=False, advertising=False):
+    def _request(self, method, path, *, params=None, data=None, discovery=False, advertising=False, engagement=False):
         require_access(self.user)
         if method != "GET" and not self.writes:
             raise CommunityError("Sending and moderation are disabled for this environment.")
-        token = self._ads_token if advertising else self._discovery_token if discovery else self._token
+        token = self._engagement_token if engagement else self._ads_token if advertising else self._discovery_token if discovery else self._token
         if not token:
             raise CommunityError("The required Meta connection is not configured.")
         if method == "GET" and path.endswith("/conversations"):
@@ -101,7 +112,7 @@ class MetaCommunity:
             self._last_conversation_read = time.monotonic()
         try:
             response = self._session.request(
-                method, f"https://graph.facebook.com/{self.version}/{path}",
+                method, f"https://graph.facebook.com/{'v27.0' if engagement else self.version}/{path}",
                 headers={"Authorization": f"Bearer {token}"},
                 params=params, json=data, timeout=(5, 25), allow_redirects=False,
             )
@@ -121,7 +132,7 @@ class MetaCommunity:
             scopes = re.findall(r"\b(?:instagram|pages)_[a-z_]+\b", str(error.get("message", "")))
             allowed = {"instagram_basic", "instagram_manage_messages", "instagram_manage_comments",
                        "pages_manage_metadata", "pages_messaging", "pages_read_engagement",
-                       "pages_read_user_content", "pages_manage_engagement"}
+                       "pages_read_user_content", "pages_manage_engagement", "instagram_manage_engagement"}
             missing = sorted(set(scopes) & allowed)
             detail = " Required permissions: " + ", ".join(missing) + "." if missing else ""
             reference = f" (Meta {code}" if isinstance(code, int) else ""
@@ -457,11 +468,58 @@ class MetaCommunity:
             self._instagram_user_posts.add(post_id)
             return result
 
+    def instagram_like_status(self):
+        """Validate a dedicated Facebook User token; never reuse ads/Page credentials.
+
+        Called through the session read cache for display, and fresh before writes.
+        Token inspection stays server-side and returns capability information only.
+        """
+        require_access(self.user)
+        if not self._engagement_token:
+            return {"available": False, "reason": "Connect a Community User token with instagram_manage_engagement in Connection."}
+        if not self._engagement_config["app_id"] or not self._engagement_config["app_secret"]:
+            return {"available": False, "reason": "Meta app credentials are needed to verify the Community User token."}
+        from meta_ads_client import fetch_meta_token_debug
+        try:
+            metadata = fetch_meta_token_debug(config=self._engagement_config)
+        except Exception:
+            return {"available": False, "reason": "The Community User token could not be verified. Check Connection and retry."}
+        if (not isinstance(metadata, dict) or metadata.get("is_valid") is not True or metadata.get("type") != "USER"
+                or str(metadata.get("app_id")) != str(self._engagement_config["app_id"])):
+            return {"available": False, "reason": "Reconnect a valid Facebook User token for this Meta app; Page and System User tokens cannot enable Instagram likes."}
+        needed = {"instagram_basic", "instagram_manage_engagement", "pages_read_user_content", "pages_show_list"}
+        missing = sorted(needed - set(metadata.get("scopes") or []))
+        if missing:
+            return {"available": False, "reason": "Community token needs: " + ", ".join(missing) + ". Reauthorize the separate community connection."}
+        try:
+            page = self._request("GET", identifier(self.page), engagement=True,
+                                 params={"fields": "id,instagram_business_account{id}"})
+        except CommunityError as exc:
+            return {"available": False, "reason": str(exc)}
+        if (not isinstance(page, dict) or str(page.get("id")) != self.page
+                or str((page.get("instagram_business_account") or {}).get("id")) != self.instagram):
+            return {"available": False, "reason": "The Community User token does not match the connected Page and Instagram account."}
+        return {"available": True, "reason": "Instagram Like and Unlike are authorized for the connected account."}
+
+    def _reserve_instagram_like(self):
+        with _like_lock:
+            now = time.monotonic()
+            window = _like_windows.setdefault(self.instagram, deque())
+            while window and now - window[0] >= 5:
+                window.popleft()
+            if len(window) >= 20:
+                raise CommunityError("Please wait a few seconds before another Instagram Like or Unlike.")
+            window.append(now)
+
     def moderate(self, platform, post_id, comment_id, action, text="", *, ad_id="", comment_edge=""):
         if action not in ("reply", "delete", "like", "unlike", "hide", "unhide"):
             raise CommunityError("Unknown comment action.")
         if platform == "Instagram" and action in ("like", "unlike"):
-            raise CommunityError("Instagram comment likes are not enabled by this API integration. Open Instagram to like it.")
+            if not self.writes:
+                raise CommunityError("Sending and moderation are disabled for this environment.")
+            capability = self.instagram_like_status()
+            if not capability["available"]:
+                raise CommunityError(capability["reason"])
         comment_id = identifier(comment_id)
         after = ""
         found = False
@@ -488,7 +546,12 @@ class MetaCommunity:
                 raise CommunityError("Meta did not confirm the reply ID. Refresh before retrying; the reply may have succeeded.")
             return result
         if action in ("like", "unlike"):
-            result = self._request("POST" if action == "like" else "DELETE", f"{comment_id}/likes")
+            if platform == "Instagram":
+                self._reserve_instagram_like()
+                result = self._request("POST" if action == "like" else "DELETE",
+                    f"{self.owner('Instagram')}/likes", data={"comment_id": comment_id}, engagement=True)
+            else:
+                result = self._request("POST" if action == "like" else "DELETE", f"{comment_id}/likes")
         elif action in ("hide", "unhide"):
             key = "is_hidden" if platform == "Facebook" else "hide"
             result = self._request("POST", comment_id, data={key: action == "hide"}, **auth)

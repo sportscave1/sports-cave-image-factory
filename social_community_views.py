@@ -149,12 +149,12 @@ def comment_context(row):
     return {}
 
 
-def _comment_actions(api, row, done):
+def _comment_actions(api, row, done, *, instagram_likes=None):
     """Only the selected editor is built; every card's actions stay visible."""
     platform, post_id, comment_id = row["platform"], row["post"]["id"], row["id"]
     suffix = platform + "-" + comment_id
     context = comment_context(row)
-    actions = st.columns([1, 1.2, 1, 1, 1.2])
+    actions = st.columns([1, 1.2, 1, 1, 1.2, 1.2] if platform == "Instagram" else [1, 1.2, 1, 1, 1.2])
     actions[0].button("Reply", icon=":material/reply:", key="comment-select-" + suffix, width="stretch",
                       on_click=lambda: st.session_state.__setitem__("community-selected-comment", (platform, comment_id)))
     if platform == "Facebook":
@@ -164,19 +164,23 @@ def _comment_actions(api, row, done):
             api.moderate(platform, post_id, comment_id, action, **context)
             done("Like removed." if action == "unlike" else "Comment liked.")
     else:
-        from social_media import SOCIAL_PROFILES
-        link = row["post"].get("permalink") or dict(SOCIAL_PROFILES)["Instagram"]
-        actions[1].link_button("Like in Instagram", link, width="stretch")
+        enabled = api.writes and bool((instagram_likes or {}).get("available"))
+        for column, action in zip(actions[1:3], ("like", "unlike")):
+            if column.button(action.title(), key=action + "-" + suffix, disabled=not enabled,
+                             width="stretch", help=(instagram_likes or {}).get("reason")):
+                api.moderate(platform, post_id, comment_id, action, **context)
+                done("Instagram comment liked." if action == "like" else "Instagram like removed.")
+    offset = 1 if platform == "Instagram" else 0
     action = "unhide" if row.get("is_hidden") or row.get("hidden") else "hide"
-    if actions[2].button(action.title(), key="hide-" + suffix, disabled=not api.writes, width="stretch"):
+    if actions[2 + offset].button(action.title(), key="hide-" + suffix, disabled=not api.writes, width="stretch"):
         api.moderate(platform, post_id, comment_id, action, **context)
         done("Comment restored." if action == "unhide" else "Comment hidden.")
-    actions[3].button("Delete", icon=":material/delete:", key="comment-delete-" + suffix,
+    actions[3 + offset].button("Delete", icon=":material/delete:", key="comment-delete-" + suffix,
                       disabled=not api.writes, width="stretch",
                       on_click=lambda: st.session_state.__setitem__("community-selected-delete", (platform, comment_id)))
     link = row["post"].get("permalink") or row["post"].get("permalink_url")
     if str(link or "").startswith("https://"):
-        actions[4].link_button("Open post", link, width="stretch")
+        actions[4 + offset].link_button("Open post", link, width="stretch")
     if st.session_state.get("community-selected-delete") == (platform, comment_id):
         confirm = st.checkbox("Confirm permanent deletion", key="community-delete-confirm-" + suffix)
         remove, cancel = st.columns(2)
@@ -225,6 +229,12 @@ def render_comments(api, feed, done):
             (author(row) + " " + str(row.get("text") or row.get("message") or "") + " " + row["platform"]).casefold()]
     visible = st.session_state.get("community-comment-visible", 40)
     st.caption(f"{min(len(rows), visible)} comments shown · newest loaded first · live ads + organic posts · Sydney time")
+    instagram_likes = None
+    if any(row["platform"] == "Instagram" for row in rows[:visible]):
+        if hasattr(api, "instagram_like_status"):
+            instagram_likes = feed.read("instagram_like_status")
+        if not (instagram_likes or {}).get("available"):
+            st.caption("Instagram likes need connection authorization. " + (instagram_likes or {}).get("reason", "See Connection."))
     for row in rows[:visible]:
         with st.container(border=True, key="community-comment-card-" + row["platform"] + "-" + row["id"]):
             detail_header(author(row), row["platform"] + " · " + dated(row.get("created_time") or row.get("timestamp")),
@@ -234,7 +244,7 @@ def render_comments(api, feed, done):
             if post_text:
                 st.caption("Post: " + " ".join(str(post_text).split())[:200])
             st.caption(f"{int(row.get('like_count') or 0)} likes")
-            _comment_actions(api, row, done)
+            _comment_actions(api, row, done, instagram_likes=instagram_likes)
     pending = bool(snapshot["more_comments"] or any(snapshot["more_posts"].values()) or snapshot.get("more_ads"))
     if not rows and not snapshot["errors"]:
         st.info("No comments match the loaded results." if query else
