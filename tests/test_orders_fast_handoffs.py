@@ -6,9 +6,24 @@ from starlette.testclient import TestClient
 import prodigi_preparation as prep
 import prodigi_preparation_api as api
 
+def test_critical_qa_auth_is_not_blocked_by_the_poll_auth_slot(monkeypatch):
+    seen=[]
+    def authenticate(token,*,slots):
+        assert slots is not api._orders_auth_slots
+        assert slots.acquire(blocking=False)
+        slots.release();seen.append(token)
+    monkeypatch.setattr(api,'desktop',authenticate)
+    monkeypatch.setattr('prodigi_dashboard_qa.permit',lambda *a:{'permitted':True})
+    client=TestClient(Starlette(routes=[Route('/qa/permit',api.dashboard_qa_action,methods=['POST'])]))
+    assert api._orders_auth_slots.acquire(blocking=False)
+    try:
+        response=client.post('/qa/permit',json=dict(key='prodigi_prepare:1',token='a'*43,evidence={}),headers={'Authorization':'Bearer '+'x'*43})
+        assert response.status_code==200 and response.json()['permitted'] and seen==['x'*43]
+    finally:api._orders_auth_slots.release()
+
 def test_product_finish_keeps_the_native_preselect_error(monkeypatch):
     calls=[]
-    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:None)
     monkeypatch.setattr('prodigi_product_browser.finish',lambda key,token,stage,**kw:(calls.append((stage,kw)) or {'status':'Needs review'}))
     client=TestClient(Starlette(routes=[Route('/browser/finish',api.browser_action,methods=['POST'])]))
     response=client.post('/browser/finish',json=dict(key='product:prodigi_prepare:1',token='a'*43,stage='product-select',error='Catalogue changed'),headers={'Authorization':'Bearer '+'x'*43})
@@ -20,7 +35,7 @@ def test_ready_qa_precedes_another_artwork_transfer(monkeypatch,qa_plan):
     calls=[]
     monkeypatch.setattr(prep,'enabled',lambda:True)
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','true')
-    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:None)
     monkeypatch.setattr('orders_automatic.kick',lambda:None)
     monkeypatch.setattr(prep,'tick',lambda:pytest.fail('A ready handoff must not wait for preparation'))
     monkeypatch.setattr('prodigi_submission.kick',lambda:None)
@@ -38,7 +53,7 @@ def test_ready_qa_precedes_another_artwork_transfer(monkeypatch,qa_plan):
 def test_idle_poll_prepares_once_then_claims_the_new_handoff(monkeypatch):
     calls=[]
     monkeypatch.setattr(prep,'enabled',lambda:True)
-    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:None)
     monkeypatch.setattr('orders_automatic.kick',lambda:None)
     monkeypatch.setattr('prodigi_submission.kick',lambda:None)
     monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
@@ -65,7 +80,7 @@ def test_continuation_hint_only_changes_priority_of_existing_guarded_claim(monke
 def test_only_fixed_companion_can_recover_known_empty_editor_failure(monkeypatch,capable):
     calls=[];actor={'id':'fixture'}
     monkeypatch.setattr(prep,'enabled',lambda:True)
-    monkeypatch.setattr(api,'desktop',lambda _:actor)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:actor)
     monkeypatch.setattr('orders_automatic.kick',lambda:None)
     monkeypatch.setattr('prodigi_submission.kick',lambda:None)
     monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
@@ -81,7 +96,7 @@ def test_only_fixed_companion_can_recover_known_empty_editor_failure(monkeypatch
 def test_only_item_qa_companion_can_recover_the_old_shared_control_wait(monkeypatch,capable):
     calls=[];actor={'id':'fixture'}
     monkeypatch.setattr(prep,'enabled',lambda:True)
-    monkeypatch.setattr(api,'desktop',lambda _:actor)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:actor)
     monkeypatch.setattr('orders_automatic.kick',lambda:None)
     monkeypatch.setattr('prodigi_submission.kick',lambda:None)
     monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
@@ -97,7 +112,7 @@ def test_only_item_qa_companion_can_recover_the_old_shared_control_wait(monkeypa
 @pytest.mark.parametrize('status',['Ready for manual payment','Needs QA','Needs review','Handoff unavailable'])
 def test_only_successful_qa_completion_wakes_existing_guarded_submission_worker(monkeypatch,status):
     calls=[]
-    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:None)
     monkeypatch.setattr('prodigi_dashboard_qa.finish',lambda *args:dict(status=status))
     monkeypatch.setattr('prodigi_dashboard_qa.permit',lambda *args:dict(permitted=True))
     monkeypatch.setattr('prodigi_submission.kick',lambda:calls.append('guarded-submit-worker'))

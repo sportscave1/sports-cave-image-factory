@@ -4,6 +4,7 @@ from threading import BoundedSemaphore
 
 # Short Orders auth must not queue behind other workers' external operations.
 _orders_auth_slots=BoundedSemaphore(1)
+_orders_action_auth_slots=BoundedSemaphore(1)
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 import prodigi_preparation as queue
@@ -132,7 +133,7 @@ async def browser_action(request):
         auth=request.headers.get('authorization','')
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}',auth):
             raise PermissionError('A paired desktop credential is required.')
-        await run_in_threadpool(desktop,auth[7:])
+        await run_in_threadpool(desktop,auth[7:],slots=_orders_action_auth_slots)
         raw=bytearray()
         async for block in request.stream():
             raw.extend(block)
@@ -166,11 +167,12 @@ async def browser_action(request):
 
 async def dashboard_qa_action(request):
     from product_upload_api import HEADERS,failure
+    stage='authentication'
     try:
         import json
         auth=request.headers.get('authorization','')
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}',auth):raise PermissionError('A paired desktop credential is required.')
-        await run_in_threadpool(desktop,auth[7:])
+        await run_in_threadpool(desktop,auth[7:],slots=_orders_action_auth_slots)
         raw=bytearray()
         async for block in request.stream():
             raw.extend(block)
@@ -181,6 +183,7 @@ async def dashboard_qa_action(request):
             or not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])
             or not isinstance(body.get('error',''),str) or len(body.get('error',''))>240):raise ValueError('Invalid QA receipt.')
         from prodigi_dashboard_qa import permit,finish
+        stage='permit_verification' if request.url.path.endswith('/permit') else 'finish_verification'
         result=await run_in_threadpool(permit,body['key'],body['token'],body['evidence']) if request.url.path.endswith('/permit') else await run_in_threadpool(finish,body['key'],body['token'],body['evidence'],body.get('error',''))
         if request.url.path.endswith('/finish') and result.get('status')=='Ready for manual payment':
             from prodigi_consolidation import kick_commit
@@ -188,7 +191,9 @@ async def dashboard_qa_action(request):
             from prodigi_submission import kick
             kick() # Owner gate and durable order fence still precede any POST.
         return JSONResponse(result,headers=HEADERS)
-    except Exception as error:return failure(error)
+    except Exception as error:
+        __import__('logging').getLogger(__name__).warning('Orders QA request stopped stage=%s kind=%s sqlstate=%s',stage,type(error).__name__,getattr(error,'sqlstate',''))
+        return failure(error)
 
 
 from orders_certificate import open_certificate

@@ -23,6 +23,27 @@ def fixture():
     evidence=dict(quality='Excellent',sku=snap['mapping']['prodigi_code'],colour='natural',shipping=dict(options=options(),selected='budget'),inserts=inserts())
     return value,snap,provider,evidence
 
+@pytest.mark.parametrize('case',['unchanged','started','changed_address','changed_shipping','changed_asset','exhausted'])
+def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(store,monkeypatch,case):
+    value,snap,p,_=fixture()
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False))
+    with prep.connect() as c,c.cursor() as q:prep.save(q,value)
+    plan=qa.claim(exact_item_supported=True)
+    qa.finish(plan['key'],plan['token'],None,error='QA shipping: The exact draft or shipping quotes changed before QA.')
+    value=prep.read(1)
+    if case=='started':value['dashboard_qa']['started']=True
+    if case=='exhausted':value['qa_prepermit_recoveries']=2
+    if case in ('started','exhausted'):
+        with prep.connect() as c,c.cursor() as q:prep.save(q,value)
+    if case=='changed_address':p.data['recipient']['address']['line1']='Changed'
+    if case=='changed_shipping':p.data['shippingMethod']='Express'
+    if case=='changed_asset':p.data['items'][0]['assets'][0]['url']='https://fixture/other'
+    assert qa.recover_waiting_item_qa({'id':'fixture'})==(1 if case=='unchanged' else 0)
+    saved=prep.read(1)
+    assert saved['browser']['verified'] and not p.writes
+    if case=='unchanged':assert saved['qa_prepermit_recoveries']==1 and saved['status']==qa.WAITING
+
 
 def test_verified_upload_enters_qa_immediately_without_repeating_provider_or_source_reads():
     value,snap,p,_=fixture();readback=deepcopy(p.data)
@@ -140,7 +161,7 @@ def test_browser_receipts_are_bound_to_the_paired_desktop(monkeypatch):
     from starlette.testclient import TestClient
     import prodigi_preparation_api as api
     calls=[]
-    monkeypatch.setattr(api,'desktop',lambda _:calls.append('authenticated'))
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:calls.append('authenticated'))
     monkeypatch.setattr(qa,'finish',lambda *args:{'status':'Needs QA'})
     client=TestClient(Starlette(routes=[Route('/qa/finish',api.dashboard_qa_action,methods=['POST'])]))
     assert client.post('/qa/finish',json={}).status_code!=200 and not calls

@@ -79,7 +79,9 @@ def recover_waiting_item_qa(user):
             AND value->>'status'='Needs review'
             AND (value->>'message'='QA inserts: The expected QA control did not finish loading.'
                  AND value->'dashboard_qa'->>'item_only'='true'
-                 OR value->>'message'='QA product-row: Close the existing order editor before QA.')
+                 OR value->>'message'='QA product-row: Close the existing order editor before QA.'
+                 OR (value->>'message'='QA shipping: The exact draft or shipping quotes changed before QA.'
+                     AND COALESCE((value->>'qa_prepermit_recoveries')::int,0)<2))
             AND value->'dashboard_qa'->>'started'='false'
             AND value->'browser'->>'verified'='true'
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
@@ -93,17 +95,21 @@ def _recover_item_qa(key):
     provider,resolver,_,_=browser.context(key)
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key);receipt=value.get('dashboard_qa') or {}
+        prepermit=value.get('message')=='QA shipping: The exact draft or shipping quotes changed before QA.'
         known=(value.get('message')=='QA inserts: The expected QA control did not finish loading.' and receipt.get('item_only')
-               or value.get('message')=='QA product-row: Close the existing order editor before QA.')
+               or value.get('message')=='QA product-row: Close the existing order editor before QA.' or prepermit)
         if (value.get('status')!='Needs review' or not known or receipt.get('started') is not False or value.get('submission')):
             return False
+        if prepermit and value.get('qa_prepermit_recoveries',0)>=2:return False
         try:
             _,order,_=current(value,provider,resolver)
             if pinned_order(receipt['before'])!=pinned_order(order):return False
+            if prepermit and clean(receipt['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):return False
         except (ValueError,PermissionError):return False
         value.setdefault('dashboard_qa_history',[]).append({k:receipt.get(k) for k in ('claimed_at','checked_at','verified','item_only')})
         value.pop('dashboard_qa');value.pop('last_failure',None)
-        value.update(status=WAITING,message='Rechecking the saved edition; shared checks wait until every item is ready.')
+        if prepermit:value['qa_prepermit_recoveries']=value.get('qa_prepermit_recoveries',0)+1
+        value.update(status=WAITING,message='Retrying the pre-permit QA check; verified artwork retained.' if prepermit else 'Rechecking the saved edition; shared checks wait until every item is ready.')
         browser.save(cur,key,value)
     return True
 
