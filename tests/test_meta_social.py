@@ -161,12 +161,12 @@ class MetaContractTests(unittest.TestCase):
         self.assertEqual(self.http.request.call_args.kwargs["headers"]["Authorization"], "Bearer fixture-discovery-token")
 
     def test_discovery_reuses_existing_meta_user_token_when_no_override_is_set(self):
-        env = dict(ENV, META_ACCESS_TOKEN="fixture-existing-user-token")
+        env = dict(ENV, META_ACCESS_TOKEN="fixture-user")
         env.pop("META_SOCIAL_DISCOVERY_TOKEN")
         api = MetaCommunity(ADMIN, env=env, session=self.http)
         self.http.request.return_value = response({"business_discovery": {"username": "fixture"}})
         api.discover("fixture")
-        self.assertEqual(self.http.request.call_args.kwargs["headers"]["Authorization"], "Bearer fixture-existing-user-token")
+        self.assertEqual(self.http.request.call_args.kwargs["headers"]["Authorization"], "Bearer fixture-user")
 
     def test_assessment_does_not_invent_engagement_or_assume_sports_fit(self):
         assessed = assess_creator({"username": "fixture", "followers_count": 5000})
