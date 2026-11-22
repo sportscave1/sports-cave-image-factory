@@ -109,7 +109,7 @@ def test_long_wait_holds_no_database_transaction(mirror,monkeypatch):
 
 @pytest.fixture
 def endpoint(monkeypatch):
-    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:None)
     monkeypatch.setattr(prep,'enabled',lambda:True)
     return TestClient(Starlette(routes=[Route('/notifications',wake.listen,methods=['GET'])]))
 
@@ -154,3 +154,19 @@ def test_cancelled_request_releases_its_listener_slot(endpoint,monkeypatch):
     with pytest.raises(asyncio.CancelledError):asyncio.run(wake.listen(request))
     assert wake._waiters.acquire(False) and wake._waiters.acquire(False)
     wake._waiters.release();wake._waiters.release()
+
+
+def test_notifications_authentication_does_not_take_native_poll_slot(monkeypatch):
+    from unittest.mock import MagicMock
+    from companion_poll_transaction import connection
+    import os_accounts
+    factory=MagicMock()
+    cur=factory.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cur.fetchone.return_value={'actor_id':'fixture'}
+    monkeypatch.setattr(prep,'connect',factory)
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(os_accounts,'DEFAULT_STORE',SimpleNamespace(get_user=lambda _:dict(id='fixture')))
+    monkeypatch.setattr(os_accounts,'can_access_page',lambda *_:True)
+    with connection(factory,slots=api._orders_auth_slots):
+        assert api.desktop('fixture-token',slots=wake._auth)==dict(id='fixture')
+    assert factory.call_count==3

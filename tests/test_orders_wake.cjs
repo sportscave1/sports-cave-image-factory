@@ -10,10 +10,12 @@ const cursor='b'.repeat(64);
 
 function fixture({request,run=async()=>true,paired=true,stored=''}={}) {
   const state={staffQueueCredential:paired?'fixture-token':null,ordersNotificationCursor:stored};
-  const timers=[],calls=[],writes=[];
+  const timers=[],calls=[],writes=[],intervals=new Map();let nextInterval=0;
   const scope=vm.createContext({AbortSignal,Date,Math,ordersTickRunning:false,
     osOrigin:'https://sports-cave-image-factory.onrender.com',ordersQueueTick:run,
     setTimeout:(resolve,ms)=>{timers.push({resolve,ms});},
+    setInterval:(fn,ms)=>{const id=++nextInterval;intervals.set(id,{fn,ms});return id;},
+    clearInterval:id=>intervals.delete(id),
     chrome:{storage:{local:{get:async()=>({...state}),set:async value=>{writes.push(value);Object.assign(state,value);}}}},
     fetch:async(url,options)=>{calls.push({url,options});return request?request(url,options):{ok:true,json:async()=>({enabled:true,version:cursor,changed:true})};},
   });
@@ -21,7 +23,7 @@ function fixture({request,run=async()=>true,paired=true,stored=''}={}) {
   const start=()=>vm.runInContext('ensureOrdersNotifications()',scope);
   const advance=async()=>{assert.ok(timers.length);timers.shift().resolve();await flush();};
   const stop=async promise=>{state.staffQueueCredential=null;while(timers.length)timers.shift().resolve();await flush();await promise;};
-  return {scope,state,timers,calls,writes,start,advance,stop};
+  return {scope,state,timers,calls,writes,intervals,start,advance,stop};
 }
 
 test('unpaired notification channel makes no request',async()=>{
@@ -44,7 +46,9 @@ test('failed tick leaves cursor replayable and backs off without changing queue 
   const pending=f.start();await flush();
   assert.equal(f.state.ordersNotificationCursor,'a'.repeat(64));
   assert.equal(f.writes.length,0);assert.ok(f.timers[0].ms>=2000);
+  assert.equal(f.intervals.size,1);assert.equal([...f.intervals.values()][0].ms,20000);
   await f.stop(pending);
+  assert.equal(f.intervals.size,0);
 });
 
 test('reconnected worker sends saved cursor and idle reply never starts native work',async()=>{
@@ -79,4 +83,16 @@ test('disabled server does not run actions and waits before reconnecting',async(
   const f=fixture({request:async()=>({ok:true,json:async()=>({enabled:false,changed:false})}),run:()=>assert.fail('Disabled')});
   const pending=f.start();await flush();assert.equal(f.writes.length,0);assert.equal(f.timers[0].ms,30000);
   await f.stop(pending);
+});
+
+test('refreshing the same pairing preserves its notification cursor',async()=>{
+  const staff=fs.readFileSync(path.join(__dirname,'../windows-upload-companion/staff-queue.js'),'utf8');
+  const state={staffQueueCredential:'a'.repeat(43),ordersNotificationCursor:cursor};
+  const scope=vm.createContext({chrome:{storage:{local:{get:async key=>({[key]:state[key]}),set:async value=>Object.assign(state,value)}}},
+    ensureStaffAlarm:async()=>{},ensureOrdersAlarm:async()=>{},ordersQueueTick:()=>{},staffQueueTick:()=>{}});
+  vm.runInContext(staff.slice(0,staff.indexOf('async function ensureStaffAlarm')),scope);
+  await vm.runInContext("pairStaffQueue('a'.repeat(43))",scope);
+  assert.equal(state.ordersNotificationCursor,cursor);
+  await vm.runInContext("pairStaffQueue('b'.repeat(43))",scope);
+  assert.equal(state.ordersNotificationCursor,'');
 });

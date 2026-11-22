@@ -9,11 +9,12 @@ from starlette.responses import JSONResponse
 import prodigi_preparation as queue
 
 
-def desktop(token):
+def desktop(token,*,slots=None):
     import product_upload_staff_queue as pairing
     import os_accounts
     from companion_poll_transaction import connection
-    with connection(queue.connect,slots=_orders_auth_slots) as conn, conn.cursor() as cur:
+    limiter=_orders_auth_slots if slots is None else slots
+    with connection(queue.connect,slots=limiter) as conn, conn.cursor() as cur:
         # Authenticate through MVCC; another worker's long transaction must not
         # make Orders wait for the shared desktop heartbeat row lock.
         cur.execute('''SELECT actor_id FROM product_upload_desktop
@@ -25,7 +26,7 @@ def desktop(token):
     queue.require_user(user)
     if not os_accounts.can_access_page(user, 'Upload Companion'):
         raise PermissionError('Orders companion access is required.')
-    with connection(queue.connect,slots=_orders_auth_slots) as conn,conn.cursor() as cur:
+    with connection(queue.connect,slots=limiter) as conn,conn.cursor() as cur:
         cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES('orders_companion_seen','true',now())
             ON CONFLICT(key) DO UPDATE SET updated_at=now()
             WHERE app_settings.updated_at<now()-interval '20 seconds'""")
@@ -56,6 +57,7 @@ async def ready_handoff(request, merge_supported):
 
 async def tick(request):
     from product_upload_api import HEADERS, failure
+    stage='request'
     try:
         auth = request.headers.get('authorization', '')
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}', auth):
@@ -70,9 +72,11 @@ async def tick(request):
             raise ValueError('Orders tick accepts no job instructions.')
         if not queue.enabled():
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
+        stage='authentication'
         await run_in_threadpool(desktop, auth[7:])
         merge_supported=request.headers.get('x-sports-cave-orders-merge')=='1'
         if merge_supported:
+            stage='merge_readback'
             from prodigi_consolidation import record_capability,commit_ready
             await run_in_threadpool(record_capability)
             await run_in_threadpool(commit_ready)
@@ -83,14 +87,19 @@ async def tick(request):
         kick()
         from prodigi_status_sync import kick as sync_supplier_status
         sync_supplier_status()
+        stage='ready_handoff'
         browser = await ready_handoff(request,merge_supported)
         if browser is None:
+            stage='preparation'
             value = await run_in_threadpool(queue.tick)
+            stage='prepared_handoff'
             browser = await ready_handoff(request,merge_supported)
         return JSONResponse({'enabled': queue.enabled(), 'job':
             {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None,
             'browser': browser}, headers=HEADERS)
     except Exception as error:
+        import logging
+        logging.getLogger(__name__).warning('Orders poll retry stage=%s kind=%s',stage,type(error).__name__)
         return failure(error)
 
 

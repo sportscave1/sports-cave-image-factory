@@ -18,6 +18,7 @@ WAIT_SECONDS=20
 CHECK_SECONDS=2
 _waiters=threading.BoundedSemaphore(2)
 _reads=threading.BoundedSemaphore(1)
+_auth=threading.BoundedSemaphore(1)
 _cache_lock=threading.Lock()
 _cache=None
 _cache_at=0.0
@@ -80,7 +81,12 @@ async def listen(request):
         after=request.query_params.get('after','')
         if set(request.query_params)-{'after'} or (after and not re.fullmatch(r'[a-f0-9]{64}',after)):
             raise ValueError('Only an opaque Orders notification cursor is accepted.')
-        await run_in_threadpool(desktop,auth[7:])
+        # A long-poll reconnect must never occupy the native tick's auth slot.
+        await run_in_threadpool(desktop,auth[7:],slots=_auth)
+        state=request.headers.get('x-sports-cave-orders-wake-state','')
+        if state in ('queue-failed','notification-invalid','transport-failed'):
+            import logging
+            logging.getLogger(__name__).warning('Orders notification reconnect previous=%s',state)
         if not prep.enabled():return JSONResponse(dict(enabled=False,changed=False),headers=HEADERS)
         if not _waiters.acquire(blocking=False):
             return JSONResponse(dict(retry=True),status_code=429,headers={**HEADERS,'Retry-After':'5'})
