@@ -121,6 +121,9 @@ def _loop():
                     kick()
                 except Exception:LOG.warning('ORDERS automatic JPG admission temporarily unavailable')
                 last_orders=time.monotonic()
+            # Numbered customer JPGs precede background preparation/acceptance.
+            # An unrelated catalogue backlog must not starve paid order artwork.
+            if run_one(jobs):continue
             from auto_editions_repair import run_one as run_repair,admit as admit_repairs
             try:
                 admit_repairs(jobs.connect)
@@ -128,7 +131,6 @@ def _loop():
             except Exception:LOG.warning('AUTO_EDITIONS repair diagnosis temporarily unavailable')
             from companion_acceptance import run_one as run_acceptance
             if run_acceptance():continue
-            if run_one(jobs):continue
         except Exception:
             LOG.warning('AUTO_EDITIONS queue temporarily unavailable')
         _wake.wait(15);_wake.clear()

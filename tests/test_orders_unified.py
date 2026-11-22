@@ -114,3 +114,40 @@ def test_progress_endpoint_is_bounded_authenticated_and_only_returns_review_fiel
     def denied(*a,**k):raise PermissionError('Orders access required')
     monkeypatch.setattr(files,'_request_user',denied)
     assert client.get('/status?allocations=1').status_code==403 and len(calls)==1
+
+
+def test_waiting_jpg_yields_to_other_orders_qa(store,monkeypatch):
+    import prodigi_preparation as prep,auto_editions_runtime as runtime,prodigi_full_qa as full
+    from test_prodigi_preparation import value,Provider
+    first=value();first['status']='Preparing JPG'
+    second=value();second.update(allocation_id=2,status='Checking QA')
+    with store() as c,c.cursor() as q:
+        prep.save(q,first);prep.save(q,second)
+        q.execute("UPDATE app_settings SET updated_at=now()-interval '2 minutes' WHERE key='prodigi_prepare:1'")
+        q.execute("UPDATE app_settings SET updated_at=now()-interval '1 minute' WHERE key='prodigi_prepare:2'")
+    monkeypatch.setattr(runtime,'stores',lambda:(None,SimpleNamespace(read=lambda _:dict(status='Queued'))))
+    monkeypatch.setattr(runtime,'start_worker',lambda:None)
+    monkeypatch.setattr(prep,'Client',Provider)
+    calls=[]
+    def check(value,provider,resolver,persist):
+        calls.append(value['allocation_id']);value['status']='Awaiting dashboard QA';persist(value);return value
+    monkeypatch.setattr(full,'run',check)
+    assert prep.tick()['allocation_id']==1
+    assert prep.tick()['allocation_id']==2 and calls==[2]
+
+
+def test_customer_jpg_runs_before_background_catalogue_acceptance(monkeypatch):
+    import auto_editions_runtime as runtime
+    enabled=iter([True,False]);calls=[]
+    jobs=SimpleNamespace(expired=lambda:[],connect=lambda:None)
+    monkeypatch.setattr(runtime,'enabled',lambda:next(enabled,False))
+    monkeypatch.setattr(runtime,'stores',lambda:(None,jobs))
+    monkeypatch.setattr('orders_auto_jpg.admit',lambda _:None)
+    monkeypatch.setattr('orders_automatic.admit',lambda:None)
+    monkeypatch.setattr('prodigi_submission.kick',lambda:None)
+    monkeypatch.setattr('auto_editions_repair.admit',lambda _:None)
+    monkeypatch.setattr('auto_editions_repair.run_one',lambda _:None)
+    monkeypatch.setattr('companion_acceptance.run_one',lambda:True)
+    monkeypatch.setattr(runtime,'run_one',lambda _:calls.append('customer-jpg') or True)
+    runtime._loop()
+    assert calls==['customer-jpg']

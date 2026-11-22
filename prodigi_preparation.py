@@ -401,7 +401,11 @@ def tick():
             if value['status']=='Preparing JPG':
                 import auto_editions_runtime as runtime
                 _,jobs=runtime.stores();job=jobs.read(value['snapshot']['job_id']);runtime.start_worker()
-                if not job or job['status'] in ('Queued','Generating'):return value
+                if not job:raise ValueError('The numbered JPG job is missing. Restart this order for review.')
+                if job['status'] in ('Queued','Generating'):
+                    value['message']='Preparing the numbered JPG; other orders continue through QA.'
+                    persist(value) # Yield this waiting unit to the back of the queue.
+                    return value
                 if job['status']!='Ready':raise ValueError('Numbered JPG generation requires review: '+str(job.get('error_code') or job['status']))
                 snapshot=resolve(value['allocation_id'])
                 if snapshot['job_id']!=value['snapshot']['job_id']:raise ValueError('Source changed during JPG generation.')

@@ -1467,6 +1467,11 @@
           if(elements.list.dataset.signature===signature)continue;
           elements.list.dataset.signature=signature;
         }
+        if(name==='orders') {
+          const signature=JSON.stringify(jobs.map(({updated_at,...visible})=>visible));
+          if(elements.list.dataset.signature===signature)continue;
+          elements.list.dataset.signature=signature;
+        }
         const rendered=jobs.slice(0,10).map(item => {
           const article=(name==='ads' && adRows.get(item.id)) || doc.createElement('article');
           const fresh=!article._parts;
