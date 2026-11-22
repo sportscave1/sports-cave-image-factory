@@ -405,3 +405,27 @@ def test_qa_requires_every_question_packing_slip_and_download_readback(store,mon
     queue.complete_qa({'id':'fixture'},1,answers,True)
     assert queue.read(1)['status']=='Ready for manual payment'
     assert p.data['status']=='draft' and len(p.writes)==1
+
+
+def test_order_shipping_address_reads_identity_bound_nested_rest_and_camel_case():
+    address=dict(name='Synthetic Customer',address1='1 Fixture Road',address2='',city='Fixture',province='Michigan',zip='48000',country_code='US',province_code='MI')
+    expected=queue.shopify_recipient(dict(raw_payload=dict(id=123,shipping_address=address)), 'gid://shopify/Order/123')
+    assert expected['name']=='Synthetic Customer' and expected['address']['countryCode']=='US'
+    assert expected['state_aliases']==['Michigan','MI']
+    direct=dict(address,countryCodeV2='US',provinceCode='MI')
+    assert queue.shopify_recipient(dict(shippingAddress=direct),'123')==expected
+    with pytest.raises(ValueError,match='different'):queue.shopify_recipient(dict(raw_payload=dict(id=124,shipping_address=address)),'123')
+    with pytest.raises(ValueError,match='unidentified'):queue.shopify_recipient(dict(raw_payload=dict(shipping_address=address)),'123')
+    with pytest.raises(ValueError,match='complete'):queue.shopify_recipient(dict(customer_raw=dict(default_address=address)),'123')
+
+
+def test_empty_recipient_recovery_preserves_verified_artwork_and_rejects_other_changes():
+    old=snapshot();old['recipient']=dict(name=None,address=dict(line1=None,countryCode=None))
+    fresh=deepcopy(old);fresh['recipient']=queue.shopify_recipient(dict(shipping_address=dict(name='Synthetic Customer',address1='1 Fixture Road',city='Fixture',province='Michigan',zip='48000',country_code='US')),'123')
+    value=dict(allocation_id=1,snapshot=old,fingerprint=queue.digest(old),browser=dict(verified=True),history=[])
+    changed=deepcopy(fresh);changed['mapping']['prodigi_code']='DIFFERENT'
+    with pytest.raises(ValueError,match='changed'):queue.restore_missing_recipient(deepcopy(value),lambda _:changed)
+    assert queue.restore_missing_recipient(value,lambda _:fresh)
+    assert value['snapshot']==fresh and value['fingerprint']==queue.digest(fresh) and value['browser']['verified']
+    assert value['history'][-1]['event']=='missing_shopify_recipient_recovered'
+    assert not queue.restore_missing_recipient(value,lambda _:pytest.fail('Never replace a populated address'))

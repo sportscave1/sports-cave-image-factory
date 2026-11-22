@@ -130,12 +130,7 @@ def resolve(allocation_id, *, allow_sandbox=False):
             (str(unit['shopify_order_id']), str(unit['shopify_order_id']).rsplit('/', 1)[-1]))
         mirrors = cur.fetchall()
     raw = mirrors[0]['raw_json'] if len(mirrors) == 1 else {}
-    address = raw.get('shipping_address') or {}
-    recipient = {'name': raw.get('shipping_name') or address.get('name'), 'address': {
-        'line1': address.get('address1'), 'line2': address.get('address2'),
-        'townOrCity': address.get('city'), 'stateOrCounty': address.get('province'),
-        'postalOrZipCode': address.get('zip'), 'countryCode': address.get('countryCodeV2')},
-        'state_aliases': [address.get('province'), address.get('provinceCode')]}
+    recipient = shopify_recipient(raw,unit['shopify_order_id'])
     return dict(allocation_id=allocation_id, identity=record['payload']['identity'],
         job_id=record['id'], output=output, mapping=mapping,
         order_reference=reference, product=row.get('product_title') or unit.get('product_title'),
@@ -145,6 +140,46 @@ def resolve(allocation_id, *, allow_sandbox=False):
         rendered_total=record['result'].get('edition_total'),
         production_evidence=(record['payload'].get('production') or {}).get('evidence', {}),
         **({'draft_preparation':True} if draft_preparation else {}))
+
+
+def shopify_recipient(raw, order_id):
+    """Read this order's shipping address from normalized, REST or GraphQL mirrors."""
+    source=raw if isinstance(raw,dict) else {}
+    address=source.get('shipping_address') or source.get('shippingAddress')
+    if not address:
+        nested=source.get('raw_payload') or {}
+        if isinstance(nested,dict) and (nested.get('shipping_address') or nested.get('shippingAddress')):
+            expected=str(order_id).rsplit('/',1)[-1]
+            ids=[str(nested[k]).rsplit('/',1)[-1] for k in ('id','admin_graphql_api_id') if nested.get(k)]
+            if not ids or any(key!=expected for key in ids):
+                raise ValueError('The original Shopify shipping payload belongs to a different or unidentified order.')
+            source=nested;address=source.get('shipping_address') or source.get('shippingAddress')
+    address=address if isinstance(address,dict) else {}
+    name=source.get('shipping_name') or address.get('name') or ' '.join(str(address.get(k) or '') for k in
+        (('firstName','lastName') if 'firstName' in address else ('first_name','last_name'))).strip()
+    recipient={'name':name,'address':{'line1':address.get('address1'),'line2':address.get('address2'),
+        'townOrCity':address.get('city'),'stateOrCounty':address.get('province'),
+        'postalOrZipCode':address.get('zip'),'countryCode':address.get('countryCodeV2') or address.get('country_code') or address.get('countryCode')},
+        'state_aliases':[address.get('province'),address.get('provinceCode') or address.get('province_code')]}
+    from prodigi_qa import address_matches
+    if not address_matches(recipient,recipient):
+        raise ValueError('The saved Shopify order has no complete shipping address; review its original order data.')
+    return recipient
+
+
+def restore_missing_recipient(value,resolver=None):
+    """Recover an empty legacy read only; never replace a populated address or artwork."""
+    before=value.get('snapshot') or {};old=before.get('recipient')
+    if not isinstance(old,dict) or old.get('name') or any((old.get('address') or {}).values()):return False
+    fresh=(resolver or resolve)(value['allocation_id'])
+    from prodigi_qa import address_matches
+    recipient=fresh.get('recipient')
+    if not address_matches(recipient,recipient):raise ValueError('The independent Shopify shipping address is still missing.')
+    if digest({k:v for k,v in before.items() if k!='recipient'})!=digest({k:v for k,v in fresh.items() if k!='recipient'}):
+        raise ValueError('Artwork or order details changed during address recovery; review this exact allocation.')
+    value.update(snapshot=fresh,fingerprint=digest(fresh))
+    value.setdefault('history',[]).append(dict(at=now(),event='missing_shopify_recipient_recovered'))
+    return True
 
 
 def validate_order(order, snapshot, order_id, item_id):
@@ -447,6 +482,7 @@ def reconcile(user, allocation_id):
     document_receipt=(current or {}).get('document_browser') or {}
     from prodigi_full_qa import live_enabled
     if current and receipt.get('verified') and live_enabled():
+        restore_missing_recipient(current)
         from prodigi_dashboard_qa import WAITING,ACTIVE
         if current.get('status') in (WAITING,ACTIVE):return current
         previous=current.pop('dashboard_qa',None)
