@@ -92,7 +92,7 @@ def has_existing_artwork(item):
     return not empty
 
 
-def claim():
+def claim(*,exact_item_supported=False):
     import os
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (LOCK,))
@@ -122,7 +122,7 @@ def claim():
                 colour = (item.get('attributes') or {}).get('color','')
                 matches = [i for i in order['items'] if i.get('sku') == item['sku'] and
                     (i.get('attributes') or {}).get('color','').casefold() == colour.casefold()]
-                if len(matches) != 1:
+                if len(matches) != 1 and not exact_item_supported:
                     raise ValueError('Identical supplier rows cannot be distinguished in the browser; review manually.')
                 url, _ = link(snap)
                 token = secrets.token_urlsafe(32)
@@ -136,7 +136,7 @@ def claim():
                     item_id=value['item_id'],reference=order['merchantReference'],sku=item['sku'],colour=colour,
                     order_url=f'https://{host}/orders/{value["order_id"]}/detail',artwork_url=url,
                     sha256=snap['output']['sha256'],bytes=snap['output']['bytes'],dimensions=snap['dimensions'],
-                    filename=filename)
+                    filename=filename,exact_item=exact_item_supported)
             except Exception as error:
                 value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                     else 'Browser preparation could not be verified. No order was submitted.')

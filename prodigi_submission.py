@@ -33,7 +33,7 @@ def configure(user,enabled):
     return value
 
 
-def checked(value,provider,resolver,authorisation):
+def checked(value,provider,resolver,authorisation,*,whole_order=True):
     from prodigi_dashboard_qa import current,pinned_order,POLICY,CHECKS
     receipt=value.get('dashboard_qa') or {};qa=value.get('qa') or {}
     if (not authorisation.get('enabled') or qa.get('policy')!=POLICY or not receipt.get('verified')
@@ -53,6 +53,13 @@ def checked(value,provider,resolver,authorisation):
         raise ValueError('The supplier order changed after QA. Recheck this exact order before submission.')
     if 'submit' not in order.get('allowedActions',[]):
         raise ValueError('Prodigi does not allow this existing order to be submitted through the API. Open it for manual handling.')
+    if whole_order and len(order.get('items',[]))>1:
+        from prodigi_order_group import members,WaitingForItems
+        for unit in members(value,order,resolver):
+            if unit['allocation_id']==value['allocation_id']:continue
+            if unit['status']!='Ready for manual payment' and not unit.get('submission'):
+                raise WaitingForItems('Waiting for every numbered item in this order to pass QA before submission.')
+            checked(unit,provider,resolver,authorisation,whole_order=False)
     return order
 
 
@@ -109,10 +116,14 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
             persist(value);return value
         items=order.get('items') or []
         mapping=value['snapshot']['mapping']
-        if (len(items)!=1 or str(items[0].get('id'))!=str(value['item_id']) or items[0].get('quantity')!=1
-            or items[0].get('sku')!=mapping['prodigi_code'] or len(items[0].get('assets') or [])!=1
-            or prep.digest(items[0]['assets'][0].get('url'))!=value.get('url_hash')):
+        target=[i for i in items if str(i.get('id'))==str(value['item_id'])]
+        if (len(target)!=1 or target[0].get('quantity')!=1
+            or target[0].get('sku')!=mapping['prodigi_code'] or len(target[0].get('assets') or [])!=1
+            or prep.digest(target[0]['assets'][0].get('url'))!=value.get('url_hash')):
             raise ValueError('The finalised order artwork or product differs from its verified unit; review before certificate upload.')
+        if len(items)>1:
+            from prodigi_order_group import manifest
+            if manifest(order)!=receipt.get('items'):raise ValueError('The finalised order items differ from their QA submission manifest.')
         receipt.update(finalised=True,finalised_at=receipt.get('finalised_at') or prep.now())
         value.update(status='Certificate pending',message='Prodigi accepted this order. Uploading the customer certificate; no repeat submission.')
         persist(value)
@@ -148,11 +159,12 @@ def tick():
         if not row:return
         value=row['value'];may_post=not bool(value.get('submission'))
         if may_post:
-            try:checked(value,prep.Client(),prep.resolve,authorisation)
+            from prodigi_order_group import WaitingForItems,refresh_qa
+            try:order=checked(value,prep.Client(),prep.resolve,authorisation)
+            except WaitingForItems as error:
+                value['message']=str(error);prep.save(q,value);return
             except StaleQA:
-                value.pop('dashboard_qa',None)
-                value.update(status='Checking QA',message='Refreshing automatic QA before submission.')
-                prep.save(q,value);return
+                refresh_qa(q,value);return
             except ValueError as error:
                 value.update(status='Needs QA',message=str(error));prep.save(q,value);return
             # A supplier-wide unique fence also covers an accidental second OS
@@ -162,10 +174,14 @@ def tick():
             if not q.fetchone():
                 value.update(status='Needs review',message='This supplier order already has a submission intent. Review the original handoff.');prep.save(q,value);return
             value['submission']=dict(intent_at=prep.now(),actor=authorisation['actor'])
+            from prodigi_order_group import reserve
+            reserve(q,value,order,authorisation)
         value.update(status='Submitting' if may_post else value['status'],message='Confirming this exact supplier order. Submission is never blindly retried.')
         value['submission']['lease_until']=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()
         prep.save(q,value)
     run(value,prep.Client(),prep.resolve,lambda v:_save(v),may_post=may_post,authorisation=authorisation)
+    from prodigi_order_group import publish
+    publish(value)
 
 
 def _save(value):

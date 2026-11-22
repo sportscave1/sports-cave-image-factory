@@ -3,6 +3,12 @@ function prodigiExactRow(row,sku,colour) {
   return Array.from(row.querySelectorAll('*')).some(e=>clean(e)===sku) &&
     (!colour||Array.from(row.querySelectorAll('strong')).some(e=>clean(e).toLowerCase()===colour.toLowerCase()));
 }
+function prodigiPinnedRow(rows,plan) {
+  const candidates=Array.from(rows).filter(r=>prodigiExactRow(r,plan.sku,plan.colour)&&
+    (!plan.exact_item||r.querySelector('[data-test="line-item-preview-'+plan.item_id+'"]')));
+  if(candidates.length>1)throw Error('The exact supplier item is ambiguous.');
+  return candidates[0]||null;
+}
 function prodigiControls(scope,selector) {
   // Prodigi's placement tools are open-shadow web components inside the dialog.
   const found=Array.from(scope.querySelectorAll(selector));
@@ -30,7 +36,7 @@ async function prodigiFilePicker(getInput,openOptions,findUploadChoice,wait) {
   const choice=await wait(findUploadChoice);choice.click();
   return wait(getInput);
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,prodigiFilePicker,prodigiProductCard};
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -88,7 +94,10 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,
       button(row,'Choose product').click();
       stage='product-search';
       const picker=await wait(()=>dialog('Select product'));
-      const catalogue=button(picker,'Catalogue');if(catalogue.getAttribute('aria-selected')!=='true')catalogue.click();
+      // Some Prodigi accounts show the catalogue directly, without tabs.
+      const catalogues=prodigiControls(picker,'button').filter(e=>visible(e)&&text(e)==='Catalogue');
+      if(catalogues.length>1)throw Error('The catalogue tab is ambiguous.');
+      if(catalogues.length===1&&catalogues[0].getAttribute('aria-selected')!=='true')catalogues[0].click();
       const search=await wait(()=>picker.querySelector('input[type="search"]'));
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(search,plan.sku);
       search.dispatchEvent(new Event('input',{bubbles:true}));
@@ -159,10 +168,9 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,
       if(plan.kind==='certificate')return await uploadCertificate(plan);
       stage='row';
       const row=await wait(()=>{
-        const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));
-        if(rows.length>1) throw Error('The exact product/frame row is ambiguous.');
-        if(rows.length!==1) return null;
-        try {button(rows[0],'Upload');return rows[0];} catch {return null;}
+        const target=prodigiPinnedRow(document.querySelectorAll('table tbody tr'),plan);
+        if(!target)return null;
+        try {button(target,'Upload');return target;} catch {return null;}
       });
       button(row,'Upload').click();
       stage='editor';

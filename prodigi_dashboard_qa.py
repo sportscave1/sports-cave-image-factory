@@ -55,7 +55,7 @@ def current(value,provider,resolver):
     receipt=value.get('browser') or {}
     if not receipt.get('verified') or not receipt.get('full_image_fit_verified'):
         raise ValueError('The saved numbered artwork and full-image fit must be verified first.')
-    if len(order.get('items',[]))!=1 or item.get('quantity')!=1:
+    if item.get('quantity')!=1:
         raise ValueError('Dashboard QA requires one separately numbered item per supplier order.')
     assets=item.get('assets') or []
     if len(assets)!=1 or prep.digest(assets[0].get('url'))!=value.get('url_hash'):
@@ -64,14 +64,18 @@ def current(value,provider,resolver):
 
 
 def enqueue(value,provider,resolver,persist):
-    current(value,provider,resolver)
+    _,order,_=current(value,provider,resolver)
+    from prodigi_order_group import members,WaitingForItems
+    try:members(value,order,resolver)
+    except WaitingForItems as error:
+        value.update(status='Checking QA',message=str(error));persist(value);return value
     value.pop('last_failure',None)
     value.update(status=WAITING,message='Checking branding inserts, Excellent quality, shipping and customer details before the configured submission step.')
     persist(value)
     return value
 
 
-def claim(*,tax_supported=False):
+def claim(*,tax_supported=False,exact_item_supported=False):
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(browser.LOCK,))
         if not q.fetchone()['acquired']:return None
@@ -83,13 +87,14 @@ def claim(*,tax_supported=False):
         provider,resolver,_,_=browser.context(key)
         try:
             snap,order,item=current(value,provider,resolver)
+            if len(order.get('items',[]))>1 and not exact_item_supported:return None
             tax_required=clean((snap.get('recipient') or {}).get('address',{}).get('countryCode'))=='us'
             if tax_required and not tax_supported:return None
             token=secrets.token_urlsafe(32)
             value['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=prep.now(),before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required)
             value.update(status=ACTIVE,message='Companion is checking this saved order in one QA pass; no certificate upload.')
             browser.save(q,key,value)
-            return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],
+            return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],item_id=value['item_id'],exact_item=exact_item_supported,
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
                 reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),
                 shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required)
@@ -151,7 +156,9 @@ def insert_checks(evidence,asset_resolver=None):
 
 
 def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolver=None):
-    if not isinstance(evidence,dict) or set(evidence) not in ({'quality','sku','colour','shipping','inserts'},{'quality','sku','colour','shipping','inserts','tax_collected'}):raise ValueError('Dashboard QA evidence is incomplete.')
+    required={'quality','sku','colour','shipping','inserts'}
+    if not isinstance(evidence,dict) or not required<=set(evidence) or set(evidence)-required-{'tax_collected','item_id'}:raise ValueError('Dashboard QA evidence is incomplete.')
+    if len(order.get('items',[]))>1 and str(evidence.get('item_id'))!=str(value['item_id']):raise ValueError('The dashboard QA evidence belongs to another supplier item.')
     receipt=value['dashboard_qa'];shipping=evidence['shipping']
     if not isinstance(shipping,dict) or set(shipping)!={'options','selected'}:raise ValueError('Shipping readback is incomplete.')
     planned=receipt['shipping']

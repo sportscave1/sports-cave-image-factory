@@ -77,7 +77,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     try {
       pin(plan);
       if(Array.from(document.querySelectorAll('[role="dialog"]')).some(visible))throw Error('Close the existing order editor before QA.');
-      const row=await wait(()=>{const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));if(rows.length>1)throw Error('The product/frame row is ambiguous.');return rows[0];});
+      const row=await wait(()=>prodigiPinnedRow(document.querySelectorAll('table tbody tr'),plan));
       const quality=text(row.querySelector('[title="Image quality"]'));
       if(!quality)throw Error('Supplier image quality is not visible.');
       const inserts=await inspectInserts(plan);
@@ -94,7 +94,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
       const shippingNow=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*[$£€]/.test(o.textContent)));
       if(shippingNow.length!==1||shippingNow[0].value.toLowerCase()!==target)throw Error('Shipping selection was not saved.');
       const tax_collected=await declareTax(plan,permit);
-      return {evidence:{tax_collected,quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
+      return {evidence:{...(plan.exact_item?{item_id:plan.item_id}:{}),tax_collected,quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
     }catch(error){return {error:String(error.message||'Dashboard QA stopped').slice(0,240)};}
   }
   let running=false;

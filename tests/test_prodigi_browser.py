@@ -181,3 +181,11 @@ def test_unknown_or_real_assets_are_never_treated_as_empty_slots(change):
     slot=dict(id='slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)
     slot.update(change)
     assert browser.has_existing_artwork(dict(assets=[slot]))
+
+def test_updated_companion_can_pin_one_of_two_identical_product_rows(handoff):
+    _,provider,_=handoff
+    second=deepcopy(provider.data['items'][0]);second.update(id='89',merchantReference='other-line')
+    provider.data['items'].append(second)
+    plan=browser.claim(exact_item_supported=True)
+    assert plan['item_id']=='88' and plan['exact_item'] is True
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}

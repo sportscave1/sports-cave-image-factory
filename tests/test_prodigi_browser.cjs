@@ -139,7 +139,7 @@ test('product repair opens only the pinned draft, without downloading artwork or
   context.changed={...context.plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(changed)',context),false);
  }
 });
-test('blank-product page flow searches, selects colour, obtains permit and reads back without Submit',async()=>{
+for(const withCatalogueTab of [true,false])test('blank-product page flow with catalogue tab '+withCatalogueTab+' selects only after permit',async()=>{
  const listeners=[],events=[];let dialogOpen=false,selected=false,inputValue='';
  const node=(value='')=>({innerText:value,textContent:value,isConnected:true,getClientRects:()=>[{}],querySelectorAll:()=>[],getAttribute:()=>null});
  const control=(label,click)=>({...node(label),disabled:false,click});
@@ -153,11 +153,19 @@ test('blank-product page flow searches, selects colour, obtains permit and reads
  class Input {dispatchEvent(){events.push('search:'+inputValue);}}
  Object.defineProperty(Input.prototype,'value',{get(){return inputValue;},set(v){inputValue=v;}});
  const input=new Input();
- const picker={...node(),querySelector:s=>s==='input[type="search"]'?input:null,querySelectorAll:s=>s==='h1,h2'?[node('Select product')]:s==='button'?[catalogue,select]:s==='button[data-test]'?[select]:[]};
+ const picker={...node(),querySelector:s=>s==='input[type="search"]'?input:null,querySelectorAll:s=>s==='h1,h2'?[node('Select product')]:s==='button'?(withCatalogueTab?[catalogue,select]:[select]):s==='button[data-test]'?[select]:[]};
  const document={readyState:'complete',querySelector:s=>s==='main'?node('fixture'):null,querySelectorAll:s=>s==='button[data-test]'?[choose]:s==='h1'?[node('99')]:s==='strong'?[]:s==='[role="dialog"]'?(dialogOpen?[picker]:[]):s==='table tbody tr'?[row]:[]};
  const chrome={runtime:{id:'same',onMessage:{addListener:f=>listeners.push(f)},sendMessage:async m=>{events.push('permit');assert(selected===false);assert.equal(m.type,'prodigi:permit');return{permitted:true};}}};
  const ctx=vm.createContext({document,chrome,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},URL,Date,setTimeout,HTMLInputElement:Input,Event:class{constructor(type){this.type=type;}}});
  vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-page.js'),'utf8'),ctx);
  const result=await new Promise(resolve=>listeners[0]({type:'prodigi:product',plan:{environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',order_id:'99',item_id:'88',reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Natural',sha256:'a'.repeat(64)}},{id:'same'},resolve));
  assert.equal(result.stage,'product-readback');assert.deepEqual(events,['choose','search:GLOBAL-CFP-A2','colour','permit','select']);
+});
+const {prodigiPinnedRow}=require('../windows-upload-companion/prodigi-page.js');
+test('identical SKU and frame rows are distinguished by immutable item ID',()=>{
+ const row=id=>({querySelector:s=>s==='[data-test="line-item-preview-'+id+'"]'?{}:null,querySelectorAll:s=>s==='strong'?[{textContent:'Black'}]:[{textContent:'GLOBAL-CFP-A2'}]});
+ const one=row('88'),two=row('89'),plan={sku:'GLOBAL-CFP-A2',colour:'black',item_id:'89',exact_item:true};
+ assert.equal(prodigiPinnedRow([one,two],plan),two);
+ assert.equal(prodigiPinnedRow([one],plan),null);
+ assert.throws(()=>prodigiPinnedRow([one,two],{...plan,exact_item:false}));
 });
