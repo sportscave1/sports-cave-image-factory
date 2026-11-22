@@ -4,6 +4,7 @@ Disabled until an owner activates it in the OS. Supplier delay settings belong
 to Prodigi. No create, resume, payment-setting or artwork-update API is used.
 """
 import json
+from copy import deepcopy
 import threading
 from datetime import datetime, timezone, timedelta
 import prodigi_preparation as prep
@@ -33,8 +34,11 @@ def configure(user,enabled):
     return value
 
 
-def checked(value,provider,resolver,authorisation,*,whole_order=True):
-    from prodigi_dashboard_qa import current,pinned_order,POLICY,CHECKS
+def checked(value,provider,resolver,authorisation,*,whole_order=True,_order=None,units=None):
+    from prodigi_dashboard_qa import current,current_for_order,pinned_order,POLICY,CHECKS
+    if whole_order:
+        from prodigi_stage import resolver_once
+        resolver=resolver_once(resolver)
     receipt=value.get('dashboard_qa') or {};qa=value.get('qa') or {}
     if (not authorisation.get('enabled') or qa.get('policy')!=POLICY or not receipt.get('verified')
         or set(qa.get('checks') or {})!=set(CHECKS) or not all(v is True for v in qa['checks'].values())):
@@ -43,7 +47,7 @@ def checked(value,provider,resolver,authorisation,*,whole_order=True):
     age=(datetime.now(timezone.utc)-stamp).total_seconds()
     if not -30<=age<=300 or receipt['checked_at']<authorisation['changed_at']:
         raise StaleQA('Refreshing automatic QA before submission.')
-    snap,order,_=current(value,provider,resolver)
+    snap,order,_=current(value,provider,resolver) if _order is None else current_for_order(value,_order,resolver)
     if str((snap.get('recipient') or {}).get('address',{}).get('countryCode','')).upper()=='US':
         from prodigi_dashboard_qa import TAX_POLICY
         if receipt.get('tax_policy')!=TAX_POLICY or receipt.get('tax_collected') is not True or order.get('usSalesTaxAlreadyCollected') is False:
@@ -55,11 +59,15 @@ def checked(value,provider,resolver,authorisation,*,whole_order=True):
         raise ValueError('Prodigi does not allow this existing order to be submitted through the API. Open it for manual handling.')
     if whole_order and len(order.get('items',[]))>1:
         from prodigi_order_group import members,WaitingForItems
-        for unit in members(value,order,resolver):
+        group=members(value,order,resolver)
+        if units is not None:units.extend(group)
+        for unit in group:
             if unit['allocation_id']==value['allocation_id']:continue
             if unit['status']!='Ready for manual payment' and not unit.get('submission'):
                 raise WaitingForItems('Waiting for every numbered item in this order to pass QA before submission.')
-            checked(unit,provider,resolver,authorisation,whole_order=False)
+            checked(unit,provider,resolver,authorisation,whole_order=False,_order=order)
+    elif units is not None:
+        units.append(value)
     return order
 
 
@@ -170,17 +178,35 @@ def tick():
           LIMIT 1 FOR UPDATE SKIP LOCKED""",(bool(authorisation.get('enabled')),))
         row=q.fetchone()
         if not row:return
-        value=row['value'];may_post=not bool(value.get('submission'))
+    # Release the candidate transaction before supplier/source reads. The final
+    # transaction below rechecks every sibling and the owner setting atomically.
+    value=row['value'];before=deepcopy(value);may_post=not bool(value.get('submission'))
+    units=[];problem=None
+    if may_post:
+        from prodigi_order_group import WaitingForItems,refresh_qa
+        try:order=checked(value,prep.Client(),prep.resolve,authorisation,units=units)
+        except (WaitingForItems,StaleQA,ValueError) as error:problem=error
+    expected={v['allocation_id']:deepcopy(v) for v in units} if problem is None and units else {value['allocation_id']:before}
+    with prep.connect() as c,c.cursor() as q:
+        q.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
+        q.execute("SELECT value FROM app_settings WHERE key=%s FOR UPDATE NOWAIT",(row['key'],))
+        current=q.fetchone()
+        if not current or current['value']!=before:return
         if may_post:
-            from prodigi_order_group import WaitingForItems,refresh_qa
-            try:order=checked(value,prep.Client(),prep.resolve,authorisation)
-            except WaitingForItems as error:
-                value.update(message=str(error),submit_check_after=(datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat())
-                prep.save(q,value);return
-            except StaleQA:
-                refresh_qa(q,value);return
-            except ValueError as error:
-                value.update(status='Needs QA',message=str(error));prep.save(q,value);return
+            q.execute('SELECT value FROM app_settings WHERE key=%s FOR SHARE',(SETTING,))
+            current_setting=q.fetchone()
+            if not current_setting or current_setting['value']!=authorisation:return
+            if problem is not None:
+                if isinstance(problem,WaitingForItems):
+                    value.update(message=str(problem),submit_check_after=(datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat())
+                    prep.save(q,value)
+                elif isinstance(problem,StaleQA):refresh_qa(q,value)
+                else:
+                    value.update(status='Needs QA',message=str(problem));prep.save(q,value)
+                return
+            q.execute("SELECT value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'order_id'=%s AND NOT COALESCE((value->>'hidden')::boolean,false) ORDER BY key FOR UPDATE NOWAIT",(value['order_id'],))
+            current_units={v['value']['allocation_id']:v['value'] for v in q.fetchall()}
+            if current_units!=expected:return # Reset, merge, sibling or source plan changed.
             # A supplier-wide unique fence also covers an accidental second OS
             # allocation pointing at this same existing provider order.
             q.execute('INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now()) ON CONFLICT(key) DO NOTHING RETURNING key',
@@ -189,7 +215,7 @@ def tick():
                 value.update(status='Needs review',message='This supplier order already has a submission intent. Review the original handoff.');prep.save(q,value);return
             value['submission']=dict(intent_at=prep.now(),actor=authorisation['actor'])
             from prodigi_order_group import reserve
-            reserve(q,value,order,authorisation)
+            reserve(q,value,order,authorisation,units=units)
         value.update(status='Submitting' if may_post else value['status'],message='Confirming this exact supplier order. Submission is never blindly retried.')
         value['submission']['lease_until']=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()
         prep.save(q,value)

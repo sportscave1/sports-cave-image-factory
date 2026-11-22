@@ -14,6 +14,7 @@ import secrets
 from urllib.parse import urlsplit,parse_qs
 
 import prodigi_preparation as prep
+import prodigi_stage as stages
 from prodigi_client import Client
 
 LOCK = 19721124
@@ -34,7 +35,7 @@ def context(key):
 
 
 def read(cur, key):
-    cur.execute('SELECT value FROM app_settings WHERE key=%s', (key,))
+    cur.execute('SELECT key,value FROM app_settings WHERE key=%s', (key,))
     row = cur.fetchone()
     if not row or row['value'].get('hidden'):
         raise ValueError('This Orders handoff is unavailable.')
@@ -42,6 +43,9 @@ def read(cur, key):
 
 
 def save(cur, key, value):
+    if isinstance(cur, stages.Stage):
+        cur.save(key, value)
+        return
     prep.measure_stage(value)
     value['updated_at'] = prep.now()
     cur.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
@@ -93,12 +97,10 @@ def has_existing_artwork(item):
     return not empty
 
 
+@stages.stale_result(None)
 def claim(*,exact_item_supported=False,reset_supported=False):
     import os
-    with prep.connect() as conn, conn.cursor() as cur:
-        cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (LOCK,))
-        if not cur.fetchone()['acquired']:
-            return None
+    with stages.edit(LOCK) as cur:
         cur.execute('''SELECT key,value FROM app_settings WHERE
             (key LIKE 'prodigi_prepare:%%' OR key LIKE 'prodigi_sandbox_test:%%')
             AND (key LIKE 'prodigi_prepare:%%' OR %s)
@@ -158,8 +160,7 @@ def authorised(cur,key,token):
 
 def permit(key,token,sha256):
     provider,resolver,_,sandbox = context(key)
-    with prep.connect() as conn,conn.cursor() as cur:
-        cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
+    with stages.edit(LOCK) as cur:
         value=authorised(cur,key,token)
         browser=value['browser']
         if browser['started'] or value['status']!='Browser uploading':
@@ -285,8 +286,7 @@ def resume_unstarted(user,key):
     """Retry only a proved untouched item; never repeat an uncertain Save."""
     prep.require_user(user)
     provider,resolver,_,sandbox=context(key)
-    with prep.connect() as conn,conn.cursor() as cur:
-        cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
+    with stages.edit(LOCK) as cur:
         value=read(cur,key);receipt=value.get('browser') or {}
         if receipt.get('started') is not False or value.get('submission'):
             raise ValueError('Only an upload stopped before its Save permit can restart.')
@@ -303,11 +303,10 @@ def resume_unstarted(user,key):
         return value
 
 
+@stages.stale_result({'status':'Handoff unavailable'})
 def _finish(key,read_receipt,stage,client_error=''):
     provider,resolver,_,sandbox=context(key)
-    with prep.connect() as conn,conn.cursor() as cur:
-        cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
-        cur.execute("SET LOCAL idle_in_transaction_session_timeout = '0'")
+    with stages.edit(LOCK) as cur:
         try:
             value=read_receipt(cur)
         except (ValueError,PermissionError):

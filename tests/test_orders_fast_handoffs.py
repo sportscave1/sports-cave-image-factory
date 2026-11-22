@@ -14,7 +14,7 @@ def test_ready_qa_precedes_another_artwork_transfer(monkeypatch,qa_plan):
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','true')
     monkeypatch.setattr(api,'desktop',lambda _:None)
     monkeypatch.setattr('orders_automatic.kick',lambda:None)
-    monkeypatch.setattr(prep,'tick',lambda:None)
+    monkeypatch.setattr(prep,'tick',lambda:pytest.fail('A ready handoff must not wait for preparation'))
     monkeypatch.setattr('prodigi_submission.kick',lambda:None)
     monkeypatch.setattr('prodigi_dashboard_qa.claim',lambda **_:(calls.append('qa') or qa_plan))
     monkeypatch.setattr('prodigi_product_browser.claim',lambda:(calls.append('product') or None))
@@ -25,6 +25,24 @@ def test_ready_qa_precedes_another_artwork_transfer(monkeypatch,qa_plan):
     assert response.status_code==200
     assert calls==(['qa'] if qa_plan else ['qa','upload'])
     assert response.json()['browser']==(qa_plan or dict(key='upload-fixture'))
+
+
+def test_idle_poll_prepares_once_then_claims_the_new_handoff(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(prep,'enabled',lambda:True)
+    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr('orders_automatic.kick',lambda:None)
+    monkeypatch.setattr('prodigi_submission.kick',lambda:None)
+    monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
+    async def ready(*_):
+        calls.append('claim')
+        return dict(key='new-plan') if 'prepare' in calls else None
+    monkeypatch.setattr(api,'ready_handoff',ready)
+    monkeypatch.setattr(prep,'tick',lambda:(calls.append('prepare') or dict(allocation_id=1,status='Awaiting browser upload')))
+    client=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])]))
+    response=client.post('/tick',content='{}',headers={'Authorization':'Bearer '+'x'*43})
+    assert response.status_code==200 and response.json()['browser']==dict(key='new-plan')
+    assert calls==['claim','prepare','claim']
 
 
 @pytest.mark.parametrize('status',['Ready for manual payment','Needs QA','Needs review','Handoff unavailable'])

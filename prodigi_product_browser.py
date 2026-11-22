@@ -10,6 +10,7 @@ import secrets
 
 import prodigi_browser as browser
 import prodigi_preparation as prep
+import prodigi_stage as stages
 
 WAITING = 'Awaiting product selection'
 ACTIVE = 'Selecting product'
@@ -34,10 +35,9 @@ def checked(value, provider, resolver):
     return snap, order, item
 
 
+@stages.stale_result(None)
 def claim():
-    with prep.connect() as conn, conn.cursor() as cur:
-        cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (browser.LOCK,))
-        if not cur.fetchone()['acquired']: return None
+    with stages.edit(browser.LOCK) as cur:
         cur.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s ORDER BY updated_at LIMIT 20", (WAITING,))
         for row in cur.fetchall():
             key, value = row['key'], row['value']
@@ -84,8 +84,7 @@ def authorised(cur,key,token):
 
 
 def permit(key,token,sha256):
-    with prep.connect() as conn,conn.cursor() as cur:
-        cur.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
+    with stages.edit(browser.LOCK) as cur:
         raw,value=authorised(cur,key,token)
         receipt=value['product_browser']
         if receipt['started'] or value['status']!=ACTIVE or value.get('submission'):
@@ -101,9 +100,9 @@ def permit(key,token,sha256):
     return {'permitted':True}
 
 
+@stages.stale_result({'status':'Handoff unavailable'})
 def finish(key,token,stage='product'):
-    with prep.connect() as conn,conn.cursor() as cur:
-        cur.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
+    with stages.edit(browser.LOCK) as cur:
         try: raw,value=authorised(cur,key,token)
         except (ValueError,PermissionError): return {'status':'Handoff unavailable'}
         return complete(cur,raw,value,stage)
@@ -130,8 +129,7 @@ def complete(cur,key,value,stage):
 
 def recheck(user,key):
     prep.require_user(user)
-    with prep.connect() as conn,conn.cursor() as cur:
-        cur.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
+    with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key)
         receipt=value['product_browser']
         if not receipt['started']:

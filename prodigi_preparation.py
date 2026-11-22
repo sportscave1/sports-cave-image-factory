@@ -134,7 +134,8 @@ def resolve(allocation_id, *, allow_sandbox=False):
     reference = unit.get('shopify_order_name') or unit.get('order_name')
     if not reference:
         raise ValueError('Allocation has no saved Shopify order reference.')
-    matches, _ = os_pages.prodigi_find_order_rows_from_cache(reference)
+    from prodigi_stage import source_read
+    matches, _ = source_read('fulfilment-order',reference,lambda:os_pages.prodigi_find_order_rows_from_cache(reference))
     matches = [r for r in matches if str(r.get('edition_order_id')) == str(allocation_id)]
     if len(matches) != 1:
         raise ValueError('The exact allocated Fulfilment row could not be matched.')
@@ -142,7 +143,8 @@ def resolve(allocation_id, *, allow_sandbox=False):
     import order_refunds
     if order_refunds.blocked(row):
         raise ValueError('Refunded orders cannot be prepared for printing.')
-    mapping = os_pages.prodigi_mapping_for_variant(row.get('variant_title') or unit.get('variant_title'))
+    variant=row.get('variant_title') or unit.get('variant_title')
+    mapping = source_read('fulfilment-mapping',variant,lambda:os_pages.prodigi_mapping_for_variant(variant))
     if not mapping.get('prodigi_code'):
         raise ValueError('This variant has no Fulfilment reference mapping.')
     with connect() as conn, conn.cursor() as cur:
@@ -162,11 +164,13 @@ def resolve(allocation_id, *, allow_sandbox=False):
     output = record['result']['output']
     if not output.get('sha256'):
         raise ValueError('The production JPG has no immutable checksum.')
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute('''SELECT raw_json FROM shopify_orders WHERE shopify_order_id=%s
-            OR legacy_resource_id=%s LIMIT 2''',
-            (str(unit['shopify_order_id']), str(unit['shopify_order_id']).rsplit('/', 1)[-1]))
-        mirrors = cur.fetchall()
+    def shipping_mirrors():
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute('''SELECT raw_json FROM shopify_orders WHERE shopify_order_id=%s
+                OR legacy_resource_id=%s LIMIT 2''',
+                (str(unit['shopify_order_id']), str(unit['shopify_order_id']).rsplit('/', 1)[-1]))
+            return cur.fetchall()
+    mirrors = source_read('shipping-mirror',unit['shopify_order_id'],shipping_mirrors)
     raw = mirrors[0]['raw_json'] if len(mirrors) == 1 else {}
     recipient = shopify_recipient(raw,unit['shopify_order_id'])
     return dict(allocation_id=allocation_id, identity=record['payload']['identity'],

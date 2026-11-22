@@ -10,9 +10,8 @@ class WaitingForItems(ValueError): pass
 def members(value,order,resolver=None):
     if len(order.get('items',[]))==1:return [value]
     resolver=resolver or prep.resolve
-    with prep.connect() as c,c.cursor() as q:
-        q.execute("SELECT value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'order_id'=%s AND NOT COALESCE((value->>'hidden')::boolean,false)", (value['order_id'],))
-        rows=[r['value'] for r in q.fetchall()]
+    from prodigi_stage import group_rows
+    rows=[r['value'] for r in group_rows("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'order_id'=%s AND NOT COALESCE((value->>'hidden')::boolean,false) ORDER BY key", (value['order_id'],))]
     rows=[r for r in rows if r['allocation_id']!=value['allocation_id']]+[value]
     items=order.get('items') or []
     ids=[str(i['id']) for i in items]
@@ -43,10 +42,10 @@ def manifest(order):
         artwork=[prep.digest(a.get('url')) for a in i.get('assets') or []]) for i in order.get('items') or []],key=lambda i:i['id'])
 
 
-def reserve(cur,value,order,authorisation):
+def reserve(cur,value,order,authorisation,*,units=None):
     """Share one committed order-wide intent; child units never own a POST."""
     if len(order.get('items',[]))==1:return
-    units=members(value,order)
+    units=members(value,order) if units is None else units
     receipt=value['submission']
     receipt.update(leader_allocation=value['allocation_id'],items=manifest(order))
     for unit in units:

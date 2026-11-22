@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import hmac, secrets
 import prodigi_preparation as prep
+import prodigi_stage as stages
 import prodigi_browser as browser
 from prodigi_qa import address_matches, clean
 
@@ -95,16 +96,16 @@ def enqueue(value,provider,resolver,persist,*,verified_order=None):
     return value
 
 
+@stages.stale_result(None)
 def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False,sequential_supported=False):
-    with prep.connect() as c,c.cursor() as q:
-        q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(browser.LOCK,))
-        if not q.fetchone()['acquired']:return None
+    with stages.edit(browser.LOCK) as q:
         q.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false) ORDER BY updated_at LIMIT 1",(WAITING,))
         row=q.fetchone()
         if not row:return None
         value=row['value'];key=row['key']
         if value.get('dashboard_qa'):return None
         provider,resolver,_,_=browser.context(key)
+        resolver=stages.resolver_once(resolver)
         try:
             snap,order,item=current(value,provider,resolver)
             if len(order.get('items',[]))>1 and not exact_item_supported:return None
@@ -165,8 +166,8 @@ def batch_values(q,value,receipt,token):
 
 def permit(key,token,evidence):
     provider,resolver,_,_=browser.context(key)
-    with prep.connect() as c,c.cursor() as q:
-        q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
+    resolver=stages.resolver_once(resolver)
+    with stages.edit(browser.LOCK) as q:
         value,receipt=authorised(q,key,token)
         if value.get('merge_pending'):
             from prodigi_consolidation import check_write
@@ -249,10 +250,11 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
         supplier_status=order.get('status'),supplier_download_confirmed=bool(assets and clean(assets[0].get('status'))=='complete'))
 
 
+@stages.stale_result({'status':'Handoff unavailable'})
 def finish(key,token,evidence,error=''):
     provider,resolver,_,_=browser.context(key)
-    with prep.connect() as c,c.cursor() as q:
-        q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
+    resolver=stages.resolver_once(resolver)
+    with stages.edit(browser.LOCK) as q:
         try:
             value,receipt=authorised(q,key,token)
             if receipt.get('verified'):return {'status':value['status']}
