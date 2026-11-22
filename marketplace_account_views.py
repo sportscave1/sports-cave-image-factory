@@ -62,7 +62,8 @@ def confirmed(nonce='', next_path=''):
 
 
 def account(profile, nonce=''):
-    return document(f'''<main id="main" class="narrow"><p class="eyebrow">YOUR ACCOUNT</p><h1>Hello, {h(profile['name'])}.</h1><p>{h(profile['email'])} · Verified email</p><div class="account-shortcuts"><a class="button dark" href="{B}/inbox">Your messages</a><a class="button outline" href="{B}/sell">List an item</a></div><p class="hint">Selling? Use this verified email on your listing so enquiries arrive in your inbox.</p>{form('', 'signout', 'Sign out')}<p class="hint">For an account correction or deletion request, <a href="mailto:hello@sportscaveshop.com">contact Sports Cave</a>.</p></main>''', 'Your account', '/account', nonce)
+    alerts = f'<label class="consent"><input type="checkbox" name="email_notifications" {"checked" if profile.get("email_notifications", True) else ""}><span>Email me about new messages, offers and invoices.</span></label>'
+    return document(f'''<main id="main" class="narrow"><p class="eyebrow">YOUR ACCOUNT</p><h1>Hello, {h(profile['name'])}.</h1><p>{h(profile['email'])} · Verified email</p><div class="account-shortcuts"><a class="button dark" href="{B}/inbox">Your messages</a><a class="button outline" href="{B}/sell">List an item</a></div><p class="hint">Selling? Use this verified email on your listing so enquiries arrive in your inbox.</p><section class="email-preference"><h2>Email alerts</h2>{form(alerts, 'notifications', 'Save email preference')}<p class="hint">Private chat details stay in your inbox. Repeated activity is grouped into fewer emails.</p></section>{form('', 'signout', 'Sign out')}<p class="hint">For an account correction or deletion request, <a href="mailto:hello@sportscaveshop.com">contact Sports Cave</a>.</p></main>''', 'Your account', '/account', nonce)
 
 
 def contact(row, intent, nonce=''):

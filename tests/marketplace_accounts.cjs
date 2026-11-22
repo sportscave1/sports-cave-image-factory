@@ -68,5 +68,14 @@ function fixture(action, values, selectValue) {
   assert.equal(seller.invoiceFields.hidden, true);
   assert.equal(seller.elements.url.required, false);
   assert.equal(seller.elements.text.required, true);
+  const preference = fixture('notifications', {email_notifications: 'on'});
+  preference.elements.email_notifications.checked = false;
+  preference.reply({ok: true, message: 'Email preference saved.'});
+  await preference.submit();
+  assert.equal(preference.calls[0].url, '/marketplace/api/auth/notifications');
+  assert.equal(JSON.parse(preference.calls[0].options.body).email_notifications, false);
+  preference.elements.email_notifications.checked = true;
+  await preference.submit();
+  assert.equal(JSON.parse(preference.calls[1].options.body).email_notifications, true);
   console.log('Accounts: secure form requests, confirmation cleanup, retry deduplication and invoice fields passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

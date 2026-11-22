@@ -33,6 +33,7 @@
       try {
         const data = Object.fromEntries(new FormData(form).entries());
         if (form.elements.consent) data.consent = form.elements.consent.checked;
+        if (form.elements.email_notifications) data.email_notifications = form.elements.email_notifications.checked;
         const action = form.dataset.accountAction;
         let endpoint = '/api/auth/' + action;
         if (action === 'start' || action === 'send') {

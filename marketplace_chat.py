@@ -137,14 +137,28 @@ class ChatStore(MarketplaceStore):
                 'seller_joined': bool(thread.get('seller_id')), 'reported': bool(thread.get('report')),
                 'blocked': bool(thread.get('blocked_by')), 'blocked_by_me': uid in thread.get('blocked_by', [])}
 
-    def conversation(self, thread_id, uid, after=0):
+    def conversation(self, thread_id, uid, after=0, *, mark_read=False):
         if not isinstance(after, int) or not 0 <= after <= 1000000:
             raise ValueError('Invalid message cursor.')
         with self.db() as conn:
             thread = self._membership(conn, thread_id, uid)
             rows = scan(conn, 'message:' + thread['id'] + ':', after=f'{after:012d}', limit=51)
+            if mark_read:
+                from marketplace_notifications import acknowledge
+                seen = rows[min(len(rows), 50) - 1]['seq'] if rows else min(after, thread['seq'])
+                acknowledge(conn, thread, uid, seen)
             return {'conversation': self._public_thread(thread, uid),
                     'messages': rows[:50], 'has_more': len(rows) > 50}
+
+    def set_email_notifications(self, uid, enabled):
+        if type(enabled) is not bool:
+            raise ValueError('Choose whether to receive email alerts.')
+        with self.db() as conn:
+            key = 'account:' + identifier(uid)
+            lock(conn, key)
+            row = self._active(conn, uid)
+            row['email_notifications'] = enabled
+            put(conn, key, row)
 
     @staticmethod
     def _indexes(conn, thread):
@@ -268,6 +282,8 @@ class ChatStore(MarketplaceStore):
         self._indexes(conn, thread)
         result = {'id': thread['id'], 'seq': message['seq']}
         put(conn, receipt, result)
+        from marketplace_notifications import enqueue
+        enqueue(conn, thread, message)
         return result
 
     def safety(self, thread_id, uid, action, reason=''):

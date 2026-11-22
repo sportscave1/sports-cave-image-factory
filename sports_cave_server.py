@@ -40,6 +40,7 @@ from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
 from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
 from prodigi_preparation_api import ROUTES as PRODIGI_PREPARATION_ROUTES
 from marketplace_api import ROUTES as MARKETPLACE_ROUTES
+from marketplace_notifications import NotificationLifecycle
 
 
 
@@ -137,7 +138,7 @@ class _WallPreviewAccessLogFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
 from auto_editions_bulk_runtime import ReviewLifecycle
-streamlit_app = ReviewLifecycle(App("app.py", routes=routes))
+streamlit_app = NotificationLifecycle(ReviewLifecycle(App("app.py", routes=routes)))
 app = ConstantTimeHealthMiddleware(
     IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app)))
 )

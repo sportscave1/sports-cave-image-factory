@@ -45,6 +45,11 @@ def render_accounts(st, store, user):
         from marketplace_mail import smtp_plan, check_smtp
         plan = smtp_plan()
         st.write('Account email delivery: existing Resend subscription')
+        from marketplace_notifications import status as alert_status
+        alerts = alert_status()
+        st.caption('Chat email alerts: ' + ('Running through Resend' if alerts['running'] else
+                   'Paused' if not alerts['enabled'] else 'Waiting for the server connection'))
+        st.caption('Unread messages, offers and invoices · Maximum one alert per conversation every 15 minutes')
         if plan['configured']:
             st.caption(f'Sender: {plan["sender_name"]} <{plan["sender_email"]}> · {plan["host"]}:{plan["port"]}')
             if st.button('Check Resend SMTP'):

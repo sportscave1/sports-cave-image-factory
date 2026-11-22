@@ -8,6 +8,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from marketplace import BASE_PATH as B, email, identifier
 from marketplace_accounts import Accounts, COOKIE, FLOW_COOKIE, NEXT_COOKIE, MAX_AGE, SignInRequired, AuthUnavailable, safe_next
 from marketplace_chat import ChatStore
+from marketplace_notifications import wake_dispatcher
 import marketplace_account_views as views
 
 
@@ -81,7 +82,7 @@ async def page(request):
             threads = await run_in_threadpool(store.inbox, profile['id'])
             selected, messages = None, []
             if 'thread_id' in request.path_params:
-                result = await run_in_threadpool(store.conversation, request.path_params['thread_id'], profile['id'])
+                result = await run_in_threadpool(store.conversation, request.path_params['thread_id'], profile['id'], mark_read=True)
                 selected, messages = result['conversation'], result['messages']
             document = views.inbox(threads, selected, messages, nonce)
         return HTMLResponse(document, headers=headers(nonce))
@@ -99,6 +100,10 @@ async def auth_action(request):
         action = request.path_params['action']
         store = ChatStore()
         accounts = Accounts(store)
+        if action == 'notifications':
+            profile = await identity(request, store)
+            await run_in_threadpool(store.set_email_notifications, profile['id'], payload.get('email_notifications'))
+            return JSONResponse({'ok': True, 'message': 'Email preference saved.'}, headers=headers())
         if action in ('signup', 'signin', 'recover'):
             address = email(payload.get('email'))
             if not allow_rate(request, 'account:' + address):
@@ -151,6 +156,7 @@ async def start(request, *, legacy=False):
             payload = {'listing_id': payload.get('listing_id'), 'kind': 'text', 'text': payload.get('message'),
                        'request_id': str(__import__('uuid').uuid4())}
         result = await run_in_threadpool(store.start, profile['id'], payload.get('listing_id'), payload)
+        wake_dispatcher()
         return JSONResponse({'ok': True, **result, 'redirect': B + '/inbox/' + result['id']}, status_code=201, headers=headers())
     except Exception as exc:
         return error(exc)
@@ -165,12 +171,13 @@ async def messages(request):
         thread_id = identifier(request.path_params['thread_id'])
         if payload is not None:
             result = await run_in_threadpool(store.send, thread_id, profile['id'], payload)
+            wake_dispatcher()
             return JSONResponse({'ok': True, **result}, status_code=201, headers=headers())
         try:
             cursor = int(request.query_params.get('after', '0'))
         except ValueError:
             raise ValueError('Invalid message cursor.') from None
-        result = await run_in_threadpool(store.conversation, thread_id, profile['id'], cursor)
+        result = await run_in_threadpool(store.conversation, thread_id, profile['id'], cursor, mark_read=True)
         return JSONResponse({'ok': True, **result}, headers=headers())
     except Exception as exc:
         return error(exc)
