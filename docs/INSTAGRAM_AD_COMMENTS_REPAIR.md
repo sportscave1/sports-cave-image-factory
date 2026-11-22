@@ -1,5 +1,22 @@
 # Instagram advertising comments — 22 November 2026
 
+## Final scope: live ads only
+
+The three investigated ads all return `effective_status=DISAPPROVED`, despite
+their configured `status=ACTIVE`. Their media failures do not establish a
+connection failure for live ads. At the user's direction, the advertising
+comment feed now requests only effective `ACTIVE` ads and defensively excludes
+other returned statuses. Organic post and inbox reads are unchanged.
+
+The new Sports Cave Community login configuration (`2009683517103204`) issued
+a valid Facebook User token with all five requested permissions, including
+`instagram_manage_comments`. It can read the linked account's published media
+and comments, but the three disapproved media still reject both comment edges.
+No community token was saved to Render: the guarded environment update stopped
+at service inspection before any write. Existing ads, Page and CRM credentials
+were not replaced. Further token changes are unnecessary for these rejected ads
+and have been stopped as requested. No customer reply or moderation was sent.
+
 The old reader expanded ordinary media metadata and comments together. A media
 node failure discarded the post before its advertising comments edge was tried.
 

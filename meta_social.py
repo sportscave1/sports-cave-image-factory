@@ -253,13 +253,18 @@ class MetaCommunity:
         if not self.ad_account or not self._ads_token:
             return {"data": [], "after": "", "errors": []}
         self.owner("Facebook")
-        params = {"fields": "id,creative{effective_object_story_id,effective_instagram_media_id,source_instagram_media_id,instagram_user_id}", "limit": 5}
+        # Only live ads belong in this feed. An enabled ad can still be rejected
+        # or inherit a paused campaign, so use effective_status rather than status.
+        params = {"fields": "id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,source_instagram_media_id,instagram_user_id}",
+                  "effective_status": '["ACTIVE"]', "limit": 5}
         if after:
             params["after"] = str(after)
         ads = self._request("GET", identifier(self.ad_account) + "/ads", params=params, advertising=True)
         ids = {"Facebook": set(), "Instagram": set()}
         ad_proofs = {}
         for ad in ads.get("data") or []:
+            if ad.get("effective_status") not in (None, "ACTIVE"):
+                continue
             creative = ad.get("creative") or {}
             story = str(creative.get("effective_object_story_id") or "")
             # Only resolve creatives tied to this Page. Check the returned owner

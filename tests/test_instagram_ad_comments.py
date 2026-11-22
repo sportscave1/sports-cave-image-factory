@@ -61,6 +61,22 @@ def test_three_ad_media_read_comments_without_requiring_unavailable_metadata():
         assert call.kwargs["headers"]["Authorization"] == "Bearer fixture-ads-token"
 
 
+def test_live_ad_feed_excludes_disapproved_and_inherited_paused_ads():
+    api, http = client()
+    ads = [dict(ad("rejected"), effective_status="DISAPPROVED"),
+           dict(ad("paused"), effective_status="CAMPAIGN_PAUSED"),
+           dict(ad("live"), effective_status="ACTIVE")]
+    http.request.side_effect = [response({"data": ads}),
+        response({"id": "page_1", "from": {"id": "page"}}),
+        response({"data": [{"id": "live-comment"}]})]
+    result = api.ad_comment_feed()
+    assert not result["errors"]
+    assert {p["id"] for p in result["data"] if p["platform"] == "Instagram"} == {"live"}
+    assert http.request.call_args_list[0].kwargs["params"]["effective_status"] == '["ACTIVE"]'
+    assert all("rejected" not in call.args[1] and "paused" not in call.args[1]
+               for call in http.request.call_args_list)
+
+
 def test_reply_to_other_placement_comment_verifies_ad_account_and_membership():
     api, http = client()
     http.request.side_effect = [response(ad()), response({"data": [{"id": "placement-comment"}]}),
