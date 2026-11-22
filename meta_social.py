@@ -121,6 +121,14 @@ class MetaCommunity:
             detail = " Required permissions: " + ", ".join(missing) + "." if missing else ""
             reference = f" (Meta {code}" if isinstance(code, int) else ""
             subcode = error.get("error_subcode")
+            if code == 100:
+                provider_message = str(error.get("message", "")).lower()
+                if "unsupported get request" in provider_message:
+                    hint = "The requested media is unavailable to this token or has been removed."
+                elif "nonexisting field" in provider_message or "non-existing field" in provider_message:
+                    fields = {"caption", "permalink", "timestamp", "owner", "comments", "like_count", "username", "text"}
+                    match = re.search(r"field \(([^)]+)\)", provider_message)
+                    hint = "Meta does not support the requested " + (match[1] if match and match[1] in fields else "media") + " field."
             if code == 200 and subcode == 2534041:
                 hint = ("Instagram message access is disabled for connected tools. In Instagram, open Settings and activity → "
                         "Messages and story replies → Message requests → Connected tools, and enable Allow access to messages. "
@@ -242,7 +250,7 @@ class MetaCommunity:
         if not self.ad_account or not self._ads_token:
             return {"data": [], "after": "", "errors": []}
         self.owner("Facebook")
-        params = {"fields": "id,creative{effective_object_story_id,effective_instagram_media_id}", "limit": 5}
+        params = {"fields": "id,creative{effective_object_story_id,effective_instagram_media_id,instagram_user_id}", "limit": 5}
         if after:
             params["after"] = str(after)
         ads = self._request("GET", identifier(self.ad_account) + "/ads", params=params, advertising=True)
@@ -254,7 +262,9 @@ class MetaCommunity:
             # again before exposing comments or allowing a moderation action.
             if story.startswith(self.page + "_"):
                 ids["Facebook"].add(identifier(story))
-                if creative.get("effective_instagram_media_id") and self.instagram:
+                ig_actor = str(creative.get("instagram_user_id") or "")
+                if (creative.get("effective_instagram_media_id") and self.instagram
+                        and (not ig_actor or ig_actor == self.instagram)):
                     ids["Instagram"].add(identifier(creative["effective_instagram_media_id"]))
         posts, errors = [], []
         for platform, post_ids in ids.items():
@@ -262,15 +272,17 @@ class MetaCommunity:
                 continue
             fields = ("id,from,message,created_time,permalink_url,comments.filter(stream).limit(20){id,message,from,created_time,like_count}"
                       if platform == "Facebook" else
-                      "id,owner,caption,timestamp,permalink,comments.limit(20){id,text,username,timestamp,like_count}")
+                      "id,owner,comments.limit(20){id,text,username,timestamp,like_count}")
             unreadable = 0
+            reason = ""
             for post_id in sorted(post_ids):
                 # These unpublished objects reject the root multi-ID expansion
                 # with error 100. Read each bounded ad post directly instead.
                 try:
                     post = self._request("GET", post_id, params={"fields": fields}, advertising=platform == "Instagram")
-                except CommunityError:
+                except CommunityError as exc:
                     unreadable += 1
+                    reason = str(exc)
                     continue
                 owner = post.get("from" if platform == "Facebook" else "owner") or {}
                 if post.get("error"):
@@ -278,7 +290,7 @@ class MetaCommunity:
                 elif str(owner.get("id")) == self.owner(platform) and post.get("id"):
                     posts.append(dict(post, platform=platform, advertising=True))
             if unreadable:
-                errors.append(f"{platform}: {unreadable} advertising posts could not be read with this connection.")
+                errors.append(f"{platform}: {unreadable} advertising posts could not be read. " + reason)
         paging = ads.get("paging") or {}
         cursor = (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""
         return {"data": posts, "after": cursor, "errors": errors}

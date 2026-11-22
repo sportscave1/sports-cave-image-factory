@@ -90,6 +90,22 @@ class LiveApiRegressionTests(unittest.TestCase):
             api.moderate("Instagram", "media", "comment", "delete")
         self.assertTrue(all(call.args[0] == "GET" for call in http.request.call_args_list))
 
+    def test_instagram_ad_read_omits_unsupported_carousel_metadata_and_foreign_actors(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"data": [
+            {"creative": {"effective_object_story_id": "page_1", "instagram_user_id": "ig", "effective_instagram_media_id": "igpost"}},
+            {"creative": {"effective_object_story_id": "page_2", "instagram_user_id": "other", "effective_instagram_media_id": "foreignig"}}]}),
+            response({"id": "page_1", "from": {"id": "page"}}), response({"id": "page_2", "from": {"id": "page"}}),
+            response({"id": "igpost", "owner": {"id": "ig"}, "comments": {"data": []}})]
+        result = api.ad_comment_feed()
+        self.assertEqual(len(result["data"]), 3)
+        self.assertFalse(result["errors"])
+        fields = http.request.call_args.kwargs["params"]["fields"]
+        self.assertNotIn("permalink", fields)
+        self.assertNotIn("caption", fields)
+        self.assertTrue(all("foreignig" not in call.args[1] for call in http.request.call_args_list))
+
     def test_permission_diagnostic_keeps_codes_and_scope_names_but_no_provider_secrets(self):
         http = Mock()
         http.request.return_value = response({"error": {"code": 200, "error_subcode": 123,

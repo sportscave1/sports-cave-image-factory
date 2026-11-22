@@ -100,6 +100,13 @@ credential. A moderation write is issued once; no write is automatically retried
 Reference: https://developers.facebook.com/documentation/instagram-platform/reference/instagram-media
 Focused validation: 86 passed, 8 legacy database opt-in skips, 68 subtests.
 
+Final bounded ad-read correction omits caption/permalink metadata that Meta
+does not support on carousel child media, and excludes advertising creatives
+explicitly assigned to a different Instagram actor before making media reads.
+Remaining provider failures retain safe numeric/permission diagnostics rather
+than only an unreadable-post count. No raw provider messages or secrets are
+returned. Focused validation: 87 passed, 8 skips, 68 subtests.
+
 `python -m pytest tests/test_meta_social.py tests/test_social_community_feed.py
 tests/test_social_community_live_regressions.py tests/test_social_community_store.py
 tests/test_social_wall_inbox.py tests/test_social_media_reporting.py
