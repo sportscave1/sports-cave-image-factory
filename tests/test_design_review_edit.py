@@ -57,6 +57,23 @@ def test_refresh_edit_preserves_exact_target_and_uses_the_same_closeout():
     assert 'Read back the PSD and JSON together' in edit
 
 
+def test_targeted_edit_overrides_new_design_defaults_before_shared_stages():
+    from design_review_prompt import EDIT_EXECUTION_RULES
+    source = dict(id='id:Original', rev=ORIGINAL_REV, path_display=ORIGINAL_PATH,
+                  size=264 * 1024**2, content_hash='verified-hash')
+    prompt = _prompt('Collector', 'Remove the score only; keep everything else the same.',
+                     edit=dict(source=source, metadata=dict(upload_intent='new_product')))
+    assert prompt.count(EDIT_EXECUTION_RULES) == 1
+    assert prompt.index(EDIT_EXECUTION_RULES) < prompt.index('**1.')
+    assert '**Start the authorised new-design job**' not in prompt
+    assert 'Zero creative generations are required for a local correction' in prompt
+    assert 'Skip unrelated bestseller research, image searches' in prompt
+    assert 'chunked Dropbox upload sessions' in prompt
+    assert 'never flatten, downsample, remove required layers' in prompt
+    assert 'report INCOMPLETE with the exact failing operation' in prompt
+    assert '"size": 276824064' in prompt and '"content_hash": "verified-hash"' in prompt
+
+
 def test_edit_inherits_future_shared_creative_updates(monkeypatch):
     import home_morning_brief_actions as actions
     monkeypatch.setattr(actions, 'CREATIVE_REVIEW', 'FUTURE SHARED EDIT CREATIVE RULE')
@@ -311,6 +328,40 @@ def test_single_generation_replacement_needs_no_trial_and_cleans_only_its_files(
     assert [(x.args[1], x.kwargs['expected_revision']) for x in provider.api.delete_path_recoverable.call_args_list] == [
         (staged['path_display'], staged['rev']), (backup['path_display'], backup['rev'])]
     validate.assert_called_once()
+
+
+def test_large_review_metadata_uses_existing_revision_upload_and_downloads_staging_once(files):
+    provider, original, _, staged, current, validate = files
+    # Exercise the size guard with the failed run's sizes; the fixture keeps
+    # content tiny so this regression test does not allocate hundreds of MiB.
+    original['size'] = 250 * 1024**2
+    staged['size'] = 264 * 1024**2
+    upload = provider.api.upload_revision.side_effect
+    def large_receipt(*args):
+        result = upload(*args)
+        result['size'] = staged['size']
+        return result
+    provider.api.upload_revision.side_effect = large_receipt
+    download = Mock(wraps=provider.download)
+    provider.download = download
+    final, _, warnings = apply(provider, original, '', staged['path_display'])
+    assert not warnings
+    assert final['content_hash'] == staged['content_hash']
+    assert download.call_count == 2
+    assert [call.args[0]['id'] for call in download.call_args_list] == [original['id'], staged['id']]
+    assert provider.api.upload_revision.call_args.args[3] == ORIGINAL_REV
+    validate.assert_called_once()
+
+
+@pytest.mark.parametrize('size', [None, True, 39, 1024**3 + 1])
+def test_invalid_or_oversized_review_psds_never_start_writes(files, size):
+    provider, original, _, staged, _, _ = files
+    staged['size'] = size
+    with pytest.raises(ValueError, match='up to 1 GiB per file'):
+        apply(provider, original, '', staged['path_display'])
+    provider.api.copy_path.assert_not_called()
+    provider.api.upload_revision.assert_not_called()
+    provider.api.delete_path_recoverable.assert_not_called()
 
 
 @pytest.mark.parametrize('changed_target', [False, True])
