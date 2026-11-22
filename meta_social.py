@@ -63,7 +63,9 @@ class MetaCommunity:
         self.instagram = str(env.get("META_INSTAGRAM_ACTOR_ID") or env.get("META_INSTAGRAM_ACCOUNT_ID") or env.get("INSTAGRAM_ACCOUNT_ID") or env.get("INSTAGRAM_ACTOR_ID") or "")
         self._token = env.get("META_PAGE_ACCESS_TOKEN", "")
         self._discovery_token = env.get("META_SOCIAL_DISCOVERY_TOKEN") or env.get("META_ACCESS_TOKEN", "")
-        self._ads_token = env.get("META_ACCESS_TOKEN", "")
+        # A Facebook User token can be added for community ad comments without
+        # replacing the System User token used by posting, reporting and CRM.
+        self._ads_token = env.get("META_SOCIAL_ACCESS_TOKEN") or env.get("META_ACCESS_TOKEN", "")
         account = str(env.get("META_AD_ACCOUNT_ID", "")).strip()
         self.ad_account = (account if account.startswith("act_") else "act_" + account) if account else ""
         self.writes = env.get("META_SOCIAL_WRITES_ENABLED") == "1"

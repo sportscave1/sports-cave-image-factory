@@ -25,8 +25,32 @@ without logging credentials or customer comment text.
 
 Reference: https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-media/comments
 
-Offline validation: 103 tests passed, 8 legacy opt-in database tests skipped,
+Offline validation: 105 tests passed, 8 legacy opt-in database tests skipped,
 68 subtests passed; Render topology validator passed. No real replies,
 moderation actions, ad changes or customer automations were sent during tests.
 Live availability must be verified after deployment; offline tests do not prove
 that Meta grants access to each production media object.
+
+## Production token audit
+
+Read-only `debug_token` checks on 22 November confirmed:
+
+- Both deployed tokens belong to Sports Cave OS, app `1490062765695248`.
+- `META_ACCESS_TOKEN` is a valid `SYSTEM_USER` token with expiry `0`.
+- `META_PAGE_ACCESS_TOKEN` is a valid `PAGE` token for `116001074739884`,
+  also with expiry `0`.
+- Both include `instagram_basic`, `instagram_manage_comments`,
+  `instagram_manage_messages`, `pages_read_engagement`, `ads_read` and
+  `ads_management`. Returned granular scopes contain no target restrictions.
+- Business Settings shows the system user has full access to the app, Page
+  and Instagram account. No existing token was revoked or replaced.
+
+The Facebook Login ad-comment API documents a Facebook User token. A separate
+`META_SOCIAL_ACCESS_TOKEN` can now be configured for the community module;
+absence preserves its existing token fallback. This key is not consumed by
+ad posting, review sync, reporting or CRM, which retain `META_ACCESS_TOKEN`.
+Page messaging retains `META_PAGE_ACCESS_TOKEN`. Isolation is tested offline.
+
+The separate User-token route remains a proposed recovery until the three
+production media have been read successfully. Valid scopes alone do not prove
+media availability. No new credential value is stored in Git or this report.

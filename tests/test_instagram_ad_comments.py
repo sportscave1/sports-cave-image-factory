@@ -16,6 +16,29 @@ def client():
                          META_ACCESS_TOKEN="fixture-ads-token"), session=http), http
 
 
+def test_dedicated_community_token_does_not_replace_page_or_global_ad_credentials():
+    import os
+    import meta_ads_client
+    settings = dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-system-token",
+                    META_SOCIAL_ACCESS_TOKEN="fixture-community-user-token")
+    http = Mock()
+    http.request.return_value = response({"data": []})
+    api = MetaCommunity(dict(ADMIN), env=settings, session=http)
+    api._request("GET", "ad1", advertising=True)
+    assert http.request.call_args.kwargs["headers"]["Authorization"] == "Bearer fixture-community-user-token"
+    api._request("GET", "me")
+    assert http.request.call_args.kwargs["headers"]["Authorization"] == "Bearer fixture-page-token"
+    with patch.dict(os.environ, settings):
+        assert meta_ads_client.get_meta_config()["access_token"] == "fixture-system-token"
+
+
+def test_unconfigured_dedicated_token_preserves_existing_social_connection():
+    api, http = client()
+    http.request.return_value = response({"data": []})
+    api._request("GET", "ad1", advertising=True)
+    assert http.request.call_args.kwargs["headers"]["Authorization"] == "Bearer fixture-ads-token"
+
+
 def ad(media="media", actor="ig", account="123"):
     return {"id": "ad1", "account_id": account, "creative": {
         "effective_object_story_id": "page_1", "instagram_user_id": actor,
