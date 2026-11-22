@@ -159,3 +159,25 @@ def test_one_click_send_queues_only_the_selected_allocation(monkeypatch):
     app=AppTest.from_string('import orders_page\norders_page._render_send_artwork({"edition_order_id":123},"test")').run()
     app.button(key='orders-send-test-123').click().run()
     assert not app.exception and calls==[123]
+
+
+def test_required_empty_slot_is_not_an_artwork_file_and_is_pinned_until_save(handoff):
+    _,provider,_=handoff
+    slot=dict(id='print-area-slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)
+    provider.data['items'][0]['assets']=[slot]
+    assert not browser.has_existing_artwork(provider.data['items'][0])
+    plan=browser.claim();assert plan and plan['sku']==provider.data['items'][0]['sku']
+    provider.data['items'][0]['assets'][0]['id']='another-slot'
+    with pytest.raises(ValueError,match='changed'):browser.permit(KEY,plan['token'],plan['sha256'])
+    provider.data['items'][0]['assets'][0]['id']='print-area-slot'
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+    assert not provider.writes
+
+
+@pytest.mark.parametrize('change',[
+    dict(url='https://fixture.invalid/existing.jpg'),dict(assetId='real-asset'),dict(status='Complete'),
+    dict(pageCount=1),dict(pageCount=False),dict(required=False),dict(printArea='back')])
+def test_unknown_or_real_assets_are_never_treated_as_empty_slots(change):
+    slot=dict(id='slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)
+    slot.update(change)
+    assert browser.has_existing_artwork(dict(assets=[slot]))

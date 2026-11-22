@@ -80,6 +80,18 @@ def checked(value, provider, resolver, sandbox):
     return snap, order, item
 
 
+def has_existing_artwork(item):
+    """Prodigi creates a required print-area slot before a file is attached."""
+    assets=item.get('assets') or []
+    if not assets:return False
+    if not isinstance(assets,list) or len(assets)!=1 or not isinstance(assets[0],dict):return True
+    slot=assets[0]
+    empty=(set(slot)=={'id','printArea','status','pageCount','required'} and isinstance(slot['id'],str) and bool(slot['id'])
+        and slot['printArea']=='default' and slot['status']=='NotYetDownloaded' and slot['required'] is True
+        and type(slot['pageCount']) is int and slot['pageCount']==0)
+    return not empty
+
+
 def claim():
     import os
     with prep.connect() as conn, conn.cursor() as cur:
@@ -105,7 +117,7 @@ def claim():
                 continue  # An uncertain upload is never automatically repeated.
             try:
                 snap, order, item = checked(value, provider, resolver, sandbox)
-                if item.get('assets'):
+                if has_existing_artwork(item):
                     raise ValueError('Existing supplier artwork requires manual preservation.')
                 colour = (item.get('attributes') or {}).get('color','')
                 matches = [i for i in order['items'] if i.get('sku') == item['sku'] and
@@ -117,7 +129,7 @@ def claim():
                 value.update(status='Browser uploading',message='Companion is uploading artwork. Payment and production remain manual.')
                 filename=f'SC-{value["allocation_id"]}-{snap["job_id"][:16]}-{prep.digest(token)[:8]}.jpg'
                 value['browser'] = dict(token_hash=prep.digest(token), started=False,filename=filename,
-                    before=business(order,item['id']), claimed_at=prep.now(), environment=provider.mode)
+                    before=business(order,item['id']),empty_slots=deepcopy(item.get('assets') or []), claimed_at=prep.now(), environment=provider.mode)
                 save(cur,key,value)
                 host = 'sandbox-beta-dashboard.pwinty.com' if sandbox else 'dashboard.prodigi.com'
                 return dict(key=key,token=token,environment=provider.mode,order_id=value['order_id'],
@@ -154,7 +166,8 @@ def permit(key,token,sha256):
         snap,order,item=checked(value,provider,resolver,sandbox)
         if sha256!=snap['output']['sha256']:
             raise ValueError('The companion did not verify this exact numbered JPG.')
-        if item.get('assets') or business(order,item['id'])!=browser['before']:
+        if (has_existing_artwork(item) or (item.get('assets') or [])!=browser.get('empty_slots',[])
+                or business(order,item['id'])!=browser['before']):
             raise ValueError('The supplier order changed before Save.')
         browser.update(started=True,save_permitted_at=prep.now(),companion_sha256=sha256)
         save(cur,key,value)  # Commit before the browser is permitted to Save.
