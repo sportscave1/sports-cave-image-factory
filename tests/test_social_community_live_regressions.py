@@ -10,6 +10,25 @@ from tests import test_meta_social as contracts
 
 
 class LiveApiRegressionTests(unittest.TestCase):
+    def test_ad_diagnostics_identify_missing_instagram_token_grants(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.return_value = response({"data": [{"permission": "ads_management", "status": "granted"}]})
+        hint = api.advertising_access_hint()
+        self.assertIn("instagram_basic", hint)
+        self.assertIn("instagram_manage_comments", hint)
+        self.assertNotIn("fixture-ads-token", hint)
+        self.assertEqual(http.request.call_count, 1)
+
+    def test_ad_diagnostics_verify_linked_account_separately_from_media(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        permissions = [{"permission": p, "status": "granted"} for p in (
+            "ads_read", "instagram_basic", "instagram_manage_comments", "pages_read_engagement")]
+        http.request.side_effect = [response({"data": permissions}), response({"id": "ig"})]
+        self.assertIn("individual advertising media are unavailable", api.advertising_access_hint())
+        self.assertTrue(all(call.args[0] == "GET" for call in http.request.call_args_list))
+
     def test_disabled_instagram_message_access_has_an_actionable_subcode_hint(self):
         http = Mock()
         http.request.return_value = response({"error": {"code": 200, "error_subcode": 2534041}}, 403)

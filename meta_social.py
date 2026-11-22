@@ -290,10 +290,32 @@ class MetaCommunity:
                 elif str(owner.get("id")) == self.owner(platform) and post.get("id"):
                     posts.append(dict(post, platform=platform, advertising=True))
             if unreadable:
+                if platform == "Instagram":
+                    reason += " " + self.advertising_access_hint()
                 errors.append(f"{platform}: {unreadable} advertising posts could not be read. " + reason)
         paging = ads.get("paging") or {}
         cursor = (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""
         return {"data": posts, "after": cursor, "errors": errors}
+
+    def advertising_access_hint(self):
+        """Distinguish missing advertising-token grants from unavailable media."""
+        require_access(self.user)
+        if not self._ads_token:
+            return "The advertising connection is not configured."
+        try:
+            payload = self._request("GET", "me/permissions", params={"fields": "permission,status"}, advertising=True)
+            granted = {row.get("permission") for row in payload.get("data", []) if row.get("status") == "granted"}
+            missing = {"instagram_basic", "instagram_manage_comments", "pages_read_engagement"} - granted
+            if not ({"ads_read", "ads_management"} & granted):
+                missing.add("ads_read")
+            if missing:
+                return "The advertising token needs these Meta permissions: " + ", ".join(sorted(missing)) + ". Reconnect that token with Instagram access."
+            identity = self._request("GET", self.owner("Instagram"), params={"fields": "id"}, advertising=True)
+            if str(identity.get("id")) != self.instagram:
+                return "The advertising token could not verify the linked Instagram account."
+        except CommunityError:
+            return "Check the advertising token's access to the linked Instagram account in Meta Business Settings."
+        return "The advertising token can read the linked Instagram account; these individual advertising media are unavailable."
 
     def _own_post(self, platform, post_id):
         post_id = identifier(post_id)
