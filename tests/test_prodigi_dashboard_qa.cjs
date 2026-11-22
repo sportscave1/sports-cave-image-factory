@@ -1,6 +1,38 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {prodigiShippingQuotes,prodigiCheapestShipping}=require('../windows-upload-companion/prodigi-dashboard-qa.js');
 const select=rows=>({options:rows.map(([value,label,disabled=false])=>({value,textContent:label,disabled}))});
+const {prodigiInsertSummary}=require('../windows-upload-companion/prodigi-dashboard-qa.js');
+function summaryPage(body){
+ const h={innerText:'Inserts',getClientRects:()=>[{}]};
+ const card={innerText:'Inserts\nView & edit\n'+body,querySelectorAll:()=>[h]};
+ const header={innerText:'Inserts\nView & edit',querySelectorAll:()=>[h],parentElement:card};
+ h.parentElement=header;return{querySelectorAll:()=>[h]};
+}
+test('saved inserts summary records names without opening or modifying a dialog',()=>{
+ const result=prodigiInsertSummary(summaryPage('2 inserts, $1.00\nRound packaging sticker, Packing slip (colour)\nInsert availability is dependent on fulfilment location'));
+ assert.deepEqual(result.saved.map(r=>r.name),['Round packaging sticker','Packing slip (colour)']);
+ assert.equal(result.saved[0].asset,null);
+});
+for(const body of ['0 inserts','2 inserts, $1.00','2 inserts\nPacking slip (colour)','1 insert\nInsert availability is dependent on fulfilment location'])
+ test('empty or ambiguous saved inserts summary requires fallback: '+body,()=>assert.equal(prodigiInsertSummary(summaryPage(body)),null));
+test('insert names may change without a template match',()=>{
+ assert.equal(prodigiInsertSummary(summaryPage('1 insert, $0.50\nSeasonal flyer')).saved[0].name,'Seasonal flyer');
+ const main=summaryPage('1 insert\nFlyer'),h=main.querySelectorAll()[0];main.querySelectorAll=()=>[h,h];assert.equal(prodigiInsertSummary(main),null);
+});
+test('full QA uses the saved inserts summary with zero dialog clicks or readiness delay',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs');let listener,clock=0,permits=0;
+ const main=summaryPage('2 inserts, $1.00\nRound packaging sticker, Packing slip (colour)');main.innerText='REF-TEST';
+ const row={querySelector:()=>({textContent:'Excellent'})};
+ const quotes={value:'standard',options:[{value:'standard',textContent:'Standard: $37.05',disabled:false}]};
+ const document={querySelector:()=>main,querySelectorAll:s=>{
+  if(s==='main h1')return[{textContent:'99'}];if(s==='[role="dialog"]'||s==='#taxCollectedCheckbox')return[];
+  if(s==='table tbody tr')return[row];if(s==='main select')return[quotes];throw Error('Unexpected control read '+s);
+ }};
+ const context={document,URL,Date:{now:()=>clock},location:{href:'https://dashboard.prodigi.com/orders/99/detail'},prodigiPinnedRow:r=>r[0],setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},chrome:{runtime:{id:'paired',onMessage:{addListener:f=>listener=f},sendMessage:async()=>{permits++;return{permitted:true};}}}};
+ vm.runInNewContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-dashboard-qa.js'),'utf8'),context);
+ const result=await new Promise(resolve=>listener({type:'prodigi:qa',plan:{order_url:context.location.href,order_id:'99',reference:'REF-TEST',sku:'GLOBAL-CFP-A1',colour:'Black',shipping_intent:'standard'}},{id:'paired'},resolve));
+ assert.equal(result.error,undefined);assert.equal(result.evidence.inserts.saved.length,2);assert.equal(clock,0);assert.equal(permits,1);
+});
 test('quoted shipping prices use cents, including ties and Express intent',()=>{
  const quotes=prodigiShippingQuotes(select([['budget','Budget: $10.07'],['standard','Standard: $10.07'],['express','Express: $23.04']]));
  assert.deepEqual(quotes.map(q=>q.cents),[1007,1007,2304]);
@@ -66,7 +98,7 @@ test('US quotes include Overnight and Standard Plus without changing a cheapest 
 test('owner-authorised tax control is ticked once and an existing tick is never toggled off',async()=>{
  const vm=require('node:vm'),fs=require('node:fs');
  for(const initial of [false,true]){
-  let listener,opened=false,checked=initial,clicks=0,permitted=false;
+  let listener,opened=false,checked=initial,clicks=0,permitted=false,clock=0;
   const visible=text=>({textContent:text,isConnected:true,getClientRects:()=>[{}],getAttribute:()=>null});
   const edit={...visible('View & edit'),click(){opened=true}},cancel={...visible('Cancel'),click(){opened=false}};
   const quotes={...visible(''),value:'standard',options:[{textContent:'Standard: $10.07',value:'standard',disabled:false}]};
@@ -74,7 +106,7 @@ test('owner-authorised tax control is ticked once and an existing tick is never 
   const modal={...visible(''),querySelectorAll(selector){if(selector==='h1,h2')return [visible('Inserts on this order')];if(selector==='button')return [cancel];if(selector.startsWith('[data-test'))return [visible('Slip'),visible('Sticker')];throw Error('Unexpected read '+selector)}};
   const main={...visible('REF-TEST'),querySelectorAll:()=>[edit]},row={querySelector:()=>visible('Excellent')};
   const document={querySelector:()=>main,querySelectorAll(selector){if(selector==='main h1')return [visible('99')];if(selector==='table tbody tr')return [row];if(selector==='[role="dialog"]')return opened?[modal]:[];if(selector==='main select')return [quotes];if(selector==='#taxCollectedCheckbox')return [control];throw Error('Unexpected read '+selector)}};
-  const context={document,URL,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},prodigiExactRow:()=>true,prodigiPinnedRow:rows=>rows[0],setTimeout:fn=>queueMicrotask(fn),chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:async()=>{permitted=true;return {permitted:true,tax_declaration:true}}}}};
+  const context={document,URL,Date:{now:()=>clock},location:{href:'https://dashboard.prodigi.com/orders/99/detail'},prodigiExactRow:()=>true,prodigiPinnedRow:rows=>rows[0],setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:async()=>{permitted=true;return {permitted:true,tax_declaration:true}}}}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-dashboard-qa.js'),'utf8'),context);
   const result=await new Promise(resolve=>listener({type:'prodigi:qa',plan:{order_url:context.location.href,order_id:'99',reference:'REF-TEST',sku:'fixture',colour:'black',shipping_intent:'standard',tax_declaration:true,tax_required:true}},{id:'paired'},resolve));
   assert.equal(result.error,undefined);assert.equal(result.evidence.tax_collected,true);assert.equal(checked,true);assert.equal(clicks,initial?0:1);
