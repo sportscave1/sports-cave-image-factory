@@ -141,3 +141,15 @@ def test_shipping_intent_reads_only_the_service_not_the_appended_recipient():
     assert qa.intent('Express Shipping | Synthetic Recipient')=='express'
     assert qa.intent('Standard | Express Street')=='standard'
     with pytest.raises(ValueError):qa.intent('Unknown service | Express Street')
+
+
+def test_country_prefixed_standard_and_extended_quotes_preserve_the_lowest_tied_service():
+    assert qa.intent('US Standard Tracked Shipping')=='standard'
+    assert qa.intent('UK Standard Shipping | Express Street')=='standard'
+    assert qa.intent('International Standard Shipping')=='standard'
+    with pytest.raises(ValueError):qa.intent('Unknown service | US Standard Tracked Shipping')
+    rows=[dict(service=service,cents=cents,currency='$') for service,cents in [('budget',2730),('standard',2730),('express',3810),('overnight',5430),('standardplus',3000)]]
+    assert qa.shipping_choice(rows,'standard','standard')=='standard'
+    assert qa.shipping_choice(rows,'express','standard')=='express'
+    rows[-1]['cents']=2000
+    assert qa.shipping_choice(rows,'standard','standard')=='standardplus'

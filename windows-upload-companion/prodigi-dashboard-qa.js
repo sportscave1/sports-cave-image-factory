@@ -1,9 +1,9 @@
 'use strict';
 function prodigiShippingQuotes(select) {
   return Array.from(select.options).filter(o=>!o.disabled).map(o=>{
-    const m=o.textContent.trim().match(/^(Budget|Standard|Express):\s*([$£€])\s*([0-9]+(?:,[0-9]{3})*)(?:\.([0-9]{2}))?$/i);
+    const m=o.textContent.trim().match(/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*([$£€])\s*([0-9]+(?:,[0-9]{3})*)(?:\.([0-9]{2}))?$/i);
     if(!m)throw Error('An available shipping quote cannot be read.');
-    return {service:m[1].toLowerCase(),cents:Number(m[3].replaceAll(',',''))*100+Number(m[4]||0),currency:m[2]};
+    return {service:m[1].toLowerCase().replace(/\s/g,''),cents:Number(m[3].replaceAll(',',''))*100+Number(m[4]||0),currency:m[2]};
   });
 }
 function prodigiCheapestShipping(options,intent,current) {
@@ -61,7 +61,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
       const quality=text(row.querySelector('[title="Image quality"]'));
       if(!quality)throw Error('Supplier image quality is not visible.');
       const inserts=await inspectInserts(plan);
-      const selects=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard|Express):\s*[$£€]/.test(o.textContent)));
+      const selects=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*[$£€]/.test(o.textContent)));
       if(selects.length!==1)throw Error('A unique shipping selector is required.');
       const select=selects[0],options=prodigiShippingQuotes(select),current=select.value.toLowerCase();
       if(!options.some(o=>o.service===current))throw Error('Selected shipping service is unknown.');
@@ -71,7 +71,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
       pin(plan);
       if(target!==current){const option=Array.from(select.options).find(o=>o.value.toLowerCase()===target);if(!option)throw Error('Chosen shipping quote disappeared.');select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));await delay(1000);}
       pin(plan);
-      const shippingNow=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard|Express):\s*[$£€]/.test(o.textContent)));
+      const shippingNow=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*[$£€]/.test(o.textContent)));
       if(shippingNow.length!==1||shippingNow[0].value.toLowerCase()!==target)throw Error('Shipping selection was not saved.');
       return {evidence:{quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
     }catch(error){return {error:String(error.message||'Dashboard QA stopped').slice(0,240)};}

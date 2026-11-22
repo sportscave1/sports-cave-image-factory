@@ -18,14 +18,14 @@ def intent(value):
     # Fulfilment may append recipient details after a pipe; those are not a service.
     value=clean(value).split('|',1)[0].strip()
     if __import__('re').search(r'\bexpress\b',value):return 'express'
-    if __import__('re').match(r'^standard(?:\s|$)',value) or value in ('budget','economy','australia post'):return 'standard'
+    if __import__('re').match(r'^(?:(?:us|usa|united states|uk|united kingdom|au|australia|nz|new zealand|ca|canada|international|domestic)\s+)?standard(?:\s|$)',value) or value in ('budget','economy','australia post'):return 'standard'
     raise ValueError('The customer shipping service is unknown; review it before changing shipping.')
 
 
 def shipping_choice(options, requested, current):
     if not isinstance(options,list) or not 1<=len(options)<=10:raise ValueError('Shipping quotes are missing or ambiguous.')
     if any(not isinstance(o,dict) or set(o)!={'service','cents','currency'} or
-           o['service'] not in ('budget','standard','express') or type(o['cents']) is not int or
+           o['service'] not in ('budget','standard','standardplus','express','overnight') or type(o['cents']) is not int or
            not 0<=o['cents']<=10000000 or o['currency'] not in ('$','£','€') for o in options):
         raise ValueError('Shipping quotes could not be verified.')
     if len({o['currency'] for o in options})!=1 or len({o['service'] for o in options})!=len(options):

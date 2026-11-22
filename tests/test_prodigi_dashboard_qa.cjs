@@ -29,3 +29,12 @@ test('QA waits for late inserts controls and reads saved names without changing 
  assert.equal(result.error,undefined);assert.deepEqual(Array.from(result.evidence.inserts.saved,r=>r.name),['Current slip','Current sticker']);
  assert.equal(edits,1);assert.equal(cancels,1);assert.equal(opened,false);assert(lookups>=2);
 });
+
+
+test('US quotes include Overnight and Standard Plus without changing a cheapest Standard tie',()=>{
+ const quotes=prodigiShippingQuotes(select([['budget','Budget: $27.30'],['standard','Standard: $27.30'],['express','Express: $38.10'],['overnight','Overnight: $54.30'],['standardplus','Standard Plus: $30.00']]));
+ assert.deepEqual(quotes.map(q=>q.service),['budget','standard','express','overnight','standardplus']);
+ assert.equal(prodigiCheapestShipping(quotes,'standard','standard'),'standard');
+ assert.equal(prodigiCheapestShipping(quotes,'express','standard'),'express');
+ quotes[4].cents=2000;assert.equal(prodigiCheapestShipping(quotes,'standard','standard'),'standardplus');
+});
