@@ -61,7 +61,7 @@ class MetaCommunity:
         self.page = str(env.get("META_FACEBOOK_PAGE_ID") or env.get("META_PAGE_ID") or env.get("FACEBOOK_PAGE_ID") or "")
         self.instagram = str(env.get("META_INSTAGRAM_ACTOR_ID") or env.get("META_INSTAGRAM_ACCOUNT_ID") or env.get("INSTAGRAM_ACCOUNT_ID") or env.get("INSTAGRAM_ACTOR_ID") or "")
         self._token = env.get("META_PAGE_ACCESS_TOKEN", "")
-        self._discovery_token = env.get("META_SOCIAL_DISCOVERY_TOKEN", "")
+        self._discovery_token = env.get("META_SOCIAL_DISCOVERY_TOKEN") or env.get("META_ACCESS_TOKEN", "")
         self.writes = env.get("META_SOCIAL_WRITES_ENABLED") == "1"
         self.version = env.get("META_API_VERSION", "v26.0")
         if not re.fullmatch(r"v\d+\.0", self.version):

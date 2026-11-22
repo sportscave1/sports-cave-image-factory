@@ -12,8 +12,9 @@ no longer query or initialize the old social task tables.
 
 ## Runtime setup
 
-This work is uncommitted, local and not deployed. No production tokens were read,
-customer data fetched, real messages sent or storage deleted.
+The user authorized committing, pushing and deploying this replacement on
+22 November 2026. The release preserves the existing Render services and
+integrates the current production branch before final validation.
 
 Use Facebook Login with an existing Facebook Page and its linked Instagram
 professional account. The transport uses the existing Meta API version setting,
@@ -24,7 +25,8 @@ Server configuration:
 - META_FACEBOOK_PAGE_ID (existing META_PAGE_ID/FACEBOOK_PAGE_ID aliases work).
 - META_INSTAGRAM_ACTOR_ID (existing account ID aliases work).
 - META_PAGE_ACCESS_TOKEN: a Page token for the selected Page.
-- META_SOCIAL_DISCOVERY_TOKEN: separate Facebook User token for Business Discovery.
+- META_SOCIAL_DISCOVERY_TOKEN: optional Facebook User token override for Business
+  Discovery; otherwise reuse the existing META_ACCESS_TOKEN.
 - META_API_VERSION, optional.
 - META_SOCIAL_WRITES_ENABLED=0 by default. Set to 1 only in an authorized environment.
 - META_SOCIAL_AUTOMATION_ENABLED=0 by default. Automatic invitations also need the
