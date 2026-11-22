@@ -33,7 +33,14 @@ def peer(thread, api):
 
 def _errors(snapshot):
     for error in snapshot["errors"]:
-        st.warning(error)
+        # A verified account with a few unavailable ad objects is a partial
+        # history result, not a disconnected inbox. Keep its details available.
+        unavailable = re.match(r"Instagram: (\d+) advertising posts could not be read", error)
+        if unavailable and "individual advertising media are unavailable" in error:
+            with st.expander(unavailable[1] + " Instagram advertising posts unavailable from Meta"):
+                st.caption(error)
+        else:
+            st.warning(error)
 
 
 def _select_thread(rows):

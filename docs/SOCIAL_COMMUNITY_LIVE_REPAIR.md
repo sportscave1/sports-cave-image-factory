@@ -114,6 +114,21 @@ from inability to read the linked account or unavailable individual media. These
 probes expose permission names/status only and never change Meta access.
 Focused validation: 89 passed, 8 legacy database opt-in skips, 68 subtests.
 
+Final production diagnosis on `678eb0b5`: the advertising token has all required
+scopes and can read the linked Instagram account. Two Instagram ad media reads
+succeed; three individual ad media return Meta 100/33 (unavailable media).
+This is distinct from the repaired Instagram inbox connection. Preserve this
+partial-history information in a compact expandable notice instead of treating
+it as an account-wide connection failure. The provider does not distinguish
+removed media from other object-specific unavailability in this response.
+
+All four core read capabilities were verified Available in Edge. The combined
+inbox loaded 60 conversations and an actual Instagram thread. Recent Facebook
+advertising customer comments, dated dropdowns and their actions were inspected.
+Collaborations loaded its real empty state and Find creators controls. No real
+messages, invitations or moderation actions were sent as tests. Final focused
+validation: 90 passed, 8 legacy database opt-in skips, 68 subtests.
+
 `python -m pytest tests/test_meta_social.py tests/test_social_community_feed.py
 tests/test_social_community_live_regressions.py tests/test_social_community_store.py
 tests/test_social_wall_inbox.py tests/test_social_media_reporting.py

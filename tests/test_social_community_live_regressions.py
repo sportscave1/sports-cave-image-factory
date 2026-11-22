@@ -225,6 +225,19 @@ class LiveUiRegressionTests(unittest.TestCase):
     app = contracts.CommunityUiTests.app
     button = contracts.CommunityUiTests.button
 
+    def test_unavailable_individual_ad_media_keeps_comments_usable_with_compact_details(self):
+        partial = {"data": [], "after": "", "errors": [
+            "Instagram: 3 advertising posts could not be read. The advertising token can read the linked Instagram account; "
+            "these individual advertising media are unavailable."]}
+        with patch.object(FakeCommunity, "ad_comment_feed", return_value=partial, create=True):
+            app = self.app()
+            app.segmented_control[0].set_value("Comments").run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.warning)
+        self.assertEqual(len(app.expander), 3)
+        self.assertTrue(any("3 Instagram advertising posts unavailable" in row.label for row in app.expander))
+        self.assertTrue(any("Love this edition" in row.label for row in app.expander))
+
     def test_pending_history_never_claims_no_comments_and_offers_search(self):
         with patch.object(FakeCommunity, "comment_feed", side_effect=lambda p, after="": HistoryRegressionTests.history(p, after, found_at=7)):
             app = self.app()
