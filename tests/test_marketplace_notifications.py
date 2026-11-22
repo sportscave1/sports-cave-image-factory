@@ -211,6 +211,21 @@ class QueueTests(AlertSetup):
         self.assertEqual(len(self.queue.due()), 1)
         self.assertEqual(self.claim()['attempt']['seq'], 6)
 
+    def test_delayed_acceptance_keeps_a_full_gap_before_the_next_alert(self):
+        thread = self.start_chat()
+        self.ready()
+        first = self.claim()
+        self.queue.complete(first, error=EmailDeliveryError('offline', retryable=True))
+        self.send(thread, self.buyer['id'], text='More unread activity')
+        self.clock.advance(alerts.COOLDOWN + 1)
+        retry = self.claim()
+        self.assertEqual(retry['attempt']['id'], first['attempt']['id'])
+        self.queue.complete(retry, receipt='delayed-receipt')
+        self.ready()
+        self.assertEqual(self.queue.due(), [])
+        self.clock.advance(alerts.COOLDOWN)
+        self.assertEqual(self.claim()['attempt']['seq'], 2)
+
     def test_provider_failure_preserves_saved_chat_and_retries_exact_frozen_payload(self):
         thread = self.start_chat()
         self.ready()

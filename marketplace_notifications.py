@@ -226,7 +226,8 @@ class NotificationStore(MarketplaceStore):
             row['settled_seq'] = max(row.get('settled_seq', 0), attempt['seq'])
             row['last_outcome'] = 'accepted' if error is None else 'uncertain' if ambiguous else 'failed'
             if error is None:
-                row.update(last_accepted_at=at, provider_id=str(receipt or '')[:250])
+                row.update(last_accepted_at=at, provider_id=str(receipt or '')[:250],
+                           cooldown_until=max(row.get('cooldown_until', 0), at + COOLDOWN))
             row.pop('attempt', None)
             _schedule(conn, row, max(at + GRACE, row.get('cooldown_until', 0)) if _unread(row) else None)
             return True
