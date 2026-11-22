@@ -25,6 +25,21 @@ def next_cursor(page):
     return (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""
 
 
+def merge_post(existing, organic, platform):
+    """Preserve ad context/cursors while filling omitted text and attachment fields."""
+    if not existing:
+        return dict(organic, platform=platform)
+    merged = dict(organic, **existing)
+    primary = existing.get("comments") or {"data": []}
+    comments = {}
+    for row in [*(primary.get("data") or []), *((organic.get("comments") or {}).get("data") or [])]:
+        if row.get("id"):
+            previous = comments.get(row["id"], {})
+            comments[row["id"]] = dict(previous, **{k: v for k, v in row.items() if v is not None and v != ""})
+    merged["comments"] = dict(primary, data=list(comments.values()))
+    return merged
+
+
 class CommunityFeed:
     def __init__(self, api, state, *, now=time.monotonic):
         require_access(api.user)
@@ -110,8 +125,7 @@ class CommunityFeed:
                         # A boosted organic post may also be an ad. Preserve
                         # its cross-placement comments and verified ad context;
                         # the ordinary /media expansion is a narrower view.
-                        posts[key] = (dict(post, **existing) if existing.get("ad_id")
-                                      else dict(post, platform=platform))
+                        posts[key] = merge_post(existing, post, platform)
                         platform_posts[post["id"]] = post
                     next_after = next_cursor(page)
                     if (after == cursors[-1] and next_after and next_after not in cursors
@@ -125,7 +139,8 @@ class CommunityFeed:
             platform, post_id = post_key
             page = post.get("comments") or {"data": []}
             for row in page.get("data") or []:
-                rows[(platform, row["id"])] = dict(row, platform=platform, post=post)
+                if row.get("id"):
+                    rows[(platform, row["id"])] = dict(row, platform=platform, post=post)
             after = next_cursor(page)
             for cursor in extras.get(post_key, []):
                 try:
@@ -145,7 +160,7 @@ class CommunityFeed:
         return {"items": items, "errors": list(dict.fromkeys(errors)), "more_posts": more_posts,
                 "more_comments": more_comments, "posts_scanned": len(posts), "more_ads": more_ads}
 
-    def more_comments(self, snapshot):
+    def more_comments(self, snapshot, *, scan_empty=True):
         """Advance two comment edges at most; only then fetch older post pages."""
         if snapshot["more_comments"]:
             extras = self.state.setdefault("comment_pages", {})
@@ -161,4 +176,4 @@ class CommunityFeed:
                 cursors = self._pages("post")[platform]
                 if after and after not in cursors:
                     cursors.append(after)
-                    self.state.setdefault("post_scan_targets", {})[platform] = len(cursors) + 3
+                    self.state.setdefault("post_scan_targets", {})[platform] = len(cursors) + (3 if scan_empty else 0)

@@ -143,11 +143,13 @@ class CompactWorkspaceTests(unittest.TestCase):
     def test_closed_comment_rows_have_dates_and_no_forms(self):
         app = self.app()
         app.segmented_control[0].set_value("Comments").run()
-        self.assertEqual(len(app.expander), 2)
+        self.assertEqual(len(app.expander), 0)
         self.assertEqual(len(app.text_area), 0)
         self.assertEqual(len(app.selectbox), 0)
-        self.assertTrue(all("22 Nov 2026" in p.label for p in app.expander))
-        self.assertTrue(all("AEDT" in p.label for p in app.expander))
+        rendered = "\n".join(item.value for item in app.markdown)
+        self.assertIn("22 Nov 2026", rendered)
+        self.assertIn("AEDT", rendered)
+        self.assertEqual(len([b for b in app.button if str(b.key).startswith("comment-select-")]), 2)
         self.assertFalse(app.exception)
 
     def test_opening_and_typing_does_not_fetch_comment_feed_again(self):
@@ -197,11 +199,11 @@ class CompactWorkspaceTests(unittest.TestCase):
         with patch.object(FakeCommunity, "comment_feed", many):
             app = self.app()
             app.segmented_control[0].set_value("Comments").run()
-            self.assertEqual(len(app.expander), 40)
+            self.assertEqual(len([b for b in app.button if str(b.key).startswith("comment-select-")]), 40)
             self.button(app, "Show more comments").click().run()
-            self.assertEqual(len(app.expander), 80)
+            self.assertEqual(len([b for b in app.button if str(b.key).startswith("comment-select-")]), 80)
             self.button(app, "Show more comments").click().run()
-            self.assertEqual(len(app.expander), 90)
+            self.assertEqual(len([b for b in app.button if str(b.key).startswith("comment-select-")]), 90)
             self.assertFalse(app.exception)
 
 

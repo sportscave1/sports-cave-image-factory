@@ -1,4 +1,9 @@
 /* Native controls and one scoped stylesheet; no iframe, icon font or JS bundle. */
+.st-key-community-shell [class*="st-key-community-comment-card-"] .sc-detail-header{min-height:48px;padding:0 0 8px;border:0}
+.st-key-community-shell [class*="st-key-community-comment-card-"] .sc-avatar{width:34px;height:34px;flex-basis:34px;font-size:12px}
+.st-key-community-shell [class*="st-key-community-comment-card-"] .sc-detail-person strong{font-size:14px}
+.sc-comment-body{font-size:15px;line-height:1.6;overflow-wrap:anywhere;padding:2px 0 6px}
+.sc-comment-attachment{max-width:250px;max-height:200px;object-fit:contain;border-radius:6px}
 [data-testid="stMain"]:has(.st-key-community-shell){background:#fff!important}
 [data-testid="stMainBlockContainer"]:has(.st-key-community-shell){padding-left:28px!important;padding-right:24px!important;max-width:100%!important}
 .st-key-community-shell{--sc-gold:#a77b24;--sc-line:#e6e7eb;--sc-ink:#17191e;color:var(--sc-ink);font-family:"Segoe UI",system-ui,sans-serif}

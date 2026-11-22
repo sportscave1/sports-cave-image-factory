@@ -234,9 +234,9 @@ class LiveUiRegressionTests(unittest.TestCase):
             app.segmented_control[0].set_value("Comments").run()
         self.assertFalse(app.exception)
         self.assertFalse(app.warning)
-        self.assertEqual(len(app.expander), 3)
+        self.assertEqual(len(app.expander), 1)
         self.assertTrue(any("3 Instagram advertising posts unavailable" in row.label for row in app.expander))
-        self.assertTrue(any("Love this edition" in row.label for row in app.expander))
+        self.assertTrue(any("Love this edition" in row.value for row in app.markdown))
 
     def test_pending_history_never_claims_no_comments_and_offers_search(self):
         with patch.object(FakeCommunity, "comment_feed", side_effect=lambda p, after="": HistoryRegressionTests.history(p, after, found_at=7)):
@@ -244,8 +244,9 @@ class LiveUiRegressionTests(unittest.TestCase):
             app.segmented_control[0].set_value("Comments").run()
             self.assertFalse(app.exception)
             self.assertTrue(any("so far" in item.value for item in app.info))
-            self.button(app, "Search older posts").click().run()
-            self.assertTrue(app.expander)
+            for _ in range(7):
+                self.button(app, "Load older comments").click().run()
+            self.assertTrue(any(str(button.key).startswith("comment-select-") for button in app.button))
             self.assertFalse(app.exception)
 
     def test_message_content_is_escaped_in_bubbles(self):

@@ -145,7 +145,7 @@ class MetaContractTests(unittest.TestCase):
         ):
             with self.subTest(platform=platform, action=action):
                 self.api.comments = Mock(return_value={"data": [{"id": "comment"}], "after": ""})
-                self.http.request.return_value = response({"success": True})
+                self.http.request.return_value = response({"id": "reply"} if action == "reply" else {"success": True})
                 self.api.moderate(platform, "post", "comment", action, "Thanks")
                 call = self.http.request.call_args
                 self.assertEqual(call.args[:2], (method, "https://graph.facebook.com/v26.0/" + path))
@@ -252,17 +252,12 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
         return AppTest.from_string(self.SCRIPT).run()
 
     def button(self, app, text):
+        text = {"Reply": "Send public reply", "Show more comments": "Load older comments",
+                "Search older posts": "Load older comments"}.get(text, text)
         return next(b for b in app.button if b.label == text)
 
     def open_comment(self, app, platform):
-        # AppTest doesn't yet serialize tracked expanders. Send the same bool
-        # widget state that a real browser emits, alongside the other controls.
-        states = app._tree.get_widget_states()
-        panel = next(p for p in app.expander if platform in p.label)
-        expanded = states.widgets.add()
-        expanded.id = panel.proto.id
-        expanded.bool_value = True
-        return app._run(widget_state=states)
+        return app.button(key="comment-select-" + platform + "-comment").click().run()
 
     def test_replacement_tabs_and_all_original_profile_shortcuts(self):
         app = self.app()
@@ -290,6 +285,7 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
         app.segmented_control[0].set_value("Comments").run()
         self.assertFalse(app.exception)
         self.open_comment(app, "Facebook")
+        app.button(key="comment-delete-Facebook-comment").click().run()
         self.assertTrue(self.button(app, "Delete comment").disabled)
         app.checkbox[0].check()
         self.open_comment(app, "Facebook")
@@ -303,7 +299,7 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
         app.segmented_control[0].set_value("Comments").run()
         self.open_comment(app, "Instagram")
         self.assertFalse(app.exception)
-        self.assertNotIn("Like", [b.label for b in app.button])
+        self.assertNotIn("like-Instagram-comment", [b.key for b in app.button])
         self.assertIn("Hide", [b.label for b in app.button])
 
     def test_discovery_saves_ranked_prospect_and_draft(self):

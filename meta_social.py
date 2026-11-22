@@ -245,11 +245,11 @@ class MetaCommunity:
         if platform == "Facebook":
             edge = "posts"
             fields = ("id,message,created_time,permalink_url,"
-                      "comments.filter(stream).limit(20){id,message,from,created_time,like_count}")
+                      "comments.filter(stream).order(reverse_chronological).limit(20){id,message,from,created_time,like_count,user_likes,is_hidden,attachment}")
         else:
             edge = "media"
             fields = ("id,caption,timestamp,permalink,"
-                      "comments.limit(20){id,text,username,timestamp,like_count}")
+                      "comments.limit(20){id,text,username,timestamp,like_count,hidden}")
         return self._edge(f"{owner}/{edge}", fields, after=after, extra={"limit": 8})
 
     def ad_comment_feed(self, *, after=""):
@@ -292,9 +292,9 @@ class MetaCommunity:
         for platform, post_ids in ids.items():
             if not post_ids:
                 continue
-            fields = ("id,from,message,created_time,permalink_url,comments.filter(stream).limit(20){id,message,from,created_time,like_count}"
+            fields = ("id,from,message,created_time,permalink_url,comments.filter(stream).order(reverse_chronological).limit(20){id,message,from,created_time,like_count,user_likes,is_hidden,attachment}"
                       if platform == "Facebook" else
-                      "id,owner,comments.limit(20){id,text,username,timestamp,like_count}")
+                      "id,owner,comments.limit(20){id,text,username,timestamp,like_count,hidden}")
             unreadable = 0
             reason = ""
             for post_id in sorted(post_ids):
@@ -352,7 +352,7 @@ class MetaCommunity:
         ordered_comments is documented for Facebook Login and includes the
         other media used by placement customization. No writes are retried.
         """
-        fields = "id,text,from{id,username},timestamp,like_count"
+        fields = "id,text,from{id,username},timestamp,like_count,hidden"
         try:
             page = self._edge(f"{post_id}/ordered_comments", fields, after=after, advertising=True)
             self._instagram_user_posts.add(post_id)
@@ -439,16 +439,16 @@ class MetaCommunity:
                 advertising = comment_edge != "page_comments"
                 if not advertising:
                     self._instagram_user_posts.discard(post_id)
-                page = self._edge(f"{post_id}/comments", "id,text,from{id,username},timestamp,like_count",
+                page = self._edge(f"{post_id}/comments", "id,text,from{id,username},timestamp,like_count,hidden",
                                   after=after, advertising=advertising)
                 page["comment_edge"] = comment_edge
                 return page
             return self._instagram_ad_comments(post_id, after=after)
         post_id = self._own_post(platform, post_id)
-        fields = "id,message,from,created_time,like_count" if platform == "Facebook" else "id,text,username,timestamp,like_count"
+        fields = "id,message,from,created_time,like_count,user_likes,is_hidden,attachment" if platform == "Facebook" else "id,text,username,timestamp,like_count,hidden"
         try:
             return self._edge(f"{post_id}/comments", fields, after=after,
-                              extra={"filter": "stream"} if platform == "Facebook" else None,
+                              extra={"filter": "stream", "order": "reverse_chronological"} if platform == "Facebook" else None,
                               advertising=post_id in self._instagram_user_posts)
         except CommunityError:
             if platform != "Instagram" or not self._ads_token or post_id in self._instagram_user_posts:
@@ -483,13 +483,20 @@ class MetaCommunity:
             if not text or len(text) > 1000:
                 raise CommunityError("Write a reply between 1 and 1,000 characters.")
             edge = "comments" if platform == "Facebook" else "replies"
-            return self._request("POST", f"{comment_id}/{edge}", data={"message": text}, **auth)
+            result = self._request("POST", f"{comment_id}/{edge}", data={"message": text}, **auth)
+            if not isinstance(result, dict) or not result.get("id"):
+                raise CommunityError("Meta did not confirm the reply ID. Refresh before retrying; the reply may have succeeded.")
+            return result
         if action in ("like", "unlike"):
-            return self._request("POST" if action == "like" else "DELETE", f"{comment_id}/likes")
-        if action in ("hide", "unhide"):
+            result = self._request("POST" if action == "like" else "DELETE", f"{comment_id}/likes")
+        elif action in ("hide", "unhide"):
             key = "is_hidden" if platform == "Facebook" else "hide"
-            return self._request("POST", comment_id, data={key: action == "hide"}, **auth)
-        return self._request("DELETE", comment_id, **auth)
+            result = self._request("POST", comment_id, data={key: action == "hide"}, **auth)
+        else:
+            result = self._request("DELETE", comment_id, **auth)
+        if result is not True and (not isinstance(result, dict) or result.get("success") is not True):
+            raise CommunityError("Meta did not confirm the comment update. Refresh before retrying; it may have succeeded.")
+        return result
 
     def discover(self, handle):
         handle = username(handle)

@@ -25,7 +25,7 @@ def label_text(value, limit=110):
 
 
 def author(row):
-    return row.get("username") or (row.get("from") or {}).get("name") or "Customer"
+    return row.get("username") or (row.get("from") or {}).get("name") or "Name not returned by Meta"
 
 
 def peer(thread, api):
@@ -142,55 +142,81 @@ def render_inbox(api, feed, done):
         st.rerun()
 
 
-def _comment_actions(api, row, done):
-    platform, post_id, comment_id = row["platform"], row["post"]["id"], row["id"]
-    context = ({"ad_id": row["post"]["ad_id"],
+def comment_context(row):
+    if row["platform"] == "Instagram" and row["post"].get("ad_id"):
+        return {"ad_id": row["post"]["ad_id"],
                 "comment_edge": (row["post"].get("comments") or {}).get("comment_edge", "")}
-               if platform == "Instagram" and row["post"].get("ad_id") else {})
+    return {}
+
+
+def _comment_actions(api, row, done):
+    """Only the selected editor is built; every card's actions stay visible."""
+    platform, post_id, comment_id = row["platform"], row["post"]["id"], row["id"]
     suffix = platform + "-" + comment_id
-    detail_header(author(row), platform + " · " + dated(row.get("created_time") or row.get("timestamp")),
-                  "Ad comment" if row["post"].get("advertising") else "Comment", "gold")
-    st.text(row.get("text") or row.get("message") or "[Comment]")
-    post_text = row["post"].get("message") or row["post"].get("caption") or "Sports Cave post"
-    st.caption(("Advertising post: " if row["post"].get("advertising") else "Post: ") + post_text[:200])
-    st.caption(dated(row.get("created_time") or row.get("timestamp")) +
-               f" · {int(row.get('like_count') or 0)} likes")
-    actions = st.columns([1, 1, 1.2])
+    context = comment_context(row)
+    actions = st.columns([1, 1.2, 1, 1, 1.2])
+    actions[0].button("Reply", icon=":material/reply:", key="comment-select-" + suffix, width="stretch",
+                      on_click=lambda: st.session_state.__setitem__("community-selected-comment", (platform, comment_id)))
     if platform == "Facebook":
-        if actions[0].button("Like", icon=":material/thumb_up:", key="like-" + suffix, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, "like")
-            done("Comment liked.")
+        action = "unlike" if row.get("user_likes") else "like"
+        if actions[1].button(action.title(), icon=":material/thumb_up:", key="like-" + suffix,
+                             disabled=not api.writes, width="stretch"):
+            api.moderate(platform, post_id, comment_id, action, **context)
+            done("Like removed." if action == "unlike" else "Comment liked.")
     else:
-        link = row["post"].get("permalink")
-        if str(link or "").startswith("https://"):
-            actions[0].link_button("Like on Instagram", link)
-    if actions[1].button("Hide", key="hide-" + suffix, disabled=not api.writes):
-        api.moderate(platform, post_id, comment_id, "hide", **context)
-        done("Comment hidden.")
+        from social_media import SOCIAL_PROFILES
+        link = row["post"].get("permalink") or dict(SOCIAL_PROFILES)["Instagram"]
+        actions[1].link_button("Like in Instagram", link, width="stretch")
+    action = "unhide" if row.get("is_hidden") or row.get("hidden") else "hide"
+    if actions[2].button(action.title(), key="hide-" + suffix, disabled=not api.writes, width="stretch"):
+        api.moderate(platform, post_id, comment_id, action, **context)
+        done("Comment restored." if action == "unhide" else "Comment hidden.")
+    actions[3].button("Delete", icon=":material/delete:", key="comment-delete-" + suffix,
+                      disabled=not api.writes, width="stretch",
+                      on_click=lambda: st.session_state.__setitem__("community-selected-delete", (platform, comment_id)))
     link = row["post"].get("permalink") or row["post"].get("permalink_url")
     if str(link or "").startswith("https://"):
-        actions[2].link_button("Open post", link)
-    draft_key = "community-comment-reply-" + suffix
-    with st.form("community-comment-form-" + suffix):
-        text = st.text_area("Public reply", max_chars=1000, key=draft_key, height=80,
-                            placeholder="Reply to this comment…", label_visibility="collapsed")
-        if st.form_submit_button("Reply", icon=":material/reply:", type="primary", disabled=not api.writes, width="stretch"):
-            api.moderate(platform, post_id, comment_id, "reply", text, **context)
-            done("Reply sent.", draft_key=draft_key)
-    with st.popover("More", icon=":material/more_horiz:"):
-        if platform == "Facebook" and st.button("Unlike", key="unlike-" + suffix, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, "unlike")
-            done("Like removed.")
-        if st.button("Unhide", key="unhide-" + suffix, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, "unhide", **context)
-            done("Comment restored.")
+        actions[4].link_button("Open post", link, width="stretch")
+    if st.session_state.get("community-selected-delete") == (platform, comment_id):
         confirm = st.checkbox("Confirm permanent deletion", key="community-delete-confirm-" + suffix)
-        if st.button("Delete comment", key="delete-" + suffix, disabled=not (api.writes and confirm)):
+        remove, cancel = st.columns(2)
+        if remove.button("Delete comment", key="delete-" + suffix, disabled=not (api.writes and confirm), type="primary"):
             api.moderate(platform, post_id, comment_id, "delete", **context)
             done("Comment deleted.")
+        if cancel.button("Cancel deletion", key="delete-cancel-" + suffix):
+            st.session_state.pop("community-selected-delete", None)
+            st.rerun()
+    if st.session_state.get("community-selected-comment") == (platform, comment_id):
+        draft_key = "community-comment-reply-" + suffix
+        with st.form("community-comment-form-" + suffix):
+            text = st.text_area("Public reply", max_chars=1000, key=draft_key, height=80,
+                                placeholder="Reply to this comment…", label_visibility="collapsed")
+            if st.form_submit_button("Send public reply", icon=":material/reply:", type="primary",
+                                     disabled=not api.writes, width="stretch"):
+                api.moderate(platform, post_id, comment_id, "reply", text, **context)
+                done("Reply sent.", draft_key=draft_key)
+
+
+def _comment_body(row):
+    text = row.get("text") or row.get("message")
+    attachment = row.get("attachment") or {}
+    if text:
+        st.markdown('<div class="sc-comment-body">' + html.escape(str(text)).replace('\n', '<br>') + '</div>', unsafe_allow_html=True)
+    elif attachment:
+        st.caption("Photo, sticker or attachment comment")
+    else:
+        st.caption("Meta did not return this comment's text. Open the original post to view it.")
+    image = ((attachment.get("media") or {}).get("image") or {}).get("src")
+    if str(image or "").startswith("https://"):
+        st.markdown('<img class="sc-comment-attachment" loading="lazy" alt="Comment attachment" src="' +
+                    html.escape(image, quote=True) + '">', unsafe_allow_html=True)
 
 
 def render_comments(api, feed, done):
+    # First paint checks one organic batch per channel. Scrolling performs
+    # bounded additional reads instead of a long empty-history scan up front.
+    for platform in ("Facebook", "Instagram"):
+        feed.state.setdefault("post_scan_targets", {}).setdefault(platform, 1)
     snapshot = feed.comments()
     _errors(snapshot)
     query = st.text_input("Search comments", placeholder="Search comments or people…", key="community-comment-search",
@@ -198,39 +224,35 @@ def render_comments(api, feed, done):
     rows = [row for row in snapshot["items"] if not query or query in
             (author(row) + " " + str(row.get("text") or row.get("message") or "") + " " + row["platform"]).casefold()]
     visible = st.session_state.get("community-comment-visible", 40)
-    st.caption(f"{min(len(rows), visible)} of {len(rows)} loaded comments · newest first · dates in Sydney time")
-    listing, details = st.columns([1.8, 1.25], gap="large")
-    with listing:
-        for row in rows[:visible]:
-            platform, comment_id = row["platform"], row["id"]
-            date = dated(row.get("created_time") or row.get("timestamp"))
-            summary = (date + " · " + platform + " · " + label_text(author(row), 45) +
-                       " — " + label_text(row.get("text") or row.get("message") or "[Comment]"))
-            panel = st.expander(summary, key="community-comment-open-" + platform + "-" + comment_id,
-                on_change=lambda p=platform, c=comment_id: st.session_state.__setitem__("community-selected-comment", (p, c)))
-            if panel.open:
-                with panel:
-                    st.text(row.get("text") or row.get("message") or "[Comment]")
-                    st.caption("Reply and manage this comment in the detail panel.")
-        if not rows and snapshot["errors"]:
-            empty_state("Comments could not load", "Check the connection notice above, then use Refresh to try again.")
-    selected = st.session_state.get("community-selected-comment")
-    row = next((item for item in rows[:visible] if (item["platform"], item["id"]) == selected), None)
-    with details, st.container(key="community-detail"):
-        if row:
+    st.caption(f"{min(len(rows), visible)} comments shown · newest loaded first · live ads + organic posts · Sydney time")
+    for row in rows[:visible]:
+        with st.container(border=True, key="community-comment-card-" + row["platform"] + "-" + row["id"]):
+            detail_header(author(row), row["platform"] + " · " + dated(row.get("created_time") or row.get("timestamp")),
+                          "Live ad" if row["post"].get("advertising") else "Organic post", "gold")
+            _comment_body(row)
+            post_text = row["post"].get("message") or row["post"].get("caption")
+            if post_text:
+                st.caption("Post: " + " ".join(str(post_text).split())[:200])
+            st.caption(f"{int(row.get('like_count') or 0)} likes")
             _comment_actions(api, row, done)
-        else:
-            empty_state("Comment details", "Open a comment to read its context, reply or manage it here.")
+    pending = bool(snapshot["more_comments"] or any(snapshot["more_posts"].values()) or snapshot.get("more_ads"))
     if not rows and not snapshot["errors"]:
-        pending = any(snapshot["more_posts"].values()) or snapshot.get("more_ads")
         st.info("No comments match the loaded results." if query else
-                "No comments in the posts checked so far. Continue searching older posts below." if pending else
+                "No comments in the posts checked so far. Scroll down to check more posts." if pending else
                 "No comments were returned for the posts available to this connection.")
     st.caption(f"{snapshot.get('posts_scanned', 0)} posts checked · Facebook and Instagram together")
-    more = len(rows) > visible or snapshot["more_comments"] or any(snapshot["more_posts"].values()) or snapshot.get("more_ads")
-    more_label = "Search older posts" if not rows and (any(snapshot["more_posts"].values()) or snapshot.get("more_ads")) else "Show more comments"
-    if more and st.button(more_label, icon=":material/expand_more:", key="community-more-comments"):
-        if len(rows) <= visible:
-            feed.more_comments(snapshot)
-        st.session_state["community-comment-visible"] = visible + 40
-        st.rerun()
+    more = len(rows) > visible or pending
+    if more:
+        from social_comment_scroll import scroll_request
+        token = str(st.session_state.get("community-comment-generation", 0))
+        requested = scroll_request(token, not snapshot["errors"])
+        manual = st.button("Load older comments", key="community-more-comments", icon=":material/arrow_downward:")
+        if manual or (requested and st.session_state.get("community-comment-consumed") != token):
+            st.session_state["community-comment-consumed"] = token
+            if len(rows) <= visible:
+                feed.more_comments(snapshot, scan_empty=False)
+            st.session_state["community-comment-visible"] = visible + 40
+            st.session_state["community-comment-generation"] = int(token) + 1
+            st.rerun()
+    elif rows:
+        st.caption("You're up to date with the loaded posts.")

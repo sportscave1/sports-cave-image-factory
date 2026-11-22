@@ -289,7 +289,8 @@ def render_page(user, *, store=ledger, account_store=None, api_factory=MetaCommu
             CommunityFeed(api, state)
             if previous_identity and previous_identity != state["identity"]:
                 for key in ("community-connection-account", "community-connection-checks", "community-connection-checked-at",
-                            "community-selected-thread", "community-selected-comment", "community-selected-creator"):
+                            "community-selected-thread", "community-selected-comment", "community-selected-delete", "community-selected-creator",
+                            "community-comment-consumed", "community-comment-generation"):
                     st.session_state.pop(key, None)
                 for key in list(st.session_state):
                     if str(key).startswith(("community-reply-", "community-comment-reply-", "community-message-pages-",
