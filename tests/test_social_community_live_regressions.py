@@ -43,7 +43,8 @@ class LiveApiRegressionTests(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         self.assertTrue(all("ids" not in call.kwargs["params"] for call in calls))
         self.assertTrue(all(call.args[0] == "GET" for call in calls))
-        self.assertTrue(all(call.kwargs["headers"]["Authorization"] == "Bearer fixture-page-token" for call in calls[1:]))
+        self.assertTrue(all(call.kwargs["headers"]["Authorization"] == "Bearer fixture-page-token" for call in calls[1:3]))
+        self.assertEqual(calls[3].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
         self.assertNotIn("foreign", repr([call.kwargs["params"] for call in calls]))
 
     def test_opaque_long_cursors_survive_every_paginated_edge(self):
@@ -67,6 +68,27 @@ class LiveApiRegressionTests(unittest.TestCase):
         result = api.ad_comment_feed()
         self.assertEqual(result["data"][0]["comments"]["data"][0]["id"], "kept")
         self.assertIn("1 advertising posts", result["errors"][0])
+
+    def test_instagram_ad_reply_uses_verified_user_token_without_retrying_a_write(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"error": {"code": 100}}, 400),
+            response({"id": "media", "owner": {"id": "ig"}}),
+            response({"data": [{"id": "comment"}]}), response({"id": "reply"})]
+        api.moderate("Instagram", "media", "comment", "reply", "Thanks")
+        calls = http.request.call_args_list
+        self.assertEqual(calls[-1].args[0], "POST")
+        self.assertEqual(calls[-1].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
+        self.assertEqual(sum(call.args[0] == "POST" for call in calls), 1)
+
+    def test_instagram_user_token_fallback_still_requires_correct_post_owner(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"error": {"code": 100}}, 400),
+            response({"id": "media", "owner": {"id": "foreign"}})]
+        with self.assertRaisesRegex(CommunityError, "does not belong"):
+            api.moderate("Instagram", "media", "comment", "delete")
+        self.assertTrue(all(call.args[0] == "GET" for call in http.request.call_args_list))
 
     def test_permission_diagnostic_keeps_codes_and_scope_names_but_no_provider_secrets(self):
         http = Mock()

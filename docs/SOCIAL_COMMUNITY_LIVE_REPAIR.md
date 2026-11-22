@@ -91,6 +91,15 @@ by the agent. The advertising root multi-ID expansion returned error 100 in
 production; replaced it with direct, ownership-checked reads for at most five
 ads per page. An unavailable ad post no longer discards readable posts.
 
+The direct Facebook advertising reads exposed recent November 2026 customer
+comments in Edge. Instagram advertising media needs the existing Facebook
+User/Business token with advertising access, as specified in Meta's IG Media
+reference, rather than the Page messaging token. Updated this read path and
+added a verified-owner read fallback before Instagram moderation chooses its
+credential. A moderation write is issued once; no write is automatically retried.
+Reference: https://developers.facebook.com/documentation/instagram-platform/reference/instagram-media
+Focused validation: 86 passed, 8 legacy database opt-in skips, 68 subtests.
+
 `python -m pytest tests/test_meta_social.py tests/test_social_community_feed.py
 tests/test_social_community_live_regressions.py tests/test_social_community_store.py
 tests/test_social_wall_inbox.py tests/test_social_media_reporting.py

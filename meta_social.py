@@ -71,6 +71,7 @@ class MetaCommunity:
             raise CommunityError("Invalid Meta API version setting.")
         self._session = session or requests.Session()
         self._last_conversation_read = 0.0
+        self._instagram_user_posts = set()
 
     def owner(self, platform):
         require_access(self.user)
@@ -131,13 +132,13 @@ class MetaCommunity:
             raise CommunityError("Meta did not confirm this operation. Refresh before retrying.")
         return result
 
-    def _edge(self, path, fields, *, after="", extra=None):
+    def _edge(self, path, fields, *, after="", extra=None, advertising=False):
         params = {"fields": fields, "limit": 30, **(extra or {})}
         if after:
             # Meta cursors are opaque. Truncation corrupts long cursors and makes
             # older posts/comments fail with error 100. Never follow paging URLs.
             params["after"] = str(after)
-        result = self._request("GET", path, params=params)
+        result = self._request("GET", path, params=params, advertising=advertising)
         paging = result.get("paging") or {}
         return {"data": result.get("data") or [],
                 "after": (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""}
@@ -267,7 +268,7 @@ class MetaCommunity:
                 # These unpublished objects reject the root multi-ID expansion
                 # with error 100. Read each bounded ad post directly instead.
                 try:
-                    post = self._request("GET", post_id, params={"fields": fields})
+                    post = self._request("GET", post_id, params={"fields": fields}, advertising=platform == "Instagram")
                 except CommunityError:
                     unreadable += 1
                     continue
@@ -286,7 +287,15 @@ class MetaCommunity:
         post_id = identifier(post_id)
         owner = self.owner(platform)
         fields = "id,from" if platform == "Facebook" else "id,owner"
-        result = self._request("GET", post_id, params={"fields": fields})
+        try:
+            result = self._request("GET", post_id, params={"fields": fields})
+        except CommunityError:
+            if platform != "Instagram" or not self._ads_token:
+                raise
+            # Instagram ad media requires the Facebook User/Business token with
+            # advertising access, unlike the Page conversations edge.
+            result = self._request("GET", post_id, params={"fields": fields}, advertising=True)
+            self._instagram_user_posts.add(post_id)
         author = result.get("from" if platform == "Facebook" else "owner") or {}
         if str(author.get("id")) != owner:
             raise CommunityError("This post does not belong to the connected account.")
@@ -295,8 +304,16 @@ class MetaCommunity:
     def comments(self, platform, post_id, *, after=""):
         post_id = self._own_post(platform, post_id)
         fields = "id,message,from,created_time,like_count" if platform == "Facebook" else "id,text,username,timestamp,like_count"
-        return self._edge(f"{post_id}/comments", fields, after=after,
-                          extra={"filter": "stream"} if platform == "Facebook" else None)
+        try:
+            return self._edge(f"{post_id}/comments", fields, after=after,
+                              extra={"filter": "stream"} if platform == "Facebook" else None,
+                              advertising=post_id in self._instagram_user_posts)
+        except CommunityError:
+            if platform != "Instagram" or not self._ads_token or post_id in self._instagram_user_posts:
+                raise
+            result = self._edge(f"{post_id}/comments", fields, after=after, advertising=True)
+            self._instagram_user_posts.add(post_id)
+            return result
 
     def moderate(self, platform, post_id, comment_id, action, text=""):
         if action not in ("reply", "delete", "like", "unlike", "hide", "unhide"):
@@ -316,18 +333,19 @@ class MetaCommunity:
                 break
         if not found:
             raise CommunityError("This comment could not be verified on the selected account's post.")
+        auth = {"advertising": platform == "Instagram" and str(post_id) in self._instagram_user_posts}
         if action == "reply":
             text = str(text or "").strip()
             if not text or len(text) > 1000:
                 raise CommunityError("Write a reply between 1 and 1,000 characters.")
             edge = "comments" if platform == "Facebook" else "replies"
-            return self._request("POST", f"{comment_id}/{edge}", data={"message": text})
+            return self._request("POST", f"{comment_id}/{edge}", data={"message": text}, **auth)
         if action in ("like", "unlike"):
             return self._request("POST" if action == "like" else "DELETE", f"{comment_id}/likes")
         if action in ("hide", "unhide"):
             key = "is_hidden" if platform == "Facebook" else "hide"
-            return self._request("POST", comment_id, data={key: action == "hide"})
-        return self._request("DELETE", comment_id)
+            return self._request("POST", comment_id, data={key: action == "hide"}, **auth)
+        return self._request("DELETE", comment_id, **auth)
 
     def discover(self, handle):
         handle = username(handle)
