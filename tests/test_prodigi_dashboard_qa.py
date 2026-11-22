@@ -24,6 +24,18 @@ def fixture():
     return value,snap,provider,evidence
 
 
+def test_verified_upload_enters_qa_immediately_without_repeating_provider_or_source_reads():
+    value,snap,p,_=fixture();readback=deepcopy(p.data)
+    p.order=lambda _:pytest.fail('Upload already independently read back this order')
+    resolver=lambda _:pytest.fail('Upload already verified this exact source')
+    saved=[]
+    assert qa.enqueue(value,p,resolver,saved.append,verified_order=readback)['status']==qa.WAITING
+    assert len(saved)==1 and not p.writes
+    readback['items'][0]['assets'][0]['url']='https://fixture/wrong'
+    with pytest.raises(ValueError,match='artwork changed'):
+        qa.enqueue(value,p,resolver,saved.append,verified_order=readback)
+
+
 def test_cheapest_and_express_rules_do_not_confuse_price_ties():
     rows=options()
     assert qa.shipping_choice(rows,'standard','standard')=='budget'

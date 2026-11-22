@@ -71,6 +71,28 @@ def test_claim_save_permit_and_independent_source_verification(handoff,monkeypat
     assert len(provider.writes)==1 and provider.data['status']=='draft'
 
 
+def test_live_upload_completion_queues_dashboard_qa_in_the_same_verified_handoff(handoff,monkeypatch):
+    _,provider,value=handoff
+    import prodigi_full_qa as full
+    import prodigi_dashboard_qa as dashboard
+    _,resolver,link,_=browser.context(KEY)
+    provider.mode='live'
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','true')
+    monkeypatch.setattr(browser,'context',lambda _:(provider,resolver,link,False))
+    monkeypatch.setattr(full,'enabled',lambda:True)
+    monkeypatch.setattr(full,'live_enabled',lambda:True)
+    monkeypatch.setattr(browser,'verify_file',lambda *_:True)
+    original=provider.order;reads=[]
+    def order(key):reads.append(key);return original(key)
+    provider.order=order
+    plan=browser.claim();browser.permit(KEY,plan['token'],plan['sha256'])
+    provider.artwork('99','88',render_url(),'a'*32)
+    assert browser.finish(KEY,plan['token'])['status']==dashboard.WAITING
+    assert reads==['99']*4 # claim, Save permit, and two independent post-Save reads.
+    assert sandbox.list_tests()[0]['browser']['verified'] is True
+    assert not sandbox.list_tests()[0].get('submission')
+
+
 @pytest.mark.parametrize('change',[
     lambda p:p.data.update(status='in_production'),
     lambda p:p.data['items'][0].update(sku='different'),

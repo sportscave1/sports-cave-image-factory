@@ -38,6 +38,17 @@ def test_group_waits_for_all_uploaded_numbered_items(pair):
     assert not p.submits
 
 
+def test_immediate_upload_to_qa_still_waits_for_and_revalidates_siblings(pair):
+    a,b,p,_=pair;b['browser']['verified']=False
+    with prep.connect() as c,c.cursor() as q:prep.save(q,b)
+    calls=[]
+    def resolver(aid):
+        calls.append(aid);return prep.resolve(aid)
+    result=qa.enqueue(a,p,resolver,lambda _:None,verified_order=deepcopy(p.data))
+    assert result['status']=='Checking QA' and calls==[2]
+    assert not p.submits
+
+
 def test_one_bad_sibling_cannot_be_hidden_by_passed_qa_on_first_item(pair):
     a,b,p,auth=pair;b['qa']['checks']['image_quality']=False
     with prep.connect() as c,c.cursor() as q:prep.save(q,b)

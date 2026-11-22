@@ -13,3 +13,13 @@ Newly QA-passed drafts take priority over passive countdown polling. A blocked m
 Validation before release: 179 full focused Python tests passed, plus 32 tests after submission-priority/display changes (two additional cases; 181 unique Python cases), and 36 Node tests. Native replacement acceptance and the three remaining live orders are monitored after deployment; do not infer live success from these offline counts.
 
 Live Reset acceptance found the editor dialog can precede its SKU label and image-control canvas. Companion 1.7.32 waits for the exact SKU, saved image details and a fully drawn native removal control. A delayed-hydration regression test passes; this change leaves the guarded Save/readback protocol intact.
+
+## Final live acceptance and server handoff review
+
+SC3529, SC3530 and SC3531 all completed full preparation and reached Submitted with 13/13 dashboard QA checks. SC3530 reuploaded its saved White/XL artwork after the late-editor fix; its QA record was committed before the initial submission intent. Existing submitted orders were not reset. The owner confirmed supplier preferences exclusively control the edit window: do not query its duration or add any duration-dependent automation.
+
+Server-only optimisation reuses the independently verified upload readback for QA queue admission, then revalidates live state again when QA is claimed/permitted and before submission. This removes a redundant order/source read and an intermediate preparation poll. Ready QA is served before another large upload. A successful QA-finish callback wakes the existing owner-gated submission worker immediately, preserving its durable order-wide fence and all-item barrier. The periodic workers remain recovery fallbacks. Companion 1.7.32 needs no reload for these server changes.
+
+Validation for these handoffs: 137 focused Python cases passed, followed by 42 browser/handoff cases including an additional live-context upload-completion test (138 unique cases across those runs). No duplicate live test was performed on the already-submitted SC3530. All client files remain the accepted 1.7.32 release.
+
+Suggested later phases: reuse the same pinned supplier tab for upload and saved-order QA; update only changed Orders rows and expose concise stage timings in backend diagnostics; evaluate repeat-customer consolidation separately. Cross-Shopify-order merge/cancellation remains unimplemented and disabled, as recorded in PRODIGI_ORDER_GROUPS_20261122.md.

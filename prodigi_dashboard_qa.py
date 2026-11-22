@@ -69,10 +69,19 @@ def current(value,provider,resolver):
     return current_for_order(value,provider.order(value['order_id']),resolver)
 
 
-def enqueue(value,provider,resolver,persist):
-    _,order,_=current(value,provider,resolver)
+def enqueue(value,provider,resolver,persist,*,verified_order=None):
+    # Upload completion has just independently verified this exact readback and
+    # source. Reuse it for queue admission, avoiding another provider/file read.
+    # claim(), permit() and submission still independently revalidate everything.
+    if verified_order is None:
+        _,order,_=current(value,provider,resolver)
+        checked_resolver=resolver
+    else:
+        order=verified_order
+        checked_resolver=lambda aid:value['snapshot'] if aid==value['allocation_id'] else resolver(aid)
+        current_for_order(value,order,checked_resolver)
     from prodigi_order_group import members,WaitingForItems
-    try:members(value,order,resolver)
+    try:members(value,order,checked_resolver)
     except WaitingForItems as error:
         value.update(status='Checking QA',message=str(error));persist(value);return value
     value.pop('last_failure',None)

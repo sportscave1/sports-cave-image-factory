@@ -45,14 +45,15 @@ async def tick(request):
         kick()
         from prodigi_browser import claim
         browser = None
-        if request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
+        # Finish already-uploaded orders before starting another large transfer.
+        if request.headers.get('x-sports-cave-orders-qa')=='1':
+            from prodigi_dashboard_qa import claim as qa_claim
+            browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1')
+        if browser is None and request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
             from prodigi_product_browser import claim as product_claim
             browser=await run_in_threadpool(product_claim)
         browser = browser or (await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1')
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
-        if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
-            from prodigi_dashboard_qa import claim as qa_claim
-            browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1')
         if browser is None and request.headers.get('x-sports-cave-orders-documents')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_LEGACY_DOCUMENT_UPLOAD','').lower()=='true':
             from prodigi_document_browser import claim as document_claim
             browser=await run_in_threadpool(document_claim)
@@ -122,6 +123,9 @@ async def dashboard_qa_action(request):
             or not isinstance(body.get('error',''),str) or len(body.get('error',''))>240):raise ValueError('Invalid QA receipt.')
         from prodigi_dashboard_qa import permit,finish
         result=await run_in_threadpool(permit,body['key'],body['token'],body['evidence']) if request.url.path.endswith('/permit') else await run_in_threadpool(finish,body['key'],body['token'],body['evidence'],body.get('error',''))
+        if request.url.path.endswith('/finish') and result.get('status')=='Ready for manual payment':
+            from prodigi_submission import kick
+            kick() # Owner gate and durable order fence still precede any POST.
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:return failure(error)
 
