@@ -4,13 +4,25 @@ Sports Cave event: [VERIFIED SUBJECT / EVENT]
 
 Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow the current brief, job instructions and shared creative standards. For this new-design job, the integration rules below supersede older cutout-only compositing and mandatory whole-subject replacement instructions; photographic identity and factual accuracy remain mandatory. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, photographic layout review, one creative generation, assembly and inspection, then one verified final PSD and matching JSON in Design Studio Review. Display references/artwork and continue without pausing for approval.
 
+**Source brief — research context, not artwork copy**
+
 [INSERT VERIFIED DESIGN BRIEF AND SOURCE CONTEXT]
 
 **1. Research the story, sources and master**
 
 Use authorised read-only Shopify reports for comparable bestsellers and a lower-selling print where supported. If unavailable, use verified storefront bestsellers or approved references in the closest comparable sport or collector collection. Treat unranked products as style references only. Record evidence or gaps in REVIEW NOTES; draw original cues without attributing sales to design.
 
-Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.
+**TIMELESS COLLECTOR ARTWORK — MANDATORY**
+
+Create artwork supporters will want on their wall for years. Keep visible copy to the emotional title, necessary subject names and official edition badge. Do not add scores, match results, statistics, performance totals, record figures, rankings, rounds, periods, clock readings, elapsed/finish/split times, fixture dates or venue/result strips anywhere on the artwork. This includes subtitles, supporting captions, footers, plaques and small print, across every sport and both recent and historical editions. A fact being verified, essential to research or story-defining does not make it printable.
+
+Use news, dates, results, times and statistics only to verify the story, photographs, era and sources, or in non-artwork research notes and metadata. A brief, source article, inherited caption or reference design is research context, never an instruction to print its factual details. Preserve the real venue through imagery rather than a match-report caption. These rules supersede older instructions to add verified supporting facts, a stat/date line or event context, or to preserve existing score/stat/time captions.
+
+Preserve strong emotional titles such as The Right Hand, At the Buzzer and Two Golds. A number integral to verified fan language or a meaningful sporting phrase may remain in the title; this is not permission for a numerical recap. Preserve authentic jersey/car numbers, source-photo markings and the official edition numbering. Never fabricate or alter photographic evidence to remove a number, or enlarge incidental scoreboard information into a designed text feature.
+
+For New Design and full Refresh, omit or remove standalone result/stat/time/event-caption text while preserving the title, subject, story and successful visual direction. Leave the freed space quiet or adjust nearby spacing; do not invent replacement copy or redesign the piece. For targeted Edit, never introduce this copy; when its removal is requested, change only that text and the nearby spacing needed to restore balance, respecting explicit locks on unrelated elements.
+
+Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Express the story through authentic photographs and a strong emotional title. Keep results, scores, statistics, rounds, dates and times in research notes and metadata only, never as supporting artwork copy. This applies equally to routine tributes and defining-event editions.
 
 **STORY-LED COLLECTOR TITLES**
 
@@ -22,7 +34,7 @@ Compare three distinct short candidates: established fan language, original word
 
 Treat the brief's suggested title as one candidate unless explicitly locked. Replace interchangeable phrases such as New Chapter. Reject assumed feelings, invented relationships with a city and wording transferable to five other athletes. A transfer does not prove belonging. Verify nickname, team and era references; original wordplay is editorial, not an established nickname or quotation. Honour approved title locks.
 
-Keep numbers out of headlines, including jersey/car numbers, scores, statistics and dates. Preserve authentic photographic numbers and the official edition badge. Keep factual supporting context separate. Fit the winning words, hero and plaque into one composition. Complete this decision within the existing pre-generation review.
+Keep scores, statistics, rounds, dates and times in non-artwork research context only; never turn them into supporting copy. A number integral to verified fan language or a meaningful sporting phrase may remain when it earns the title. Preserve authentic photographic numbers and the official edition badge. Carry only the winning title into lettering and generation. Fit the winning words, hero and plaque into one composition. Complete this decision within the existing pre-generation review.
 
 Record the chosen title and one sentence explaining its connection to the photograph and supporters in REVIEW NOTES. Refine once within research if needed. Before generation and during final inspection, recheck the title and placement against the story, refining typography within the authorised scope.
 
@@ -80,7 +92,7 @@ Test without glow, shadow or reflection: shape and placement must still express 
 
 Do not reserve an empty “signature slot.” Use the available space by thoughtfully arranging the existing elements. Where beneficial, reposition the official edition badge in relation to the typography, keeping it subordinate to the subject and title, comfortably separated from neighbouring elements, and inside the established safe area. Use the original official badge asset and preserve its design and edition number, with editable tonal styling as allowed by the shared collector-asset rules.
 
-Do not automatically fill space with additional wording, repeated names, statistics, quotes, oversized numbers, extra portraits, decorative symbols or substitute seals. Add supporting context only when it strengthens the sporting story and meets the existing verification requirements. Leave breathing room where it improves the design.
+Do not automatically fill space with additional wording, repeated names, statistics, quotes, oversized numbers, extra portraits, decorative symbols or substitute seals. Keep scores, results, statistics, rounds, dates, times and fixture/event captions out of artwork copy, including supporting text; verification does not make them necessary. Express supporting context through the authentic imagery and emotional title. Leave breathing room where it improves the design.
 
 Choose placement for each artwork individually. Do not force a fixed title-and-badge arrangement across every design.
 
@@ -130,6 +142,8 @@ In the generation request, name the exact venue feature, supporting action, plac
 
 **3. Generate the collector treatment once**
 
+Carry the timeless artwork rule into the image-generation request: render only the locked emotional title and necessary subject names. Do not generate a score, stat, round, time, date or venue/result caption from the brief or reference images. The original edition badge is restored separately below.
+
 Use the badge-hidden reviewed layout as the composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references, original photographs and venue references. Carry the exact sources, final athlete depiction count, supporting role, story-appropriate photographic or abstract treatment and selected tonal hierarchy into the request. Preserve source face, expression, natural skin texture, anatomy, hand-to-equipment relationships, uniform lettering and contact. No glossy skin smoothing or invented figures. Generate the complete flat collector artwork, including a naturally integrated photographic subject, finished title lettering, venue and collector treatment. The reviewed cutout layout is a positioning and scale plan, not the final rendering style. Use the full-resolution originals as identity and detail references. Resolve hair and fabric edges, source-background spill, local light direction, exposure, colour temperature, grain, sharpness, depth, contact shadows and plausible environmental overlap as one coherent scene during this generation. Preserve every facial feature, gaze, expression, age and natural skin detail; retain the real pose, anatomy, kit and equipment. Do not reinterpret identity, beautify faces, invent missing anatomy or hide weak detail under blur or effects. Avoid a sticker-like outline, bright fringe, hard rectangular crop, arbitrary waist fade or a differently lit pasted-on figure. Keep successful natural photographic transitions rather than forcing every subject into an isolated silhouette. Copy the locked title verbatim and repeat the border geometry above, including all four sides, corner returns and calculated inset. Exclude plaque, number, placeholder outlines and seals; generate a continuous natural surface in their reserved area. Keep the output without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
 
 Inspect generation 1 beside the photographs for identity, natural texture and the selected depiction count before accepting its visual direction. Record discrepancies for local source restoration, without another generation or approval pause. Generation 1 becomes the visual master for finishing. On a master copy, keep its untouched original in hidden **ORIGINAL EDITABLE ARTWORK** and a visible working copy beneath **FINAL POLISHED ARTWORK** correction layers. Preserve successful lettering, abstraction, reflections, venue, lighting and border. Never reconstruct working surroundings from stretched samples, generic shapes or broad photographic strips.
@@ -139,6 +153,8 @@ Place the original plaque pair at the recorded layout transform. Limit other PSD
 Retry a transient tool failure once per authorised method. Retry image generation once only if a technical failure produced no usable output. Keep a photo-only fallback clearly provisional. If access requires sign-in or permission, use an already authorised method. For moderation, record the exact stated reason, use only a compliant request within the existing allowance, and never retry by disguising or bypassing a rejection. Defer dependencies; finish independent work. Verify an uncertain write’s exact path, identity and contents before retrying.
 
 **4. Inspect and finish the assembled PSD**
+
+Within the existing final inspection, read every visible word, including small supporting text. Confirm there is no added score, statistic, result, round, timing or fixture/event-caption line. Remove any that slipped through within the authorised scope, preserve the emotional title and successful composition, and recheck the saved render. Do not restore removed captions from references, inherited artwork or generation 1. No extra generation or review stage is required.
 
 **MANDATORY PHOTOGRAPHIC AUTHENTICITY AND INTEGRATION CHECK**
 
