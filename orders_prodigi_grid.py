@@ -104,7 +104,7 @@ def review(saved,row,jpg):
         submission_enabled=(saved or {}).get('_submit_enabled'),
         insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
         shipping_quote=shipping_summary(saved),
-        items=items,can_restart=stopped,allocation_id=str(row.get('edition_order_id') or ''),
+        items=items,can_restart=stopped,can_reset=stopped and not bool((saved or {}).get('submission')),allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
 

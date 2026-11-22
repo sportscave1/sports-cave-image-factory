@@ -6,6 +6,18 @@ const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-browser.js'),'utf8');
 const {prodigiExactRow,prodigiControls,prodigiFilePicker}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiRemovePoint}=require('../windows-upload-companion/prodigi-page.js');
+
+test('Reset locates only the isolated rendered trash control, at its actual scale',()=>{
+ const width=100,height=100,data=new Uint8ClampedArray(width*height*4);
+ for(let y=40;y<52;y++)for(let x=12;x<24;x++)data[(y*width+x)*4+3]=255;
+ const canvas={width,height,getBoundingClientRect:()=>({left:100,top:50,width:200,height:300}),getContext:()=>({getImageData:()=>({data})})};
+ assert.deepEqual(prodigiRemovePoint(canvas),{x:135,y:186.5});
+ data.fill(0);assert.throws(()=>prodigiRemovePoint(canvas),/cannot be identified/);
+ data.fill(255);assert.throws(()=>prodigiRemovePoint(canvas),/cannot be identified/);
+ assert.throws(()=>prodigiRemovePoint({...canvas,width:10000,height:10000}),/unavailable/);
+ assert.throws(()=>prodigiRemovePoint({...canvas,getContext:()=>({getImageData(){throw Error('Tainted')}})}),/Tainted/);
+});
 
 test('remembered URL mode switches to file upload once and waits for its control',async()=>{
   const events=[],input={type:'file'};let mode='url',renders=0;
@@ -60,6 +72,17 @@ test('only exact pinned artwork and supplier order destinations are accepted',()
     {artwork_url:'https://other.example/file.jpg'},{bytes:200*1024*1024},{environment:'other'}]) {
     context.plan={...plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
   }
+});
+
+test('artwork replacement requires an exact live full-Reset handoff',()=>{
+ const {context}=setup();context.plan={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
+  key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,replace_artwork:true};
+ assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ for(const change of [{exact_item:false},{item_id:''},{token:'invalid'},{key:'arbitrary'},{replace_artwork:'true'},
+  {environment:'sandbox',order_url:plan.order_url}]){
+  context.plan={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,replace_artwork:true,...change};
+  assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
 });
 test('the image library may add its own filters without changing the pinned order',()=>{
   const {context}=setup();context.expected=plan.order_url;

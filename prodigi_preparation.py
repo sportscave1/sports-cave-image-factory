@@ -275,11 +275,7 @@ def request(user, allocation_id, order_id='', item_id=''):
     return result
 
 
-def _request(user, allocation_id, order_id='', item_id=''):
-    require_user(user)
-    if not enabled():
-        raise ValueError('Prodigi preparation is disabled pending imported-order acceptance.')
-    allocation_id = int(allocation_id)
+def preparation_snapshot(user,allocation_id):
     preparing=False
     try:
         snapshot = resolve(allocation_id)
@@ -293,6 +289,15 @@ def _request(user, allocation_id, order_id='', item_id=''):
         jobs.enqueue(job,str(user['id']));runtime.start_worker();preparing=True
         snapshot=dict(allocation_id=allocation_id,job_id=job['id'],order_reference=unit.get('shopify_order_name') or unit.get('order_name'),
             number=job['number'],total=job['total'],product=unit.get('product_title'),identity=job['identity'])
+    return snapshot,preparing
+
+
+def _request(user, allocation_id, order_id='', item_id=''):
+    require_user(user)
+    if not enabled():
+        raise ValueError('Prodigi preparation is disabled pending imported-order acceptance.')
+    allocation_id = int(allocation_id)
+    snapshot,preparing=preparation_snapshot(user,allocation_id)
     if order_id or item_id:
         order_id, item_id = identifier(order_id), identifier(item_id)
     value = dict(allocation_id=allocation_id, order_id=order_id, item_id=item_id,

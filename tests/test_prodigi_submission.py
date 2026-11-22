@@ -24,6 +24,20 @@ def ready():
     return value,snap,p,auth
 
 
+def test_fresh_qa_draft_preempts_old_passive_countdown_poll(store,monkeypatch):
+    v,s,p,auth=ready();old=deepcopy(v)
+    old.update(allocation_id=2,order_id='older-countdown',status='Submitted',submission={'lease_until':'2020-01-01T00:00:00+00:00'})
+    monkeypatch.setattr(prep,'resolve',lambda _:s)
+    monkeypatch.setattr(prep,'Client',lambda:p)
+    with prep.connect() as c,c.cursor() as q:
+        prep.save(q,v);prep.save(q,old)
+        q.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',(submit.SETTING,json.dumps(auth)))
+        q.execute("UPDATE app_settings SET updated_at=now()-interval '5 minutes' WHERE key='prodigi_prepare:2'")
+    submit.tick()
+    assert p.submits==['99'] and prep.read(1)['status']=='Submitted'
+    assert prep.read(2)['order_id']=='older-countdown'
+
+
 def test_authorisation_fresh_qa_and_unchanged_order_are_required():
     v,s,p,a=ready();submit.checked(v,p,lambda _:s,a)
     with pytest.raises(ValueError,match='authorisation'):submit.checked(v,p,lambda _:s,{'enabled':False})

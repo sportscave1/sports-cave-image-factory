@@ -36,7 +36,22 @@ async function prodigiFilePicker(getInput,openOptions,findUploadChoice,wait) {
   const choice=await wait(findUploadChoice);choice.click();
   return wait(getInput);
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard};
+function prodigiRemovePoint(canvas) {
+  // Prodigi draws its trash affordance on a separate, transparent public canvas.
+  // Read only that rendered control, never the artwork canvas or application state.
+  const w=canvas.width,h=canvas.height,box=canvas.getBoundingClientRect();
+  if(!Number.isSafeInteger(w)||!Number.isSafeInteger(h)||w<32||h<32||w*h>8000000||box.width<=0||box.height<=0)
+    throw Error('The native remove-image control is unavailable.');
+  const pixels=canvas.getContext('2d').getImageData(0,0,w,h).data;
+  let x0=w,y0=h,x1=-1,y1=-1,count=0;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(pixels[(y*w+x)*4+3]>20){
+    x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);count++;
+  }
+  if(count<16||count>60000||x1-x0<4||y1-y0<4||x1-x0>Math.min(256,w/3)||y1-y0>Math.min(256,h/3))
+    throw Error('The native remove-image icon cannot be identified safely.');
+  return {x:box.left+(x0+x1)/2/w*box.width,y:box.top+(y0+y1)/2/h*box.height};
+}
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiRemovePoint};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -170,10 +185,29 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       const row=await wait(()=>{
         const target=prodigiPinnedRow(document.querySelectorAll('table tbody tr'),plan);
         if(!target)return null;
-        try {button(target,'Upload');return target;} catch {return null;}
+        try {button(target,plan.replace_artwork?'Edit':'Upload');return target;} catch {return null;}
       });
-      button(row,'Upload').click();
+      button(row,plan.replace_artwork?'Edit':'Upload').click();
       stage='editor';
+      if(plan.replace_artwork){
+        const existing=await wait(()=>dialog('Image Editor'));
+        if(!text(existing).includes(plan.sku))throw Error('Reset editor product differs.');
+        stage='reset-image';
+        const remove=await wait(()=>{
+          const found=prodigiControls(dialog('Image Editor'),'canvas[part="remove-canvas"]').filter(visible);
+          if(found.length>1)throw Error('More than one image-removal control is visible.');
+          return found[0]||null;
+        });
+        const point=prodigiRemovePoint(remove);
+        const at={bubbles:true,composed:true,view:window,clientX:point.x,clientY:point.y,button:0};
+        remove.dispatchEvent(new PointerEvent('pointerdown',{...at,buttons:1,pointerType:'mouse',isPrimary:true}));
+        remove.dispatchEvent(new MouseEvent('mousedown',{...at,buttons:1}));
+        remove.dispatchEvent(new PointerEvent('pointerup',{...at,buttons:0,pointerType:'mouse',isPrimary:true}));
+        remove.dispatchEvent(new MouseEvent('mouseup',{...at,buttons:0}));
+        remove.dispatchEvent(new MouseEvent('click',at));
+        // This changes only the unsaved editor. Save is permitted after the
+        // replacement file checksum, source and unchanged supplier readback pass.
+      }
       const editor=await wait(()=>{
         const e=dialog('Image Editor');if(!e)return null;
         try {button(e,'Add image');return e;} catch {return null;}
@@ -227,8 +261,8 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       button(dialog('Image Editor'),'Save').click();
       await wait(()=>!dialog('Image Editor'),120000);
       return {saved:true,stage};
-    } catch {
-      return {saved:false,stage};
+    } catch(error) {
+      return {saved:false,stage,error:String(error.message||'Artwork preparation stopped').slice(0,240)};
     } finally {running=false;}
   }
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{

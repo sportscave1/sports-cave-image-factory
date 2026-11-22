@@ -3,6 +3,14 @@ import pytest
 import orders_prodigi_grid as grid
 
 
+def test_uncertain_submission_keeps_warning_but_never_offers_full_reset():
+    saved=dict(status='Submission uncertain',submission={'intent_at':'recorded'})
+    result=grid.review(saved,{'edition_order_id':1},'')
+    assert result['can_restart'] is True and result['can_reset'] is False
+    saved.pop('submission');saved['status']='Needs review'
+    assert grid.review(saved,{'edition_order_id':1},'')['can_reset'] is True
+
+
 @pytest.fixture
 def screen(monkeypatch):
     import streamlit as st

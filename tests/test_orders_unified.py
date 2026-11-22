@@ -57,12 +57,13 @@ def test_restart_is_authenticated_and_cannot_reset_a_submission(monkeypatch):
     monkeypatch.setattr(files,'_request_user',lambda *a,**k:dict(id='owner'))
     monkeypatch.setattr(prep,'require_user',lambda _:None)
     monkeypatch.setattr(prep,'read',lambda _:dict(status='Submitted',submission={'intent_at':'saved'}))
+    monkeypatch.setattr(prep,'enabled',lambda:True)
     monkeypatch.setattr(prep,'reconcile',lambda *_:pytest.fail('Never clear a supplier submission fence'))
     monkeypatch.setattr('prodigi_submission.kick',lambda:calls.append('readback'))
     client=TestClient(Starlette(routes=[Route('/restart',api.restart_order,methods=['POST'])]))
     assert client.post('/restart',json={'allocation_id':1}).status_code==403 and not calls
     response=client.post('/restart',json={'allocation_id':1},headers={'Origin':'https://fixture.invalid'})
-    assert response.status_code==200 and response.json()['status']=='Submitted' and calls==['readback']
+    assert response.status_code==409 and not calls and 'submission' in response.json()['error'].lower()
 
 
 def test_automatic_mirror_admission_skips_completed_invalid_and_previously_failed(store,monkeypatch):

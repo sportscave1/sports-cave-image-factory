@@ -151,10 +151,14 @@ def tick():
         if not q.fetchone()['acquired']:return
         q.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
           AND NOT COALESCE((value->>'hidden')::boolean,false) AND (
-           (value->>'status'='Ready for manual payment' AND %s AND NOT value ? 'submission') OR
+           (value->>'status'='Ready for manual payment' AND %s AND NOT value ? 'submission'
+            AND COALESCE((value->>'submit_check_after')::timestamptz,'epoch')<now()) OR
            (value->>'status' IN ('Submitting','Submitted','Submission uncertain','Certificate pending') AND updated_at<now()-interval '30 seconds'
             AND COALESCE((value->'submission'->>'lease_until')::timestamptz,'epoch')<now()))
-          ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED""",(bool(authorisation.get('enabled')),))
+          ORDER BY CASE value->>'status' WHEN 'Ready for manual payment' THEN 0
+            WHEN 'Submitting' THEN 1 WHEN 'Submission uncertain' THEN 1
+            WHEN 'Certificate pending' THEN 2 ELSE 3 END,updated_at
+          LIMIT 1 FOR UPDATE SKIP LOCKED""",(bool(authorisation.get('enabled')),))
         row=q.fetchone()
         if not row:return
         value=row['value'];may_post=not bool(value.get('submission'))
@@ -162,7 +166,8 @@ def tick():
             from prodigi_order_group import WaitingForItems,refresh_qa
             try:order=checked(value,prep.Client(),prep.resolve,authorisation)
             except WaitingForItems as error:
-                value['message']=str(error);prep.save(q,value);return
+                value.update(message=str(error),submit_check_after=(datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat())
+                prep.save(q,value);return
             except StaleQA:
                 refresh_qa(q,value);return
             except ValueError as error:

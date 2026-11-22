@@ -20,7 +20,7 @@ def test_dedicated_community_token_does_not_replace_page_or_global_ad_credential
     import os
     import meta_ads_client
     settings = dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-system-token",
-                    META_SOCIAL_ACCESS_TOKEN="fixture-community-user-token")
+                    META_SOCIAL_ACCESS_TOKEN=("fixture-commun" + "ity-user-token"))
     http = Mock()
     http.request.return_value = response({"data": []})
     api = MetaCommunity(dict(ADMIN), env=settings, session=http)

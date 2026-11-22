@@ -48,7 +48,7 @@ async def tick(request):
         if request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
             from prodigi_product_browser import claim as product_claim
             browser=await run_in_threadpool(product_claim)
-        browser = browser or (await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1')
+        browser = browser or (await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1')
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
         if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
             from prodigi_dashboard_qa import claim as qa_claim
@@ -81,11 +81,12 @@ async def browser_action(request):
             if len(raw)>512: raise ValueError('Orders receipt is too large.')
         body=json.loads(raw)
         is_permit=request.url.path.endswith('/permit')
-        if (not isinstance(body,dict) or (set(body)!={'key','token','sha256'} if is_permit else set(body) not in ({'key','token'},{'key','token','stage'})) or
+        if (not isinstance(body,dict) or (set(body)!={'key','token','sha256'} if is_permit else set(body) not in ({'key','token'},{'key','token','stage'},{'key','token','stage','error'})) or
             not all(isinstance(v,str) for v in body.values()) or
+            len(body.get('error',''))>240 or
             not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])):
             raise ValueError('Only an exact Orders handoff receipt is accepted.')
-        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback'):
+        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','reset-image','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback'):
             raise ValueError('Unknown browser stage.')
         import os
         if (re.fullmatch(r'(?:document:)?prodigi_sandbox_test:[a-f0-9-]{36}',body['key']) and
@@ -96,7 +97,8 @@ async def browser_action(request):
             from prodigi_document_browser import permit,finish
         if body['key'].startswith('product:'):
             from prodigi_product_browser import permit,finish
-        result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'))
+        extra={'error':body.get('error','')} if not body['key'].startswith(('product:','document:')) else {}
+        result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'),**extra)
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:
         return failure(error)
@@ -137,21 +139,15 @@ async def restart_order(request):
         body=await request.json()
         if not isinstance(body,dict) or set(body)!={'allocation_id'} or type(body['allocation_id']) is not int or body['allocation_id']<=0:
             raise ValueError('Choose an allocated order to restart.')
-        saved=await run_in_threadpool(queue.read,body['allocation_id'])
-        if not saved:result=await run_in_threadpool(queue.request,user,body['allocation_id'])
-        elif saved.get('submission'):
-            # Restart after submit means readback, never a second Submit.
-            from prodigi_submission import kick
-            kick();result=saved
-        elif saved.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA','Browser uploading','Awaiting browser upload','Awaiting product selection','Selecting product'):result=saved
-        else:result=await run_in_threadpool(queue.reconcile,user,body['allocation_id'])
+        from prodigi_reset import reset_order
+        result=await run_in_threadpool(reset_order,user,body['allocation_id'])
         if result and result.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA'):
             def clear_request_failure():
                 with queue.connect() as c,c.cursor() as q:
                     q.execute("UPDATE app_settings SET value=value || %s::jsonb,updated_at=now() WHERE key=%s",
                         (__import__('json').dumps(dict(active=False,resolved_at=queue.now())),queue.FAILURE_PREFIX+str(body['allocation_id'])))
             await run_in_threadpool(clear_request_failure)
-        return JSONResponse({'status':(result or {}).get('status','Checking QA')},headers=HEADERS)
+        return JSONResponse({'status':(result or {}).get('status','Queued')},headers=HEADERS)
     except Exception as error:return failure(error)
 
 

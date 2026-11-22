@@ -233,9 +233,12 @@ def finish(key,token,evidence,error=''):
     provider,resolver,_,_=browser.context(key)
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
-        value,receipt=authorised(q,key,token)
-        if receipt.get('verified'):return {'status':value['status']}
-        values=batch_values(q,value,receipt,token)
+        try:
+            value,receipt=authorised(q,key,token)
+            if receipt.get('verified'):return {'status':value['status']}
+            values=batch_values(q,value,receipt,token)
+        except (ValueError,PermissionError):
+            return {'status':'Handoff unavailable'} # Reset retired this token; release the desktop queue.
         try:
             if error:raise ValueError(error[:240])
             if not receipt.get('started'):raise ValueError('QA stopped before the shipping permit; recheck this same order.')

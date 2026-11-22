@@ -14,6 +14,8 @@ function prodigiOrderAddress(address,expected) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.replace_artwork!==undefined && (plan.replace_artwork!==true||host!=='dashboard.prodigi.com'||plan.exact_item!==true||
+    !/^prodigi_prepare:\d+$/.test(plan.key)||!/^[A-Za-z0-9_-]{43}$/.test(plan.token)||!/^[A-Za-z0-9-]{1,100}$/.test(plan.item_id)))return false;
   if(plan?.kind==='qa' && plan.items!==undefined && (!Array.isArray(plan.items)||plan.items.length<2||plan.items.length>20||
     plan.exact_item!==true||new Set(plan.items.map(r=>r?.item_id)).size!==plan.items.length||
     !plan.items.some(r=>r?.item_id===plan.item_id&&r.sku===plan.sku&&r.colour===plan.colour)||
@@ -33,13 +35,13 @@ async function prodigiQAReceipt(plan,action,evidence=null,error='') {
   const response=await fetch(osOrigin+'/api/orders-companion/qa/'+action,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({key:plan.key,token:plan.token,evidence,...(error?{error}: {})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
   if(!response.ok)throw Error('The pinned QA receipt could not be verified.');return response.json();
 }
-async function prodigiReceipt(plan,action,stage='readback') {
+async function prodigiReceipt(plan,action,stage='readback',error='') {
   if(plan.kind==='qa')return prodigiQAReceipt(plan,action,null,'Interrupted QA; recheck the saved order without repeating an upload.');
   const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
   if(!token) throw Error('Desktop pairing is unavailable.');
   const response=await fetch(osOrigin+'/api/orders-companion/browser/'+action,{
     method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-    body:JSON.stringify({key:plan.key,token:plan.token,...(action==='permit'?{sha256:plan.sha256}:{stage})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
+    body:JSON.stringify({key:plan.key,token:plan.token,...(action==='permit'?{sha256:plan.sha256}:{stage,...(error?{error:String(error).slice(0,240)}:{})})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
   if(!response.ok) throw Error('The exact draft could not be verified.');
   return response.json();
 }
@@ -73,11 +75,11 @@ async function prodigiBrowserRun(plan) {
     if(!ready) {stage='signin';throw Error('Sign into Prodigi in Edge, then review the same draft.');}
     const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan});
     stage=result?.stage||'page';
-    if(!result?.saved) throw Error('The companion stopped before a confirmed artwork Save.');
+    if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');
     return await prodigiReceipt(plan,'finish',stage);
-  } catch {
+  } catch(error) {
     // Read back this same item; never repeat an uncertain Save or upload.
-    return await prodigiReceipt(plan,'finish',stage);
+    return await prodigiReceipt(plan,'finish',stage,String(error.message||'Browser handoff interrupted'));
   } finally {
     prodigiBrowserTransfer=null;
     await chrome.storage.local.remove('ordersBrowserPending');

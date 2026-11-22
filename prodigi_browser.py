@@ -92,7 +92,7 @@ def has_existing_artwork(item):
     return not empty
 
 
-def claim(*,exact_item_supported=False):
+def claim(*,exact_item_supported=False,reset_supported=False):
     import os
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (LOCK,))
@@ -117,8 +117,11 @@ def claim(*,exact_item_supported=False):
                 continue  # An uncertain upload is never automatically repeated.
             try:
                 snap, order, item = checked(value, provider, resolver, sandbox)
-                if has_existing_artwork(item):
-                    raise ValueError('Existing supplier artwork requires manual preservation.')
+                replace=has_existing_artwork(item)
+                if replace:
+                    from prodigi_reset import replacement_allowed
+                    if not replacement_allowed(value,order,item):raise ValueError('Existing supplier artwork requires an explicit full Reset.')
+                    if not reset_supported or not exact_item_supported:continue
                 colour = (item.get('attributes') or {}).get('color','')
                 matches = [i for i in order['items'] if i.get('sku') == item['sku'] and
                     (i.get('attributes') or {}).get('color','').casefold() == colour.casefold()]
@@ -136,7 +139,7 @@ def claim(*,exact_item_supported=False):
                     item_id=value['item_id'],reference=order['merchantReference'],sku=item['sku'],colour=colour,
                     order_url=f'https://{host}/orders/{value["order_id"]}/detail',artwork_url=url,
                     sha256=snap['output']['sha256'],bytes=snap['output']['bytes'],dimensions=snap['dimensions'],
-                    filename=filename,exact_item=exact_item_supported)
+                    filename=filename,exact_item=exact_item_supported,**({'replace_artwork':True} if replace else {}))
             except Exception as error:
                 value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                     else 'Browser preparation could not be verified. No order was submitted.')
@@ -166,10 +169,12 @@ def permit(key,token,sha256):
         snap,order,item=checked(value,provider,resolver,sandbox)
         if sha256!=snap['output']['sha256']:
             raise ValueError('The companion did not verify this exact numbered JPG.')
-        if (has_existing_artwork(item) or (item.get('assets') or [])!=browser.get('empty_slots',[])
+        from prodigi_reset import replacement_allowed
+        if ((has_existing_artwork(item) and not replacement_allowed(value,order,item)) or (item.get('assets') or [])!=browser.get('empty_slots',[])
                 or business(order,item['id'])!=browser['before']):
             raise ValueError('The supplier order changed before Save.')
         browser.update(started=True,save_permitted_at=prep.now(),companion_sha256=sha256)
+        if value.get('reset_authorisation'):value['reset_authorisation']['used_at']=prep.now()
         save(cur,key,value)  # Commit before the browser is permitted to Save.
     return {'permitted':True}
 
@@ -257,8 +262,8 @@ def verify_original(provider,source,filename,output,dimensions):
     return str(asset['id']),bool(verify_file(asset['url'],output))
 
 
-def finish(key,token,stage='readback'):
-    return _finish(key,lambda cur:authorised(cur,key,token),stage)
+def finish(key,token,stage='readback',error=''):
+    return _finish(key,lambda cur:authorised(cur,key,token),stage,error)
 
 
 def recheck(user,key):
@@ -294,7 +299,7 @@ def resume_unstarted(user,key):
         return value
 
 
-def _finish(key,read_receipt,stage):
+def _finish(key,read_receipt,stage,client_error=''):
     provider,resolver,_,sandbox=context(key)
     with prep.connect() as conn,conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
@@ -306,6 +311,7 @@ def _finish(key,read_receipt,stage):
             # This performs no supplier read/write and never grants Save.
             return {'status':'Handoff unavailable'}
         value['browser']['last_stage']=stage
+        if client_error:value['browser']['client_error']=str(client_error)[:240]
         if value['browser'].get('verified'):
             return {'status':value['status']}
         try:
@@ -348,6 +354,7 @@ def _finish(key,read_receipt,stage):
             value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                 else 'Supplier artwork could not be verified. Review the exact draft; no automatic retry.')
             value['message']+=' Browser stage: '+stage+'.'
+            if client_error:value['message']+=' '+str(client_error)[:240]
             prep.record_failure(value,'artwork.'+stage,value['message'],type(error).__name__)
         save(cur,key,value)
     return {'status':value['status']}
