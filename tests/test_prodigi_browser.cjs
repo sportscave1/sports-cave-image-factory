@@ -224,6 +224,19 @@ test('an ordinary saved artwork handoff never reloads an unexpected editor',asyn
  await vm.runInContext('prodigiBrowserRun(plan)',context);
 });
 
+test('explicit full Reset refreshes the owned stale editor before replacement upload',async()=>{
+ const {context,storage}=setup();let page='old',reloaded=0;
+ const url='https://dashboard.prodigi.com/orders/99/detail';storage.ordersWorkerTabs={[url]:9};
+ context.chrome.tabs.get=async id=>({id,url});
+ context.chrome.tabs.reload=async()=>{page='new';reloaded++;};
+ context.chrome.tabs.sendMessage=async(id,message)=>{
+  if(message.type==='prodigi:ready')return{ready:true,page_instance:page,busy:page==='old'};
+  assert.equal(message.type,'prodigi:upload');assert.equal(page,'new');return{saved:true,stage:'save'};
+ };
+ context.plan={...plan,environment:'live',order_url:url,key:'prodigi_prepare:1',token:'b'.repeat(43),replace_artwork:true,exact_item:true};
+ await vm.runInContext('prodigiBrowserRun(plan)',context);assert.equal(reloaded,1);
+});
+
 test('fresh saved-order QA removes only image-library filters on its owned exact tab',async()=>{
  const {context,storage,calls}=setup();let page='old',navigations=0;
  const url='https://dashboard.prodigi.com/orders/99/detail';
@@ -333,6 +346,21 @@ test('product repair opens only the pinned draft, without downloading artwork or
  for(const change of [{sku:'GLOBAL-CFP-A2-BACKLOADER'},{colour:'Oak'},{environment:'sandbox'},{key:'prodigi_prepare:1'}]){
   context.changed={...context.plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(changed)',context),false);
  }
+});
+
+test('product Reset reloads its exact owned tab after extension reload invalidated the old receiver',async()=>{
+ const {context,storage,calls}=setup();let loaded=false;const events=[];
+ const url='https://dashboard.prodigi.com/orders/99/detail';storage.ordersWorkerTabs={[url]:9};
+ context.chrome.tabs.get=async id=>({id,url});
+ context.chrome.tabs.reload=async()=>{events.push('reload');loaded=true;};
+ context.chrome.tabs.sendMessage=async(id,message)=>{
+  if(!loaded)throw Error('Receiving end does not exist');
+  if(message.type==='prodigi:ready')return{ready:true,page_instance:'new-extension-context'};
+  assert.equal(message.type,'prodigi:product');events.push('select-product');return{stage:'product-readback'};
+ };
+ context.plan={kind:'product',environment:'live',order_id:'99',item_id:'88',order_url:url,key:'product:prodigi_prepare:1',token:'b'.repeat(43),sha256:'a'.repeat(64),reference:'fixture',sku:'GLOBAL-CFP-A1',colour:'Black'};
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+ assert.deepEqual(events,['reload','select-product']);assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
 });
 for(const withCatalogueTab of [true,false])test('blank-product page flow with catalogue tab '+withCatalogueTab+' selects only after permit',async()=>{
  const listeners=[],events=[];let dialogOpen=false,selected=false,inputValue='';

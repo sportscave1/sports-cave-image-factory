@@ -147,7 +147,7 @@ async function prodigiBrowserRun(plan) {
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
       const tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
-      let refresh=plan.kind==='qa'&&plan.fresh_saved_order===true;
+      let refresh=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true);
       if(plan.kind==='merge-hold'&&tab.ordersReused){
         const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
         if(state?.busy!==false)throw Error('Close the unsaved duplicate-order editor before holding it.');
@@ -155,7 +155,7 @@ async function prodigiBrowserRun(plan) {
       }
       // Read verified persisted artwork, not a leftover post-Save editor.
       const ready=await prodigiWaitForPage(tab,refresh,30,plan.order_url);
-      if(!ready)throw Error('Sign into Prodigi before checking the saved order.');
+      if(!ready)throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');
       const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
       return plan.kind==='qa'?await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||''):await prodigiReceipt(plan,'finish',result?.stage||'product',result?.error||'');
     }
@@ -170,7 +170,7 @@ async function prodigiBrowserRun(plan) {
     const tab=await prodigiWorkerTab(plan);
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
     // Only a server-verified empty item may clear a product-selection shell.
-    const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true,60,plan.order_url);
+    const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true||plan.replace_artwork===true,60,plan.order_url);
     if(!ready) {stage='signin';throw Error('Sign into Prodigi in Edge, then review the same draft.');}
     const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
     stage=result?.stage||'page';
