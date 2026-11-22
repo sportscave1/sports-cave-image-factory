@@ -174,3 +174,36 @@ def test_multiple_blank_items_are_targeted_by_id_and_serialised(blank):
     blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
     assert product.finish(p['key'],p['token'])['status']==browser.WAITING
     assert blank.data['items'][1]['sku'] is None
+
+
+@pytest.mark.parametrize('case',['late_correct','changed_address','changed_asset','wrong_colour','charged','exhausted'])
+def test_automatic_product_readback_never_repeats_select_and_requires_full_proof(blank,monkeypatch,case):
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    plan=product.claim();product.permit(plan['key'],plan['token'],plan['sha256'])
+    assert product.finish(plan['key'],plan['token'],'product-readback',error='The expected Prodigi control did not finish loading.')['status']=='Needs review'
+    blank.data['items'][0].update(sku=plan['sku'],attributes={'color':'natural'})
+    if case=='changed_address':blank.data['recipient']={'name':'Synthetic changed recipient'}
+    if case=='changed_asset':blank.data['items'][0]['assets']=[{'url':'https://fixture.invalid/new','printArea':'default'}]
+    if case=='wrong_colour':blank.data['items'][0]['attributes']={'color':'black'}
+    if case=='charged':blank.data['charges']=[{'id':'synthetic-paid'}]
+    if case=='exhausted':
+        v=saved();v['product_readback_recoveries']=2
+        with prep.connect() as c,c.cursor() as q:prep.save(q,v)
+    assert product.recover_readbacks({'id':'fixture'})==(1 if case=='late_correct' else 0)
+    assert bool(saved()['product_browser'].get('verified'))==(case=='late_correct')
+    assert not blank.writes and product.claim() is None
+
+
+def test_product_readback_diagnostics_store_paths_without_values(blank):
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256'])
+    blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
+    blank.data['recipient']={'name':'Never store this value in diagnostic paths'}
+    product.finish(p['key'],p['token'],'product-readback')
+    paths=saved()['product_browser']['readback_changed_fields']
+    assert any(p.startswith('recipient') for p in paths)
+    assert 'Never store' not in str(paths)
+
+
+def test_changed_field_diagnostics_preserve_null_key_presence():
+    assert product.changed_fields({},dict(unexpected=None))==['unexpected']
+    assert product.changed_fields(dict(unexpected=None),{})==['unexpected']

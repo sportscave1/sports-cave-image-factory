@@ -86,6 +86,9 @@ async def tick(request):
             stage='empty_product_editor_recovery'
             from prodigi_browser import recover_selected_empty_editors
             await run_in_threadpool(recover_selected_empty_editors,actor)
+            stage='product_selection_readback_recovery'
+            from prodigi_product_browser import recover_readbacks
+            await run_in_threadpool(recover_readbacks,actor)
         if request.headers.get('x-sports-cave-orders-item-qa')=='1':
             stage='item_qa_recovery'
             from prodigi_dashboard_qa import recover_waiting_item_qa

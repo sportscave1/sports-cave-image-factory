@@ -99,3 +99,69 @@ def test_group_reset_invalidates_sibling_qa_without_resetting_its_saved_artwork(
     sibling=prep.read(2)
     assert sibling['status']=='Checking QA' and sibling['checks']=={}
     assert sibling['browser']['verified'] and not sibling.get('dashboard_qa')
+
+
+@pytest.mark.parametrize('assets',[[],[dict(id='empty-slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)]])
+def test_full_reset_of_unsaved_upload_refreshes_owned_editor_without_replacing_artwork(draft,assets):
+    p,s=draft;p.data['items'][0]['assets']=deepcopy(assets)
+    v=reset.reset_order({'id':'owner'},1)
+    assert 'product_browser' not in v
+    prep.run(v,p,prep.resolve,None,save)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    assert plan['selected_empty_product'] is True
+    assert 'replace_artwork' not in plan and plan['item_id']=='88'
+    assert not prep.read(1)['browser']['started'] and not p.writes
+    assert browser.permit(plan['key'],plan['token'],plan['sha256'])=={'permitted':True}
+
+
+def test_unreset_empty_item_has_no_authority_to_clear_an_unsaved_editor(draft):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=prep.read(1)
+    for key in ('browser','dashboard_qa','write_intent'):v.pop(key,None)
+    v.update(status=browser.WAITING,browser_requested=True);save(v)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    assert 'selected_empty_product' not in plan and 'replace_artwork' not in plan
+    assert not p.writes
+
+
+@pytest.mark.parametrize('change',['address','asset','generation','used'])
+def test_empty_reset_refresh_requires_unchanged_unconsumed_reset_authority(draft,change):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    if change=='address':p.data['recipient']['address']['line1']='Other fixture address'
+    if change=='asset':p.data['items'][0]['assets']=[dict(id='different-empty-slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)]
+    if change in ('generation','used'):
+        v=prep.read(1)
+        if change=='generation':v['reset_generation']='different-generation'
+        else:v['reset_authorisation']['used_at']=prep.now()
+        save(v)
+    assert browser.claim(exact_item_supported=True,reset_supported=True) is None
+    assert prep.read(1)['status']=='Needs review' and not p.writes
+
+
+def test_empty_reset_requires_capable_worker_before_refresh_handoff(draft):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    assert browser.claim(exact_item_supported=True,reset_supported=False) is None
+    assert browser.claim(exact_item_supported=False,reset_supported=True) is None
+    assert not prep.read(1).get('browser') and not p.writes
+
+
+@pytest.mark.parametrize('case',['unchanged','changed_address','saved_asset','used_permit','exhausted'])
+def test_empty_reset_readiness_recovers_once_without_new_owner_click(draft,case):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    browser.finish(plan['key'],plan['token'],'signin',error='Sign into Prodigi in Edge, then review the same draft.')
+    v=prep.read(1)
+    if case=='changed_address':p.data['recipient']['address']['line1']='Changed fixture address'
+    if case=='saved_asset':p.data['items'][0]['assets']=[dict(url='https://fixture/new',printArea='default')]
+    if case=='used_permit':v['browser']['started']=True
+    if case=='exhausted':v['readiness_recoveries']=1
+    save(v)
+    assert browser.recover_selected_empty_editors({'id':'owner'})==(1 if case=='unchanged' else 0)
+    assert not p.writes
+    if case=='unchanged':
+        next_plan=browser.claim(exact_item_supported=True,reset_supported=True)
+        assert next_plan['token']!=plan['token'] and next_plan['selected_empty_product']
+        assert not prep.read(1)['browser']['started'] and prep.read(1)['readiness_recoveries']==1

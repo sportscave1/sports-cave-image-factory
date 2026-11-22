@@ -26,6 +26,22 @@ def business(order, target):
     return result
 
 
+def changed_fields(before,after,path=''):
+    """Bounded structural paths only; never persist customer/provider values."""
+    if before==after:return []
+    if isinstance(before,dict) and isinstance(after,dict):
+        result=[]
+        for k in sorted(before.keys()|after.keys()):
+            field=path+'.'+k if path else k
+            result.extend([field] if k not in before or k not in after else changed_fields(before[k],after[k],field))
+            if len(result)>=40:break
+        return result[:40]
+    if isinstance(before,list) and isinstance(after,list) and len(before)==len(after):
+        return [p for i,(a,b) in enumerate(zip(before,after))
+                for p in changed_fields(a,b,f'{path}[{i}]')][:40]
+    return [path]
+
+
 def checked(value, provider, resolver):
     snap = browser.snapshot(value, resolver, False)
     order = provider.order(value['order_id'])
@@ -117,7 +133,9 @@ def complete(cur,key,value,stage,*,error=''):
         provider,resolver,_,_=browser.context(key)
         snap,order,item=checked(value,provider,resolver)
         prep.validate_order(order,snap,value['order_id'],value['item_id'],binding=value.get('consolidation_binding'))
-        if not receipt['started'] or business(order,item['id'])!=receipt['before']:
+        current_business=business(order,item['id'])
+        receipt['readback_changed_fields']=changed_fields(receipt['before'],current_business)
+        if not receipt['started'] or current_business!=receipt['before']:
             raise ValueError('The supplier order changed outside the permitted product selection.')
         receipt.update(verified=True,verified_at=prep.now(),sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''))
         value.update(status=browser.WAITING,message='Original Fulfilment product and frame verified. Uploading this edition next, before selecting another product.')
@@ -159,3 +177,36 @@ def recheck(user,key,*,allow_expired_blank=False):
         else:
             complete(cur,key,value,'recheck') # Readback only; never repeat an uncertain Select.
         return value
+
+
+def recover_readbacks(user):
+    """Bounded independent readback after Select, never replay the Select click."""
+    prep.require_user(user)
+    from companion_poll_transaction import connection
+    with connection(prep.connect) as c,c.cursor() as q:
+        q.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+          AND value->>'status'='Needs review'
+          AND value->'product_browser'->>'started'='true'
+          AND NOT COALESCE((value->'product_browser'->>'verified')::boolean,false)
+          AND value->'product_browser'->>'client_stage'='product-readback'
+          AND COALESCE((value->>'product_readback_recoveries')::int,0)<2
+          AND NOT value ? 'submission' AND NOT value ? 'browser'
+          AND NOT COALESCE((value->>'hidden')::boolean,false)
+          ORDER BY updated_at LIMIT 2""")
+        keys=[r['key'] for r in q.fetchall()]
+    return sum(_recover_readback(key) for key in keys)
+
+
+@stages.stale_result(False)
+def _recover_readback(key):
+    with stages.edit(browser.LOCK) as q:
+        value=browser.read(q,key);receipt=value.get('product_browser') or {}
+        if (value.get('status')!='Needs review' or not receipt.get('started') or receipt.get('verified')
+            or receipt.get('client_stage')!='product-readback' or value.get('submission') or value.get('browser')
+            or value.get('product_readback_recoveries',0)>=2):return False
+        value['product_readback_recoveries']=value.get('product_readback_recoveries',0)+1
+        # Keep the original receipt and consumed permit for independent proof.
+        complete(q,key,value,'product-readback')
+        if receipt.get('verified'):value.pop('last_failure',None)
+        browser.save(q,key,value)
+        return receipt.get('verified') is True

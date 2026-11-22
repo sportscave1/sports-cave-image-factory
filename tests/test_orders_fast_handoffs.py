@@ -85,6 +85,7 @@ def test_only_fixed_companion_can_recover_known_empty_editor_failure(monkeypatch
     monkeypatch.setattr('prodigi_submission.kick',lambda:None)
     monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
     monkeypatch.setattr('prodigi_browser.recover_selected_empty_editors',lambda user:calls.append(user))
+    monkeypatch.setattr('prodigi_product_browser.recover_readbacks',lambda user:0)
     async def ready(*_):return {'key':'fixture'}
     monkeypatch.setattr(api,'ready_handoff',ready)
     headers={'Authorization':'Bearer '+'x'*43}
