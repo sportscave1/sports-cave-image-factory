@@ -6,7 +6,7 @@ contexts. Completion binds the supplier render to its uploaded asset metadata,
 verifies placement and compares original bytes when the supplier exposes them.
 """
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import hmac
 import json
@@ -342,10 +342,15 @@ def recover_selected_empty_editors(user,*,page_supported=False):
                   AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation'))
               OR (%s AND value->>'status'='Browser uploading'
                   AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation')
-                  AND COALESCE(value->>'readiness_recovery_policy','')<>'fresh-owned-context-v1'))
+                  AND COALESCE(value->>'readiness_recovery_policy','')<>'fresh-owned-context-v1')
+              OR (%s AND value->'browser'->>'last_stage'='permit'
+                  AND value->>'message' LIKE 'Prodigi returned HTTP 429;%%'
+                  AND COALESCE((value->>'api_rate_recoveries')::int,0)<1
+                  AND COALESCE((value->>'api_rate_retry_at')::timestamptz,'epoch')<now()
+                  AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation')))
             AND NOT value ? 'submission'
             AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 2""",(page_supported,page_supported,page_supported))
+            ORDER BY updated_at LIMIT 2""",(page_supported,page_supported,page_supported,page_supported))
         keys=[row['key'] for row in cur.fetchall()]
     recovered=0
     for key in keys:
@@ -374,6 +379,9 @@ def _recover_ready_editor(user,key,*,page_supported=False):
                 stalled=age>300 and stale and seen.get('claim')==receipt.get('token_hash')
             except (KeyError,TypeError,ValueError):pass
         if (value.get('status')!='Needs review' and not stalled) or receipt.get('started') is not False or value.get('submission'):return False
+        rate_wait=(page_supported and receipt.get('last_stage')=='permit'
+                   and value.get('message','').startswith('Prodigi returned HTTP 429;')
+                   and value.get('api_rate_recoveries',0)<1)
         readiness=stalled or receipt.get('last_stage') in ('signin','readiness') and receipt.get('client_error') in (
             'Sign into Prodigi in Edge, then review the same draft.',
             'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
@@ -384,6 +392,11 @@ def _recover_ready_editor(user,key,*,page_supported=False):
             _,order,item=checked(value,provider,resolver,sandbox)
             from prodigi_reset import replacement_allowed
             if not ((value.get('product_browser') or {}).get('verified') is True or replacement_allowed(value,order,item)):return False
+        elif rate_wait:
+            if value.get('api_rate_retry_at') and datetime.fromisoformat(value['api_rate_retry_at'])>datetime.now(timezone.utc):return False
+            _,order,item=checked(value,provider,resolver,sandbox)
+            from prodigi_reset import replacement_allowed
+            if not ((value.get('product_browser') or {}).get('verified') is True or replacement_allowed(value,order,item)):return False
         elif not (receipt.get('last_stage')=='page' and receipt.get('client_error')=='An existing editor requires manual review.'
                   and (value.get('product_browser') or {}).get('verified') is True):return False
         # Nested stage would lose the outer observation. Perform its exact checks here.
@@ -391,6 +404,7 @@ def _recover_ready_editor(user,key,*,page_supported=False):
         if (has_existing_artwork(item) or (item.get('assets') or [])!=receipt.get('empty_slots',[])
             or business(order,item['id'])!=receipt.get('before')):return False
         value.setdefault('browser_history',[]).append({k:receipt.get(k) for k in ('claimed_at','filename','started','last_stage')})
+        if rate_wait:value['api_rate_recoveries']=value.get('api_rate_recoveries',0)+1
         if readiness:
             value['readiness_recoveries']=attempts+1
             if page_supported:value['readiness_recovery_policy']=READINESS_POLICY
@@ -457,6 +471,9 @@ def _finish(key,read_receipt,stage,client_error=''):
         except Exception as error:
             value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                 else 'Supplier artwork could not be verified. Review the exact draft; no automatic retry.')
+            retry_after=getattr(error,'retry_after',None)
+            if isinstance(retry_after,(int,float)) and 0<=retry_after<86400:
+                value['api_rate_retry_at']=(datetime.now(timezone.utc)+timedelta(seconds=max(5,retry_after))).isoformat()
             value['message']+=' Browser stage: '+stage+'.'
             if client_error:value['message']+=' '+str(client_error)[:240]
             prep.record_failure(value,'artwork.'+stage,value['message'],type(error).__name__)

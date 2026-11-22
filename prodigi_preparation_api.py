@@ -152,7 +152,7 @@ async def browser_action(request):
             len(body.get('error',''))>240 or
             not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])):
             raise ValueError('Only an exact Orders handoff receipt is accepted.')
-        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','reset-image','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback','merge-hold','merge-hold-confirmed'):
+        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','readiness','page','row','editor','reset-image','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback','merge-hold','merge-hold-confirmed'):
             raise ValueError('Unknown browser stage.')
         import os
         if (re.fullmatch(r'(?:document:)?prodigi_sandbox_test:[a-f0-9-]{36}',body['key']) and

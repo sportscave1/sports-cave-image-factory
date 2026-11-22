@@ -6,6 +6,12 @@ duplicate cancellation requires the server consolidation workflow and readback.
 import os
 import re
 import requests
+import time
+from datetime import datetime,timezone
+from email.utils import parsedate_to_datetime
+from threading import BoundedSemaphore
+
+_READ_SLOTS=BoundedSemaphore(2)
 from urllib.parse import urlencode
 
 
@@ -18,6 +24,14 @@ def identifier(value):
     if not re.fullmatch(r'[A-Za-z0-9-]{1,100}', value):
         raise ProdigiError('A verified Prodigi order/item ID is required.')
     return value
+
+
+def read_retry_delay(response,attempt=0):
+    raw=(getattr(response,'headers',{}) or {}).get('Retry-After','')
+    try:return max(0,float(raw))
+    except (TypeError,ValueError):
+        try:return max(0,(parsedate_to_datetime(raw)-datetime.now(timezone.utc)).total_seconds())
+        except (TypeError,ValueError,OverflowError):return 1*(2**attempt)
 
 
 class Client:
@@ -59,15 +73,27 @@ class Client:
         if method == 'PATCH' and any(os.getenv(flag, '').lower() != 'true' for flag in
                 ('SPORTS_CAVE_PRODIGI_PREPARE', 'SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED')):
             raise ProdigiError('Artwork writes are disabled pending imported-order acceptance.')
-        try:
-            response = self.transport.request(method, 'https://api.prodigi.com/v5' + path,
-                headers={'X-API-Key': self.key, 'Content-Type': 'application/json'},
-                json=body, timeout=(5, 20), allow_redirects=False)
-        except requests.RequestException:
-            raise ProdigiError('Prodigi did not acknowledge the request. Reconcile the same item before retrying.') from None
+        attempts=3 if method=='GET' else 1
+        for attempt in range(attempts):
+            try:
+                def send():
+                    return self.transport.request(method, 'https://api.prodigi.com/v5' + path,
+                        headers={'X-API-Key': self.key, 'Content-Type': 'application/json'},
+                        json=body, timeout=(5, 20), allow_redirects=False)
+                if method=='GET':
+                    with _READ_SLOTS:response=send()
+                else:response=send()
+            except requests.RequestException:
+                raise ProdigiError('Prodigi did not acknowledge the request. Reconcile the same item before retrying.') from None
+            if method!='GET' or response.status_code!=429 or attempt==attempts-1:break
+            delay=read_retry_delay(response,attempt)
+            if delay>15:break # Do not disregard a longer supplier cooldown or exceed the action deadline.
+            time.sleep(delay)
         if response.status_code not in (200, 201):
             # Provider bodies can contain addresses, signed URLs and credentials.
-            raise ProdigiError(f'Prodigi returned HTTP {response.status_code}; no replacement order was created.')
+            error=ProdigiError(f'Prodigi returned HTTP {response.status_code}; no replacement order was created.')
+            if method=='GET' and response.status_code==429:error.retry_after=read_retry_delay(response,attempt)
+            raise error
         envelope = response.json()
         data = envelope.get('data')
         if listing:

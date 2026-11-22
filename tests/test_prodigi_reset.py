@@ -197,3 +197,21 @@ def test_fresh_context_worker_can_retire_only_stale_unused_empty_handoff(draft,c
         q.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',('orders_runtime:1',json.dumps(record)))
     assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==(1 if case=='stale' else 0)
     assert not p.writes
+
+
+@pytest.mark.parametrize('case',['unchanged','used_permit','changed_asset','exhausted','cooldown'])
+def test_rate_limited_unused_save_recovers_without_replaying_a_permit(draft,case):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    browser.finish(plan['key'],plan['token'],'permit',error='The draft changed before Save.')
+    v=prep.read(1);v['message']='Prodigi returned HTTP 429; no replacement order was created. Browser stage: permit.'
+    if case=='used_permit':v['browser']['started']=True
+    if case=='changed_asset':p.data['items'][0]['assets']=[dict(url='https://fixture/other',printArea='default')]
+    if case=='exhausted':v['api_rate_recoveries']=1
+    if case=='cooldown':
+        from datetime import datetime,timezone,timedelta
+        v['api_rate_retry_at']=(datetime.now(timezone.utc)+timedelta(minutes=1)).isoformat()
+    save(v)
+    assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==(1 if case=='unchanged' else 0)
+    assert not p.writes
