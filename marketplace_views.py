@@ -48,6 +48,7 @@ def shell(content, *, title, description, path=BASE_PATH, schema=None, nonce='',
           is_home=False, header_search=False, search_value='', search_filters=None):
     canonical = PUBLIC_ORIGIN + path
     schema = schema or {'@context': 'https://schema.org', '@type': 'WebPage', 'name': title, 'url': canonical}
+    home_styles = f'<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-restore.css?v=1">' if is_home else ''
     preload = f'<link rel="preload" as="image" href="{BASE_PATH}/assets/collector-room-1600.webp" imagesrcset="{BASE_PATH}/assets/collector-room-800.webp 800w, {BASE_PATH}/assets/collector-room-1600.webp 1600w" imagesizes="100vw">' if is_home else ''
     return f'''<!doctype html><html lang="en-AU"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -58,7 +59,7 @@ def shell(content, *, title, description, path=BASE_PATH, schema=None, nonce='',
 <meta property="og:description" content="{h(description)}"><meta property="og:url" content="{h(canonical)}">
 <meta property="og:image" content="{PUBLIC_ORIGIN}{BASE_PATH}/assets/collector-room-1600.webp"><meta property="og:image:width" content="1600"><meta property="og:image:height" content="800"><meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.png"><link rel="preconnect" href="https://www.sportscaveshop.com" crossorigin>{preload}
-<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace.css?v=2"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-home.css?v=3"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-collect.css?v=1">
+<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace.css?v=2"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-home.css?v=3"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-collect.css?v=1">{home_styles}
 <script type="application/ld+json" nonce="{h(nonce)}">{jsonld(schema)}</script>
 <script src="{BASE_PATH}/assets/marketplace.js?v=3" defer></script></head>
 <body class="{'is-home' if is_home else 'inner-page'}"><a class="skip" href="#main">Skip to content</a>
@@ -112,15 +113,31 @@ def home(config, rows, query, nonce='', unavailable=False, browse=False):
     if catalogue_mode:
         content = f'<main id="main" class="browse-page">{collection}</main>'
     else:
+        sport_links = ''.join(f'<a href="{h(browse_url(sport=s))}">{h(s)}</a>' for s in SPORTS)
+        shortcuts = ''.join(f'<a href="{h(browse_url(category=key))}">{h(label)}</a>' for key, label in CATEGORIES.items())
+        tabs = f'<nav class="collection-tabs" aria-label="Item category"><a class="collection-tab active" href="{BASE_PATH}/browse" aria-current="page">New finds</a>' + ''.join(f'<a class="collection-tab" href="{h(browse_url(category=key))}">{h(label)}</a>' for key, label in CATEGORIES.items()) + '</nav>'
+        home_cards = cards
+        if not visible:
+            tiles = ''.join(f'<a class="empty-category" href="{h(browse_url(category=key))}">{icon({"memorabilia":"frame","jerseys":"jersey","cards":"cards"}[key])}<span>{h(label)}</span></a>' for key, label in CATEGORIES.items())
+            home_cards = f'<div class="opening-collection"><div class="opening-categories">{tiles}</div><div class="opening-copy"><h3>{h(heading)}</h3><p>{h(detail)}</p>{action}</div></div>'
+        home_collection = f'<section id="finds" class="catalogue section-width" aria-labelledby="finds-heading"><div class="catalogue-heading"><h2 id="finds-heading">From one collection to the next.</h2>{count}</div>{tabs}<div class="listing-grid">{home_cards}</div><nav class="pager" aria-label="Collection pages">{pager}</nav></section>'
+        # The marketplace has not enabled checkout or recorded completed sales.
+        # Approvals and enquiries are not sales. Shop totals do not belong here.
+        sales_total = 0
+        available_total = '—' if unavailable else str(len(rows))
         content = f'''<main id="main" class="home"><section class="hero" aria-labelledby="hero-heading"><img class="hero-photo" src="{BASE_PATH}/assets/collector-room-1600.webp" srcset="{BASE_PATH}/assets/collector-room-800.webp 800w, {BASE_PATH}/assets/collector-room-1600.webp 1600w" sizes="100vw" alt="" width="1600" height="800" fetchpriority="high" decoding="async"><div class="hero-shade"></div>
-<div class="hero-copy"><p class="eyebrow">SPORTS CAVE MARKETPLACE</p><h1 id="hero-heading">{h(config['headline'])}</h1><p class="hero-description">{h(config['description'])}</p><div class="hero-actions"><a class="button gold" href="{BASE_PATH}/sell">Sell an item</a><a class="hero-collection-link" href="#finds">Meet the collection <span aria-hidden="true">↓</span></a></div></div><p class="hero-signoff">For the love of the game.</p></section>
-<div class="founding-line section-width"><span>Free founding listings</span><span>Photos + recorded video</span><span>Australian collectors</span></div>{collection}
-<section class="collector-steps section-width" aria-label="How it works"><div><span>01</span><p>See every detail.</p></div><div><span>02</span><p>Ask the seller.</p></div><div><span>03</span><p>Make it yours.</p></div><a class="text-link" href="{BASE_PATH}/terms">How it works</a></section>
-<section class="payment-strip section-width"><div class="payment-word">PayPal</div><div><h2>A little more confidence.</h2><p>Learn about Goods &amp; Services and eligible Buyer Protection. Marketplace checkout is coming next.</p></div><a class="text-link" href="{BASE_PATH}/buyer-protection">Buyer Protection <span aria-hidden="true">↗</span></a></section></main>'''
+<div class="hero-copy"><p class="eyebrow">SPORTS CAVE MARKETPLACE</p><h1 id="hero-heading">{h(config['headline'])}</h1><p class="hero-description">{h(config['description'])}</p>{search_form(hero=True)}<nav class="hero-shortcuts" aria-label="Popular collections">{shortcuts}</nav></div><p class="hero-signoff">For the love of the game.</p></section>
+<section class="marketplace-facts" aria-label="Marketplace-only totals"><div><strong>{sales_total}</strong><span>Total sales</span></div><div><strong>{h(available_total)}</strong><span>Items for sale</span></div><div><strong>$0</strong><span>Founding listing fees</span></div></section>
+<nav class="sports-strip section-width" aria-label="Browse by sport"><span>Follow your game</span><div>{sport_links}</div></nav>{home_collection}
+<section class="buying section-width" aria-labelledby="buying-heading"><h2 id="buying-heading">Collecting. Made personal.</h2><div class="buying-columns"><div>{icon('tag')}<h3>Collector to collector</h3><p>Find a piece from someone who shares your passion.</p></div><div>{icon('chat')}<h3>Ask before you buy</h3><p>Send an enquiry while your contact details stay private.</p></div><div>{icon('review')}<h3>A considered collection</h3><p>Every listing is reviewed before it goes live.</p></div></div><a class="text-link" href="{BASE_PATH}/terms">How it works</a></section>
+<section class="payment-strip section-width"><div class="payment-word">PayPal</div><div><h2>A little more confidence.</h2><p>Learn about Goods &amp; Services and eligible Buyer Protection. Marketplace checkout is coming next.</p></div><a class="text-link" href="{BASE_PATH}/buyer-protection">Buyer Protection <span aria-hidden="true">↗</span></a></section>
+<section class="seller-strip section-width"><div><p class="eyebrow">MAKE ROOM FOR WHAT’S NEXT</p><h2>Your collection. A new chapter.</h2></div><a class="button gold" href="{BASE_PATH}/sell">Sell an item</a></section></main>'''
     schema = {'@context': 'https://schema.org', '@graph': [
         {'@type': 'Organization', '@id': PUBLIC_ORIGIN + BASE_PATH + '#organisation', 'name': 'Sports Cave', 'url': SHOP_URL, 'logo': PUBLIC_ORIGIN + BASE_PATH + '/assets/logo.webp'},
         {'@type': 'WebSite', 'name': 'Sports Cave Marketplace', 'url': PUBLIC_ORIGIN + BASE_PATH},
         {'@type': 'CollectionPage', 'name': 'Sports Cave Marketplace', 'url': PUBLIC_ORIGIN + BASE_PATH + ('/browse' if catalogue_mode else ''), 'mainEntity': {'@type': 'ItemList', 'numberOfItems': len(visible), 'itemListElement': [{'@type': 'ListItem', 'position': (page - 1) * 12 + i + 1, 'url': PUBLIC_ORIGIN + listing_url(row), 'name': row['title']} for i, row in enumerate(visible)]}}]}
+    if not catalogue_mode:
+        schema['@graph'][1]['potentialAction'] = {'@type': 'SearchAction', 'target': {'@type': 'EntryPoint', 'urlTemplate': PUBLIC_ORIGIN + BASE_PATH + '/browse?q={search_term_string}'}, 'query-input': 'required name=search_term_string'}
     return shell(content, title='The Collection | Sports Cave Marketplace' if catalogue_mode else 'Sports Cave Marketplace | Memorabilia, Jerseys & Trading Cards', description=config['description'], path=BASE_PATH + ('/browse' if catalogue_mode else ''), schema=schema, nonce=nonce, noindex=bool(search or category or sport or sort != 'newest' or page != 1), is_home=not catalogue_mode)
 
 

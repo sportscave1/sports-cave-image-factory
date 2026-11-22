@@ -80,6 +80,7 @@ async def asset(request):
     paths = {'marketplace.css': (ASSET_ROOT / 'marketplace.css', 'text/css'),
              'marketplace-home.css': (ASSET_ROOT / 'marketplace-home.css', 'text/css'),
              'marketplace-collect.css': (ASSET_ROOT / 'marketplace-collect.css', 'text/css'),
+             'marketplace-restore.css': (ASSET_ROOT / 'marketplace-restore.css', 'text/css'),
              'collector-room-1600.webp': (ASSET_ROOT / 'collector-room-1600.webp', 'image/webp'),
              'collector-room-800.webp': (ASSET_ROOT / 'collector-room-800.webp', 'image/webp'),
              'marketplace.js': (ASSET_ROOT / 'marketplace.js', 'text/javascript'),
