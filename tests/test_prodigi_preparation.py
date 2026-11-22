@@ -238,6 +238,10 @@ def test_normal_dashboard_link_and_companion_login_isolation():
     from upload_companion_page import extension_package
     with zipfile.ZipFile(io.BytesIO(extension_package())) as archive:
         assert 'orders-queue.js' in archive.namelist()
+        assert 'orders-wake.js' in archive.namelist()
+        import re
+        imports=re.findall(r"importScripts\('([^']+)'\)",archive.read('worker.js').decode())
+        assert set(imports)<=set(archive.namelist())
 
 
 def test_artwork_transfer_verifies_archived_bytes_before_issuing_durable_link(monkeypatch):

@@ -207,7 +207,9 @@ async def order_status(request):
         return JSONResponse({'orders':{aid:review(saved.get(aid),{'edition_order_id':aid},'') for aid in ids}},headers=HEADERS)
     except Exception as error:return failure(error)
 
-ROUTES = (('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+from orders_wake import listen as orders_notifications
+
+ROUTES = (('/api/orders-companion/notifications',orders_notifications,('GET',)),('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),
