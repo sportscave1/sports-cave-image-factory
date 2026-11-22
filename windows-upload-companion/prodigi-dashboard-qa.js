@@ -35,7 +35,10 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     return rows;
   }
   async function inspectInserts(plan){
-    pin(plan);uniqueButton(document.querySelector('main'),'View & edit').click();
+    pin(plan);
+    // The artwork row can render before Prodigi loads the inserts controls.
+    const edit=await wait(()=>{try{return uniqueButton(document.querySelector('main'),'View & edit');}catch{return null;}});
+    pin(plan);edit.click();
     let saved=[];
     try {
       const modal=await wait(insertDialog);
