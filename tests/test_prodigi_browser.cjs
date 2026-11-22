@@ -7,6 +7,20 @@ const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-browser.js'),'utf8');
 const {prodigiExactRow,prodigiControls,prodigiFilePicker}=require('../windows-upload-companion/prodigi-page.js');
 const {prodigiRemovePoint}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiResetControl}=require('../windows-upload-companion/prodigi-page.js');
+
+test('Reset waits for the late SKU, image details and drawn control before any click',async()=>{
+ let step=0;const pixels=new Uint8ClampedArray(100*100*4);
+ const canvas={width:100,height:100,getBoundingClientRect:()=>({left:0,top:0,width:100,height:100}),getContext:()=>({getImageData:()=>({data:pixels})})};
+ const editor={textContent:'Image Editor',querySelectorAll:s=>s==='canvas[part="remove-canvas"]'?[canvas]:[]};
+ const wait=async check=>{for(step=0;step<6;step++){
+  editor.textContent=step<2?'Image Editor':step<3?'GLOBAL-CFP-A1':'GLOBAL-CFP-A1 Uploaded image:';
+  if(step===4)for(let y=30;y<42;y++)for(let x=40;x<52;x++)pixels[(y*100+x)*4+3]=255;
+  const found=check();if(found)return found;
+ }throw Error('Timeout');};
+ const result=await prodigiResetControl(()=>step?editor:null,'GLOBAL-CFP-A1',wait,e=>e.textContent,()=>true);
+ assert.equal(step,4);assert.equal(result.canvas,canvas);assert.deepEqual(result.point,{x:45.5,y:35.5});
+});
 
 test('Reset locates only the isolated rendered trash control, at its actual scale',()=>{
  const width=100,height=100,data=new Uint8ClampedArray(width*height*4);

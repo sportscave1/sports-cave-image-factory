@@ -51,7 +51,19 @@ function prodigiRemovePoint(canvas) {
     throw Error('The native remove-image icon cannot be identified safely.');
   return {x:box.left+(x0+x1)/2/w*box.width,y:box.top+(y0+y1)/2/h*box.height};
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiRemovePoint};
+async function prodigiResetControl(getEditor,sku,wait,text,visible) {
+  let last='Waiting for '+sku+' and saved image details.';
+  try {return await wait(()=>{
+    const editor=getEditor();
+    if(!editor||!text(editor).includes(sku)||!text(editor).includes('Uploaded image:'))return null;
+    const controls=prodigiControls(editor,'canvas[part="remove-canvas"]').filter(visible);
+    if(controls.length>1){last='More than one image-removal control is visible.';throw Error(last);}
+    if(!controls.length){last='Waiting for the image-removal control to render.';return null;}
+    try {return {canvas:controls[0],point:prodigiRemovePoint(controls[0])};}
+    catch(error){last=String(error.message||'Native image control unavailable');if(error.name==='SecurityError')throw error;return null;}
+  });}catch{throw Error('Reset editor: '+last);}
+}
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiRemovePoint,prodigiResetControl};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -190,15 +202,8 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       button(row,plan.replace_artwork?'Edit':'Upload').click();
       stage='editor';
       if(plan.replace_artwork){
-        const existing=await wait(()=>dialog('Image Editor'));
-        if(!text(existing).includes(plan.sku))throw Error('Reset editor product differs.');
         stage='reset-image';
-        const remove=await wait(()=>{
-          const found=prodigiControls(dialog('Image Editor'),'canvas[part="remove-canvas"]').filter(visible);
-          if(found.length>1)throw Error('More than one image-removal control is visible.');
-          return found[0]||null;
-        });
-        const point=prodigiRemovePoint(remove);
+        const {canvas:remove,point}=await prodigiResetControl(()=>dialog('Image Editor'),plan.sku,wait,text,visible);
         const at={bubbles:true,composed:true,view:window,clientX:point.x,clientY:point.y,button:0};
         remove.dispatchEvent(new PointerEvent('pointerdown',{...at,buttons:1,pointerType:'mouse',isPrimary:true}));
         remove.dispatchEvent(new MouseEvent('mousedown',{...at,buttons:1}));

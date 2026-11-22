@@ -1,4 +1,4 @@
-# Orders companion full Reset - 1.7.31
+# Orders companion full Reset - 1.7.32
 
 Reset replaces the old QA-only Restart in the compact Orders review panel. It creates one new preparation generation for the same allocation, edition and supplier item. It resolves the current source, verifies/selects the canonical product when blank, reuploads the current numbered JPG and runs fresh complete QA. It reuses a retained JPG when current; a missing/current-master JPG is enqueued through the existing edition worker.
 
@@ -11,3 +11,5 @@ Reset rejects every submitted/uncertain submission, order-wide submission fence,
 Newly QA-passed drafts take priority over passive countdown polling. A blocked multi-item draft has a bounded submission-check cooldown, so it cannot monopolise that priority. New-order admission remains automatic in existing bounded batches; failures requiring a PSD mapping/repair or supplier correction are surfaced instead of silently retried.
 
 Validation before release: 179 full focused Python tests passed, plus 32 tests after submission-priority/display changes (two additional cases; 181 unique Python cases), and 36 Node tests. Native replacement acceptance and the three remaining live orders are monitored after deployment; do not infer live success from these offline counts.
+
+Live Reset acceptance found the editor dialog can precede its SKU label and image-control canvas. Companion 1.7.32 waits for the exact SKU, saved image details and a fully drawn native removal control. A delayed-hydration regression test passes; this change leaves the guarded Save/readback protocol intact.
