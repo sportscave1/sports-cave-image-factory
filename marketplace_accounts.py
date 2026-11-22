@@ -35,8 +35,8 @@ def prune_expired(conn, kind):
         raise ValueError('Invalid temporary record type.')
     conn.execute('''DELETE FROM crm_runtime_state WHERE key IN (
         SELECT key FROM crm_runtime_state WHERE key > %s AND key < %s
-        AND COALESCE((value->>'expires')::double precision,0) < %s ORDER BY key LIMIT 25)''',
-        (PREFIX + kind, PREFIX + kind + '~', time.time()))
+        AND key LIKE %s AND COALESCE((value->>'expires')::double precision,0) < %s ORDER BY key LIMIT 25)''',
+        (PREFIX + kind, PREFIX + kind + 'z', PREFIX + kind + '%', time.time()))
 
 
 def password(value):

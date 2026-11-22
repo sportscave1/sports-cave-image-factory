@@ -54,8 +54,10 @@ class FakeConnection:
         if 'pg_advisory_xact_lock' in sql:
             self.rows = []
         elif 'DELETE FROM crm_runtime_state WHERE key IN' in sql:
+            compare = self.database.collation
             old = [k for k, v in sorted(self.database.values.items())
-                   if args[0] < k < args[1] and v.get('expires', 0) < args[2]][:25]
+                   if compare(args[0]) < compare(k) < compare(args[1])
+                   and k.startswith(args[2].removesuffix('%')) and v.get('expires', 0) < args[3]][:25]
             for key in old:
                 del self.database.values[key]
             self.rows = []
@@ -78,9 +80,13 @@ class FakeConnection:
             self.rows = [{'value': deepcopy(v)} for k, v in self.database.values.items() if k.startswith(args[0].removesuffix('%'))
                          and ("value->>'status'='published'" not in sql or v['status'] == 'published')]
         elif 'WHERE key > %s AND key < %s' in sql:
-            pairs = [(k, v) for k, v in self.database.values.items() if args[0] < k < args[1]]
-            pairs.sort(key=lambda pair: pair[0], reverse='updated_at DESC' in sql)
-            self.rows = [{'value': deepcopy(v)} for k, v in pairs[:args[2]]]
+            compare = self.database.collation
+            guarded = 'AND key LIKE %s' in sql
+            pairs = [(k, v) for k, v in self.database.values.items()
+                     if compare(args[0]) < compare(k) < compare(args[1])
+                     and (not guarded or k.startswith(args[2].removesuffix('%')))]
+            pairs.sort(key=lambda pair: compare(pair[0]), reverse='updated_at DESC' in sql)
+            self.rows = [{'value': deepcopy(v)} for k, v in pairs[:args[-1]]]
         else:
             raise AssertionError('Unexpected query: ' + sql)
         return self
@@ -98,6 +104,7 @@ class FakeDatabase:
         self.fail_photo = False
         self.fail_listing = False
         self.media = MemorySource()
+        self.collation = lambda value: value
     def connect(self):
         return FakeConnection(self)
 

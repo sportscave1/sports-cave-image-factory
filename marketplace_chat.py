@@ -44,11 +44,13 @@ def amount(value):
 
 def scan(conn, prefix, *, limit=100, after='', recent=False):
     lower = PREFIX + prefix + after
-    upper = PREFIX + prefix + '~'
+    # Suffixes are UUIDs, hashes or zero-padded numbers. A letter sorts after
+    # these under both C and the production locale; '~' sorts before them there.
+    upper = PREFIX + prefix + 'z'
     order = 'updated_at DESC' if recent else 'key'
     return [r['value'] for r in conn.execute(
-        'SELECT value FROM crm_runtime_state WHERE key > %s AND key < %s ORDER BY ' + order + ' LIMIT %s',
-        (lower, upper, limit)).fetchall()]
+        'SELECT value FROM crm_runtime_state WHERE key > %s AND key < %s AND key LIKE %s ORDER BY ' + order + ' LIMIT %s',
+        (lower, upper, PREFIX + prefix + '%', limit)).fetchall()]
 
 
 class ChatStore(MarketplaceStore):

@@ -33,6 +33,11 @@ alerts. OS support viewing a conversation does not mark it read for customers.
   participant/conversation, one due pointer while pending, and one reusable hourly
   budget per recipient hash. Primary-key range scans fetch at most ten due jobs.
   Photos/videos remain in Dropbox and chat bodies are never copied into emails.
+- Key ranges use a letter after the valid UUID/hash/numeric suffix alphabet and
+  an exact namespace filter. The production database sorts punctuation such as
+  a trailing tilde before these suffixes. Tests cover that ordering for inboxes,
+  message pages, account lists, seller claims, due alerts and session cleanup;
+  the existing primary-key index still bounds each lookup.
 - Only an in-flight attempt temporarily freezes the small outgoing email fields
   and recipient so a retry is byte-identical. Success removes this payload and
   keeps a bounded receipt/sequence/cooldown record. Historical chat is not mailed

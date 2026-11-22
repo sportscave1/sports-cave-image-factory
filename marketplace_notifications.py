@@ -114,11 +114,11 @@ class NotificationStore(MarketplaceStore):
         self.clock = clock
 
     def due(self, limit=10):
-        upper = PREFIX + f'notice-due:{int(self.clock() * 1000):013d}:~'
+        upper = PREFIX + f'notice-due:{int(self.clock() * 1000):013d}:z'
         with self.db() as conn:
             return [r['value'] for r in conn.execute('''SELECT value FROM crm_runtime_state
-                WHERE key > %s AND key < %s ORDER BY key LIMIT %s''',
-                (PREFIX + 'notice-due:', upper, min(10, max(1, limit)))).fetchall()]
+                WHERE key > %s AND key < %s AND key LIKE %s ORDER BY key LIMIT %s''',
+                (PREFIX + 'notice-due:', upper, PREFIX + 'notice-due:%', min(10, max(1, limit)))).fetchall()]
 
     @staticmethod
     def _recipient(conn, thread, role):
