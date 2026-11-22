@@ -113,3 +113,42 @@ def test_boosted_post_retains_ad_comments_and_context_when_organic_post_is_loade
         feed.more_comments(first)
         feed.comments()
         read.assert_called_with("Instagram", "post", after="ad-cursor", ad_id="ad1", comment_edge="")
+
+
+def test_page_token_recovers_ad_comments_and_reply_uses_that_same_token():
+    api, http = client()
+    unavailable = response({"error": {"code": 100, "error_subcode": 33}}, 400)
+    http.request.side_effect = [response(ad()), unavailable, unavailable,
+        response({"data": [{"id": "c"}]}), response({"id": "reply"})]
+    api.moderate("Instagram", "media", "c", "reply", "Thanks", ad_id="ad1")
+    calls = http.request.call_args_list
+    assert calls[-2].kwargs["headers"]["Authorization"] == "Bearer fixture-page-token"
+    assert calls[-1].kwargs["headers"]["Authorization"] == "Bearer fixture-page-token"
+    assert calls[-1].args[1].endswith("/c/replies")
+    assert sum(c.args[0] == "POST" for c in calls) == 1
+
+
+def test_boosted_original_media_recovers_when_effective_ad_media_is_unavailable():
+    api, http = client()
+    creative = ad()["creative"]
+    creative["source_instagram_media_id"] = "source-media"
+    unavailable = response({"error": {"code": 100, "error_subcode": 33}}, 400)
+    http.request.side_effect = [response({"data": [{"id": "ad1", "creative": creative}]}),
+        response({"id": "page_1", "from": {"id": "page"}}), unavailable, unavailable, unavailable,
+        response({"data": [{"id": "boosted-comment"}]})]
+    result = api.ad_comment_feed()
+    recovered = next(p for p in result["data"] if p["platform"] == "Instagram")
+    assert recovered["id"] == "source-media"
+    assert recovered["ad_id"] == "ad1"
+    assert not result["errors"]
+    assert recovered["comments"]["data"][0]["id"] == "boosted-comment"
+
+
+def test_original_media_reply_requires_the_source_id_to_be_on_the_verified_ad():
+    api, http = client()
+    verified = ad()
+    verified["creative"]["source_instagram_media_id"] = "source-media"
+    http.request.side_effect = [response(verified), response({"data": [{"id": "c"}]}), response({"id": "reply"})]
+    api.moderate("Instagram", "source-media", "c", "reply", "Thanks", ad_id="ad1")
+    assert http.request.call_args_list[1].args[1].endswith("/source-media/ordered_comments")
+    assert http.request.call_args.args[1].endswith("/c/replies")
