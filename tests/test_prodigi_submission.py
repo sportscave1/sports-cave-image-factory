@@ -71,6 +71,19 @@ def test_draft_or_pending_is_not_completion_and_no_second_post():
     assert p.submits==['99']
 
 
+def test_supplier_hold_after_submission_waits_without_resubmission_or_certificate():
+    v,s,p,a=ready();v['submission']={'intent_at':prep.now()}
+    p.data.update(status='on_hold',issues=[{'code':'payment_required'}])
+    cert=lambda _:pytest.fail('A supplier hold never confirms payment/production')
+    result=submit.run(v,p,lambda _:s,lambda _:None,cert)
+    assert result['status']=='Submitted' and 'on hold' in result['message']
+    assert result['submission']['supplier_status']=='on_hold'
+    assert not result['submission'].get('finalised') and not p.submits
+    p.data.update(status='in_production',issues=[])
+    result=submit.run(v,p,lambda _:s,lambda _:None,lambda _:'https://cdn.shopify.com/cert.pdf')
+    assert result['status']=='Complete' and not p.submits
+
+
 def test_database_fence_and_pause_survive_repeated_ticks(store,monkeypatch):
     v,s,p,a=ready()
     monkeypatch.setattr(prep,'Client',lambda:p);monkeypatch.setattr(prep,'resolve',lambda _:s)

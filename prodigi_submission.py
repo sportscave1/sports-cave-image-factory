@@ -10,7 +10,7 @@ import prodigi_preparation as prep
 
 SETTING='orders_submit_after_qa'
 LOCK=19721129
-ACCEPTED={'submitted','paused','in_production','partially_shipped','shipped','completed'}
+ACCEPTED={'submitted','paused','on_hold','in_production','partially_shipped','shipped','completed'}
 FINALISED={'in_production','partially_shipped','shipped','completed'}
 _gate=threading.Lock()
 
@@ -99,7 +99,9 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
         receipt.update(confirmed=True,confirmed_at=receipt.get('confirmed_at') or prep.now())
         if state not in FINALISED:
             receipt['lease_until']=prep.now()
-            value.update(status='Submitted',message='Submitted to Prodigi · awaiting payment/production under your supplier countdown.')
+            value.update(status='Submitted',message=(
+                'Submitted to Prodigi · supplier reports on hold. Open Prodigi to review its current hold/countdown; payment and production are not confirmed.'
+                if state=='on_hold' else 'Submitted to Prodigi · awaiting payment/production under your supplier countdown.'))
             persist(value);return value
         items=order.get('items') or []
         mapping=value['snapshot']['mapping']
