@@ -34,7 +34,7 @@ def test_group_waits_for_all_uploaded_numbered_items(pair):
     a,b,p,_=pair;b['browser']['verified']=False
     with prep.connect() as c,c.cursor() as q:prep.save(q,b)
     result=qa.enqueue(a,p,prep.resolve,lambda _:None)
-    assert result['status']=='Checking QA' and 'all numbered' in result['message']
+    assert result['status']==qa.WAITING
     assert not p.submits
 
 
@@ -45,7 +45,7 @@ def test_immediate_upload_to_qa_still_waits_for_and_revalidates_siblings(pair):
     def resolver(aid):
         calls.append(aid);return prep.resolve(aid)
     result=qa.enqueue(a,p,resolver,lambda _:None,verified_order=deepcopy(p.data))
-    assert result['status']=='Checking QA' and calls==[2]
+    assert result['status']==qa.WAITING and calls==[2]
     assert not p.submits
 
 
@@ -162,3 +162,40 @@ def test_batch_cannot_hide_a_missing_wrong_or_failed_item(pair,monkeypatch,failu
     qa.finish(plan['key'],plan['token'],evidence)
     submit.tick();assert not p.submits
     assert not prep.read(1).get('submission') and not prep.read(2).get('submission')
+
+
+def test_each_edition_finishes_qa_before_sibling_then_final_batch_submits_once(pair,monkeypatch):
+    import prodigi_browser as browser
+    from test_prodigi_dashboard_qa import options,inserts
+    a,b,p,auth=pair
+    monkeypatch.setattr(browser,'context',lambda _:(p,prep.resolve,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    a.pop('dashboard_qa',None);a['status']=qa.WAITING
+    b.pop('dashboard_qa',None);b.update(status='Awaiting product selection',browser={})
+    p.data['items'][1].update(sku=None,attributes={},assets=[])
+    with prep.connect() as c,c.cursor() as q:
+        prep.save(q,a);prep.save(q,b)
+    # An old companion cannot silently claim an incomplete grouped batch.
+    assert qa.claim(exact_item_supported=True,batch_supported=True) is None
+    first=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True)
+    assert first['item_id']=='88' and 'items' not in first
+    qa.permit(first['key'],first['token'],dict(options=options(),current='standard',target='budget'))
+    p.data['shippingMethod']='Budget'
+    evidence=dict(item_id='88',quality='Excellent',sku=a['snapshot']['mapping']['prodigi_code'],colour='natural',
+        shipping=dict(options=options(),selected='budget'),inserts=inserts())
+    assert qa.finish(first['key'],first['token'],evidence)['status']=='Waiting for order'
+    assert all(prep.read(1)['checks'].values())
+    submit.tick();assert not p.submits and not prep.read(1).get('submission')
+    # The next item's variant/upload occurs after the first QA, on the same order.
+    p.data['items'][1].update(sku=b['snapshot']['mapping']['prodigi_code'],attributes={'color':'natural'},
+        assets=[dict(url='https://fixture/art2',printArea='default',status='complete')])
+    b['browser']=dict(verified=True,full_image_fit_verified=True);b['status']=qa.WAITING
+    with prep.connect() as c,c.cursor() as q:prep.save(q,b)
+    final=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True)
+    assert {i['item_id'] for i in final['items']}=={'88','89'}
+    qa.permit(final['key'],final['token'],dict(options=options(),current='budget',target='budget'))
+    combined=dict(items=[dict(**r,quality='Excellent') for r in final['items']],
+        shipping=dict(options=options(),selected='budget'),inserts=inserts())
+    assert qa.finish(final['key'],final['token'],combined)['status']=='Ready for manual payment'
+    submit.tick();assert p.submits==['99']
+    assert prep.read(1)['status']==prep.read(2)['status']=='Submitted'

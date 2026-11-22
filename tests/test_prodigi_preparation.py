@@ -429,3 +429,26 @@ def test_empty_recipient_recovery_preserves_verified_artwork_and_rejects_other_c
     assert value['snapshot']==fresh and value['fingerprint']==queue.digest(fresh) and value['browser']['verified']
     assert value['history'][-1]['event']=='missing_shopify_recipient_recovered'
     assert not queue.restore_missing_recipient(value,lambda _:pytest.fail('Never replace a populated address'))
+
+
+def test_shipping_display_suffix_is_not_an_artwork_or_address_change():
+    a=snapshot();a['recipient']={'address':{'line1':'1 Fixture Street'}}
+    b=deepcopy(a);b['shipping']='Standard | Synthetic Customer | Fixture'
+    assert queue.same_source(a,b)
+    v=value();v.update(snapshot=a,fingerprint=queue.digest(a))
+    assert queue.source_matches(v,b)
+    for key,changed in [('shipping','Express'),('job_id','b'*64),('number',99),
+                        ('mapping',{'prodigi_code':'GLOBAL-CFP-A1'}),
+                        ('recipient',{'address':{'line1':'2 Different Street'}}),
+                        ('output',{'sha256':'b'*64,'bytes':100})]:
+        bad=deepcopy(b);bad[key]=changed
+        assert not queue.source_matches(v,bad),key
+    v['fingerprint']='tampered'
+    assert not queue.source_matches(v,b)
+
+
+def test_shipping_suffix_refresh_does_not_stop_supplier_matching():
+    v=value();v['snapshot']['shipping']='Standard | Synthetic Customer | Fixture'
+    v['fingerprint']=queue.digest(v['snapshot']);v['browser_requested']=True
+    result=queue.run(v,Provider(),lambda _:snapshot(),lambda _:pytest.fail('No API write'),lambda _:None)
+    assert result['status']=='Awaiting browser upload'

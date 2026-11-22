@@ -85,15 +85,17 @@ def enqueue(value,provider,resolver,persist,*,verified_order=None):
         value.update(status='Merge preparing',message='Preparing all additional numbered items before combined QA.');persist(value);return value
     from prodigi_order_group import members,WaitingForItems
     try:members(value,order,checked_resolver)
-    except WaitingForItems as error:
-        value.update(status='Checking QA',message=str(error));persist(value);return value
+    except WaitingForItems:
+        # This edition is saved: check it now, without waiting for sibling uploads.
+        # A final fresh whole-order batch remains required before any submission.
+        pass
     value.pop('last_failure',None)
     value.update(status=WAITING,message='Checking branding inserts, Excellent quality, shipping and customer details before the configured submission step.')
     persist(value)
     return value
 
 
-def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False):
+def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False,sequential_supported=False):
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(browser.LOCK,))
         if not q.fetchone()['acquired']:return None
@@ -109,10 +111,13 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
             tax_required=clean((snap.get('recipient') or {}).get('address',{}).get('countryCode'))=='us'
             if tax_required and not tax_supported:return None
             token=secrets.token_urlsafe(32)
-            values=[value]
+            values=[value];item_only=False
             if batch_supported and len(order.get('items',[]))>1:
-                from prodigi_order_group import members
-                values=members(value,order,resolver)
+                from prodigi_order_group import members,WaitingForItems
+                try:values=members(value,order,resolver)
+                except WaitingForItems:
+                    if not sequential_supported:return None
+                    item_only=True
                 if len(values)>100:raise ValueError('More than 100 numbered items require a separate order review.')
                 if any(v['allocation_id']!=value['allocation_id'] and v.get('status')==ACTIVE for v in values):return None
                 if any(v.get('submission') and not v.get('merge_pending') for v in values):raise ValueError('A submitted item cannot enter a new draft QA batch.')
@@ -124,8 +129,8 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
                 current_for_order(unit,order,resolver)
                 previous=unit.get('dashboard_qa')
                 if previous:unit.setdefault('dashboard_qa_history',[]).append({k:previous.get(k) for k in ('policy','claimed_at','checked_at','verified')})
-                unit['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=stamp,before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required,batch=batch)
-                unit.update(status=ACTIVE,message='Checking all numbered items, shipping, inserts and tax in one QA pass.')
+                unit['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=stamp,before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required,batch=batch,item_only=item_only)
+                unit.update(status=ACTIVE,message='Checking this edition before preparing the next item.' if item_only else 'Checking all numbered items, shipping, inserts and tax in one QA pass.')
                 browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
             return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],item_id=value['item_id'],exact_item=exact_item_supported,
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
@@ -280,6 +285,8 @@ def finish(key,token,evidence,error=''):
                 result=evaluate(unit,snap,order,item,proof,identity_verified=identity_proof(snap),asset_resolver=getattr(provider,'asset',None))
                 unit.update(qa=result,checks=result['checks'],status='Ready for manual payment' if all(result['checks'].values()) else 'Needs QA',
                     message='All QA passed. Submission follows the configured Orders companion setting.' if all(result['checks'].values()) else ' '.join(result['blockers']))
+                if all(result['checks'].values()) and other.get('item_only'):
+                    unit.update(status='Waiting for order',message='This edition passed QA. Preparing the next item before final whole-order QA and one submission.')
                 pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
                 other.update(tax_collected=tax_seen,verified=True,evidence=proof,checked_at=stamp,validated_order_hash=prep.digest(pinned))
                 updates.append(unit)

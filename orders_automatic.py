@@ -22,7 +22,14 @@ def owner(authorisation=None):
 def kick():
     if not _gate.acquire(blocking=False):return
     def work():
-        try:admit()
+        try:
+            # Independent of long catalogue/package work; only small local batches.
+            import auto_editions_runtime as runtime
+            if runtime.enabled():
+                from orders_auto_jpg import admit as admit_jpg
+                _,jobs=runtime.stores();admit_jpg(jobs.connect)
+                runtime.start_worker()
+            admit()
         except Exception:
             import logging
             logging.getLogger(__name__).warning('Orders admission unavailable; existing jobs continue')
@@ -32,7 +39,7 @@ def kick():
 
 def admit(limit=3):
     global _last
-    if time.monotonic()-_last<60:return 0
+    if time.monotonic()-_last<15:return 0
     _last=time.monotonic()
     import prodigi_preparation as prep
     from prodigi_submission import setting

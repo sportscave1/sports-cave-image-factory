@@ -119,7 +119,7 @@ def complete(cur,key,value,stage):
         if not receipt['started'] or business(order,item['id'])!=receipt['before']:
             raise ValueError('The supplier order changed outside the permitted product selection.')
         receipt.update(verified=True,verified_at=prep.now(),sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''))
-        value.update(status='Queued',message='Original Fulfilment product and frame verified. Continuing artwork upload and QA.')
+        value.update(status=browser.WAITING,message='Original Fulfilment product and frame verified. Uploading this edition next, before selecting another product.')
         value.setdefault('history',[]).append(dict(at=prep.now(),event='blank_product_selected',sku=item['sku']))
     except ValueError as error:
         value.update(status='Needs review',message='Product selection: '+str(error))

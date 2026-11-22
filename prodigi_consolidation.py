@@ -123,7 +123,7 @@ def guard(sources,targets,source_order,target_order,identity_map,resolver):
     service=intent(sources[0]['snapshot'].get('shipping'))
     for value in sources+targets:
         fresh=resolver(value['allocation_id'])
-        if prep.digest(fresh)!=prep.digest(value['snapshot']):raise ValueError('A numbered source changed before consolidation.')
+        if not prep.same_source(value['snapshot'],fresh):raise ValueError('A numbered source changed before consolidation.')
         if identity_map[origin(value)]!=expected:raise ValueError('Customer or complete shipping address differs; keep the orders separate.')
         if intent(fresh.get('shipping'))!=service:raise ValueError('Standard and Express orders cannot be combined.')
         from prodigi_qa import address_matches

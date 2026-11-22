@@ -52,6 +52,26 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def source_view(snapshot):
+    """Pin business/artwork fields; shipping's UI-only address suffix is redundant.
+
+    The authoritative recipient remains compared in full, independently of this
+    display label. A different service, address, file or edition still stops.
+    """
+    result=dict(snapshot)
+    shipping=result.get('shipping')
+    if isinstance(shipping,str):result['shipping']=shipping.split('|',1)[0].strip()
+    return result
+
+
+def same_source(before,after):
+    return digest(source_view(before))==digest(source_view(after))
+
+
+def source_matches(value,fresh):
+    return digest(value['snapshot'])==value['fingerprint'] and same_source(value['snapshot'],fresh)
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -345,7 +365,7 @@ def _request(user, allocation_id, order_id='', item_id=''):
                     save(cur,value);return value
                 if saved['status']=='Preparing JPG' and not preparing and saved['snapshot']['job_id']==snapshot['job_id']:
                     saved.update(snapshot=snapshot,fingerprint=digest(snapshot),status='Queued');save(cur,saved);return saved
-                if saved['fingerprint'] != value['fingerprint'] or (order_id and
+                if not source_matches(saved,snapshot) or (order_id and
                         any(saved[k] != value[k] for k in ('order_id', 'item_id'))):
                     raise ValueError('This allocation already has a preparation record. Reconcile it before changing the artwork or target.')
                 if not saved.get('write_intent') and not saved.get('browser') and not saved.get('browser_requested'):
@@ -372,7 +392,7 @@ def artwork_link(snapshot):
 def run(value, provider, resolver, link, persist):
     """Injected state machine; persist commits write intent before the HTTP call."""
     snapshot = resolver(value['allocation_id'])
-    if digest(snapshot) != value['fingerprint']:
+    if not source_matches(value,snapshot):
         raise ValueError('Allocation, artwork or Fulfilment mapping changed. Manual reconciliation is required.')
     if not value['order_id'] and not value['item_id']:
         value['order_id'], value['item_id'] = discover(snapshot, provider)
@@ -421,7 +441,7 @@ def run(value, provider, resolver, link, persist):
     # Re-read after transferring bytes, to detect dashboard changes before writing.
     latest = provider.order(value['order_id'])
     validate_order(latest, snapshot, value['order_id'], value['item_id'],binding=value.get('consolidation_binding'))
-    if digest(latest) != digest(order) or digest(resolver(value['allocation_id'])) != value['fingerprint']:
+    if digest(latest) != digest(order) or not source_matches(value,resolver(value['allocation_id'])):
         raise ValueError('The order or allocation changed during preparation. No artwork was replaced.')
     value.update(status='Uploading', write_intent=True, url_hash=digest(url),
                  artwork_expires_at=(datetime.now(timezone.utc) + timedelta(days=29)).isoformat())
@@ -587,7 +607,7 @@ def complete_qa(user, allocation_id, answers, packing_slip):
         raise ValueError('Verify the uploaded artwork before completing QA.')
     if value.get('artwork_expires_at') and datetime.fromisoformat(value['artwork_expires_at']) <= datetime.now(timezone.utc):
         raise ValueError('Artwork link needs renewal before manual payment.')
-    if digest(resolve(int(allocation_id))) != value['fingerprint']:
+    if not source_matches(value,resolve(int(allocation_id))):
         raise ValueError('The saved artwork or allocation changed; recheck this preparation.')
     item = validate_order(Client().order(value['order_id']), value['snapshot'], value['order_id'], value['item_id'],binding=value.get('consolidation_binding'))
     if not any(str(a.get('status', '')).casefold().replace('_', '') in ('complete', 'notyetdownloaded', 'inprogress')

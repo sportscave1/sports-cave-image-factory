@@ -35,12 +35,12 @@ def test_permitted_selection_continues_once_to_normal_artwork(blank):
     assert product.permit(plan['key'],plan['token'],plan['sha256'])=={'permitted':True}
     with pytest.raises(ValueError):product.permit(plan['key'],plan['token'],plan['sha256'])
     blank.data['items'][0].update(sku=plan['sku'],attributes={'color':'natural'},unitPrice={'amount':'1'})
-    assert product.finish(plan['key'],plan['token'])['status']=='Queued'
+    assert product.finish(plan['key'],plan['token'])['status']==browser.WAITING
     assert saved()['product_browser']['verified']
     v=saved()
     prep.run(v,blank,lambda _:snapshot(),lambda _:pytest.fail('No API artwork writes'),lambda _:None)
     assert v['status']=='Awaiting browser upload' and not blank.writes
-    assert product.finish(plan['key'],plan['token'])['status']=='Queued' # persisted stage remains one-time
+    assert product.finish(plan['key'],plan['token'])['status']==browser.WAITING # persisted stage remains one-time
 
 @pytest.mark.parametrize('change',[
     lambda o:o.update(status='paused'),lambda o:o.update(charges=[{'amount':1}]),
@@ -77,7 +77,7 @@ def test_uncertain_selection_is_not_repeated_and_can_be_read_back(blank,monkeypa
     assert product.claim() is None
     blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
     monkeypatch.setattr(prep,'require_user',lambda _:None)
-    assert product.recheck({'id':'fixture'},KEY)['status']=='Queued'
+    assert product.recheck({'id':'fixture'},KEY)['status']==browser.WAITING
     assert saved()['product_browser']['verified'] and not blank.writes
 import os_pages
 
@@ -93,7 +93,7 @@ def test_all_16_original_mappings_select_and_verify(blank,reference,monkeypatch)
     assert plan['colour']==('' if reference['sports_cave_frame']=='Unframed' else reference['prodigi_frame_colour'])
     product.permit(plan['key'],plan['token'],plan['sha256'])
     blank.data['items'][0].update(sku=plan['sku'],attributes={'color':plan['colour'].lower()} if plan['colour'] else {})
-    assert product.finish(plan['key'],plan['token'])['status']=='Queued'
+    assert product.finish(plan['key'],plan['token'])['status']==browser.WAITING
     assert saved()['product_browser']['verified']
 def test_multiple_blank_items_are_targeted_by_id_and_serialised(blank):
     blank.data['items'].append(dict(id='89',merchantReference='other-line',sku=None,quantity=1,assets=[]))
@@ -104,5 +104,5 @@ def test_multiple_blank_items_are_targeted_by_id_and_serialised(blank):
     assert product.claim() is None
     product.permit(p['key'],p['token'],p['sha256'])
     blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
-    assert product.finish(p['key'],p['token'])['status']=='Queued'
+    assert product.finish(p['key'],p['token'])['status']==browser.WAITING
     assert blank.data['items'][1]['sku'] is None

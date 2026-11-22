@@ -25,7 +25,7 @@ def members(value,order,resolver=None):
         if not matches:raise WaitingForItems('Waiting for every item in this order to be prepared.')
         unit=matches[0]
         snap=resolver(unit['allocation_id'])
-        if prep.digest(snap)!=prep.digest(unit['snapshot']):raise ValueError('A numbered item source changed before order QA.')
+        if not prep.same_source(unit['snapshot'],snap):raise ValueError('A numbered item source changed before order QA.')
         receipt=unit.get('browser') or {};assets=item.get('assets') or []
         if not (receipt.get('verified') is True and receipt.get('full_image_fit_verified') is True):
             raise WaitingForItems('Waiting for all numbered artworks in this order to finish uploading.')

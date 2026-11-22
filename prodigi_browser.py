@@ -54,7 +54,7 @@ def save(cur, key, value):
 def snapshot(value, resolver, sandbox):
     source = resolver(value['allocation_id'])
     expected = value['source_snapshot'] if sandbox else value['snapshot']
-    if prep.digest(source) != prep.digest(expected):
+    if not prep.same_source(expected,source):
         raise ValueError('The allocated artwork or Fulfilment mapping changed.')
     return value['snapshot']
 

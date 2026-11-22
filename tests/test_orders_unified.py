@@ -156,3 +156,19 @@ def test_selected_shipping_quote_uses_saved_verified_evidence_only():
     assert shipping_summary(saved)=='Express · $38.10'
     saved['dashboard_qa']['verified']=False
     assert shipping_summary(saved)==''
+
+
+def test_companion_admission_does_not_wait_for_catalogue_package_loop(monkeypatch):
+    import orders_automatic as auto,auto_editions_runtime as runtime
+    calls=[]
+    class ImmediateThread:
+        def __init__(self,*,target,**_):self.work=target
+        def start(self):self.work()
+    monkeypatch.setattr(auto.threading,'Thread',ImmediateThread)
+    monkeypatch.setattr(runtime,'enabled',lambda:True)
+    monkeypatch.setattr(runtime,'stores',lambda:(None,SimpleNamespace(connect='fixture-local-db')))
+    monkeypatch.setattr('orders_auto_jpg.admit',lambda connect:calls.append(('jpg',connect)))
+    monkeypatch.setattr(runtime,'start_worker',lambda:calls.append('wake-renderer'))
+    monkeypatch.setattr(auto,'admit',lambda:calls.append('fulfilment'))
+    auto.kick()
+    assert calls==[('jpg','fixture-local-db'),'wake-renderer','fulfilment']

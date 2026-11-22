@@ -23,7 +23,7 @@ def test_ready_qa_precedes_another_artwork_transfer(monkeypatch,qa_plan):
     response=client.post('/tick',content='{}',headers={'Authorization':'Bearer '+'x'*43,
         'X-Sports-Cave-Orders-QA':'1','X-Sports-Cave-Orders-Browser':'1','X-Sports-Cave-Orders-Products':'1'})
     assert response.status_code==200
-    assert calls==(['qa'] if qa_plan else ['qa','product','upload'])
+    assert calls==(['qa'] if qa_plan else ['qa','upload'])
     assert response.json()['browser']==(qa_plan or dict(key='upload-fixture'))
 
 

@@ -102,7 +102,6 @@ def _loop():
             # Drain already accepted packets before optional diagnosis/provider
             # work. A passive repair must not strand a completed bulk upload.
             from companion_package_api import run_one as run_package
-            if run_package():continue
             if time.monotonic()-last_cleanup>60:
                 expired=jobs.expired()
                 if expired:
@@ -121,6 +120,7 @@ def _loop():
                     kick()
                 except Exception:LOG.warning('ORDERS automatic JPG admission temporarily unavailable')
                 last_orders=time.monotonic()
+            if run_package():continue
             # Numbered customer JPGs precede background preparation/acceptance.
             # An unrelated catalogue backlog must not starve paid order artwork.
             if run_one(jobs):continue
