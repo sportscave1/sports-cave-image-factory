@@ -232,7 +232,10 @@ def test_orders_pairing_heartbeat_does_not_update_the_shared_desktop_row(store,m
         q.execute("INSERT INTO product_upload_desktop VALUES(true,%s,'owner','2026-01-01T00:00:00Z')",(pairing.digest(token),))
     monkeypatch.setattr(os_accounts,'DEFAULT_STORE',SimpleNamespace(get_user=lambda aid:{'id':aid}))
     monkeypatch.setattr(os_accounts,'can_access_page',lambda *_:True)
-    assert api.desktop(token)=={'id':'owner'}
+    from companion_poll_transaction import connection
+    from unittest.mock import MagicMock
+    with connection(MagicMock()),connection(MagicMock()):
+        assert api.desktop(token)=={'id':'owner'}
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT seen_at FROM product_upload_desktop');seen=q.fetchone()['seen_at']
         assert str(seen).startswith('2026-01-01')

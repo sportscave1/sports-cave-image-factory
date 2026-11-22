@@ -6,12 +6,13 @@ _slots = BoundedSemaphore(2)
 
 
 @contextmanager
-def connection(factory):
+def connection(factory, *, slots=None):
     # Transaction-local settings reach the actual backend behind Supavisor.
     # Preserve all existing claim locks and atomic commit/rollback semantics.
     # Bound demand even while Supavisor is waiting to assign a backend. Existing
     # route error handling returns 503; the desktop retains and retries its event.
-    if not _slots.acquire(blocking=False):
+    limiter=slots if slots is not None else _slots
+    if not limiter.acquire(blocking=False):
         raise RuntimeError('Companion polling is busy; retry the saved event shortly.')
     try:
         with factory() as conn:
@@ -21,7 +22,7 @@ def connection(factory):
                 cur.execute("SET LOCAL idle_in_transaction_session_timeout='8s'")
             yield conn
     finally:
-        _slots.release()
+        limiter.release()
 
 
 def authenticate_and_touch(cur, token_hash):

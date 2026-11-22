@@ -64,3 +64,17 @@ def test_heartbeat_paces_writes_and_always_checks_current_pairing(database):
     cur.execute("UPDATE product_upload_desktop SET token_hash='new-fixture-hash'")
     with connection(jobs.connect) as conn, conn.cursor() as poll:
         assert authenticate_and_touch(poll, 'fixture-hash') is None
+
+
+def test_short_orders_auth_has_its_own_bounded_slot_without_expanding_other_workers():
+    from threading import BoundedSemaphore
+    factory=MagicMock();orders=BoundedSemaphore(1)
+    with connection(factory),connection(factory):
+        with connection(factory,slots=orders):
+            with pytest.raises(RuntimeError):
+                with connection(factory,slots=orders):pass
+            with pytest.raises(RuntimeError):
+                with connection(factory):pass
+        assert factory.call_count==3
+    with connection(factory,slots=orders):pass
+    assert factory.call_count==4

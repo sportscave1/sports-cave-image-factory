@@ -1,5 +1,9 @@
 """Paired Orders companion polling. The Prodigi key stays on the server."""
 import re
+from threading import BoundedSemaphore
+
+# Short Orders auth must not queue behind other workers' external operations.
+_orders_auth_slots=BoundedSemaphore(1)
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 import prodigi_preparation as queue
@@ -9,7 +13,7 @@ def desktop(token):
     import product_upload_staff_queue as pairing
     import os_accounts
     from companion_poll_transaction import connection
-    with connection(queue.connect) as conn, conn.cursor() as cur:
+    with connection(queue.connect,slots=_orders_auth_slots) as conn, conn.cursor() as cur:
         # Authenticate through MVCC; another worker's long transaction must not
         # make Orders wait for the shared desktop heartbeat row lock.
         cur.execute('''SELECT actor_id FROM product_upload_desktop
@@ -21,7 +25,7 @@ def desktop(token):
     queue.require_user(user)
     if not os_accounts.can_access_page(user, 'Upload Companion'):
         raise PermissionError('Orders companion access is required.')
-    with connection(queue.connect) as conn,conn.cursor() as cur:
+    with connection(queue.connect,slots=_orders_auth_slots) as conn,conn.cursor() as cur:
         cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES('orders_companion_seen','true',now())
             ON CONFLICT(key) DO UPDATE SET updated_at=now()
             WHERE app_settings.updated_at<now()-interval '20 seconds'""")
