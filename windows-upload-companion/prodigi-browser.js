@@ -3,6 +3,21 @@
 // Only server-issued exact drafts. No API key, supplier requests or Submit click.
 let prodigiBrowserTransfer = null;
 const ordersDelay = ms => new Promise(resolve => setTimeout(resolve,ms));
+async function prodigiReadFetch(url,options,phase='readback') {
+  const deadline=Date.now()+150000;
+  for(let attempt=0;attempt<3;attempt++){
+    const remaining=deadline-Date.now();if(remaining<=0)throw Error('Saved-state verification deadline exceeded.');
+    try{
+      const response=await fetch(url,{...options,signal:AbortSignal.timeout(remaining)});
+      if(response.ok||![429,502,503,504].includes(response.status)||attempt===2)return response;
+    }catch(error){if(attempt===2)throw error;}
+    if(typeof ordersProgressRetry==='function')ordersProgressRetry(attempt+1,1000*2**attempt);
+    else if(typeof ordersProgressStage==='function')ordersProgressStage('retrying');
+    await chrome.storage.local.set({ordersRetry:{stage:phase,attempt:attempt+1,next_at:Date.now()+1000*2**attempt}});
+    await ordersDelay(1000*2**attempt);
+    if(typeof ordersProgressStage==='function')ordersProgressStage(phase);
+  }
+}
 function prodigiOrderAddress(address,expected) {
   try {
     const actual=new URL(address),pinned=new URL(expected);
@@ -25,11 +40,15 @@ async function prodigiWorkerTab(plan) {
   await chrome.storage.local.set({ordersWorkerTabs:Object.fromEntries([...entries,[plan.order_url,tab.id]])});
   return {...tab,ordersReused:false};
 }
-async function prodigiWaitForPage(tab,refresh=false,attempts=60) {
+async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
   let previousPage,reloaded=false;
   if(refresh&&tab.ordersReused){
     try{previousPage=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.page_instance;}catch{}
-    await chrome.tabs.reload(tab.id);reloaded=true;
+    // The image library can leave allowed filter parameters in the owned tab.
+    // QA pins the clean detail URL; a reload alone would preserve those filters.
+    if(orderUrl&&tab.url!==orderUrl)await chrome.tabs.update(tab.id,{url:orderUrl});
+    else await chrome.tabs.reload(tab.id);
+    reloaded=true;
   }
   for(let n=0;n<attempts;n++){
     try{const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
@@ -70,14 +89,16 @@ function prodigiPlanValid(plan) {
 async function prodigiQAReceipt(plan,action,evidence=null,error='') {
   const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
   if(!token)throw Error('Desktop pairing unavailable.');
-  const response=await fetch(osOrigin+'/api/orders-companion/qa/'+action,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({key:plan.key,token:plan.token,evidence,...(error?{error}: {})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
+  const requestFetch=action==='finish'?prodigiReadFetch:fetch;
+  const response=await requestFetch(osOrigin+'/api/orders-companion/qa/'+action,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({key:plan.key,token:plan.token,evidence,...(error?{error}: {})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
   if(!response.ok)throw Error('The pinned QA receipt could not be verified.');return response.json();
 }
 async function prodigiReceipt(plan,action,stage='readback',error='') {
   if(plan.kind==='qa')return prodigiQAReceipt(plan,action,null,'Interrupted QA; recheck the saved order without repeating an upload.');
   const token=(await chrome.storage.local.get('staffQueueCredential')).staffQueueCredential;
   if(!token) throw Error('Desktop pairing is unavailable.');
-  const response=await fetch(osOrigin+'/api/orders-companion/browser/'+action,{
+  const requestFetch=action==='finish'&&!['merge-add','merge-hold'].includes(plan.kind)?prodigiReadFetch:fetch;
+  const response=await requestFetch(osOrigin+'/api/orders-companion/browser/'+action,{
     method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body:JSON.stringify({key:plan.key,token:plan.token,...(action==='permit'?{sha256:plan.sha256}:{stage,...(error?{error:String(error).slice(0,240)}:{})})}),credentials:'omit',signal:AbortSignal.timeout(150000)});
   if(!response.ok) throw Error('The exact draft could not be verified.');
@@ -86,7 +107,9 @@ async function prodigiReceipt(plan,action,stage='readback',error='') {
 async function prodigiBrowserRun(plan) {
   if(!prodigiPlanValid(plan)) throw Error('Orders browser handoff rejected.');
   await chrome.storage.local.set({ordersBrowserPending:plan});
-  let stage='download';
+  if(typeof ordersProgressBegin==='function')ordersProgressBegin(plan);
+  const progressTimer=typeof ordersProgressSend==='function'?setInterval(()=>void ordersProgressSend(),10000):null;
+  let stage='download';if(typeof ordersProgressStage==='function')ordersProgressStage(plan.kind==='qa'?'open':plan.kind==='product'?'product':'download');
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
       const tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
@@ -97,12 +120,12 @@ async function prodigiBrowserRun(plan) {
         refresh=true; // current pause controls; never reload an open duplicate editor
       }
       // Read verified persisted artwork, not a leftover post-Save editor.
-      const ready=await prodigiWaitForPage(tab,refresh,30);
+      const ready=await prodigiWaitForPage(tab,refresh,30,plan.order_url);
       if(!ready)throw Error('Sign into Prodigi before checking the saved order.');
-      const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan});
+      const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
       return plan.kind==='qa'?await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||''):await prodigiReceipt(plan,'finish',result?.stage||'product',result?.error||'');
     }
-    const file=await fetch(plan.artwork_url,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(150000)});
+    const file=await prodigiReadFetch(plan.artwork_url,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(150000)},'download');
     if(!file.ok || (file.headers.get('content-length') && Number(file.headers.get('content-length'))!==plan.bytes))
       throw Error('The pinned JPG is unavailable.');
     const bytes=new Uint8Array(await file.arrayBuffer());
@@ -113,9 +136,9 @@ async function prodigiBrowserRun(plan) {
     const tab=await prodigiWorkerTab(plan);
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
     // Only a server-verified empty item may clear a product-selection shell.
-    const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true);
+    const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true,60,plan.order_url);
     if(!ready) {stage='signin';throw Error('Sign into Prodigi in Edge, then review the same draft.');}
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan});
+    const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
     stage=result?.stage||'page';
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');
     return await prodigiReceipt(plan,'finish',stage);
@@ -124,12 +147,18 @@ async function prodigiBrowserRun(plan) {
     return await prodigiReceipt(plan,'finish',stage,String(error.message||'Browser handoff interrupted'));
   } finally {
     prodigiBrowserTransfer=null;
+    if(progressTimer!==null)clearInterval(progressTimer);
+    if(typeof ordersProgressEnd==='function')ordersProgressEnd();
     await chrome.storage.local.remove('ordersBrowserPending');
   }
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const job=prodigiBrowserTransfer;
   if(!job || sender.frameId!==0 || sender.tab?.id!==job.tab || !prodigiOrderAddress(sender.url,job.plan.order_url)) return;
+  if(message?.type==='prodigi:progress'&&typeof message.stage==='string'){
+    if(typeof ordersProgressStage==='function')ordersProgressStage(message.stage);
+    reply({ok:true});return;
+  }
   if(message?.type==='prodigi:qa-permit'&&job.plan.kind==='qa'){prodigiQAReceipt(job.plan,'permit',message.evidence).then(reply,()=>reply({error:true}));return true;}
   if(message?.type==='prodigi:chunk') {
     const offset=message.offset;

@@ -44,6 +44,15 @@ def test_idle_poll_prepares_once_then_claims_the_new_handoff(monkeypatch):
     assert response.status_code==200 and response.json()['browser']==dict(key='new-plan')
     assert calls==['claim','prepare','claim']
 
+@pytest.mark.parametrize('hint,expected',[('99',{'preferred_order':'99'}),('not/a/detail',{})])
+def test_continuation_hint_only_changes_priority_of_existing_guarded_claim(monkeypatch,hint,expected):
+    calls=[]
+    monkeypatch.setattr('prodigi_browser.claim',lambda **kw:calls.append(kw) or {'key':'fixture'})
+    request=type('Request',(),{'headers':{'x-sports-cave-orders-browser':'1','x-sports-cave-orders-continue':hint}})()
+    import asyncio
+    result=asyncio.run(api.ready_handoff(request,False))
+    assert result=={'key':'fixture'} and calls==[dict(exact_item_supported=False,reset_supported=False,**expected)]
+
 @pytest.mark.parametrize('capable',[False,True])
 def test_only_fixed_companion_can_recover_known_empty_editor_failure(monkeypatch,capable):
     calls=[];actor={'id':'fixture'}

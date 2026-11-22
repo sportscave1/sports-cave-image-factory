@@ -14,10 +14,10 @@ test('unpriced, ambiguous and missing Express quotes stop instead of guessing',(
  assert.throws(()=>prodigiCheapestShipping([{service:'budget',cents:100,currency:'$'},{service:'budget',cents:200,currency:'$'}],'standard','budget'));
 });
 
-for(const quality of ['Excellent','Poor'])test('item QA reads only its exact saved item while sibling products have no shared controls: '+quality,async()=>{
- const vm=require('node:vm'),fs=require('node:fs');let listener;
+for(const quality of ['Excellent','Poor'])for(const badgeDelay of [0,25000])test('item QA reads exact item and waits for its badge '+badgeDelay+'ms: '+quality,async()=>{
+ const vm=require('node:vm'),fs=require('node:fs');let listener,clock=0;
  const visible=text=>({textContent:text,isConnected:true,getClientRects:()=>[{}]});
- const row={querySelector:()=>visible(quality)},main=visible('REF-TEST');
+ const row={querySelector:()=>clock>=badgeDelay?visible(quality):null},main=visible('REF-TEST');
  main.querySelectorAll=()=>assert.fail('No order-level inserts or shipping reads during item QA');
  const document={querySelector:()=>main,querySelectorAll(selector){
    if(selector==='main h1')return [visible('99')];
@@ -25,7 +25,7 @@ for(const quality of ['Excellent','Poor'])test('item QA reads only its exact sav
    if(selector==='table tbody tr')return [row];
    assert.fail('Unexpected shared control read '+selector);
  }};
- const context={document,URL,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},
+ const context={document,URL,Date:{now:()=>clock},setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},location:{href:'https://dashboard.prodigi.com/orders/99/detail'},
    prodigiPinnedRow:(rows,plan)=>{assert.equal(plan.item_id,'88');return rows[0]},
    chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:()=>assert.fail('No shipping or tax writes during item QA')}}};
  vm.runInNewContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-dashboard-qa.js'),'utf8'),context);
@@ -33,9 +33,10 @@ for(const quality of ['Excellent','Poor'])test('item QA reads only its exact sav
    item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Black',order_url:context.location.href,order_id:'99',reference:'REF-TEST'}},{id:'paired'},resolve));
  assert.equal(result.error,undefined);
  assert.deepEqual(JSON.parse(JSON.stringify(result.evidence)),{item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Black',quality});
+ assert.equal(clock,badgeDelay); // Immediate evidence adds no fixed delay.
 });
 
-for(const rowDelay of [0,25000])for(const batch of [false,true])test('QA waits for late row '+rowDelay+' batch '+batch+' and reads inserts once',async()=>{
+for(const rowDelay of [0,25000])for(const batch of [false,true])for(const shippingDelay of [0,15000])test('QA waits for late row '+rowDelay+' batch '+batch+' and shipping '+shippingDelay+'ms, reads inserts once',async()=>{
  const vm=require('node:vm'),fs=require('node:fs');let listener,opened=false,lookups=0,edits=0,cancels=0,clock=0;
  const visible=text=>({textContent:text,isConnected:true,getClientRects:()=>[{}],getAttribute:()=>null});
  const edit={...visible('View & edit'),click(){opened=true;edits++}},cancel={...visible('Cancel'),click(){opened=false;cancels++}};
@@ -43,7 +44,7 @@ for(const rowDelay of [0,25000])for(const batch of [false,true])test('QA waits f
  const modal={...visible(''),querySelectorAll(selector){if(selector==='h1,h2')return [visible('Inserts on this order')];if(selector==='button')return [cancel];if(selector.startsWith('[data-test'))return [visible('Current slip'),visible('Current sticker')];throw Error('Unexpected modal read '+selector)}};
  const main={...visible('REF-TEST'),querySelectorAll(selector){if(selector==='button')return ++lookups===1?[]:[edit];throw Error('Unexpected main read '+selector)}};
  const row={querySelector:()=>visible('Excellent')},second={querySelector:()=>visible('Poor')},seen=[];
- const document={querySelector:()=>main,querySelectorAll(selector){if(selector==='main h1')return [visible('99')];if(selector==='table tbody tr')return clock>=rowDelay?[row]:[];if(selector==='[role="dialog"]')return opened?[modal]:[];if(selector==='main select')return [quotes];throw Error('Unexpected document read '+selector)}};
+ const document={querySelector:()=>main,querySelectorAll(selector){if(selector==='main h1')return [visible('99')];if(selector==='table tbody tr')return clock>=rowDelay?[row]:[];if(selector==='[role="dialog"]')return opened?[modal]:[];if(selector==='main select')return clock>=rowDelay+shippingDelay?[quotes]:[];throw Error('Unexpected document read '+selector)}};
  const context={document,URL,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},prodigiExactRow:()=>true,prodigiPinnedRow:(rows,plan)=>{if(!rows.length)return null;seen.push(plan.item_id);return plan.item_id==='89'?second:rows[0]},Date:{now:()=>clock},setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:async()=>({permitted:true})}}};
  vm.runInNewContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-dashboard-qa.js'),'utf8'),context);
  const items=[{item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Black'},{item_id:'89',sku:'GLOBAL-CFP-A4',colour:'Natural'}];

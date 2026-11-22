@@ -98,14 +98,14 @@ def has_existing_artwork(item):
 
 
 @stages.stale_result(None)
-def claim(*,exact_item_supported=False,reset_supported=False):
+def claim(*,exact_item_supported=False,reset_supported=False,preferred_order=''):
     import os
     with stages.edit(LOCK) as cur:
         cur.execute('''SELECT key,value FROM app_settings WHERE
             (key LIKE 'prodigi_prepare:%%' OR key LIKE 'prodigi_sandbox_test:%%')
             AND (key LIKE 'prodigi_prepare:%%' OR %s)
             AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 20''', (os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()=='true',WAITING))
+            ORDER BY CASE WHEN value->>'order_id'=%s THEN 0 ELSE 1 END,updated_at LIMIT 20''', (os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()=='true',WAITING,preferred_order))
         for row in cur.fetchall():
             key, value = row['key'], row['value']
             if key.startswith('prodigi_sandbox_test:'):

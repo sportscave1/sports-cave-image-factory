@@ -42,13 +42,21 @@ def batch_status(ids):
     if not keys:return {}
     keys += [queue.FAILURE_PREFIX+str(int(i)) for i in ids if str(i).isdigit()]
     keys.append('orders_submit_after_qa')
+    keys.append('orders_companion_runtime')
+    keys += ['orders_runtime:'+str(int(i)) for i in ids if str(i).isdigit()]
     with queue.connect() as c,c.cursor() as q:
         q.execute('SELECT key,value FROM app_settings WHERE key=ANY(%s)',(keys,))
         rows=q.fetchall()
     states={r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.PREFIX)}
     states.update({r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.FAILURE_PREFIX) and r['value'].get('active')})
     automatic=next((r['value'].get('enabled') is True for r in rows if r['key']=='orders_submit_after_qa'),False)
-    for value in states.values():value['_submit_enabled']=automatic
+    from orders_runtime import public
+    runtime={r['key'].split(':')[-1]:r['value'] for r in rows if r['key'].startswith('orders_runtime:')}
+    companion=next((r['value'] for r in rows if r['key']=='orders_companion_runtime'),{})
+    for aid,value in states.items():
+        value['_submit_enabled']=automatic
+        value['_runtime']=public(value,runtime.get(aid,{}))
+        value['_companion_version']=companion.get('version','')
     return states
 
 
@@ -99,13 +107,15 @@ def review(saved,row,jpg):
     from prodigi_dashboard_qa import CHECKS
     state=(saved or {}).get('status','Waiting')
     checks=(saved or {}).get('checks') or {}
+    runtime=(saved or {}).get('_runtime') or {}
     stopped=state in ('Needs QA','Needs review','Submission uncertain','Status unavailable')
     snap=(saved or {}).get('snapshot') or {}
     if re.fullmatch('[a-f0-9]{64}',str(snap.get('job_id') or '')) and snap.get('output',{}).get('sha256'):
         jpg=ORIGIN+'/api/auto-editions/file?allocation_id='+str(row['edition_order_id'])+'&job_id='+snap['job_id']+'&inline=1'
     items=[dict(label=label,state='pass' if checks.get(key) is True else 'fail' if stopped and (checks.get(key) is False or key=='final_check') else 'pending') for key,label in CHECKS.items()]
-    return dict(status=state,message=(saved or {}).get('message','Waiting for automatic artwork preparation.'),
-        updated_at=(saved or {}).get('updated_at') or ((saved or {}).get('last_failure') or {}).get('at'),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
+    return dict(status=state,message=runtime.get('label') or (saved or {}).get('message','Waiting for automatic artwork preparation.'),
+        progress=runtime,companion_version=(saved or {}).get('_companion_version',''),
+        updated_at=runtime.get('seen_at') or (saved or {}).get('updated_at') or ((saved or {}).get('last_failure') or {}).get('at'),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
         submission_enabled=(saved or {}).get('_submit_enabled'),
         insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
         shipping_quote=shipping_summary(saved),

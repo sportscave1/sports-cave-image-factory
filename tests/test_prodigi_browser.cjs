@@ -176,6 +176,23 @@ test('an ordinary saved artwork handoff never reloads an unexpected editor',asyn
  await vm.runInContext('prodigiBrowserRun(plan)',context);
 });
 
+test('fresh saved-order QA removes only image-library filters on its owned exact tab',async()=>{
+ const {context,storage,calls}=setup();let page='old',navigations=0;
+ const url='https://dashboard.prodigi.com/orders/99/detail';
+ storage.ordersWorkerTabs={[url]:9};
+ context.chrome.tabs.get=async id=>({id,url:url+'?imageLibraryType=Uploads&imageLibraryFileType=Image'});
+ context.chrome.tabs.reload=()=>assert.fail('Reload would retain stale library filters');
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.deepEqual(JSON.parse(JSON.stringify(options)),{url});navigations++;page='new';};
+ context.chrome.tabs.sendMessage=async(id,message)=>{
+   if(message.type==='prodigi:ready')return {ready:true,page_instance:page};
+   assert.equal(message.type,'prodigi:qa');assert.equal(page,'new');return{evidence:{}};
+ };
+ context.plan={kind:'qa',fresh_saved_order:true,environment:'live',order_id:'99',item_id:'88',exact_item:true,
+   order_url:url,key:'prodigi_prepare:1',token:'b'.repeat(43),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Black',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+ assert.equal(navigations,1);assert.equal(calls.length,1);assert(calls[0].url.endsWith('/qa/finish'));
+});
+
 test('empty product editor authority rejects reset, sandbox and unscoped plans',()=>{
  const {context}=setup();const live={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
    key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,selected_empty_product:true};
@@ -184,6 +201,16 @@ test('empty product editor authority rejects reset, sandbox and unscoped plans',
    {environment:'sandbox'},{key:'other'},{item_id:''},{token:'invalid'}]){
    context.plan={...live,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
  }
+});
+
+test('read-only transport retries back off, while a Save permit is never retried',async()=>{
+ const {context,storage}=setup();let calls=0;const delays=[];
+ context.setTimeout=(fn,ms)=>{delays.push(ms);queueMicrotask(fn)};
+ context.fetch=async()=>({ok:++calls===3,status:503});
+ const result=await vm.runInContext("prodigiReadFetch('https://sports-cave-image-factory.onrender.com/readback',{})",context);
+ assert(result.ok);assert.equal(calls,3);assert.deepEqual(delays,[1000,2000]);assert.equal(storage.ordersRetry.attempt,2);
+ calls=0;context.plan=plan;context.fetch=async()=>{calls++;return{ok:false,status:503}};
+ await assert.rejects(vm.runInContext("prodigiReceipt(plan,'permit')",context),/could not be verified/);assert.equal(calls,1);
 });
 
 test('merge Add plans accept only scoped live product-selection handoffs',()=>{

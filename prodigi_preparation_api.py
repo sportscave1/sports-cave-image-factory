@@ -8,6 +8,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 import prodigi_preparation as queue
 
+def _record_runtime_version(value):
+    from orders_runtime import record_version
+    try:record_version(value)
+    except Exception:pass  # Telemetry failure never changes a handoff outcome.
+
 
 def desktop(token,*,slots=None):
     import product_upload_staff_queue as pairing
@@ -36,19 +41,21 @@ def desktop(token,*,slots=None):
 async def ready_handoff(request, merge_supported):
     from prodigi_browser import claim
     browser = None
+    preferred=request.headers.get('x-sports-cave-orders-continue','')
+    priority={'preferred_order':preferred} if re.fullmatch(r'[A-Za-z0-9-]{1,100}',preferred) else {}
     if merge_supported:
         from prodigi_consolidation import claim as merge_claim
         browser=await run_in_threadpool(merge_claim)
     # Finish already-uploaded orders before starting another large transfer.
     if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
         from prodigi_dashboard_qa import claim as qa_claim
-        browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1',sequential_supported=request.headers.get('x-sports-cave-orders-sequential')=='1',item_qa_supported=request.headers.get('x-sports-cave-orders-item-qa')=='1')
+        browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1',sequential_supported=request.headers.get('x-sports-cave-orders-sequential')=='1',item_qa_supported=request.headers.get('x-sports-cave-orders-item-qa')=='1',**priority)
     # Continue the selected item through upload before choosing a sibling.
     if browser is None and request.headers.get('x-sports-cave-orders-browser')=='1':
-        browser=await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1')
+        browser=await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1',**priority)
     if browser is None and request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
         from prodigi_product_browser import claim as product_claim
-        browser=await run_in_threadpool(product_claim)
+        browser=await run_in_threadpool(product_claim,**priority)
     if browser is None and request.headers.get('x-sports-cave-orders-documents')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_LEGACY_DOCUMENT_UPLOAD','').lower()=='true':
         from prodigi_document_browser import claim as document_claim
         browser=await run_in_threadpool(document_claim)
@@ -102,9 +109,12 @@ async def tick(request):
             value = await run_in_threadpool(queue.tick)
             stage='prepared_handoff'
             browser = await ready_handoff(request,merge_supported)
+        from starlette.background import BackgroundTask
+        runtime_version=request.headers.get('x-sports-cave-orders-version','')
+        background=BackgroundTask(_record_runtime_version,runtime_version) if runtime_version else None
         return JSONResponse({'enabled': queue.enabled(), 'job':
             {'allocation_id': value['allocation_id'], 'status': value['status']} if value else None,
-            'browser': browser}, headers=HEADERS)
+            'browser': browser}, headers=HEADERS,background=background)
     except Exception as error:
         import logging
         logging.getLogger(__name__).warning('Orders poll retry stage=%s kind=%s',stage,type(error).__name__)
@@ -226,10 +236,14 @@ async def order_status(request):
 
 from orders_wake import listen as orders_notifications
 from orders_feed import feed as orders_row_feed
+from orders_runtime import endpoint as orders_progress
+from orders_runtime import metrics_endpoint as orders_metrics
 
 ROUTES = (('/api/orders/feed',orders_row_feed,('POST',)),('/api/orders-companion/notifications',orders_notifications,('GET',)),('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),
           ('/api/prodigi-artwork/{token}', serve_artwork, ('GET', 'HEAD')),
-          ('/api/prodigi-document/{token}', serve_document, ('GET','HEAD')))
+          ('/api/prodigi-document/{token}', serve_document, ('GET','HEAD')),
+          ('/api/orders-companion/progress',orders_progress,('POST',)),
+          ('/api/orders-companion/metrics',orders_metrics,('GET',)))

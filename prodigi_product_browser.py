@@ -36,9 +36,9 @@ def checked(value, provider, resolver):
 
 
 @stages.stale_result(None)
-def claim():
+def claim(*,preferred_order=''):
     with stages.edit(browser.LOCK) as cur:
-        cur.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s ORDER BY updated_at LIMIT 20", (WAITING,))
+        cur.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s ORDER BY CASE WHEN value->>'order_id'=%s THEN 0 ELSE 1 END,updated_at LIMIT 20", (WAITING,preferred_order))
         for row in cur.fetchall():
             key, value = row['key'], row['value']
             if value.get('hidden') or not value.get('browser_requested') or any(value.get(k) for k in ('browser','write_intent','submission','product_browser')): continue

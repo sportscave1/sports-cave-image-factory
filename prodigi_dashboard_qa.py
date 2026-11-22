@@ -135,9 +135,9 @@ def enqueue(value,provider,resolver,persist,*,verified_order=None):
 
 
 @stages.stale_result(None)
-def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False,sequential_supported=False,item_qa_supported=False):
+def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False,sequential_supported=False,item_qa_supported=False,preferred_order=''):
     with stages.edit(browser.LOCK) as q:
-        q.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false) ORDER BY updated_at LIMIT 1",(WAITING,))
+        q.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false) ORDER BY CASE WHEN value->>'order_id'=%s THEN 0 ELSE 1 END,updated_at LIMIT 1",(WAITING,preferred_order))
         row=q.fetchone()
         if not row:return None
         value=row['value'];key=row['key']

@@ -73,6 +73,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
   'use strict';
   if(typeof document==='undefined') return;
   const pageInstance=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+  function reportStage(stage,plan){if(plan?.progress===true)void Promise.resolve(chrome.runtime.sendMessage({type:'prodigi:progress',stage})).catch(()=>{});}
   const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const visible=e=>e&&e.isConnected&&e.getClientRects().length;
   const text=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
@@ -85,6 +86,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
     return found[0];
   };
   async function wait(check,timeout=120000) {
+    if(typeof prodigiObserveReady==='function')return prodigiObserveReady(check,{timeout});
     const end=Date.now()+timeout;
     do {const result=check();if(result)return result;await delay(250);}while(Date.now()<end);
     throw Error('Prodigi did not reach the expected upload state.');
@@ -114,7 +116,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
   let running=false;
   async function holdDuplicate(plan) {
     if(running)throw Error('An order operation is already in progress.');
-    running=true;let stage='merge-hold';
+    running=true;let stage='merge-hold';reportStage(stage,plan);
     try {
       locationMatches(plan);
       if(dialogs().length)throw Error('Close the unsaved duplicate editor before its hold.');
@@ -140,7 +142,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
   }
   async function selectProduct(plan,adding=false) {
     if(running)throw Error('An order operation is already in progress.');
-    running=true;let stage='product';
+    running=true;let stage='product';reportStage(stage,plan);
     try {
       locationMatches(plan);
       if(dialogs().length)throw Error('An existing editor requires review.');
@@ -153,7 +155,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       });
       button(row,'Choose product').click();
       }
-      stage='product-search';
+      stage='product-search';reportStage(stage,plan);
       const picker=await wait(()=>dialog('Select product'));
       // Some Prodigi accounts show the catalogue directly, without tabs.
       const catalogues=prodigiControls(picker,'button').filter(e=>visible(e)&&text(e)==='Catalogue');
@@ -171,7 +173,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
           return !c.select.disabled&&(!c.colour||c.colour.value===c.value);
         }catch{return false;}
       });
-      stage='product-select';
+      stage='product-select';reportStage(stage,plan);
       locationMatches(plan);
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:plan.sha256});
       if(permission?.permitted!==true)throw Error('The blank item changed before selection.');
@@ -181,7 +183,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       const current=prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);
       if(current.colour&&current.colour.value!==current.value)throw Error('The frame colour did not persist.');
       current.select.click();
-      stage='product-readback';
+      stage='product-readback';reportStage(stage,plan);
       if(adding){
         await wait(()=>!dialog('Select product'));
         const editor=dialog('Image Editor');
@@ -194,7 +196,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
     }catch(error){return {stage,error:String(error.message||'Product selection stopped').slice(0,240)};}finally{running=false;}
   }
   async function uploadCertificate(plan) {
-    let stage='row';
+    let stage='row';reportStage(stage,plan);
     try {
       const addSlip=await wait(()=>{
         const rows=Array.from(document.querySelectorAll('table tbody tr')).filter(r=>prodigiExactRow(r,plan.sku,plan.colour));
@@ -203,9 +205,9 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
         try{return button(document.querySelector('main'),'Add packing slip');}catch{return null;}
       });
       addSlip.click();
-      stage='picker';
+      stage='picker';reportStage(stage,plan);
       const input=await filePickerInput();
-      stage='transfer';
+      stage='transfer';reportStage(stage,plan);
       const parts=[];let received=0;
       while(received<plan.bytes) {
         const answer=await chrome.runtime.sendMessage({type:'prodigi:chunk',offset:received});
@@ -216,10 +218,10 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       const file=new File(parts,plan.filename,{type:'application/pdf'});
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
       if(hash!==plan.sha256)throw Error('Certificate checksum differs.');
-      locationMatches(plan);stage='permit';
+      locationMatches(plan);stage='permit';reportStage(stage,plan);
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:hash});
       if(permission?.permitted!==true)throw Error('The draft changed before certificate upload.');
-      locationMatches(plan);stage='save';
+      locationMatches(plan);stage='save';reportStage(stage,plan);
       const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;
       input.dispatchEvent(new Event('change',{bubbles:true}));
       await wait(()=>!dialog('Select image')&&Array.from(document.querySelectorAll('main a')).some(a=>text(a)==='View packing slip'),240000);
@@ -229,21 +231,21 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
   async function upload(plan) {
     if(running) throw Error('An upload is already in progress.');
     running=true;
-    let stage='page';
+    let stage='page';reportStage(stage,plan);
     try {
       locationMatches(plan);
       if(dialogs().length) throw Error('An existing editor requires manual review.');
       if(plan.kind==='certificate')return await uploadCertificate(plan);
-      stage='row';
+      stage='row';reportStage(stage,plan);
       const row=await wait(()=>{
         const target=prodigiPinnedRow(document.querySelectorAll('table tbody tr'),plan);
         if(!target)return null;
         try {button(target,plan.replace_artwork?'Edit':'Upload');return target;} catch {return null;}
       });
       button(row,plan.replace_artwork?'Edit':'Upload').click();
-      stage='editor';
+      stage='editor';reportStage(stage,plan);
       if(plan.replace_artwork){
-        stage='reset-image';
+        stage='reset-image';reportStage(stage,plan);
         const {canvas:remove,point}=await prodigiResetControl(()=>dialog('Image Editor'),plan.sku,wait,text,visible);
         const at={bubbles:true,composed:true,view:window,clientX:point.x,clientY:point.y,button:0};
         remove.dispatchEvent(new PointerEvent('pointerdown',{...at,buttons:1,pointerType:'mouse',isPrimary:true}));
@@ -260,9 +262,9 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       });
       if(!text(editor).includes(plan.sku)) throw Error('Editor product differs.');
       button(editor,'Add image').click();
-      stage='picker';
+      stage='picker';reportStage(stage,plan);
       const input=await filePickerInput();
-      stage='transfer';
+      stage='transfer';reportStage(stage,plan);
       const parts=[];let received=0;
       while(received<plan.bytes) {
         const answer=await chrome.runtime.sendMessage({type:'prodigi:chunk',offset:received});
@@ -277,7 +279,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       locationMatches(plan);
       const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;
       input.dispatchEvent(new Event('change',{bubbles:true}));
-      stage='uploaded';
+      stage='uploaded';reportStage(stage,plan);
       const loaded=await wait(()=>{
         const e=dialog('Image Editor');return e&&!dialog('Select image')&&text(e).includes('Uploaded image:')&&e;
       },240000);
@@ -285,7 +287,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       if(!Array.isArray(plan.dimensions)||!compact.includes(plan.dimensions.join('x')+'px'))
         throw Error('Uploaded image dimensions differ from the numbered archive.');
       const orientation=plan.dimensions[0]>plan.dimensions[1]?'Landscape':'Portrait';
-      stage='orientation';
+      stage='orientation';reportStage(stage,plan);
       const radios=Array.from(loaded.querySelectorAll('input[type="radio"],[role="radio"]'));
       const target=radios.find(e=>e.getAttribute('aria-label')===orientation||
         (e.labels&&Array.from(e.labels).some(l=>text(l)===orientation))||
@@ -299,11 +301,11 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       });
       button(fitted,'fit').click();
       await delay(500); // Let the editor commit its orientation/fit state before Save.
-      stage='permit';
+      stage='permit';reportStage(stage,plan);
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:hash});
       if(permission?.permitted!==true) throw Error('The draft changed before Save.');
       locationMatches(plan);
-      stage='save';
+      stage='save';reportStage(stage,plan);
       button(dialog('Image Editor'),'Save').click();
       await wait(()=>!dialog('Image Editor'),120000);
       return {saved:true,stage};

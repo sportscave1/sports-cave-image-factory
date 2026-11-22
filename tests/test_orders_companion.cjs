@@ -75,3 +75,10 @@ test('a continuously successful queue yields after six stages',async()=>{
   await vm.runInContext('ordersQueueTick()',scope);
   assert.equal(calls,6);
 });
+
+test('ready work schedules one immediate continuation after a bounded batch',async()=>{
+ const {scope}=context('fixture',async()=>({ok:true,json:async()=>({enabled:true,browser:{key:'pinned',order_id:'99'}})}));
+ const timers=[];scope.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length};
+ scope.prodigiBrowserRun=async()=>({status:'Waiting for order'});
+ await vm.runInContext('ordersQueueTick()',scope);assert.equal(timers.length,1);assert.equal(timers[0].ms,100);
+});
