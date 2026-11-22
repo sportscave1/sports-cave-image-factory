@@ -191,7 +191,7 @@ def test_failure_reconnect_honours_verified_completion_without_failure_or_reuplo
          patch('requests.post') as fail_request,patch.object(local,'release_verified_temporary_files') as cleanup:
         local.report_failure(row)
         local.report_failure(row)  # Repeated error callbacks cannot report or upload again.
-    reconnect.assert_called_once_with(row);fail_request.assert_not_called();cleanup.assert_called_once_with(row)
+    reconnect.assert_called_once_with(row,checkpoint_only=True);fail_request.assert_not_called();cleanup.assert_called_once_with(row)
     saved=json.loads((folder/'job-state.json').read_text())
     assert row['status']=='Prepared' and row['error']=='' and not row['checkpoint_pending']
     assert saved['status']=='Prepared' and saved['error']=='' and not saved['checkpoint_pending']
@@ -337,3 +337,31 @@ def test_legacy_retained_packet_cannot_be_relabelled_as_current_resumable_genera
         local.upload_prepared('job',archive)
     body.assert_not_called()
     assert row['status']=='Blocked' and 'generation' in row['error'] and archive.exists()
+
+
+def test_acknowledged_retained_failure_releases_same_idle_memory_checkpoint(tmp_path):
+    folder=tmp_path/'owned-job';folder.mkdir()
+    ctx=dict(automatic=True,source={'file_id':'id:synthetic'},product_gid='gid://shopify/Product/1',lease_token='synthetic-lease')
+    retained=dict(context=ctx,status='Blocked',checkpoint_pending=True,error='Synthetic upload admission failure')
+    (folder/'job-state.json').write_text(json.dumps(retained))
+    current=dict(retained,folder=folder,workers=0)
+    def acknowledge(row):row.update(checkpoint_pending=False,checkpoint_reported=True)
+    with patch.object(local,'JOBS',{'owned-job':current}),patch.object(local,'host_request',return_value={'grant':{}}),patch.object(local,'report_failure',side_effect=acknowledge):
+        assert local.recover_retained({})
+    assert current['checkpoint_pending'] is False and current['checkpoint_reported'] is True
+    current.update(workers=1,checkpoint_pending=True)
+    local.reconcile_retained_checkpoint(dict(current,checkpoint_pending=False))
+    assert current['checkpoint_pending'] is True
+
+
+def test_checkpoint_only_reconnect_never_downgrades_or_replays_body(tmp_path):
+    from unittest.mock import Mock
+    local.HOST_FILE.write_bytes(json.dumps(dict(base_url='https://fixture.invalid',token='synthetic')).encode())
+    ctx=dict(product_gid='gid://shopify/Product/1',lease_token='synthetic',source={'file_id':'id:synthetic'})
+    grant=dict(base_url='https://fixture.invalid',ticket='synthetic',secret='synthetic')
+    response=Mock();response.json.return_value=dict(grant=grant,upload_protocol=0,upload_max_bytes=256)
+    row=dict(context=ctx,grant=grant,upload_protocol=1)
+    with patch.object(device_trust,'protect',side_effect=lambda value,**_:value),patch.object(local,'health_payload',return_value={}),patch.object(local,'context',return_value=ctx),patch('requests.post',return_value=response) as post:
+        local.reconnect(row,checkpoint_only=True)
+        assert row['upload_protocol']==1 and post.call_args.args[0].endswith('/reconnect')
+        with pytest.raises(ValueError,match='legacy replay refused'):local.reconnect(row)
