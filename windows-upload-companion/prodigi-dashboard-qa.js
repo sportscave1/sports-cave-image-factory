@@ -19,7 +19,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
   const delay=ms=>new Promise(r=>setTimeout(r,ms));
   const text=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
   const visible=e=>e&&e.isConnected&&e.getClientRects().length;
-  async function wait(fn,timeout=20000){const end=Date.now()+timeout;do{const v=fn();if(v)return v;await delay(200);}while(Date.now()<end);throw Error('The expected QA control did not finish loading.');}
+  async function wait(fn,timeout=120000){const end=Date.now()+timeout;do{const v=fn();if(v)return v;await delay(200);}while(Date.now()<end);throw Error('The expected QA control did not finish loading.');}
   function uniqueButton(scope,label){const all=Array.from(scope.querySelectorAll('button')).filter(e=>visible(e)&&!e.disabled&&(e.getAttribute('aria-label')||text(e))===label);if(all.length!==1)throw Error('A unique '+label+' control is required.');return all[0];}
   function pin(plan){
     const actual=new URL(location.href),wanted=new URL(plan.order_url);
@@ -43,7 +43,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     try {
       const modal=await wait(insertDialog);
       // Read the currently saved selection only. Never select, assign or save a set.
-      saved=await wait(()=>{const rows=insertRows(modal);return rows.length?rows:null;},5000).catch(()=>[]);
+      saved=await wait(()=>{const rows=insertRows(modal);return rows.length?rows:null;},20000).catch(()=>[]);
     } finally {
       const open=insertDialog();if(open)uniqueButton(open,'Cancel').click();
       await wait(()=>!insertDialog());
@@ -74,13 +74,16 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     return true;
   }
   async function run(plan){
+    let stage='product-row';
     try {
       pin(plan);
       if(Array.from(document.querySelectorAll('[role="dialog"]')).some(visible))throw Error('Close the existing order editor before QA.');
       const row=await wait(()=>prodigiPinnedRow(document.querySelectorAll('table tbody tr'),plan));
       const quality=text(row.querySelector('[title="Image quality"]'));
       if(!quality)throw Error('Supplier image quality is not visible.');
+      stage='inserts';
       const inserts=await inspectInserts(plan);
+      stage='shipping';
       const selects=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*[$£€]/.test(o.textContent)));
       if(selects.length!==1)throw Error('A unique shipping selector is required.');
       const select=selects[0],options=prodigiShippingQuotes(select),current=select.value.toLowerCase();
@@ -93,9 +96,10 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
       pin(plan);
       const shippingNow=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*[$£€]/.test(o.textContent)));
       if(shippingNow.length!==1||shippingNow[0].value.toLowerCase()!==target)throw Error('Shipping selection was not saved.');
+      stage='tax-declaration';
       const tax_collected=await declareTax(plan,permit);
       return {evidence:{...(plan.exact_item?{item_id:plan.item_id}:{}),tax_collected,quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
-    }catch(error){return {error:String(error.message||'Dashboard QA stopped').slice(0,240)};}
+    }catch(error){return {error:('QA '+stage+': '+String(error.message||'Dashboard QA stopped')).slice(0,240)};}
   }
   let running=false;
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{
