@@ -55,7 +55,7 @@ def render(row, user, *, answers=None, compact=False):
                     st.caption('Certificate attachment verified. Supplier document download: '+
                         ('confirmed' if saved['qa'].get('supplier_certificate_download_confirmed') else 'pending until manual release'))
             approval=saved.get('print_approval') or {}
-            if not (saved.get('browser') or {}).get('verified') and (saved.get('qa') or {}).get('policy')!='prodigi-dashboard-inserts-qa-v1' and approval and not approval.get('print_ready') and approval.get('source_ppi'):
+            if not (saved.get('browser') or {}).get('verified') and not str((saved.get('qa') or {}).get('policy','')).startswith('prodigi-dashboard-inserts-') and approval and not approval.get('print_ready') and approval.get('source_ppi'):
                 st.warning(f"Native source: {min(approval['source_ppi']):.0f} PPI; supplier recommendation: {approval['required_ppi']} PPI. Enlarging the JPG does not create native detail.")
                 st.caption('A higher-resolution original master is required. This limitation is not automatically waived.')
             if saved.get('document') and not (saved.get('browser') or {}).get('verified'):
@@ -64,7 +64,7 @@ def render(row, user, *, answers=None, compact=False):
                 with st.expander('Companion QA review prompt'):
                     st.code(queue.review_prompt(saved), language=None)
             from prodigi_dashboard_qa import CHECKS as dashboard_checks
-            labels=dashboard_checks if (saved.get('qa') or {}).get('policy')=='prodigi-dashboard-inserts-qa-v1' or (saved.get('browser') or {}).get('verified') else queue.CHECKS
+            labels=dashboard_checks if str((saved.get('qa') or {}).get('policy','')).startswith('prodigi-dashboard-inserts-') or (saved.get('browser') or {}).get('verified') else queue.CHECKS
             active=saved['status'] in ('Checking QA','Awaiting dashboard QA','Checking dashboard QA')
             for field, label in labels.items():
                 st.caption(('✓ ' if saved['checks'].get(field) else ('Checking · ' if active else 'Review required · ')) + label)
