@@ -142,7 +142,10 @@ def claim(*,exact_item_supported=False,reset_supported=False):
                     item_id=value['item_id'],reference=order['merchantReference'],sku=item['sku'],colour=colour,
                     order_url=f'https://{host}/orders/{value["order_id"]}/detail',artwork_url=url,
                     sha256=snap['output']['sha256'],bytes=snap['output']['bytes'],dimensions=snap['dimensions'],
-                    filename=filename,exact_item=exact_item_supported,**({'replace_artwork':True} if replace else {}))
+                    filename=filename,exact_item=exact_item_supported,
+                    **({'selected_empty_product':True} if not sandbox and exact_item_supported and not replace
+                       and value.get('product_browser',{}).get('verified') is True else {}),
+                    **({'replace_artwork':True} if replace else {}))
             except Exception as error:
                 value.update(status='Needs review',message=str(error) if isinstance(error,ValueError)
                     else 'Browser preparation could not be verified. No order was submitted.')
@@ -301,6 +304,39 @@ def resume_unstarted(user,key):
         value.setdefault('history',[]).append(dict(at=prep.now(),event='untouched_browser_upload_restarted'))
         save(cur,key,value)
         return value
+
+
+def recover_selected_empty_editors(user):
+    """Recover this known pre-permit handoff bug, never uncertain supplier writes.
+
+    Called only by companions advertising the empty-editor transition fix.
+    resume_unstarted independently checks fresh source, empty assets and the full
+    pinned supplier business state before removing an unused upload intent.
+    """
+    prep.require_user(user)
+    from companion_poll_transaction import connection
+    with connection(prep.connect) as conn,conn.cursor() as cur:
+        cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+            AND value->>'status'='Needs review'
+            AND value->'browser'->>'started'='false'
+            AND value->'browser'->>'last_stage'='page'
+            AND value->'browser'->>'client_error'='An existing editor requires manual review.'
+            AND value->'product_browser'->>'verified'='true'
+            AND NOT value ? 'submission'
+            AND NOT COALESCE((value->>'hidden')::boolean,false)
+            ORDER BY updated_at LIMIT 2""")
+        keys=[row['key'] for row in cur.fetchall()]
+    recovered=0
+    for key in keys:
+        try:
+            resume_unstarted(user,key)
+            recovered+=1
+        except (ValueError,PermissionError):
+            pass  # Changed artwork/address/source stays stopped for review.
+    if recovered:
+        import logging
+        logging.getLogger(__name__).info('ORDERS_EMPTY_EDITOR_RECOVERY resumed=%d',recovered)
+    return recovered
 
 
 @stages.stale_result({'status':'Handoff unavailable'})

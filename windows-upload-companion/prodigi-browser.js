@@ -28,6 +28,10 @@ async function prodigiWorkerTab(plan) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.selected_empty_product!==undefined && (plan.selected_empty_product!==true || host!=='dashboard.prodigi.com' ||
+    plan.kind!==undefined || plan.exact_item!==true || plan.replace_artwork!==undefined ||
+    !/^prodigi_prepare:\d+$/.test(plan.key) || !/^[A-Za-z0-9_-]{43}$/.test(plan.token) ||
+    !/^[A-Za-z0-9-]{1,100}$/.test(plan.item_id)))return false;
   if(plan?.kind==='merge-hold')return Boolean(host==='dashboard.prodigi.com'&&/^[A-Za-z0-9-]{1,100}$/.test(plan.order_id)&&
     plan.order_url===`https://${host}/orders/${plan.order_id}/detail`&&/^mergehold:prodigi_merge:[a-f0-9]{32}$/.test(plan.key)&&
     /^[A-Za-z0-9_-]{43}$/.test(plan.token)&&/^[a-f0-9]{64}$/.test(plan.sha256)&&typeof plan.reference==='string');
@@ -88,10 +92,20 @@ async function prodigiBrowserRun(plan) {
     if(hash!==plan.sha256) throw Error('The numbered JPG checksum changed.');
     stage='open';
     const tab=await prodigiWorkerTab(plan);
+    let reloaded=false,previousPage;
+    if(plan.selected_empty_product===true && tab.ordersReused) {
+      // Prodigi opens an empty Image Editor after choosing a blank product.
+      // Only a fresh server-verified empty-item handoff may clear that shell.
+      // The tab is worker-owned and exact-order; Save still needs its own permit.
+      try {previousPage=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.page_instance;}catch{}
+      await chrome.tabs.reload(tab.id);reloaded=true;
+    }
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
     let ready=false;
     for(let n=0;n<60;n++) {
-      try {ready=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.ready; if(ready) break;} catch {}
+      try {const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
+        ready=state?.ready && (!reloaded || (typeof state.page_instance==='string' && state.page_instance!==previousPage));
+        if(ready) break;} catch {}
       await ordersDelay(1000);
     }
     if(!ready) {stage='signin';throw Error('Sign into Prodigi in Edge, then review the same draft.');}

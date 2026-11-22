@@ -72,6 +72,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
+  const pageInstance=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const visible=e=>e&&e.isConnected&&e.getClientRects().length;
   const text=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
@@ -314,7 +315,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
     if(sender.id!==chrome.runtime.id) return;
     if(message?.type==='prodigi:ready') {
       const match=location.pathname.match(/^\/orders\/([A-Za-z0-9-]+)\/detail$/);
-      reply({busy:dialogs().length>0,ready:document.readyState==='complete'&&Boolean(match)&&
+      reply({page_instance:pageInstance,busy:dialogs().length>0,ready:document.readyState==='complete'&&Boolean(match)&&
         Array.from(document.querySelectorAll('main h1')).some(e=>text(e).startsWith(match[1]))});return;
     }
     if(message?.type==='prodigi:upload') {

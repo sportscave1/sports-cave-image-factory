@@ -73,7 +73,11 @@ async def tick(request):
         if not queue.enabled():
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         stage='authentication'
-        await run_in_threadpool(desktop, auth[7:])
+        actor=await run_in_threadpool(desktop, auth[7:])
+        if request.headers.get('x-sports-cave-orders-empty-editor')=='1':
+            stage='empty_product_editor_recovery'
+            from prodigi_browser import recover_selected_empty_editors
+            await run_in_threadpool(recover_selected_empty_editors,actor)
         merge_supported=request.headers.get('x-sports-cave-orders-merge')=='1'
         if merge_supported:
             stage='merge_readback'

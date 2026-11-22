@@ -141,6 +141,51 @@ test('upload and QA reuse only the worker-owned exact order tab',async()=>{
  assert.equal(tabs.length,3);
 });
 
+test('blank product auto-opens an editor; fresh empty handoff reloads once then uploads and runs QA on the same tab',async()=>{
+ const {context,tabs,storage}=setup();const events=[];let editor=false,page='old',oldReady=true;
+ const live={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
+   key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true};
+ context.chrome.tabs.get=async id=>({id,url:live.order_url});
+ context.chrome.tabs.reload=async()=>{events.push('reload');editor=false;page='new';};
+ context.chrome.tabs.sendMessage=async(id,m)=>{
+   if(m.type==='prodigi:ready'){
+     // A reload callback can resolve before the old content script disappears.
+     if(page==='new'&&oldReady){oldReady=false;events.push('old-ready');return{ready:true,page_instance:'old'};}
+     return{ready:true,page_instance:page,busy:editor};
+   }
+   if(m.type==='prodigi:product'){events.push('variant');editor=true;return{stage:'product-readback'};}
+   if(m.type==='prodigi:upload'){assert(!editor);assert(!oldReady);events.push('upload');return{saved:true,stage:'save'};}
+   if(m.type==='prodigi:qa'){events.push('qa');return{evidence:{}};}
+   assert.fail('Unexpected message');
+ };
+ context.product={...live,kind:'product',key:'product:prodigi_prepare:1',sku:'GLOBAL-CFP-A2',colour:'Natural'};
+ await vm.runInContext('prodigiBrowserRun(product)',context);
+ context.upload={...live,selected_empty_product:true};
+ await vm.runInContext('prodigiBrowserRun(upload)',context);
+ context.qa={...live,kind:'qa',sku:'GLOBAL-CFP-A2',colour:'Natural',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+ await vm.runInContext('prodigiBrowserRun(qa)',context);
+ assert.deepEqual(events,['variant','reload','old-ready','upload','qa']);
+ assert.equal(tabs.length,1);assert(!storage.ordersBrowserPending);
+});
+
+test('an ordinary saved artwork handoff never reloads an unexpected editor',async()=>{
+ const {context}=setup();context.plan=plan;
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ await vm.runInContext('prodigiWorkerTab(plan)',context);
+ context.chrome.tabs.reload=()=>assert.fail('No empty product authority');
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+});
+
+test('empty product editor authority rejects reset, sandbox and unscoped plans',()=>{
+ const {context}=setup();const live={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
+   key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,selected_empty_product:true};
+ context.plan=live;assert(vm.runInContext('prodigiPlanValid(plan)',context));
+ for(const change of [{exact_item:false},{replace_artwork:true},{kind:'certificate'},{selected_empty_product:'true'},
+   {environment:'sandbox'},{key:'other'},{item_id:''},{token:'invalid'}]){
+   context.plan={...live,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
+});
+
 test('merge Add plans accept only scoped live product-selection handoffs',()=>{
  const {context}=setup();const base={kind:'merge-add',environment:'live',order_id:'98',
    order_url:'https://dashboard.prodigi.com/orders/98/detail',key:'merge:prodigi_merge:'+'a'.repeat(32),

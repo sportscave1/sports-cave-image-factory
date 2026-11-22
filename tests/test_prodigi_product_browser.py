@@ -42,6 +42,39 @@ def test_permitted_selection_continues_once_to_normal_artwork(blank):
     assert v['status']=='Awaiting browser upload' and not blank.writes
     assert product.finish(plan['key'],plan['token'])['status']==browser.WAITING # persisted stage remains one-time
 
+def test_verified_empty_product_handoff_can_clear_only_its_worker_editor(blank,monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','true')
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256'])
+    blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
+    product.finish(p['key'],p['token'])
+    monkeypatch.setattr(browser,'context',lambda _: (blank,lambda _:snapshot(),lambda _:('https://fixture.invalid/art','fixture'),False))
+    plan=browser.claim(exact_item_supported=True)
+    assert plan['selected_empty_product'] is True and plan['item_id']=='88'
+    assert saved()['browser']['started'] is False and not blank.writes
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+
+@pytest.mark.parametrize('changed',['none','assets','address','started','submission','different_error'])
+def test_known_auto_editor_recovery_rechecks_before_retrying(blank,monkeypatch,changed):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','true')
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256'])
+    blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
+    product.finish(p['key'],p['token'])
+    monkeypatch.setattr(browser,'context',lambda _: (blank,lambda _:snapshot(),lambda _:('https://fixture.invalid/art','fixture'),False))
+    plan=browser.claim(exact_item_supported=True)
+    assert browser.finish(KEY,plan['token'],'page',error='An existing editor requires manual review.')['status']=='Needs review'
+    v=saved()
+    if changed=='assets':blank.data['items'][0]['assets']=[{'url':'https://fixture.invalid/new','printArea':'default'}]
+    if changed=='address':blank.data['recipient']={'name':'Different destination'}
+    if changed=='started':v['browser']['started']=True
+    if changed=='submission':v['submission']={'status':'submitted'}
+    if changed=='different_error':v['browser']['client_error']='A different error'
+    if changed in ('started','submission','different_error'):
+        with prep.connect() as c,c.cursor() as q:prep.save(q,v)
+    assert browser.recover_selected_empty_editors({'id':'fixture'})==(1 if changed=='none' else 0)
+    assert saved()['status']==(browser.WAITING if changed=='none' else 'Needs review')
+    assert not blank.writes
+
 @pytest.mark.parametrize('change',[
     lambda o:o.update(status='paused'),lambda o:o.update(charges=[{'amount':1}]),
     lambda o:o['items'][0].update(sku='GLOBAL-CFP-A1'),
