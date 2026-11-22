@@ -69,9 +69,17 @@ var SCAutoEditionsPreparation = (function () {
                 if (l.typename === "LayerSet") named(l, name, found);
             }
         }
-        function visibleRole(container, name) {
+        function visibleRole(container, name, expected) {
             var matches = [];
             named(container, name, matches);
+            if(expected){
+                var exact=[];
+                for(var j=0;j<matches.length;j++)if(matches[j].id===expected.layer_id)exact.push(matches[j]);
+                if(exact.length!==1 || expected.name!==name || exact[0].parent!==container || !exact[0].visible
+                    || SCPSDInspector.encode(box(exact[0]))!==SCPSDInspector.encode(expected.bounds_px))
+                    throw Error("reviewed_role_identity_changed");
+                return exact[0];
+            }
             if (matches.length === 1) return matches[0];
             // Retain hidden same-name layers in the PSD. The live role must
             // still be unique and top-level, as in the Python preflight.
@@ -119,8 +127,8 @@ var SCAutoEditionsPreparation = (function () {
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }
             if (doc.mode !== DocumentMode.RGB || doc.bitsPerChannel !== BitsPerChannelType.EIGHT)
                 throw Error("colour_conversion_requires_approval");
-            layer = visibleRole(doc, r.number_layer_name);
-            plaque = visibleRole(doc, r.plaque_layer_name);
+            layer = visibleRole(doc, r.number_layer_name, r.reviewed_roles && r.reviewed_roles.number);
+            plaque = visibleRole(doc, r.plaque_layer_name, r.reviewed_roles && r.reviewed_roles.plaque);
             if (layer.kind !== LayerKind.TEXT || !layer.visible || layer.allLocked || !plaque.visible)
                 throw Error("uneditable_or_hidden_role");
             if (layer.parent !== doc || plaque.parent !== doc)

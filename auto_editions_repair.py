@@ -41,13 +41,22 @@ def request(connect,pid,actor,request_id,allocation_id=None):
         if not mapping or not row or mapping['dropbox_file_id']!=row['file_id']:raise ValueError('Restore the exact PSD mapping before repair.')
         if (row.get('replacement') or {}).get('manual_required') or (row.get('reset_cancellation') or {}).get('stage') in ('Cancelling','Confirmed'):raise ValueError('Resolve the pending manual mapping/cancellation first.')
         if allocation_id:
-            cur.execute('SELECT shopify_product_gid FROM edition_orders WHERE id=%s',(allocation_id,));unit=cur.fetchone()
+            cur.execute("""SELECT shopify_product_gid FROM edition_orders e WHERE id=%s
+              AND status='assigned' AND allocation_valid=true AND identity_enforced=true
+              AND invalidated_at IS NULL AND to_jsonb(e)->>'cancelled_at' IS NULL
+              AND COALESCE(to_jsonb(e)->>'duplicate_allocation_warning','') IN ('','false')""",(allocation_id,));unit=cur.fetchone()
             if not unit or unit['shopify_product_gid']!=pid:raise ValueError('Allocation does not belong to this design.')
         previous=latest(cur,pid)
         if previous and previous['detail']['state'] in ACTIVE:
+            if allocation_id:
+                detail={**previous['detail'],'allocation_id':allocation_id,'user_requested':True,
+                        'next_check':datetime.now(timezone.utc).isoformat()}
+                cur.execute('UPDATE auto_edition_onboarding_audit SET detail=%s::jsonb WHERE id=%s',(encode(detail),previous['id']))
+                return {**detail,'duplicate':True}
             return {**previous['detail'],'duplicate':True}
         if previous and previous['detail']['request_id']==request_id:return previous['detail']
         detail=dict(request_id=request_id,state='Queued',allocation_id=allocation_id,
+            user_requested=actor!='auto-editions-repair',
             product_gid=pid,file_id=mapping['dropbox_file_id'],source=row.get('source'),
             original_checkpoint=str(row['updated_at']),previous_status=row['status'],
             message='Repair requested. Waiting for diagnosis.',changed_at=datetime.now(timezone.utc).isoformat())
@@ -173,7 +182,7 @@ def run_one(connect):
           LEFT JOIN auto_edition_onboarding q ON q.product_gid=a.product_gid
           WHERE a.event=%s AND a.detail->>'state' IN ('Queued','Diagnosing','Waiting','Codex queued','Codex repairing')
           AND COALESCE((a.detail->>'next_check')::timestamptz,a.created_at)<=now()
-          ORDER BY CASE WHEN q.status='Cloud Ready' THEN 0 ELSE 1 END,
+          ORDER BY CASE WHEN q.status='Cloud Ready' THEN 0 WHEN a.detail->>'user_requested'='true' THEN 1 ELSE 2 END,
             COALESCE((a.detail->>'next_check')::timestamptz,a.created_at),a.id
           FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(EVENT,))
         record=cur.fetchone()
@@ -216,8 +225,12 @@ def run_one(connect):
             from auto_editions_technical import Technical
             Technical(connect).seed()
             checkpoint(connect,record,'Waiting','Uploaded package is queued for technical validation.',technical_seed_hash=row['preparation_hash']);return True
-        if d['state']=='Waiting':
-            handoff(connect,record,row,'Automatic repair needs PSD diagnosis. Queued for the Edition Companion.');return True
+        from auto_editions_role_evidence import resolution
+        if d['state']=='Waiting' and not resolution(row.get('source')):
+            handoff(connect,record,row,d.get('handoff_message') or
+                ('Companion returned without repairing the PSD. '+str(row.get('reason') or 'Inspect the retained diagnosis.')
+                 if d.get('handoff_started') else 'Automatic repair needs PSD diagnosis. Queued for the Edition Companion.'))
+            return True
         # Repair is explicit authority to resume this one deferred product only.
         with connect() as conn,conn.cursor() as cur:
             cur.execute("UPDATE auto_edition_onboarding SET priority=10 WHERE product_gid=%s AND file_id=%s AND status IN ('Blocked','Needs PSD Repair') AND (lease_until IS NULL OR lease_until<now())",(pid,d['file_id']))
@@ -235,6 +248,23 @@ def run_one(connect):
         if row.get('preparation_hash') and row['technical_state'] is None:
             from auto_editions_technical import Technical
             Technical(connect).seed();checkpoint(connect,record,'Waiting','Resumed existing package for technical validation.');return True
+        from auto_editions_role_evidence import resolution
+        reviewed=resolution(source)
+        if reviewed and not row.get('preparation_hash'):
+            from auto_editions_preflight import preparation_code_hash
+            import hashlib
+            revision=hashlib.sha256((encode(reviewed)+preparation_code_hash()).encode()).hexdigest()
+            if d.get('role_repair_revision')!=revision:
+                from worker_health_queue import submit
+                submit(connect,pid,record['actor_id'],str(uuid.uuid5(uuid.NAMESPACE_URL,d['request_id']+revision)),repair_confirmed=True)
+                checkpoint(connect,record,'Waiting','Verified PSD layer repair queued for native preparation and automatic order JPGs.',role_repair_revision=revision)
+                return True
+        if d['state']=='Waiting':
+            if d.get('handoff_started'):
+                checkpoint(connect,record,'Needs help',d.get('handoff_message') or
+                    'Companion returned without repairing the PSD. '+str(row.get('reason') or 'Inspect the retained source diagnosis.'))
+            else:handoff(connect,record,row,'Automatic repair needs PSD diagnosis. Queued for the Edition Companion.')
+            return True
         if code in ('NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','EDITION_GEOMETRY','FONT_MISSING','PROFILE_MISSING','COLOUR_POLICY_PENDING'):
             handoff(connect,record,row,'PSD or colour evidence needs diagnosis. Queued for the Edition Companion.');return True
         from worker_health_queue import submit
@@ -253,13 +283,15 @@ def claim(connect):
           AND q.status IN ('Blocked','Needs PSD Repair')
           AND COALESCE(q.replacement->>'stage','') NOT IN ('Discovering','Queued','Preparing')
           AND COALESCE(q.reset_cancellation->>'stage','') NOT IN ('Cancelling','Confirmed')
-          ORDER BY a.id FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(EVENT,));record=cur.fetchone()
+          ORDER BY CASE WHEN a.detail->>'user_requested'='true' THEN 0 ELSE 1 END,a.id FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(EVENT,));record=cur.fetchone()
         if not record:return None
         d={**record['detail'],'state':'Codex repairing','handoff_token':str(uuid.uuid4()),'handoff_started':datetime.now(timezone.utc).isoformat(),'message':'Edition Companion submitted the PSD diagnosis to Codex.'}
         cur.execute('UPDATE auto_edition_onboarding_audit SET detail=%s::jsonb WHERE id=%s',(encode(d),record['id']))
         return {k:d[k] for k in ('request_id','product_gid','prompt','handoff_token')}
 
-def returned(connect,pid,request_id,token,ok):
+def returned(connect,pid,request_id,token,ok,message=''):
+    from orders_artwork_repair import public_message
+    diagnostic=public_message(message)
     with connect() as conn,conn.cursor() as cur:
         cur.execute("SELECT id,actor_id,detail FROM auto_edition_onboarding_audit WHERE event=%s AND product_gid=%s AND detail->>'request_id'=%s ORDER BY id DESC LIMIT 1 FOR UPDATE",(EVENT,pid,request_id))
         record=cur.fetchone()
@@ -270,8 +302,9 @@ def returned(connect,pid,request_id,token,ok):
         preparing=(cur.fetchone() or {}).get('status') in ('Awaiting preparation','Preparing','Cloud Ready')
         state='Waiting' if ok or preparing else 'Needs help'
         message=('Native preparation resumed; verifying the actual PSD and JPG queue.' if preparing else
-            'Codex returned; verifying the actual PSD and JPG queue.' if ok else 'Codex repair needs attention. Open the retained repair prompt.')
-        d={**d,'state':state,'message':message}
+            'Codex returned; verifying the actual PSD and JPG queue.' if ok else diagnostic or 'Companion repair failed without a verified result. Review the local repair report.')
+        d={**d,'state':state,'message':message,'handoff_message':diagnostic,
+           'changed_at':datetime.now(timezone.utc).isoformat()}
         cur.execute('UPDATE auto_edition_onboarding_audit SET detail=%s::jsonb WHERE id=%s',(encode(d),record['id']))
 
 async def action(request):
@@ -301,8 +334,10 @@ async def host(request):
             if body!={}:raise ValueError('Empty repair claim required.')
             result=await run_in_threadpool(claim,queue().connect)
             return JSONResponse({'repair':result},headers=HEADERS)
-        if set(body)!={'product_gid','request_id','handoff_token','ok'} or type(body['ok']) is not bool:raise ValueError('Exact repair receipt required.')
-        await run_in_threadpool(returned,queue().connect,body['product_gid'],body['request_id'],body['handoff_token'],body['ok'])
+        required={'product_gid','request_id','handoff_token','ok'}
+        if (set(body) not in (required,required|{'message'}) or type(body['ok']) is not bool
+                or not isinstance(body.get('message',''),str) or len(body.get('message',''))>500):raise ValueError('Exact repair receipt required.')
+        await run_in_threadpool(returned,queue().connect,body['product_gid'],body['request_id'],body['handoff_token'],body['ok'],body.get('message',''))
         return JSONResponse({'ok':True},headers=HEADERS)
     except Exception as error:return failure(error)
 

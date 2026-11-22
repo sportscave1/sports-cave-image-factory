@@ -37,8 +37,11 @@ def detect_roles(inspection,total,*,source=None):
     canvas = ae.dimensions([doc.get('width_px'), doc.get('height_px')])
     from auto_editions_role_evidence import reviewed_rows
     rows = reviewed_rows(inspection,source)
+    from auto_editions_role_evidence import selected_roles
+    selected=selected_roles(inspection,source)
     candidates = []
     for row in rows:
+        if selected and row.get('layer_id')!=selected['number']['layer_id']:continue
         match = NUMBER.fullmatch(row.get('text') or '') if row.get('kind') == 'text' else None
         if match and row.get('visible'):
             candidates.append((row, match))
@@ -64,7 +67,7 @@ def detect_roles(inspection,total,*,source=None):
     def recognised_plaque(row):
         name = row['path'][0]['name']
         if pinned:
-            return name == pinned
+            return name == pinned and (not selected or row.get('layer_id')==selected['plaque']['layer_id'])
         if name in PLAQUES:
             return True
         # A suffixed placed asset must still be an independent top-level image.

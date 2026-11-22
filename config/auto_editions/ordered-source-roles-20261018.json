@@ -349,6 +349,78 @@
         ],
         "name": "limited-edition-plaque"
       }
+    },
+    {
+      "source": {
+        "product_gid": "gid://shopify/Product/8887166796083",
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAAng",
+        "revision": "0165da28d855b67000000036d367e13",
+        "content_hash": "02d7b8cc046cdac2c53841acd386314fa41376de3aef7eb2270e041794186da1"
+      },
+      "exact_role_ids": true,
+      "source_dimensions": [
+        7016,
+        4961
+      ],
+      "evidence": "Owner requested SC3533 repair. Sole top-level editable number No. 12 of 100; the full artwork smart object contains its integrated bottom-right footer backing. No artwork layer is hidden or changed.",
+      "number": {
+        "name": "No. 12 of 100",
+        "layer_id": 334,
+        "bounds_px": [
+          6032,
+          4459,
+          6582,
+          4546
+        ],
+        "kind": "text"
+      },
+      "plaque": {
+        "name": "Generative Fill 6",
+        "layer_id": 338,
+        "bounds_px": [
+          0,
+          0,
+          7016,
+          4961
+        ],
+        "kind": "smart_object"
+      }
+    },
+    {
+      "source": {
+        "product_gid": "gid://shopify/Product/9434618265907",
+        "file_id": "id:u1tYiAa2O-AAAAAAAAABEw",
+        "revision": "016572fe73a7cb3000000036d367e13",
+        "content_hash": "47c61d14ce5f7abbfb89053eef6d601cdc62166b13b7c67fd88a0c224800ee65"
+      },
+      "exact_role_ids": true,
+      "source_dimensions": [
+        2835,
+        2004
+      ],
+      "evidence": "Owner requested SC3533 repair. The upper editable 001 / 100 field and upper collector plaque are the visible production roles. Lower historical same-name text and plaque layers remain unchanged. Full outside-number and reference pixel proofs are mandatory.",
+      "number": {
+        "name": "001 / 100",
+        "layer_id": 35,
+        "bounds_px": [
+          642,
+          1743,
+          917,
+          1791
+        ],
+        "kind": "text"
+      },
+      "plaque": {
+        "name": "limited-edition-plaque",
+        "layer_id": 33,
+        "bounds_px": [
+          242,
+          1582,
+          1104,
+          1863
+        ],
+        "kind": "smart_object"
+      }
     }
   ]
 }
