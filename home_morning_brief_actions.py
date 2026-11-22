@@ -16,7 +16,10 @@ from design_photographic_composition import (
 )
 from design_collector_assets import NEW_BADGE_LAYOUT
 from design_signature_free import SIGNATURE_FREE_COMPOSITION
-from design_collector_titles import NEW_DESIGN_TITLE_GUIDANCE, REFRESH_TITLE_GUIDANCE
+from design_collector_titles import (
+    NEW_DESIGN_TITLE_GUIDANCE, REFRESH_TITLE_GUIDANCE,
+    TIMELESS_ARTWORK_GUIDANCE, TIMELESS_ARTWORK_CHECK,
+)
 from design_collector_background import NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND
 from design_motorsport import (
     MOTORSPORT_ARTWORK, MOTORSPORT_JSON, MOTORSPORT_PLACEMENT,
@@ -104,13 +107,13 @@ def _prompt(title, story, *, edit=None, primary_market="", refresh_product_id=No
             'ID, handle/URL, variants, sales and edition history, counters and inventory. If the target '
             'cannot be verified, retain the Review artwork as needs_attention; never create another product.'
         )
-    story_guidance = 'Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Include an accolade, statistic or year only when essential and verified, in supporting context rather than the emotional headline. Reserve a full date for supporting context on a defining day. Keep dates, scores, live rankings and changing statistics out of routine player tributes.'
+    story_guidance = 'Choose a story supporters would still want to display in five years. Use timeless player, team, rivalry or legacy angles for routine results; verified landmarks, iconic moments or farewells for event tributes. Express the story through authentic photographs and a strong emotional title. Keep results, scores, statistics, rounds, dates and times in research notes and metadata only, never as supporting artwork copy. This applies equally to routine tributes and defining-event editions.'
     title_guidance = NEW_DESIGN_TITLE_GUIDANCE
     typography = _CREATE_DESIGN_TYPOGRAPHY
     save_naming = REVIEW_SAVE_NAMING
     edition_check = ''
     if preserve_refresh_edition:
-        story_guidance = 'Use the existing edition story as the research brief. Verify its subject, event or career angle, era and emotional meaning from the current artwork and listing. Find stronger authentic sources for that same story; do not replace it with a different moment or a new title concept. Preserve verified story-defining context, including an existing quotation, date, score or statistic where it identifies the original edition.'
+        story_guidance = 'Use the existing edition story as the research brief. Verify its subject, event or career angle, era and emotional meaning from the current artwork and listing. Find stronger authentic sources for that same story; do not replace it with a different moment or a new title concept. Preserve the emotional headline and any existing quotation. Keep verified story-defining dates, scores, rounds, times and statistics in research notes and metadata only; remove their standalone artwork captions without changing the edition story or visual direction.'
         title_guidance = REFRESH_TITLE_GUIDANCE
         typography = typography.replace(
             'Revise a conventional headline merely filling an empty corner within this layout review.',
@@ -137,13 +140,15 @@ Keep the existing full website product title verbatim for JSON design_title and 
 
 {CONTINUOUS_DESIGN_FLOW}Read SPORTS-CAVE-LIMITED-EDITION-COLLECTOR-DESIGNS.txt once for this job. Follow the current brief, job instructions and shared creative standards. For this new-design job, the integration rules below supersede older cutout-only compositing and mandatory whole-subject replacement instructions; photographic identity and factual accuracy remain mandatory. The integrated collector composition below governs creative layout across New Design, Refresh and Edit within the requested scope. Preserve authentic photographic units while composing venue, supporting moment, abstraction, title, exact plaque footprint and border together; source fidelity does not lock the original background or dictate a photo-first layout. These directions supersede conflicting photo-first, optional collector-treatment, pasted-photo and tiny-patch defaults in older guides, including the referenced project file. Treat Decision, Timing, Recommendation, Monitor or Wait in the brief as research context. Proceed through research, composition planning, one creative generation, assembly and finishing, then one verified final PSD and matching JSON in Design Studio Review. Display references/artwork and continue without pausing for approval.
 
+**Source brief — research context, not artwork copy**
+
 {context}
 
 **1. Research the story, sources and master**
 
 Use authorised read-only Shopify reports for comparable bestsellers and a lower-selling print where supported. If unavailable, use verified storefront bestsellers or approved references in the closest comparable sport or collector collection. Treat unranked products as style references only. Record evidence or gaps in REVIEW NOTES; draw original cues without attributing sales to design.
 
-{story_guidance}
+{TIMELESS_ARTWORK_GUIDANCE}{story_guidance}
 
 {title_guidance}{POSTER_IMAGE_SELECTION}
 
@@ -161,6 +166,8 @@ Use authorised read-only Shopify reports for comparable bestsellers and a lower-
 
 **3. Generate the collector treatment once**
 
+Carry the timeless artwork rule into the image-generation request: render only the locked emotional title and necessary subject names. Do not generate a score, stat, round, time, date or venue/result caption from the brief or reference images. The original edition badge is restored separately below.
+
 {GENERATE_PHOTOGRAPHIC_UNIT}{MOTORSPORT_INTEGRATION}Use the badge-hidden reviewed layout as the composition reference for one creative image-generation call. Include the hero and selected secondary source with its distinct story role as placement references, original photographs and venue references. For rivalries, include both primary rivals and their verified opposing-profile or genuine competition sources; carry the reviewed inward gaze, fierce natural expressions, balanced scale and interaction into this single generation. Preserve both rivals as the primary read through integration and finishing; incidental supporting imagery and venue remain subordinate. Carry the exact sources, verified defining moment, signature gesture or peak action, emotional payoff, final athlete depiction count, supporting role and selected tonal hierarchy into the request. Use those selected photographs as actual image inputs, not just names or text descriptions. Preserve the researched poster moment and its decisive silhouette; do not substitute a routine pose, training kit or generic celebration during generation. For individual tributes, keep the verified action/emotion pairing: never two emotional shots. Rivalry face-offs may use two intense opposing portraits; every darts design must retain its genuine throwing-action photograph. Do not turn a reaction photograph into invented sporting action. Carry the five reviewed collector decisions into this generation: exact venue feature and its source, meaningful supporting-image role or justified exception, connecting abstract detail, title–badge anchor and border construction. For hockey and basketball, including NBA and Olympic basketball, specify the dark foundation with fine brushed antique-gold contours or inlays, sparse verified team-colour marks and the selected venue feature retained subtly in place and recognisable. For other sports preserve the chosen palette and photographic or archival foundation with restrained connecting collector abstraction. Preserve source face, expression, natural skin texture, anatomy, hand-to-equipment relationships, uniform lettering and contact. No glossy skin smoothing or invented figures. Generate the complete flat collector artwork, including a naturally integrated photographic subject, finished title lettering, venue and collector treatment. The reviewed cutout layout is a positioning and scale plan, not the final rendering style. Use the best available selected source images as identity and detail references. Resolve hair and fabric edges, source-background spill, local light direction, exposure, colour temperature, grain, sharpness, depth, contact shadows and plausible environmental overlap as one coherent scene during this generation. Preserve every facial feature, gaze, expression, age and natural skin detail; retain the real pose, anatomy, kit and equipment. Do not reinterpret identity, beautify faces, invent missing anatomy or hide weak detail under blur or effects. Avoid a sticker-like outline, bright fringe, hard rectangular crop, arbitrary waist fade or a differently lit pasted-on figure. Keep successful natural photographic transitions rather than forcing every subject into an isolated silhouette. Copy the locked title verbatim and repeat the selected border geometry above, including all four sides, line count, stroke weight, spacing, matched corner construction, optional accents and calculated inset. Use the reviewed border choice rather than default corner brackets. Exclude plaque, number, placeholder outlines and seals; generate a continuous natural surface in their reserved area. Keep the output without physical frame, room or wall. Display it as **Composition draft · generation 1 of 1**.
 
 Inspect generation 1 beside the photographs for identity, natural texture and the selected depiction count during the finishing pass; continue delivery with any unresolved limitations recorded. Record discrepancies for local source restoration, without another generation or approval pause. Generation 1 becomes the visual master for finishing, with successful creative decisions preserved and missing selected collector elements treated as named composition defects to correct locally. On a master copy, keep its untouched original in hidden **ORIGINAL EDITABLE ARTWORK** and a visible working copy beneath **FINAL POLISHED ARTWORK** correction layers. Preserve successful lettering, abstraction, venue, lighting, controlled reflections and border, including the reviewed dark abstract hierarchy and recognisable venue for hockey and basketball. Never reconstruct working surroundings from stretched samples, generic shapes or broad photographic strips.
@@ -171,7 +178,7 @@ Retry a transient tool failure once per authorised method. Retry image generatio
 
 **4. Inspect and finish the assembled PSD**
 
-{CREATE_DESIGN_AUTHENTICITY_CHECK}{MOTORSPORT_FINISH_CHECK}{edition_check}{REVIEW_RELATIONSHIPS}{FINAL_PHOTOGRAPHIC_REVIEW}
+{CREATE_DESIGN_AUTHENTICITY_CHECK}{MOTORSPORT_FINISH_CHECK}{edition_check}{TIMELESS_ARTWORK_CHECK}{REVIEW_RELATIONSHIPS}{FINAL_PHOTOGRAPHIC_REVIEW}
 **5. Save and verify one final Review PSD**
 
 Retain the assembled layer structure, visible generation foundation, verified master settings and working layers. Document defects or limitations in hidden **REVIEW NOTES**.

@@ -1,6 +1,7 @@
 from sports_categories import sport_family
 from design_motorsport import MOTORSPORT_ARTWORK, MOTORSPORT_SOURCE_SEARCH
 from design_subject_authenticity import IDENTITY_OVERRIDES_CONTINUITY
+from design_collector_titles import TIMELESS_ARTWORK_COPY_RULE, TIMELESS_ARTWORK_CHECK
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -9,7 +10,7 @@ import re
 
 
 STYLE_REQUIRED_LABEL = "Style required"
-STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v6_text_minimalism"
+STYLE_REGISTRY_VERSION = "sports_cave_design_styles_v7_timeless_artwork"
 
 DESIGN_DETAIL_FIELDS = (
     ("design_title", "Design title"),
@@ -186,18 +187,19 @@ ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER = "ARTWORK TEXT MINIMALISM - HARD RULE"
 ARTWORK_TEXT_MINIMALISM_CONTRACT = f"""
 {ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER}
 
-Sports Cave artwork is collectible wall art, not advertising creative. Keep all visible typography intentionally minimal. A design is allowed to breathe; never add explanatory or filler text merely to balance empty space. Every visible word must earn its place.
+Sports Cave artwork is collectible wall art, not advertising creative. Keep all visible typography intentionally minimal. A design is allowed to breathe.
 
 Use only this restrained hierarchy when genuinely required by the selected design type and verified story:
 1. Main title or defining moment.
 2. Athlete/player name or names where appropriate.
 3. Verified authentic signature assets where appropriate.
-4. One very short subtitle, date or event only when it is genuinely necessary.
-5. The exact supplied compact Sports Cave collector badge or limited-edition plaque when the design system calls for it.
+4. The exact supplied compact Sports Cave collector badge or limited-edition plaque when the design system calls for it.
 
 Never invent, add or paraphrase promotional, ecommerce, scarcity or CTA copy inside the artwork. Forbidden artwork wording includes: LIMITED TO 100 WORLDWIDE; ONLY 100 MADE; ONLY 100 WILL EVER EXIST; JUST 100 AVAILABLE; NO REPRINTS; NEVER REPRINTED; ONCE IT'S GONE, IT'S GONE; ONCE IT SELLS OUT, IT'S GONE; SECURE YOUR EDITION; CLAIM YOUR EDITION; OWN YOUR EDITION; BUY NOW; SHOP NOW; and equivalent sales language.
 
 An established compact plaque may retain only its supplied collector treatment, such as LIMITED EDITION and 001 / 100, plus wording already present in the exact approved plaque asset. Composite that asset unchanged. Never expand it into a sentence, slogan, CTA or sales claim; never recreate or retype it. For an Update Existing Design task, do not introduce promotional copy, but preserve immutable non-target pixels unless removal of existing text is the named correction.
+
+{TIMELESS_ARTWORK_COPY_RULE}
 """.strip()
 
 
@@ -207,7 +209,7 @@ ARTWORK TEXT MINIMALISM REVIEW - MANDATORY
 Inspect every visible word. Penalise unnecessary marketing copy, promotional scarcity sentences, CTA language, filler subtitles, repeated information and too many competing text elements. Treat any invented sales wording such as LIMITED TO 100 WORLDWIDE, ONLY 100 MADE, NO REPRINTS, CLAIM YOUR EDITION, SHOP NOW or a paraphrased equivalent as a failure requiring the smallest safe removal correction.
 
 Do not demand more text when the title, necessary names, verified signatures and any exact compact supplied collector plaque already communicate the story. Favour clean negative space, premium restraint and a composition led by authentic photography. The exact compact plaque remains acceptable when unchanged and subordinate; expanding it into promotional wording fails review.
-""".strip()
+""".strip() + "\n\n" + TIMELESS_ARTWORK_CHECK.strip()
 
 
 TARGETED_CORRECTION_EDIT_LOCK = (
@@ -416,12 +418,12 @@ MOMENT LOCK HANDOFF - AUTHORITATIVE
 Use the ULTIMATE MOMENT LOCK and MOMENT LOCK CONFIRMATION from the preceding Research and Find Images responses plus the exact selected-asset mappings below. Stop and return to Find Images if a selected source depicts another event, season, uniform, venue or celebration, or if the composition would require reconstructing history. Never reinterpret the lock as a generic sports-poster brief.
 
 PREMIUM LIMITED-EDITION SPORTING ARTEFACT
-Build an original composition around one definitive authentic photograph of the exact moment. The default hierarchy is: historic photograph; emotion/action; event-specific headline; event context; athlete name where required; authentic signature; concise verified stat/date line; then subtle Sports Cave/Limited Edition details. The hero must dominate at Shopify-thumbnail size. Choose chest-up, waist-up, strong three-quarter or complete iconic action according to what best communicates the real moment; do not shrink the athlete for decoration or force every source into the same crop.
+Build an original composition around one definitive authentic photograph of the exact moment. The default hierarchy is: historic photograph; emotion/action; emotional headline; athlete name where required; authentic signature; then subtle Sports Cave/Limited Edition details. Express event context through the authentic imagery, never an added result, stat, date or timing line. The hero must dominate at Shopify-thumbnail size. Choose chest-up, waist-up, strong three-quarter or complete iconic action according to what best communicates the real moment; do not shrink the athlete for decoration or force every source into the same crop.
 
 Use one of these quality principles according to the lock, never as a template copy: an iconic single action with restrained stadium context; defining-event storytelling with one commanding hero and an exact historic line; or a premium photographic collage where every additional authentic same-event image strengthens the story and one hero remains unmistakably dominant. A second athlete or equal principal is prohibited unless the locked moment genuinely requires that person. Ultimate Moments is not Rivalry Face-Off.
 
 EVENT-SPECIFIC STORYTELLING
-Make clear within about three seconds why this photograph matters. Use a strong 2-5 word collector headline tied directly to the athlete and event. Do not invent a quote or use generic AI copy such as UNSTOPPABLE, GREATNESS, LEGEND, CHAMPION or DESTINY without a verified athlete-specific meaning. Where useful, include one quiet factual line for the verified milestone, result, record, date, opponent, venue or competition; do not fill the design with statistics.
+Make clear within about three seconds why this photograph matters. Use a strong 2-5 word collector headline tied directly to the athlete and event. Do not invent a quote or use generic AI copy such as UNSTOPPABLE, GREATNESS, LEGEND, CHAMPION or DESTINY without a verified athlete-specific meaning. Let the photograph and emotional title communicate the moment. Keep verified milestones, results, record figures, dates, opponents, venues and competition details in research context rather than adding a factual caption.
 
 The background is atmospheric evidence from the same story: the genuine venue, crowd, scoreboard, track, court, field, trophy environment, architecture or event lighting. Do not use a random smoky arena, unrelated crowd, fake scoreboard, generic AI stadium, arbitrary spotlights, fantasy sparks or dramatic clouds. Reference-only environment images guide factual setting and must not be presented as another event's real photograph.
 
@@ -663,7 +665,7 @@ Define one clear emotional idea for one verified athlete, then verify the exact 
 """,
         'Prioritise one exceptionally strong hero portrait/action photograph.',
         """
-Use one dominant authentic subject, one disciplined focal idea, genuine negative space, limited typography and a tightly controlled palette. Default to one source photograph; a second photograph of the same athlete is exceptional and must strengthen the same idea without becoming a collage, with maximum two visible figures of that same person. Use a flat or subtly textured story-led colour field; black/charcoal, natural venue tones or team-derived hues are equally valid when suited to the concept. Add a small gold collector accent only when useful. Avoid unnecessary statistics, duplicate portraits, large effects, detailed stadiums, crowds, trophy collages, extra players and decorative filler.
+Use one dominant authentic subject, one disciplined focal idea, genuine negative space, limited typography and a tightly controlled palette. Default to one source photograph; a second photograph of the same athlete is exceptional and must strengthen the same idea without becoming a collage, with maximum two visible figures of that same person. Use a flat or subtly textured story-led colour field; black/charcoal, natural venue tones or team-derived hues are equally valid when suited to the concept. Add a small gold collector accent only when useful. Never add statistics. Avoid duplicate portraits, large effects, detailed stadiums, crowds, trophy collages, extra players and decorative filler.
 """,
         "Minimalist Hero passes only when one authentic athlete, one emotion and one disciplined hierarchy remain immediately clear at thumbnail size. Confirm meaningful negative space, limited typography and absence of decorative filler. Cap at 6/10 when clutter, statistics, duplicate portraits, oversized effects, background spectacle or a second visual story prevents the selected minimalist type from being immediately recognisable.",
         minimum=1,
@@ -683,9 +685,9 @@ Classify the verified story before directing the artwork. If it is a championshi
 """,
         'Prioritise genuine photographs of the locked achievement and correct trophy.',
         """
-Build the hierarchy around visible proof of the verified accomplishment. Championship mode must use an authentic trophy lift, podium or directly relevant title celebration with strong upward victorious energy, accurate trophy, season, venue and confetti cues when supported. Achievement mode must centre the correct award, record, statistic, date, equipment or defining photograph and communicate authority without falsely implying a championship. Use one distinct athlete; a second real photograph may show only that athlete and only when essential. Never turn an ordinary portrait into a champion with typography or use unrelated celebration imagery. Never invent a future or hypothetical achievement as fact.
+Build the hierarchy around photographic proof of the verified accomplishment. Championship mode must use an authentic trophy lift, podium or directly relevant title celebration with strong upward victorious energy, accurate trophy, season, venue and confetti cues when supported. Achievement mode must centre the correct award, equipment or defining photograph and communicate authority without falsely implying a championship. Verify the record, statistic and date in research notes; do not print them as achievement captions. Use one distinct athlete; a second real photograph may show only that athlete and only when essential. Never turn an ordinary portrait into a champion with typography or use unrelated celebration imagery. Never invent a future or hypothetical achievement as fact.
 """,
-        "First classify the artwork as championship/title or achievement/record and judge it against that verified mode. Confirm visible factual evidence, exact trophy or award, result/statistic, date, event, venue, uniform and emotional hierarchy. Cap at 6/10 when it is merely an ordinary portrait with Champion text, generic celebration, an unrelated trophy, a fabricated statistic or a championship treatment for a non-title achievement.",
+        "First classify the artwork as championship/title or achievement/record and judge it against that verified mode. Confirm photographic evidence, exact trophy or award, event, venue, uniform and emotional hierarchy against researched facts. Never require a printed result, statistic or date as proof. Cap at 6/10 when it is merely an ordinary portrait with Champion text, generic celebration, an unrelated trophy, a fabricated statistic or a championship treatment for a non-title achievement.",
         minimum=1,
         exact=1,
     ),
@@ -736,7 +738,7 @@ STYLE_TYPE_CONTRACTS = MappingProxyType(
     {
         "ultimate_moment": """
 ULTIMATE MOMENT TYPE CONTRACT - ONE DEFINING COMMERCIAL INSTANT
-Select the single strongest verified moment of the subject's career, not a career summary. The exact action or immediate emotional aftermath must control the photography, title, crop, background and tone. Preserve the real opponent, score/result, season, venue, uniform and equipment visible in that event. Use the approved moment photograph as the dominant narrative evidence; supporting material may clarify its real setting but may not turn it into a generic portrait collage. Motion, impact and event atmosphere must come from the photographed event, never invented action.
+Select the single strongest verified moment of the subject's career, not a career summary. The exact action or immediate emotional aftermath must control the photography, title, crop, background and tone. Preserve the real opponent, season, venue, uniform, equipment and authentic source-photo markings visible in that event; verify its result in research without printing a recap. Use the approved moment photograph as the dominant narrative evidence; supporting material may clarify its real setting but may not turn it into a generic portrait collage. Motion, impact and event atmosphere must come from the photographed event, never invented action.
 """.strip(),
         "rivalry_faceoff": """
 RIVALRY FACE-OFF TYPE CONTRACT - BALANCED COMPETITIVE TENSION
@@ -756,11 +758,11 @@ Pair one verified driver or rider with their actual race vehicle from the same v
 """.strip(),
         "minimalist_hero": """
 MINIMALIST HERO TYPE CONTRACT - ONE SUBJECT, ONE IDEA, CONTROLLED SPACE
-Use one dominant authentic athlete and one clear emotional idea. Design with strong negative space, a limited palette, minimal supporting texture and only essential typography. Default to one photograph; never add statistics, duplicate portraits, extra players, trophy montages, detailed stadium scenery or oversized effects merely to fill space. The face, silhouette and verified uniform/equipment must remain recognisable at Shopify-thumbnail size. Restraint and hierarchy—not emptiness plus decoration—define this type.
+Use one dominant authentic athlete and one clear emotional idea. Design with strong negative space, a limited palette, minimal supporting texture and only essential typography. Never add statistics. Default to one photograph; do not add duplicate portraits, extra players, trophy montages, detailed stadium scenery or oversized effects merely to fill space. The face, silhouette and verified uniform/equipment must remain recognisable at Shopify-thumbnail size. Restraint and hierarchy—not emptiness plus decoration—define this type.
 """.strip(),
         "championship_achievement": """
 CHAMPIONSHIP / ACHIEVEMENT TYPE CONTRACT - VISIBLE VERIFIED EVIDENCE
-Choose one truthful mode. Championship mode must immediately communicate a verified title victory through a genuine trophy lift, podium, title celebration or directly relevant winning aftermath, with accurate trophy, competition, season, venue and supported confetti/title cues plus strong upward victorious energy. Achievement mode must centre a verified record, award, milestone or career accomplishment through its correct award, statistic, date, equipment or defining photograph, conveying authority without pretending it was a championship. Never use an ordinary portrait with Champion text, an unrelated celebration or a substitute trophy.
+Choose one truthful mode. Championship mode must immediately communicate a verified title victory through a genuine trophy lift, podium, title celebration or directly relevant winning aftermath, with accurate trophy, competition, season, venue and supported confetti/title cues plus strong upward victorious energy. Achievement mode must centre a verified record, award, milestone or career accomplishment through its correct award, equipment or defining photograph, conveying authority without pretending it was a championship. Keep record figures, statistics and dates in research notes, never added artwork captions. Never use an ordinary portrait with Champion text, an unrelated celebration or a substitute trophy.
 """.strip(),
         "vintage_restoration": """
 VINTAGE RESTORATION TYPE CONTRACT - THE ORIGINAL FRAME IS THE ARTEFACT
@@ -776,13 +778,13 @@ Treat the supplied approved artwork as an immutable master. Define one requested
 
 STYLE_SIGNATURE_PLACEMENT_RULES = MappingProxyType(
     {
-        "ultimate_moment": "Place the verified signature in controlled negative space that belongs to the defining event, close enough to map to the hero but clear of the decisive action, score/event evidence and authentic equipment. It must not interrupt the moment's motion or atmosphere.",
+        "ultimate_moment": "Place the verified signature in controlled negative space that belongs to the defining event, close enough to map to the hero but clear of the decisive action, photographic event evidence and authentic equipment. It must not interrupt the moment's motion or atmosphere.",
         "rivalry_faceoff": f"{RIVALRY_FACE_OFF_SIGNATURE_PLACEMENT_RULES}\n\nPlace each verified signature on its corresponding rival's side with balanced border spacing. Preserve the central confrontation and never cross-map a signature across the rivalry divide.",
         "legends_jersey_display": LEGENDS_JERSEY_DISPLAY_SIGNATURE_PLACEMENT_RULES,
         "nostalgic_tribute": "Place the verified signature like a restrained archival inscription in calm negative space near the remembered subject. Preserve the period mood and grain; do not add a bright modern glow or cover a meaningful gesture, face or historical detail.",
         "motorsport_driver_car": "Place the verified driver's signature in clean garage, track or title negative space mapped unmistakably to the driver. Keep it clear of the car's livery, sponsors, race number, wheels and silhouette; never invent a vehicle-related autograph.",
         "minimalist_hero": "Use the verified signature as the only optional memorabilia accent in disciplined negative space near the hero. Keep it modest and quiet so it does not destroy the minimalist hierarchy or compete with the single title.",
-        "championship_achievement": "Place the verified signature in controlled negative space beside the hero or below the verified achievement evidence. Keep the trophy, award, statistic, date and victory gesture unobstructed; the signature must support authority rather than become decorative celebration clutter.",
+        "championship_achievement": "Place the verified signature in controlled negative space beside the hero or below the verified photographic achievement evidence. Keep the trophy, award, equipment and victory gesture unobstructed; the signature must support authority rather than become decorative celebration clutter.",
         "vintage_restoration": "Use a verified signature only when historically appropriate and supplied from a clear reference. Place it like a restrained archival annotation outside critical photographic evidence, preserving the original frame and grain; do not modernise or simulate an autograph on the historical photograph.",
         "update_existing": "Change a signature only when the task explicitly identifies that signature. Replace it inside the existing signature footprint with the correct verified asset and preserve every other pixel, including all other signatures, names, spacing, opacity and surrounding artwork.",
     }
@@ -791,13 +793,13 @@ STYLE_SIGNATURE_PLACEMENT_RULES = MappingProxyType(
 
 STYLE_TARGETED_CORRECTION_RULES = MappingProxyType(
     {
-        "ultimate_moment": "Preserve the locked decisive event and all authentic action. Correct only the named local defect; never substitute a generic career image or change the opponent, score, venue, uniform, equipment or emotional instant.",
+        "ultimate_moment": "Preserve the locked decisive event and all authentic action. Correct only the named local defect; never substitute a generic career image or change the opponent, venue, uniform, equipment or emotional instant. Removing a requested result caption does not change the photographed event.",
         "rivalry_faceoff": "Preserve both authentic source photographs, natural eye-lines, body directions, equal scale and central tension. Never mirror, turn, regenerate or rebalance a compliant rival while correcting the named local defect.",
         "legends_jersey_display": "Preserve both authentic rear sources, jersey surnames and numbers, LEGENDS NEVER DIE system, ordered surnames, matched nameplates, signatures, badge and plaque. Correct only the named local defect without constructing identity-bearing pixels.",
         "nostalgic_tribute": "Preserve the genuine period photograph, grain, colour age, emotional gesture and archival atmosphere. A local correction must not modernise, smooth, colourise or restage the remembered era.",
         "motorsport_driver_car": "Preserve the exact driver, car body, livery, race number, sponsors, suit, helmet, wheels, season and circuit context. Correct only the named defect without relivery, vehicle reconstruction or cross-era substitution.",
         "minimalist_hero": "Preserve the one-subject hierarchy, negative space, limited palette and minimal typography. Correct only the named defect and do not fill space, add effects, duplicate the hero or introduce a second visual story.",
-        "championship_achievement": "Preserve the verified accomplishment mode and its exact trophy, award, record, statistic, date, event, uniform and evidence. Correct only the named defect and do not turn an achievement into a championship or replace real proof with generic celebration.",
+        "championship_achievement": "Preserve the verified accomplishment mode and its exact trophy, award, event, uniform and photographic evidence. Keep researched records, statistics and dates in notes; removing a requested factual caption does not change the accomplishment. Correct only the named defect and do not turn an achievement into a championship or replace real proof with generic celebration.",
         "vintage_restoration": "Preserve the original archival frame, crop, grain, tonal character and every genuine person, uniform, vehicle and venue detail. Repair only the named physical defect; do not generate missing history or apply global AI enhancement.",
         "update_existing": "Use the smallest possible edit mask around the requested element. Preserve all unrequested pixels exactly and provide a before/after change statement proving no collateral redesign occurred.",
     }
@@ -1539,6 +1541,8 @@ def finalize_generation_handoff(prompt, *, include_motorsport=True):
         "Every listed human principal needs one verified authentic signature asset. If a mapping is missing, make that incompleteness explicit rather than presenting the design as final.",
     ):
         prompt = prompt.replace(old, "If a verified signature is unavailable, omit it and generate the artwork unless the selected Design Type explicitly requires that asset before generation. Never fabricate a signature.")
+    if TIMELESS_ARTWORK_COPY_RULE not in prompt:
+        prompt = "\n\n".join((TIMELESS_ARTWORK_COPY_RULE, prompt))
     if COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES not in prompt:
         prompt = "\n\n".join((prompt, COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES))
     if include_motorsport and MOTORSPORT_ARTWORK not in prompt:
