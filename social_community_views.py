@@ -130,7 +130,7 @@ def _comment_actions(api, row, done):
     suffix = platform + "-" + comment_id
     st.text(row.get("text") or row.get("message") or "[Comment]")
     post_text = row["post"].get("message") or row["post"].get("caption") or "Sports Cave post"
-    st.caption("Post: " + post_text[:200])
+    st.caption(("Advertising post: " if row["post"].get("advertising") else "Post: ") + post_text[:200])
     st.caption(dated(row.get("created_time") or row.get("timestamp")) +
                f" · {int(row.get('like_count') or 0)} likes")
     actions = st.columns([1, 1, 1, 1, 1.5])
@@ -186,13 +186,13 @@ def render_comments(api, feed, done):
             with panel:
                 _comment_actions(api, row, done)
     if not rows and not snapshot["errors"]:
-        pending = any(snapshot["more_posts"].values())
+        pending = any(snapshot["more_posts"].values()) or snapshot.get("more_ads")
         st.info("No comments match the loaded results." if query else
                 "No comments in the posts checked so far. Continue searching older posts below." if pending else
                 "No comments were returned for the posts available to this connection.")
     st.caption(f"{snapshot.get('posts_scanned', 0)} posts checked · Facebook and Instagram together")
-    more = len(rows) > visible or snapshot["more_comments"] or any(snapshot["more_posts"].values())
-    more_label = "Search older posts" if not rows and any(snapshot["more_posts"].values()) else "Show more comments"
+    more = len(rows) > visible or snapshot["more_comments"] or any(snapshot["more_posts"].values()) or snapshot.get("more_ads")
+    more_label = "Search older posts" if not rows and (any(snapshot["more_posts"].values()) or snapshot.get("more_ads")) else "Show more comments"
     if more and st.button(more_label, icon=":material/expand_more:", key="community-more-comments"):
         if len(rows) <= visible:
             feed.more_comments(snapshot)

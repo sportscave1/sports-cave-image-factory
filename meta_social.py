@@ -62,6 +62,9 @@ class MetaCommunity:
         self.instagram = str(env.get("META_INSTAGRAM_ACTOR_ID") or env.get("META_INSTAGRAM_ACCOUNT_ID") or env.get("INSTAGRAM_ACCOUNT_ID") or env.get("INSTAGRAM_ACTOR_ID") or "")
         self._token = env.get("META_PAGE_ACCESS_TOKEN", "")
         self._discovery_token = env.get("META_SOCIAL_DISCOVERY_TOKEN") or env.get("META_ACCESS_TOKEN", "")
+        self._ads_token = env.get("META_ACCESS_TOKEN", "")
+        account = str(env.get("META_AD_ACCOUNT_ID", "")).strip()
+        self.ad_account = (account if account.startswith("act_") else "act_" + account) if account else ""
         self.writes = env.get("META_SOCIAL_WRITES_ENABLED") == "1"
         self.version = env.get("META_API_VERSION", "v26.0")
         if not re.fullmatch(r"v\d+\.0", self.version):
@@ -78,11 +81,11 @@ class MetaCommunity:
             raise CommunityError(f"{platform} connection is not configured. See Connection.")
         return identifier(owner)
 
-    def _request(self, method, path, *, params=None, data=None, discovery=False):
+    def _request(self, method, path, *, params=None, data=None, discovery=False, advertising=False):
         require_access(self.user)
         if method != "GET" and not self.writes:
             raise CommunityError("Sending and moderation are disabled for this environment.")
-        token = self._discovery_token if discovery else self._token
+        token = self._ads_token if advertising else self._discovery_token if discovery else self._token
         if not token:
             raise CommunityError("The required Meta connection is not configured.")
         if method == "GET" and path.endswith("/conversations"):
@@ -117,6 +120,10 @@ class MetaCommunity:
             detail = " Required permissions: " + ", ".join(missing) + "." if missing else ""
             reference = f" (Meta {code}" if isinstance(code, int) else ""
             subcode = error.get("error_subcode")
+            if code == 200 and subcode == 2534041:
+                hint = ("Instagram message access is disabled for connected tools. In Instagram, open Settings and activity → "
+                        "Messages and story replies → Message requests → Connected tools, and enable Allow access to messages. "
+                        "Then refresh this inbox.")
             if reference:
                 reference += f"/{subcode})" if isinstance(subcode, int) else ")"
             raise CommunityError("Meta rejected the request" + reference + ". " + hint + detail)
@@ -223,6 +230,56 @@ class MetaCommunity:
             fields = ("id,caption,timestamp,permalink,"
                       "comments.limit(20){id,text,username,timestamp,like_count}")
         return self._edge(f"{owner}/{edge}", fields, after=after, extra={"limit": 8})
+
+    def ad_comment_feed(self, *, after=""):
+        """Resolve actual ad post IDs: unpublished ad posts are absent from /posts.
+
+        Ads are read with the existing advertising token; owned post/comment reads
+        use the Page token. No advertising writes or new permissions are granted.
+        """
+        require_access(self.user)
+        if not self.ad_account or not self._ads_token:
+            return {"data": [], "after": "", "errors": []}
+        self.owner("Facebook")
+        params = {"fields": "id,creative{effective_object_story_id,effective_instagram_media_id}", "limit": 10}
+        if after:
+            params["after"] = str(after)
+        ads = self._request("GET", identifier(self.ad_account) + "/ads", params=params, advertising=True)
+        ids = {"Facebook": set(), "Instagram": set()}
+        for ad in ads.get("data") or []:
+            creative = ad.get("creative") or {}
+            story = str(creative.get("effective_object_story_id") or "")
+            # Only resolve creatives tied to this Page. Check the returned owner
+            # again before exposing comments or allowing a moderation action.
+            if story.startswith(self.page + "_"):
+                ids["Facebook"].add(identifier(story))
+                if creative.get("effective_instagram_media_id") and self.instagram:
+                    ids["Instagram"].add(identifier(creative["effective_instagram_media_id"]))
+        posts, errors = [], []
+        for platform, post_ids in ids.items():
+            if not post_ids:
+                continue
+            fields = ("id,from,message,created_time,permalink_url,comments.filter(stream).limit(20){id,message,from,created_time,like_count}"
+                      if platform == "Facebook" else
+                      "id,owner,caption,timestamp,permalink,comments.limit(20){id,text,username,timestamp,like_count}")
+            try:
+                result = self._request("GET", "", params={"ids": ",".join(sorted(post_ids)), "fields": fields})
+            except CommunityError as exc:
+                errors.append(platform + " advertising comments: " + str(exc))
+                continue
+            unreadable = 0
+            for post_id in post_ids:
+                post = result.get(post_id) or {}
+                owner = post.get("from" if platform == "Facebook" else "owner") or {}
+                if post.get("error"):
+                    unreadable += 1
+                elif str(owner.get("id")) == self.owner(platform) and post.get("id"):
+                    posts.append(dict(post, platform=platform, advertising=True))
+            if unreadable:
+                errors.append(f"{platform}: {unreadable} advertising posts could not be read with this connection.")
+        paging = ads.get("paging") or {}
+        cursor = (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""
+        return {"data": posts, "after": cursor, "errors": errors}
 
     def _own_post(self, platform, post_id):
         post_id = identifier(post_id)

@@ -10,6 +10,40 @@ from tests import test_meta_social as contracts
 
 
 class LiveApiRegressionTests(unittest.TestCase):
+    def test_disabled_instagram_message_access_has_an_actionable_subcode_hint(self):
+        http = Mock()
+        http.request.return_value = response({"error": {"code": 200, "error_subcode": 2534041}}, 403)
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=http)
+        with self.assertRaisesRegex(CommunityError, "enable Allow access to messages"):
+            api.conversations("Instagram")
+
+    def test_unconfigured_ad_connection_is_read_only_and_optional(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=http)
+        self.assertFalse(api.ad_comment_feed()["data"])
+        http.request.assert_not_called()
+
+    def test_ad_post_discovery_uses_separate_tokens_and_filters_foreign_owners(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"data": [
+            {"creative": {"effective_object_story_id": "page_1", "effective_instagram_media_id": "igpost"}},
+            {"creative": {"effective_object_story_id": "foreign_2", "effective_instagram_media_id": "foreignig"}},
+            {"creative": {"effective_object_story_id": "page_3"}},
+        ], "paging": {"next": "ignored", "cursors": {"after": "older-ads"}}}),
+            response({"page_1": {"id": "page_1", "from": {"id": "page"}, "comments": {"data": [{"id": "customer"}]}},
+                      "page_3": {"id": "page_3", "from": {"id": "foreign"}}}),
+            response({"igpost": {"id": "igpost", "owner": {"id": "another-ig"}}})]
+        result = api.ad_comment_feed(after="opaque-ads-cursor")
+        self.assertEqual([post["id"] for post in result["data"]], ["page_1"])
+        self.assertEqual(result["after"], "older-ads")
+        calls = http.request.call_args_list
+        self.assertEqual(calls[0].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
+        self.assertEqual(calls[0].kwargs["params"]["after"], "opaque-ads-cursor")
+        self.assertTrue(all(call.args[0] == "GET" for call in calls))
+        self.assertTrue(all(call.kwargs["headers"]["Authorization"] == "Bearer fixture-page-token" for call in calls[1:]))
+        self.assertNotIn("foreign", repr([call.kwargs["params"] for call in calls]))
+
     def test_opaque_long_cursors_survive_every_paginated_edge(self):
         http = Mock()
         http.request.return_value = response({"data": []})
@@ -68,6 +102,26 @@ class HistoryRegressionTests(unittest.TestCase):
             self.assertEqual(result["posts_scanned"], 4)
             self.feed.comments()
             self.assertEqual(read.call_count, 5)
+
+    def test_ad_comments_merge_with_page_and_instagram_comments_and_cache_reads(self):
+        ad_post = {"id": "dark-post", "platform": "Facebook", "advertising": True,
+                   "comments": {"data": [{"id": "ad-comment", "message": "What size?", "created_time": "2026-11-22T00:00:00Z"}]}}
+        with patch.object(self.api, "ad_comment_feed", create=True, return_value={"data": [ad_post], "after": "older-ads"}) as read:
+            first = self.feed.comments()
+            self.feed.comments()
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(len(first["items"]), 3)
+            self.assertEqual(first["more_ads"], "older-ads")
+            self.feed.more_comments(first)
+            self.feed.comments()
+            self.assertEqual(read.call_count, 2)
+            self.assertEqual(self.feed.state["ad_post_pages"], ["", "older-ads"])
+
+    def test_failed_ad_read_does_not_hide_page_comments(self):
+        with patch.object(self.api, "ad_comment_feed", create=True, side_effect=CommunityError("Ads permission unavailable")):
+            result = self.feed.comments()
+            self.assertEqual(len(result["items"]), 2)
+            self.assertIn("Advertising comments", result["errors"][0])
 
     def test_empty_history_search_is_bounded_and_only_advances_on_request(self):
         with patch.object(self.api, "comment_feed", side_effect=lambda p, after="": self.history(p, after, found_at=7)) as read:

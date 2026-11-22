@@ -79,9 +79,20 @@ class CommunityFeed:
     def comments(self):
         rows, posts, errors, more_posts, more_comments = {}, {}, [], {}, []
         extras = self.state.setdefault("comment_pages", {})
+        more_ads = ""
+        if hasattr(self.api, "ad_comment_feed"):
+            try:
+                for cursor in self.state.setdefault("ad_post_pages", [""]):
+                    ad_page = self.read("ad_comment_feed", after=cursor)
+                    errors.extend(ad_page.get("errors", []))
+                    for post in ad_page["data"]:
+                        posts[(post["platform"], post["id"])] = post
+                more_ads = next_cursor(ad_page)
+            except CommunityError as exc:
+                errors.append("Advertising comments: " + str(exc))
         for platform, cursors in self._pages("post").items():
             try:
-                platform_posts = {}
+                platform_posts = {key[1]: post for key, post in posts.items() if key[0] == platform}
                 # New posts frequently have no comments. Read through up to four
                 # empty batches per visit instead of presenting a false empty inbox.
                 budget = self.state.setdefault("post_scan_targets", {}).setdefault(platform, 4)
@@ -117,7 +128,7 @@ class CommunityFeed:
                 more_comments.append((platform, post_id, after))
         items = sorted(rows.values(), key=lambda row: timestamp(row.get("created_time") or row.get("timestamp")), reverse=True)
         return {"items": items, "errors": list(dict.fromkeys(errors)), "more_posts": more_posts,
-                "more_comments": more_comments, "posts_scanned": len(posts)}
+                "more_comments": more_comments, "posts_scanned": len(posts), "more_ads": more_ads}
 
     def more_comments(self, snapshot):
         """Advance two comment edges at most; only then fetch older post pages."""
@@ -128,6 +139,9 @@ class CommunityFeed:
                 if after not in cursors:
                     cursors.append(after)
         else:
+            ad_cursor = snapshot.get("more_ads")
+            if ad_cursor and ad_cursor not in self.state.setdefault("ad_post_pages", [""]):
+                self.state["ad_post_pages"].append(ad_cursor)
             for platform, after in snapshot["more_posts"].items():
                 cursors = self._pages("post")[platform]
                 if after and after not in cursors:

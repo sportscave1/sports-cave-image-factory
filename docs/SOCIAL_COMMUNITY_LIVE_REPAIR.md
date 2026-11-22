@@ -59,6 +59,31 @@ THE INSTAGRAM CONNECTION AS WELL. Production verification follows deployment.
 
 ## Validation
 
+## Production follow-up
+
+The first repair (`dc88249b`) reached live on all three active Render services.
+Main and webhook health endpoints returned HTTP 200. Edge confirmed gold tab
+selection, compact message bubbles, seven historical Facebook comments after
+scanning 120 posts, and working expansion into Reply/Like/Hide controls. These
+controls were inspected without sending or moderating real customer content.
+
+The new capability checks verified the Sports Cave Page and @sportscaveshop,
+Facebook messages, Facebook comments and Instagram comments. Instagram messages
+returned Meta code 200/subcode 2534041. Business Suite independently showed
+Instagram with a Confirm access badge and no available messages. The next repair
+maps this subcode to the connected-tools message access setting explicitly.
+
+The organic feed misses unpublished advertising posts. Added read-only discovery
+from the configured advertising account's ad creative effective post IDs, with
+the existing advertising token; Page-token reads and returned ownership checks
+restrict exposed comments to the configured Page/Instagram account. Ads and
+organic comments merge with scoped deduplication and independent pagination.
+No ads are created or changed. Official creative field reference:
+https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-creative
+
+Focused validation after this follow-up: 83 passed, 8 legacy database opt-in
+skips, 68 subtests passed. This follow-up still requires live verification.
+
 `python -m pytest tests/test_meta_social.py tests/test_social_community_feed.py
 tests/test_social_community_live_regressions.py tests/test_social_community_store.py
 tests/test_social_wall_inbox.py tests/test_social_media_reporting.py
