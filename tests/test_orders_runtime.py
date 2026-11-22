@@ -28,6 +28,18 @@ def test_progress_is_separate_monotonic_scoped_and_cannot_change_a_permit(active
     assert runtime.public(changed,record)=={}
     with pytest.raises(PermissionError):runtime.progress({**active,'sequence':3,'token':'b'*43})
 
+def test_telemetry_never_locks_the_workflow_row_needed_by_a_native_permit(active,monkeypatch):
+    with prep.connect() as c,c.cursor() as q:cursor_type=type(q)
+    original=cursor_type.execute;reads=[];before=prep.read(1)
+    def execute(self,sql,args=()):
+        if args and args[0]=='prodigi_prepare:1' and sql.lstrip().upper().startswith('SELECT VALUE'):
+            reads.append(sql)
+            assert 'FOR SHARE' not in sql.upper() and 'FOR UPDATE' not in sql.upper()
+        return original(self,sql,args)
+    monkeypatch.setattr(cursor_type,'execute',execute)
+    assert runtime.progress(active)=={'recorded':True}
+    assert reads and prep.read(1)==before
+
 @pytest.mark.parametrize('change',[{'stage':'customer address'},{'kind':[]},{'sequence':False},{'elapsed_ms':-1},
     {'version':'script'},{'key':'product:prodigi_prepare:1'},{'extra':'private'}])
 def test_progress_rejects_unbounded_or_foreign_metadata(active,change):

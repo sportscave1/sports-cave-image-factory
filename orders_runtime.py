@@ -43,7 +43,10 @@ def progress(data):
     key=key.removeprefix('product:');field,states=KINDS[kind]
     digest=prep.digest(data['token']);stamp=prep.now()
     with connection(prep.connect,slots=SLOTS) as conn,conn.cursor() as cur:
-        cur.execute('SELECT value FROM app_settings WHERE key=%s FOR SHARE',(key,));row=cur.fetchone()
+        # Diagnostics are not workflow authority. A shared preparation-row lock
+        # here conflicts with the permit's FOR UPDATE NOWAIT safety fence.
+        # Late telemetry is hidden by public()'s current token/status check.
+        cur.execute('SELECT value FROM app_settings WHERE key=%s',(key,));row=cur.fetchone()
         value=row['value'] if row else {};receipt=value.get(field) or {}
         if value.get('status') not in states or not hmac.compare_digest(receipt.get('token_hash',''),digest):
             raise PermissionError('Retired progress handoff.')

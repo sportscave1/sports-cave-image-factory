@@ -23,7 +23,7 @@ def fixture():
     evidence=dict(quality='Excellent',sku=snap['mapping']['prodigi_code'],colour='natural',shipping=dict(options=options(),selected='budget'),inserts=inserts())
     return value,snap,provider,evidence
 
-@pytest.mark.parametrize('case',['unchanged','started','changed_address','changed_shipping','changed_asset','exhausted'])
+@pytest.mark.parametrize('case',['unchanged','old_policy','started','changed_address','changed_shipping','changed_asset','exhausted'])
 @pytest.mark.parametrize('message',['QA shipping: The exact draft or shipping quotes changed before QA.','QA inserts: The expected Prodigi control did not finish loading.'])
 def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(store,monkeypatch,case,message):
     value,snap,p,_=fixture()
@@ -34,16 +34,17 @@ def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(stor
     qa.finish(plan['key'],plan['token'],None,error=message)
     value=prep.read(1)
     if case=='started':value['dashboard_qa']['started']=True
-    if case=='exhausted':value['qa_prepermit_recoveries']=2
-    if case in ('started','exhausted'):
+    if case=='exhausted':value.update(qa_prepermit_recoveries=2,qa_prepermit_recovery_policy=qa.RECOVERY_POLICY)
+    if case=='old_policy':value.update(qa_prepermit_recoveries=2,qa_prepermit_recovery_policy='before-lock-fix')
+    if case in ('started','exhausted','old_policy'):
         with prep.connect() as c,c.cursor() as q:prep.save(q,value)
     if case=='changed_address':p.data['recipient']['address']['line1']='Changed'
     if case=='changed_shipping':p.data['shippingMethod']='Express'
     if case=='changed_asset':p.data['items'][0]['assets'][0]['url']='https://fixture/other'
-    assert qa.recover_waiting_item_qa({'id':'fixture'})==(1 if case=='unchanged' else 0)
+    assert qa.recover_waiting_item_qa({'id':'fixture'})==(1 if case in ('unchanged','old_policy') else 0)
     saved=prep.read(1)
     assert saved['browser']['verified'] and not p.writes
-    if case=='unchanged':assert saved['qa_prepermit_recoveries']==1 and saved['status']==qa.WAITING
+    if case in ('unchanged','old_policy'):assert saved['qa_prepermit_recoveries']==1 and saved['status']==qa.WAITING and saved['qa_prepermit_recovery_policy']==qa.RECOVERY_POLICY
 
 
 def test_verified_upload_enters_qa_immediately_without_repeating_provider_or_source_reads():
