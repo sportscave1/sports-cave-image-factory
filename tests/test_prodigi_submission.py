@@ -117,3 +117,15 @@ def test_api_submit_exact_endpoint_owner_gate_and_202(monkeypatch):
     assert client.submit('99') is None
     assert transport.calls[0][0]==('POST','https://api.prodigi.com/v5/orders/99:submit')
     assert transport.calls[0][1]['json']=={}
+
+
+def test_us_submission_refreshes_legacy_qa_and_requires_saved_tax_declaration():
+    v,s,p,a=ready();s['recipient']['address']['countryCode']='US';p.data['recipient']['address']['countryCode']='US'
+    with pytest.raises(submit.StaleQA,match='sales-tax'):submit.checked(v,p,lambda _:s,a)
+    v['dashboard_qa'].update(tax_policy=qa.TAX_POLICY,tax_collected=True)
+    pinned=qa.pinned_order(p.data);pinned['shippingMethod']=p.data.get('shippingMethod');v['dashboard_qa']['validated_order_hash']=prep.digest(pinned)
+    p.data['usSalesTaxAlreadyCollected']=False
+    with pytest.raises(submit.StaleQA):submit.checked(v,p,lambda _:s,a)
+    p.data['usSalesTaxAlreadyCollected']=True
+    submit.checked(v,p,lambda _:s,a)
+    assert not p.submits

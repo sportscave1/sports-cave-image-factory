@@ -44,6 +44,10 @@ def checked(value,provider,resolver,authorisation):
     if not -30<=age<=300 or receipt['checked_at']<authorisation['changed_at']:
         raise StaleQA('Refreshing automatic QA before submission.')
     snap,order,_=current(value,provider,resolver)
+    if str((snap.get('recipient') or {}).get('address',{}).get('countryCode','')).upper()=='US':
+        from prodigi_dashboard_qa import TAX_POLICY
+        if receipt.get('tax_policy')!=TAX_POLICY or receipt.get('tax_collected') is not True or order.get('usSalesTaxAlreadyCollected') is False:
+            raise StaleQA('Refreshing the saved sales-tax declaration before submission.')
     pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
     if prep.digest(pinned)!=receipt.get('validated_order_hash'):
         raise ValueError('The supplier order changed after QA. Recheck this exact order before submission.')

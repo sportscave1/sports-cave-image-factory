@@ -53,6 +53,26 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     return {set_name:'',saved,expected:[],available:!(/inserts are unavailable|inserts are not available|will not be charged for unavailable inserts/i.test(main))};
   }
 
+  function taxControl(){
+    const controls=Array.from(document.querySelectorAll('#taxCollectedCheckbox')).filter(visible);
+    if(controls.length!==1)return null;
+    const e=controls[0],label=text(e.parentElement);
+    if(label!=='I declare that this order has already had sales tax collected.')return null;
+    if(e.getAttribute('role')!=='checkbox'&&!(e.tagName==='INPUT'&&e.type==='checkbox'))return null;
+    return e;
+  }
+  function taxChecked(e){return e.getAttribute('role')==='checkbox'?e.getAttribute('aria-checked')==='true':e.checked===true;}
+  async function declareTax(plan,permit){
+    if(!plan.tax_declaration)return null;
+    if(permit?.tax_declaration!==true)throw Error('The sales-tax declaration was not authorised for this draft.');
+    let control=plan.tax_required?await wait(taxControl):taxControl();
+    if(!control)return null;
+    pin(plan);
+    if(!taxChecked(control)){if(control.disabled)throw Error('The sales-tax declaration is disabled.');control.click();await wait(()=>{const e=taxControl();return e&&taxChecked(e);});await delay(700);}
+    pin(plan);control=taxControl();
+    if(!control||!taxChecked(control))throw Error('The sales-tax declaration was not saved.');
+    return true;
+  }
   async function run(plan){
     try {
       pin(plan);
@@ -73,7 +93,8 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
       pin(plan);
       const shippingNow=Array.from(document.querySelectorAll('main select')).filter(s=>Array.from(s.options).some(o=>/^(Budget|Standard(?: ?Plus)?|Express|Overnight):\s*[$£€]/.test(o.textContent)));
       if(shippingNow.length!==1||shippingNow[0].value.toLowerCase()!==target)throw Error('Shipping selection was not saved.');
-      return {evidence:{quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
+      const tax_collected=await declareTax(plan,permit);
+      return {evidence:{tax_collected,quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
     }catch(error){return {error:String(error.message||'Dashboard QA stopped').slice(0,240)};}
   }
   let running=false;

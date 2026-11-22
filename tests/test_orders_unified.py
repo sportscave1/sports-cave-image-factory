@@ -145,3 +145,13 @@ def test_customer_jpg_runs_before_background_catalogue_acceptance(monkeypatch):
     monkeypatch.setattr(runtime,'run_one',lambda _:calls.append('customer-jpg') or True)
     runtime._loop()
     assert calls==['customer-jpg']
+
+
+def test_selected_shipping_quote_uses_saved_verified_evidence_only():
+    from orders_prodigi_grid import shipping_summary
+    saved=dict(checks=dict(shipping=True),dashboard_qa=dict(verified=True,shipping=dict(target='standard',options=[dict(service='budget',cents=2730,currency='$'),dict(service='standard',cents=2730,currency='$')])) )
+    assert shipping_summary(saved)=='Standard · $27.30'
+    saved['dashboard_qa']['evidence']=dict(shipping=dict(selected='express',options=[dict(service='express',cents=3810,currency='$')]))
+    assert shipping_summary(saved)=='Express · $38.10'
+    saved['dashboard_qa']['verified']=False
+    assert shipping_summary(saved)==''

@@ -48,7 +48,7 @@ async def tick(request):
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
         if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
             from prodigi_dashboard_qa import claim as qa_claim
-            browser=await run_in_threadpool(qa_claim)
+            browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1')
         if browser is None and request.headers.get('x-sports-cave-orders-documents')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_LEGACY_DOCUMENT_UPLOAD','').lower()=='true':
             from prodigi_document_browser import claim as document_claim
             browser=await run_in_threadpool(document_claim)

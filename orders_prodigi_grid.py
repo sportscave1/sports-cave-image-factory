@@ -75,6 +75,21 @@ def read_statuses(rows,actor):
 
 
 
+def shipping_summary(saved):
+    """Use the verified selected quote already saved by QA; no supplier calls."""
+    receipt=(saved or {}).get('dashboard_qa') or {}
+    if not receipt.get('verified') or (saved or {}).get('checks',{}).get('shipping') is not True:return ''
+    shipping=(receipt.get('evidence') or {}).get('shipping') or {}
+    selected=shipping.get('selected') or (receipt.get('shipping') or {}).get('target')
+    options=shipping.get('options') or (receipt.get('shipping') or {}).get('options') or []
+    matches=[row for row in options if isinstance(row,dict) and row.get('service')==selected]
+    labels={'budget':'Budget','standard':'Standard','standardplus':'Standard Plus','express':'Express','overnight':'Overnight'}
+    if len(matches)!=1 or selected not in labels:return ''
+    quote=matches[0];cents=quote.get('cents');currency=quote.get('currency')
+    if type(cents) is not int or not 0<=cents<=10000000 or currency not in ('$','£','€'):return ''
+    return f"{labels[selected]} · {currency}{cents//100}.{cents%100:02d}"
+
+
 def review(saved,row,jpg):
     from prodigi_dashboard_qa import CHECKS
     state=(saved or {}).get('status','Waiting')
@@ -88,6 +103,7 @@ def review(saved,row,jpg):
         updated_at=(saved or {}).get('updated_at') or ((saved or {}).get('last_failure') or {}).get('at'),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
         submission_enabled=(saved or {}).get('_submit_enabled'),
         insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
+        shipping_quote=shipping_summary(saved),
         items=items,can_restart=stopped,allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')

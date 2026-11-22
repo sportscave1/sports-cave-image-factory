@@ -7,6 +7,8 @@ import prodigi_browser as browser
 from prodigi_qa import address_matches, clean
 
 POLICY='prodigi-dashboard-inserts-observed-v2'
+# Owner confirmed on 2026-11-22 that applicable sales tax is already collected.
+TAX_POLICY='owner-confirmed-sales-tax-collected-2026-11-22'
 WAITING='Awaiting dashboard QA'
 ACTIVE='Checking dashboard QA'
 SET='SC EDITION BRANDING'
@@ -69,7 +71,7 @@ def enqueue(value,provider,resolver,persist):
     return value
 
 
-def claim():
+def claim(*,tax_supported=False):
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(browser.LOCK,))
         if not q.fetchone()['acquired']:return None
@@ -81,14 +83,16 @@ def claim():
         provider,resolver,_,_=browser.context(key)
         try:
             snap,order,item=current(value,provider,resolver)
+            tax_required=clean((snap.get('recipient') or {}).get('address',{}).get('countryCode'))=='us'
+            if tax_required and not tax_supported:return None
             token=secrets.token_urlsafe(32)
-            value['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=prep.now(),before=order,started=False,policy=POLICY)
+            value['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=prep.now(),before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required)
             value.update(status=ACTIVE,message='Companion is checking this saved order in one QA pass; no certificate upload.')
             browser.save(q,key,value)
             return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
                 reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),
-                shipping_intent=intent(snap.get('shipping')),branding_set=SET)
+                shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required)
         except ValueError as error:
             value.update(status='Needs review',message=str(error));prep.record_failure(value,'dashboard_qa',str(error));browser.save(q,key,value)
 
@@ -117,7 +121,7 @@ def permit(key,token,evidence):
             raise ValueError('The selected shipping quote differs from this saved order.')
         receipt.update(started=True,shipping=deepcopy(evidence),permitted_at=prep.now())
         browser.save(q,key,value)
-    return {'permitted':True}
+    return {'permitted':True,'tax_declaration':receipt.get('tax_policy')==TAX_POLICY}
 
 
 def identity_proof(snapshot):
@@ -147,7 +151,7 @@ def insert_checks(evidence,asset_resolver=None):
 
 
 def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolver=None):
-    if not isinstance(evidence,dict) or set(evidence)!={'quality','sku','colour','shipping','inserts'}:raise ValueError('Dashboard QA evidence is incomplete.')
+    if not isinstance(evidence,dict) or set(evidence) not in ({'quality','sku','colour','shipping','inserts'},{'quality','sku','colour','shipping','inserts','tax_collected'}):raise ValueError('Dashboard QA evidence is incomplete.')
     receipt=value['dashboard_qa'];shipping=evidence['shipping']
     if not isinstance(shipping,dict) or set(shipping)!={'options','selected'}:raise ValueError('Shipping readback is incomplete.')
     planned=receipt['shipping']
@@ -189,11 +193,14 @@ def finish(key,token,evidence,error=''):
             if not receipt.get('started'):raise ValueError('QA stopped before the shipping permit; recheck this same order.')
             snap,order,item=current(value,provider,resolver)
             if pinned_order(receipt['before'])!=pinned_order(order):raise ValueError('Product, artwork, address or inserts changed during QA.')
+            tax_seen=(evidence or {}).get('tax_collected')
+            if receipt.get('tax_required') and tax_seen is not True:raise ValueError('The sales-tax-collected declaration was not confirmed; recheck this draft.')
+            if tax_seen is True and order.get('usSalesTaxAlreadyCollected') is False:raise ValueError('Prodigi has not saved the sales-tax-collected declaration yet; recheck this draft.')
             result=evaluate(value,snap,order,item,evidence,identity_verified=identity_proof(snap),asset_resolver=getattr(provider,'asset',None))
             value.update(qa=result,checks=result['checks'],status='Ready for manual payment' if all(result['checks'].values()) else 'Needs QA',
                 message='All QA passed. Submission follows the owner’s Orders companion setting.' if all(result['checks'].values()) else ' '.join(result['blockers']))
             pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
-            receipt.update(verified=True,evidence=evidence,checked_at=prep.now(),validated_order_hash=prep.digest(pinned))
+            receipt.update(tax_collected=tax_seen,verified=True,evidence=evidence,checked_at=prep.now(),validated_order_hash=prep.digest(pinned))
         except Exception as exc:
             value.update(status='Needs review',message=str(exc) if isinstance(exc,ValueError) else 'Dashboard QA could not be verified; recheck this exact draft.')
             prep.record_failure(value,'dashboard_qa',value['message'],type(exc).__name__)

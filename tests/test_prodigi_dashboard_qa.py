@@ -93,7 +93,7 @@ def test_durable_qa_permit_is_single_use_and_changes_only_shipping(store,monkeyp
     plan=qa.claim();assert plan['kind']=='qa' and 'artwork_url' not in plan
     assert qa.claim() is None
     with pytest.raises(ValueError,match='differs'):qa.permit(key,plan['token'],dict(options=options(),current='standard',target='standard'))
-    assert qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))=={'permitted':True}
+    assert qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))=={'permitted':True,'tax_declaration':True}
     with pytest.raises(ValueError,match='used'):qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))
     p.data['shippingMethod']='Budget'
     assert qa.finish(key,plan['token'],evidence)['status']=='Ready for manual payment'
@@ -153,3 +153,26 @@ def test_country_prefixed_standard_and_extended_quotes_preserve_the_lowest_tied_
     assert qa.shipping_choice(rows,'express','standard')=='express'
     rows[-1]['cents']=2000
     assert qa.shipping_choice(rows,'standard','standard')=='standardplus'
+
+
+def test_us_declaration_is_hidden_but_required_before_accepting_the_receipt(store,monkeypatch):
+    value,snap,p,evidence=fixture();snap['recipient']['address']['countryCode']='US';p.data['recipient']['address']['countryCode']='US'
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False));monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    with store() as c,c.cursor() as q:prep.save(q,value)
+    assert qa.claim() is None # Previous companions cannot take a US tax handoff.
+    plan=qa.claim(tax_supported=True);assert plan['tax_declaration'] and plan['tax_required']
+    qa.permit(prep.PREFIX+'1',plan['token'],dict(options=options(),current='standard',target='budget'));p.data['shippingMethod']='Budget'
+    assert qa.finish(prep.PREFIX+'1',plan['token'],evidence)['status']=='Needs review'
+    assert 'sales-tax' in prep.read(1)['message'] and not prep.read(1)['dashboard_qa'].get('verified')
+
+
+def test_us_declaration_accepts_checked_receipt_but_not_explicit_unsaved_api_value(store,monkeypatch):
+    value,snap,p,evidence=fixture();snap['recipient']['address']['countryCode']='US';p.data['recipient']['address']['countryCode']='US'
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False));monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    with store() as c,c.cursor() as q:prep.save(q,value)
+    plan=qa.claim(tax_supported=True);qa.permit(prep.PREFIX+'1',plan['token'],dict(options=options(),current='standard',target='budget'))
+    p.data.update(shippingMethod='Budget',usSalesTaxAlreadyCollected=False);evidence['tax_collected']=True
+    assert qa.finish(prep.PREFIX+'1',plan['token'],evidence)['status']=='Needs review'
+    p.data['usSalesTaxAlreadyCollected']=True
+    assert qa.finish(prep.PREFIX+'1',plan['token'],evidence)['status']=='Ready for manual payment'
+    saved=prep.read(1);assert saved['dashboard_qa']['tax_collected'] is True and all(saved['checks'].values())
