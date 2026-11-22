@@ -31,15 +31,17 @@ class LiveApiRegressionTests(unittest.TestCase):
             {"creative": {"effective_object_story_id": "foreign_2", "effective_instagram_media_id": "foreignig"}},
             {"creative": {"effective_object_story_id": "page_3"}},
         ], "paging": {"next": "ignored", "cursors": {"after": "older-ads"}}}),
-            response({"page_1": {"id": "page_1", "from": {"id": "page"}, "comments": {"data": [{"id": "customer"}]}},
-                      "page_3": {"id": "page_3", "from": {"id": "foreign"}}}),
-            response({"igpost": {"id": "igpost", "owner": {"id": "another-ig"}}})]
+            response({"id": "page_1", "from": {"id": "page"}, "comments": {"data": [{"id": "customer"}]}}),
+            response({"id": "page_3", "from": {"id": "foreign"}}),
+            response({"id": "igpost", "owner": {"id": "another-ig"}})]
         result = api.ad_comment_feed(after="opaque-ads-cursor")
         self.assertEqual([post["id"] for post in result["data"]], ["page_1"])
         self.assertEqual(result["after"], "older-ads")
         calls = http.request.call_args_list
         self.assertEqual(calls[0].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
         self.assertEqual(calls[0].kwargs["params"]["after"], "opaque-ads-cursor")
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all("ids" not in call.kwargs["params"] for call in calls))
         self.assertTrue(all(call.args[0] == "GET" for call in calls))
         self.assertTrue(all(call.kwargs["headers"]["Authorization"] == "Bearer fixture-page-token" for call in calls[1:]))
         self.assertNotIn("foreign", repr([call.kwargs["params"] for call in calls]))
@@ -53,6 +55,18 @@ class LiveApiRegressionTests(unittest.TestCase):
             api.comment_feed(platform, after=cursor)
             self.assertEqual(http.request.call_args.kwargs["params"]["after"], cursor)
         self.assertEqual(http.request.call_count, 2)
+
+    def test_unreadable_ad_post_does_not_discard_other_comments(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"data": [
+            {"creative": {"effective_object_story_id": "page_1"}},
+            {"creative": {"effective_object_story_id": "page_2"}}]}),
+            response({"error": {"code": 100}}, 400),
+            response({"id": "page_2", "from": {"id": "page"}, "comments": {"data": [{"id": "kept"}]}})]
+        result = api.ad_comment_feed()
+        self.assertEqual(result["data"][0]["comments"]["data"][0]["id"], "kept")
+        self.assertIn("1 advertising posts", result["errors"][0])
 
     def test_permission_diagnostic_keeps_codes_and_scope_names_but_no_provider_secrets(self):
         http = Mock()

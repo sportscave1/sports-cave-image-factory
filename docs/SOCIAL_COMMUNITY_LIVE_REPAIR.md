@@ -84,6 +84,13 @@ https://developers.facebook.com/documentation/ads-commerce/marketing-api/referen
 Focused validation after this follow-up: 83 passed, 8 legacy database opt-in
 skips, 68 subtests passed. This follow-up still requires live verification.
 
+Edge follow-up: after the owner enabled Instagram connected-tools message
+access, the unified inbox loaded 60 Facebook/Instagram conversations without the
+previous rejection. No token replacement or new permission grant was performed
+by the agent. The advertising root multi-ID expansion returned error 100 in
+production; replaced it with direct, ownership-checked reads for at most five
+ads per page. An unavailable ad post no longer discards readable posts.
+
 `python -m pytest tests/test_meta_social.py tests/test_social_community_feed.py
 tests/test_social_community_live_regressions.py tests/test_social_community_store.py
 tests/test_social_wall_inbox.py tests/test_social_media_reporting.py

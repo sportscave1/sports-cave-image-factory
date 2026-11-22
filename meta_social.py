@@ -241,7 +241,7 @@ class MetaCommunity:
         if not self.ad_account or not self._ads_token:
             return {"data": [], "after": "", "errors": []}
         self.owner("Facebook")
-        params = {"fields": "id,creative{effective_object_story_id,effective_instagram_media_id}", "limit": 10}
+        params = {"fields": "id,creative{effective_object_story_id,effective_instagram_media_id}", "limit": 5}
         if after:
             params["after"] = str(after)
         ads = self._request("GET", identifier(self.ad_account) + "/ads", params=params, advertising=True)
@@ -262,14 +262,15 @@ class MetaCommunity:
             fields = ("id,from,message,created_time,permalink_url,comments.filter(stream).limit(20){id,message,from,created_time,like_count}"
                       if platform == "Facebook" else
                       "id,owner,caption,timestamp,permalink,comments.limit(20){id,text,username,timestamp,like_count}")
-            try:
-                result = self._request("GET", "", params={"ids": ",".join(sorted(post_ids)), "fields": fields})
-            except CommunityError as exc:
-                errors.append(platform + " advertising comments: " + str(exc))
-                continue
             unreadable = 0
-            for post_id in post_ids:
-                post = result.get(post_id) or {}
+            for post_id in sorted(post_ids):
+                # These unpublished objects reject the root multi-ID expansion
+                # with error 100. Read each bounded ad post directly instead.
+                try:
+                    post = self._request("GET", post_id, params={"fields": fields})
+                except CommunityError:
+                    unreadable += 1
+                    continue
                 owner = post.get("from" if platform == "Facebook" else "owner") or {}
                 if post.get("error"):
                     unreadable += 1
