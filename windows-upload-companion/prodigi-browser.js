@@ -40,10 +40,44 @@ async function prodigiWorkerTab(plan) {
   await chrome.storage.local.set({ordersWorkerTabs:Object.fromEntries([...entries,[plan.order_url,tab.id]])});
   return {...tab,ordersReused:false};
 }
+async function prodigiReadyProbe(id,timeout=1500) {
+  let timer;
+  try{return await Promise.race([chrome.tabs.sendMessage(id,{type:'prodigi:ready'}),
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(Error('Worker page is sleeping or unavailable.'),{code:'PRODIGI_READY_TIMEOUT'})),timeout);})]);}
+  finally{clearTimeout(timer);}
+}
+async function prodigiWakeOwnedTab(tab,orderUrl) {
+  // Waking is not navigation or supplier authority. Recheck ownership and URL.
+  const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
+  const current=await chrome.tabs.get(tab.id);
+  if(!orderUrl||saved[orderUrl]!==tab.id||!prodigiOrderAddress(current.url,orderUrl))
+    throw Error('The worker order tab changed before wake-up.');
+  await chrome.tabs.update(tab.id,{active:true,autoDiscardable:false});
+}
 async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
   let previousPage,reloaded=false;
+  let woke=false;
+  async function probe(){
+    try{return await prodigiReadyProbe(tab.id);}
+    catch(error){
+      // Edge may freeze a background content script indefinitely. One targeted
+      // wake keeps the probe bounded without touching user-owned tabs/settings.
+      if(error.code==='PRODIGI_READY_TIMEOUT'&&!woke&&orderUrl){
+        try{await prodigiWakeOwnedTab(tab,orderUrl);woke=true;}
+        catch(changed){changed.prodigiOwnershipLost=true;throw changed;}
+      }
+      throw error;
+    }
+  }
   if(refresh&&tab.ordersReused){
-    try{previousPage=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.page_instance;}catch{}
+    try{previousPage=(await probe())?.page_instance;}catch(error){if(error.prodigiOwnershipLost)throw error;}
+    if(woke&&!previousPage){
+      for(let n=0;n<5&&!previousPage;n++){
+        try{previousPage=(await probe())?.page_instance;}catch(error){if(error.prodigiOwnershipLost)throw error;}
+        if(!previousPage)await ordersDelay(1000);
+      }
+      if(!previousPage)throw Error('The woken order page did not expose its identity.');
+    }
     // The image library can leave allowed filter parameters in the owned tab.
     // QA pins the clean detail URL; a reload alone would preserve those filters.
     if(orderUrl&&tab.url!==orderUrl)await chrome.tabs.update(tab.id,{url:orderUrl});
@@ -51,9 +85,9 @@ async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
     reloaded=true;
   }
   for(let n=0;n<attempts;n++){
-    try{const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
+    try{const state=await probe();
       if(state?.ready&&(!reloaded||(typeof state.page_instance==='string'&&state.page_instance!==previousPage)))return true;
-    }catch{}
+    }catch(error){if(error.prodigiOwnershipLost)throw error;}
     await ordersDelay(1000);
   }
   return false;

@@ -74,7 +74,7 @@ function setup(bytes='exact',saved=true) {
     calls.push({url,options});
     if(url===plan.artwork_url)return {ok:true,headers:{get:()=>null},arrayBuffer:async()=>new TextEncoder().encode(bytes).buffer};
     return{ok:true,json:async()=>({status:'Needs QA'})};
-  },crypto:webcrypto,Uint8Array,AbortSignal,URL,Date,setTimeout,btoa:s=>Buffer.from(s,'binary').toString('base64'),
+  },crypto:webcrypto,Uint8Array,AbortSignal,URL,Date,setTimeout,clearTimeout,btoa:s=>Buffer.from(s,'binary').toString('base64'),
     osOrigin:'https://sports-cave-image-factory.onrender.com'});
   vm.runInContext(source,context);
   return{context,calls,tabs,storage,listeners};
@@ -125,6 +125,36 @@ test('worker uploads only verified bytes and opens the exact draft without activ
   assert.equal(tabs[0].url,plan.order_url);assert.equal(tabs[0].active,false);
   assert.equal(calls.length,2);assert(calls.every(c=>c.url.startsWith('https://sports-cave-image-factory.onrender.com/')));
   assert(!storage.ordersBrowserPending);
+});
+
+test('sleeping owned page is woken once before fresh QA, retaining the new-page fence',async()=>{
+ const {context,storage}=setup();const events=[];let awake=false,page='old';
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.setTimeout=(fn,ms)=>setTimeout(fn,ms===1500?5:ms);
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.deepEqual(JSON.parse(JSON.stringify(options)),{active:true,autoDiscardable:false});events.push('wake');awake=true;};
+ context.chrome.tabs.reload=async()=>{assert(awake);events.push('reload');page='new';};
+ context.chrome.tabs.sendMessage=async()=>awake?{ready:true,page_instance:page}:await new Promise(()=>{});
+ context.tab={id:9,url:plan.order_url,ordersReused:true};context.orderUrl=plan.order_url;
+ assert.equal(await vm.runInContext('prodigiWaitForPage(tab,true,3,orderUrl)',context),true);
+ assert.deepEqual(events,['wake','reload']);
+});
+
+test('sleep recovery never activates a user-navigated tab',async()=>{
+ const {context,storage}=setup();storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.setTimeout=(fn,ms)=>setTimeout(fn,ms===1500?5:ms);
+ context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/other/detail'});
+ context.chrome.tabs.update=()=>assert.fail('User tab must not be activated');
+ context.chrome.tabs.sendMessage=()=>new Promise(()=>{});
+ context.tab={id:9};context.orderUrl=plan.order_url;
+ await assert.rejects(vm.runInContext('prodigiWaitForPage(tab,false,1,orderUrl)',context),/changed before wake/);
+ context.tab.ordersReused=true;context.chrome.tabs.reload=()=>assert.fail('User navigation must not be reloaded');
+ await assert.rejects(vm.runInContext('prodigiWaitForPage(tab,true,1,orderUrl)',context),/changed before wake/);
+});
+
+test('ready probe releases its deadline on immediate response',async()=>{
+ const {context}=setup();let cleared=0;context.clearTimeout=id=>{cleared++;clearTimeout(id);};
+ assert.equal((await vm.runInContext('prodigiReadyProbe(9)',context)).ready,true);assert.equal(cleared,1);
 });
 
 test('upload and QA reuse only the worker-owned exact order tab',async()=>{
