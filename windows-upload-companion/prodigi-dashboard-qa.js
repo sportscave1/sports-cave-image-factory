@@ -13,7 +13,26 @@ function prodigiCheapestShipping(options,intent,current) {
   const minimum=Math.min(...options.map(o=>o.cents)),choices=options.filter(o=>o.cents===minimum).map(o=>o.service);
   return choices.includes(current)?current:choices[0];
 }
-if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiCheapestShipping};
+function prodigiInsertSummary(main){
+  if(!main)return null;
+  const clean=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
+  const selector='h1,h2,h3,h4,h5,h6,[role="heading"]';
+  const headings=Array.from(main.querySelectorAll(selector)).filter(h=>clean(h)==='Inserts'&&h.getClientRects().length);
+  if(headings.length!==1)return null;
+  for(let scope=headings[0].parentElement,depth=0;scope&&depth<6;scope=scope.parentElement,depth++){
+    if(Array.from(scope.querySelectorAll(selector)).length!==1)continue;
+    const lines=String(scope.innerText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const at=lines.findIndex(s=>/^\d{1,3}\s+inserts?\b/i.test(s));if(at<0)continue;
+    const count=Number(lines[at].match(/^\d+/)[0]);if(count<1||count>100)return null;
+    const next=lines.slice(at+1).find(s=>!/^,?\s*[$£€][\d.,]+$/.test(s));
+    if(!next||/availability|unavailable|dependent on|view\s*&\s*edit/i.test(next))return null;
+    const names=next.split(',').map(s=>s.trim());
+    if(names.length!==count||names.some(s=>!s||s.length>200||!/[\p{L}]/u.test(s)))return null;
+    return {set_name:'',saved:names.map(name=>({name,asset:null})),expected:[],readback_source:'summary',available:!lines.some(s=>/inserts are unavailable|inserts are not available/i.test(s))};
+  }
+  return null;
+}
+if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiCheapestShipping,prodigiInsertSummary};
 (() => {
   if(typeof document==='undefined')return;
   function reportStage(stage,plan){if(plan?.progress===true)void Promise.resolve(chrome.runtime.sendMessage({type:'prodigi:progress',stage})).catch(()=>{});}
@@ -42,6 +61,8 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
   }
   async function inspectInserts(plan){
     pin(plan);
+    const summary=await wait(()=>prodigiInsertSummary(document.querySelector('main')),8000).catch(()=>null);
+    pin(plan);if(summary)return summary;
     // The artwork row can render before Prodigi loads the inserts controls.
     const edit=await wait(()=>{try{return uniqueButton(document.querySelector('main'),'View & edit');}catch{return null;}});
     pin(plan);edit.click();
@@ -56,7 +77,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     }
     pin(plan);
     const main=text(document.querySelector('main'));
-    return {set_name:'',saved,expected:[],available:!(/inserts are unavailable|inserts are not available|will not be charged for unavailable inserts/i.test(main))};
+    return {set_name:'',saved,expected:[],readback_source:'dialog',available:!(/inserts are unavailable|inserts are not available|will not be charged for unavailable inserts/i.test(main))};
   }
 
   function taxControl(){

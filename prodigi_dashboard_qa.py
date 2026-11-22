@@ -80,7 +80,8 @@ def recover_waiting_item_qa(user):
             AND (value->>'message'='QA inserts: The expected QA control did not finish loading.'
                  AND value->'dashboard_qa'->>'item_only'='true'
                  OR value->>'message'='QA product-row: Close the existing order editor before QA.'
-                 OR (value->>'message'='QA shipping: The exact draft or shipping quotes changed before QA.'
+                 OR (value->>'message' IN ('QA shipping: The exact draft or shipping quotes changed before QA.',
+                     'QA inserts: The expected Prodigi control did not finish loading.')
                      AND COALESCE((value->>'qa_prepermit_recoveries')::int,0)<2))
             AND value->'dashboard_qa'->>'started'='false'
             AND value->'browser'->>'verified'='true'
@@ -95,7 +96,8 @@ def _recover_item_qa(key):
     provider,resolver,_,_=browser.context(key)
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key);receipt=value.get('dashboard_qa') or {}
-        prepermit=value.get('message')=='QA shipping: The exact draft or shipping quotes changed before QA.'
+        prepermit=value.get('message') in ('QA shipping: The exact draft or shipping quotes changed before QA.',
+            'QA inserts: The expected Prodigi control did not finish loading.')
         known=(value.get('message')=='QA inserts: The expected QA control did not finish loading.' and receipt.get('item_only')
                or value.get('message')=='QA product-row: Close the existing order editor before QA.' or prepermit)
         if (value.get('status')!='Needs review' or not known or receipt.get('started') is not False or value.get('submission')):

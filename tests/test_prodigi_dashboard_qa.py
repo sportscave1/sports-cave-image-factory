@@ -24,13 +24,14 @@ def fixture():
     return value,snap,provider,evidence
 
 @pytest.mark.parametrize('case',['unchanged','started','changed_address','changed_shipping','changed_asset','exhausted'])
-def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(store,monkeypatch,case):
+@pytest.mark.parametrize('message',['QA shipping: The exact draft or shipping quotes changed before QA.','QA inserts: The expected Prodigi control did not finish loading.'])
+def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(store,monkeypatch,case,message):
     value,snap,p,_=fixture()
     monkeypatch.setattr(prep,'require_user',lambda _:None)
     monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False))
     with prep.connect() as c,c.cursor() as q:prep.save(q,value)
     plan=qa.claim(exact_item_supported=True)
-    qa.finish(plan['key'],plan['token'],None,error='QA shipping: The exact draft or shipping quotes changed before QA.')
+    qa.finish(plan['key'],plan['token'],None,error=message)
     value=prep.read(1)
     if case=='started':value['dashboard_qa']['started']=True
     if case=='exhausted':value['qa_prepermit_recoveries']=2
