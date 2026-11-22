@@ -157,7 +157,7 @@ async def browser_action(request):
             from prodigi_document_browser import permit,finish
         if body['key'].startswith('product:'):
             from prodigi_product_browser import permit,finish
-        extra={'error':body.get('error','')} if not body['key'].startswith(('product:','document:')) else {}
+        extra={'error':body.get('error','')} if not body['key'].startswith('document:') else {}
         result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'),**extra)
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:

@@ -33,8 +33,8 @@ def reset_order(user,allocation_id):
     if product.get('started') and not product.get('verified'):
         if old.get('status')=='Selecting product':raise ValueError('Product selection is in progress. Wait for its result before Reset.')
         from prodigi_product_browser import recheck
-        recheck(user,prep.PREFIX+str(aid));old=prep.read(aid)
-        if not (old.get('product_browser') or {}).get('verified'):
+        recheck(user,prep.PREFIX+str(aid),allow_expired_blank=True);old=prep.read(aid)
+        if old.get('product_browser') and not old['product_browser'].get('verified'):
             raise ValueError('The previous product selection is uncertain; it must be verified before Reset.')
     fresh,preparing=prep.preparation_snapshot(user,aid)
     from prodigi_submission import LOCK as submission_lock

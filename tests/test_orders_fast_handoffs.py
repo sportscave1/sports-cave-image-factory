@@ -6,6 +6,14 @@ from starlette.testclient import TestClient
 import prodigi_preparation as prep
 import prodigi_preparation_api as api
 
+def test_product_finish_keeps_the_native_preselect_error(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(api,'desktop',lambda _:None)
+    monkeypatch.setattr('prodigi_product_browser.finish',lambda key,token,stage,**kw:(calls.append((stage,kw)) or {'status':'Needs review'}))
+    client=TestClient(Starlette(routes=[Route('/browser/finish',api.browser_action,methods=['POST'])]))
+    response=client.post('/browser/finish',json=dict(key='product:prodigi_prepare:1',token='a'*43,stage='product-select',error='Catalogue changed'),headers={'Authorization':'Bearer '+'x'*43})
+    assert response.status_code==200 and calls==[('product-select',{'error':'Catalogue changed'})]
+
 
 @pytest.mark.parametrize('qa_plan',[None,dict(kind='qa',key='fixture')])
 def test_ready_qa_precedes_another_artwork_transfer(monkeypatch,qa_plan):

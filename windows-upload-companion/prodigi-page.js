@@ -36,6 +36,19 @@ async function prodigiFilePicker(getInput,openOptions,findUploadChoice,wait) {
   const choice=await wait(findUploadChoice);choice.click();
   return wait(getInput);
 }
+async function prodigiReadyProductCard(scope,sku,colour,wait,pin) {
+  return wait(()=>{
+    pin(); // Identity changes are fatal, never treated as a loading control.
+    let current;
+    try{current=prodigiProductCard(scope(),sku,colour);}catch{return null;}
+    if(current.colour&&current.colour.value!==current.value){
+      current.colour.value=current.value;
+      current.colour.dispatchEvent(new Event('change',{bubbles:true}));
+      return null; // Let React commit, then re-resolve the live card.
+    }
+    return current.select.disabled?null:current;
+  });
+}
 function prodigiRemovePoint(canvas) {
   // Prodigi draws its trash affordance on a separate, transparent public canvas.
   // Read only that rendered control, never the artwork canvas or application state.
@@ -68,7 +81,7 @@ function prodigiIndefiniteHold(scope,text,visible) {
   return saysHeld&&!Array.from(scope.querySelectorAll('h1,h2,h3')).some(e=>visible(e)&&/until production/i.test(text(e)))&&
     !prodigiControls(scope,'button').some(e=>visible(e)&&text(e)==='Pause indefinitely');
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiReadyProductCard,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -164,15 +177,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       const search=await wait(()=>picker.querySelector('input[type="search"]'));
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(search,plan.sku);
       search.dispatchEvent(new Event('input',{bubbles:true}));
-      const selected=await wait(()=>{
-        try{return prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);}catch{return null;}
-      });
-      if(selected.colour){selected.colour.value=selected.value;selected.colour.dispatchEvent(new Event('change',{bubbles:true}));}
-      await wait(()=>{
-        try {const c=prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);
-          return !c.select.disabled&&(!c.colour||c.colour.value===c.value);
-        }catch{return false;}
-      });
+      await prodigiReadyProductCard(()=>dialog('Select product'),plan.sku,plan.colour,wait,()=>locationMatches(plan));
       stage='product-select';reportStage(stage,plan);
       locationMatches(plan);
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:plan.sha256});
@@ -180,8 +185,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       if(adding&&(permission.order_id!==plan.order_id||permission.operation!=='add-item'))throw Error('The Add product permit belongs to another supplier order.');
       locationMatches(plan);
       // Resolve again after React commits the colour; never choose a prefix match/backloader.
-      const current=prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);
-      if(current.colour&&current.colour.value!==current.value)throw Error('The frame colour did not persist.');
+      const current=await prodigiReadyProductCard(()=>dialog('Select product'),plan.sku,plan.colour,wait,()=>locationMatches(plan));
       current.select.click();
       stage='product-readback';reportStage(stage,plan);
       if(adding){

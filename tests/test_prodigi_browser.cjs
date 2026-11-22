@@ -8,6 +8,24 @@ const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upl
 const {prodigiExactRow,prodigiControls,prodigiFilePicker}=require('../windows-upload-companion/prodigi-page.js');
 const {prodigiRemovePoint}=require('../windows-upload-companion/prodigi-page.js');
 const {prodigiResetControl}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiReadyProductCard}=require('../windows-upload-companion/prodigi-page.js');
+
+test('after a slow permit, a replaced catalogue card and reset colour settle before one Select',async()=>{
+ let step=0,colourWrites=0,clicks=0,pins=0;
+ const colour={value:'natural',options:[{textContent:'Black',value:'black'}],dispatchEvent(){colourWrites++;}};
+ const select={get disabled(){return step<4;},getAttribute:()=> 'select-product-with-data-button-GLOBAL-CFP-A1',
+   closest:()=>({querySelectorAll:()=>[colour]}),click(){clicks++;}};
+ const scope=()=>({querySelectorAll:()=>step<2?[]:[select]});
+ const wait=async check=>{for(step=0;step<8;step++){const result=check();if(result)return result;}throw Error('Never ready');};
+ const current=await prodigiReadyProductCard(scope,'GLOBAL-CFP-A1','Black',wait,()=>pins++);
+ assert.equal(step,4);assert.equal(colour.value,'black');assert.equal(colourWrites,1);assert.equal(clicks,0);
+ current.select.click();assert.equal(clicks,1);assert.equal(pins,5);
+});
+
+test('catalogue readiness never retries a changed order identity',async()=>{
+ let reads=0;await assert.rejects(prodigiReadyProductCard(()=>{reads++;},'GLOBAL-CFP-A1','Black',check=>check(),
+   ()=>{throw Error('Order changed');}),/Order changed/);assert.equal(reads,0);
+});
 
 test('Reset waits for the late SKU, image details and drawn control before any click',async()=>{
  let step=0;const pixels=new Uint8ClampedArray(100*100*4);

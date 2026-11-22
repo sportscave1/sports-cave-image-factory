@@ -112,6 +112,41 @@ def test_uncertain_selection_is_not_repeated_and_can_be_read_back(blank,monkeypa
     monkeypatch.setattr(prep,'require_user',lambda _:None)
     assert product.recheck({'id':'fixture'},KEY)['status']==browser.WAITING
     assert saved()['product_browser']['verified'] and not blank.writes
+
+def test_preselect_client_error_is_preserved_without_overriding_supplier_truth(blank):
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256'])
+    assert product.finish(p['key'],p['token'],'product-select',error='Catalogue card unavailable after permit')['status']=='Needs review'
+    receipt=saved()['product_browser']
+    assert receipt['client_stage']=='product-select' and receipt['client_error']=='Catalogue card unavailable after permit'
+    assert 'Companion: Catalogue card unavailable after permit' in saved()['message']
+    assert product.claim() is None and not receipt.get('verified') and not blank.writes
+
+@pytest.mark.parametrize('case',['expired','young','changed','ordinary','after_click'])
+def test_only_owner_reset_can_retire_an_expired_unchanged_preclick_blank(blank,monkeypatch,case):
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256'])
+    product.finish(p['key'],p['token'],'product-select' if case!='after_click' else 'product-readback')
+    v=saved()
+    if case!='young':v['product_browser']['permitted_at']='2020-01-01T00:00:00+00:00'
+    with prep.connect() as c,c.cursor() as q:prep.save(q,v)
+    if case=='changed':blank.data['recipient']={'name':'Changed'}
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    try:product.recheck({'id':'fixture'},KEY,allow_expired_blank=case!='ordinary')
+    except ValueError:
+        assert case=='changed'
+    assert ('product_browser' not in saved())==(case=='expired')
+    assert not blank.writes
+
+def test_owner_full_reset_requeues_the_proven_expired_blank_without_a_supplier_write(blank,monkeypatch):
+    import prodigi_reset
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256']);product.finish(p['key'],p['token'],'product-select')
+    v=saved();v['product_browser']['permitted_at']='2020-01-01T00:00:00+00:00'
+    with prep.connect() as c,c.cursor() as q:prep.save(q,v)
+    monkeypatch.setattr(prep,'require_user',lambda _:None);monkeypatch.setattr(prep,'enabled',lambda:True)
+    monkeypatch.setattr(prep,'preparation_snapshot',lambda *_:(snapshot(),False))
+    monkeypatch.setattr(prep,'Client',lambda:blank)
+    result=prodigi_reset.reset_order({'id':'fixture'},1)
+    assert result['status']=='Queued' and result['reset_generation'] and not result.get('product_browser')
+    assert not blank.writes and not blank.data['items'][0]['sku']
 import os_pages
 
 @pytest.mark.parametrize('reference',os_pages.PRODIGI_REFERENCE_MAPPINGS)

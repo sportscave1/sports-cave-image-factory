@@ -101,16 +101,18 @@ def permit(key,token,sha256):
 
 
 @stages.stale_result({'status':'Handoff unavailable'})
-def finish(key,token,stage='product'):
+def finish(key,token,stage='product',*,error=''):
     with stages.edit(browser.LOCK) as cur:
         try: raw,value=authorised(cur,key,token)
         except (ValueError,PermissionError): return {'status':'Handoff unavailable'}
-        return complete(cur,raw,value,stage)
+        return complete(cur,raw,value,stage,error=error)
 
 
-def complete(cur,key,value,stage):
+def complete(cur,key,value,stage,*,error=''):
     receipt=value['product_browser']
     if receipt.get('verified'): return {'status':value['status']}
+    receipt['client_stage']=stage
+    if error:receipt['client_error']=str(error)[:240]
     try:
         provider,resolver,_,_=browser.context(key)
         snap,order,item=checked(value,provider,resolver)
@@ -121,17 +123,35 @@ def complete(cur,key,value,stage):
         value.update(status=browser.WAITING,message='Original Fulfilment product and frame verified. Uploading this edition next, before selecting another product.')
         value.setdefault('history',[]).append(dict(at=prep.now(),event='blank_product_selected',sku=item['sku']))
     except ValueError as error:
-        value.update(status='Needs review',message='Product selection: '+str(error))
+        detail=' Companion: '+receipt['client_error'] if receipt.get('client_error') else ''
+        value.update(status='Needs review',message='Product selection: '+str(error)+detail)
         prep.record_failure(value,'product_selection.'+stage,value['message'],type(error).__name__)
     browser.save(cur,key,value)
     return {'status':value['status']}
 
 
-def recheck(user,key):
+def recheck(user,key,*,allow_expired_blank=False):
     prep.require_user(user)
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key)
         receipt=value['product_browser']
+        # Explicit owner Reset only: retire an expired pre-click handoff after
+        # proving the exact original blank item/business is still unchanged.
+        # Ordinary readback and polling must never replay an uncertain Select.
+        expired=False
+        try:expired=(datetime.now(timezone.utc)-datetime.fromisoformat(receipt['permitted_at'])).total_seconds()>900
+        except (KeyError,TypeError,ValueError):pass
+        if (allow_expired_blank and expired and receipt.get('started') and not receipt.get('verified')
+            and value.get('status')=='Needs review' and not any(value.get(k) for k in ('browser','write_intent','submission'))
+            and (value.get('last_failure') or {}).get('stage')=='product_selection.product-select'):
+            provider,resolver,_,_=browser.context(key)
+            _,order,item=checked(value,provider,resolver)
+            if not item.get('sku') and item==receipt['blank_item'] and business(order,item['id'])==receipt['before']:
+                value.setdefault('product_browser_history',[]).append(deepcopy(receipt))
+                value.pop('product_browser');value.pop('last_failure',None)
+                value.update(status=WAITING,message='Expired untouched product selection retired for owner Reset.')
+                browser.save(cur,key,value)
+                return value
         if not receipt['started']:
             value.pop('product_browser')
             value.update(status='Queued',message='Retrying untouched product selection.')
