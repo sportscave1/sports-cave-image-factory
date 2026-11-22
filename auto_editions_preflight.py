@@ -47,6 +47,15 @@ def validate(root, report, source, total, number_layer, plaque_layer, scale):
     candidate = report.get('resize_background')
     if scale == 1 or not candidate:
         return None
+    from auto_editions_role_evidence import reviewed_rows
+    visible=[row for row in reviewed_rows(report['inspection'],source)
+             if row.get('visible') and len(row.get('path',[]))==1]
+    bottom=visible[-1] if visible else {}
+    if (set(candidate)!={'layer_id','name'} or type(candidate['layer_id']) is not int
+            or bottom.get('layer_id')!=candidate['layer_id']
+            or (bottom.get('path') or [{}])[0].get('name')!=candidate['name']
+            or bottom.get('kind') not in ('raster','smart_object') or bottom.get('smart_object_chain')):
+        raise ValueError('Resize background is not the exact visible bottom artwork layer.')
     try:
         candidate_size = opaque(root/'preflight-artwork.png')
     except NonOpaqueArtwork:
