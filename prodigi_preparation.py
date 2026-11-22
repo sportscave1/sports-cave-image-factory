@@ -62,7 +62,25 @@ def record_failure(value,stage,message,error_type='VerificationError'):
     value.setdefault('history',[]).append(dict(at=failure['at'],event='check_failed',stage=stage,error_type=error_type))
 
 
+def measure_stage(value):
+    """Bounded backend wall timings across durable worker handoffs."""
+    stage=value.get('status')
+    if not stage:return
+    timing=value.setdefault('stage_timing',{})
+    if timing.get('stage')==stage:return
+    stamp=now()
+    if timing.get('stage') and timing.get('entered_at'):
+        try:
+            elapsed=max(0,int((datetime.fromisoformat(stamp)-datetime.fromisoformat(timing['entered_at'])).total_seconds()*1000))
+            history=value.setdefault('stage_durations',[])
+            history.append(dict(stage=timing['stage'],elapsed_ms=elapsed,finished_at=stamp))
+            value['stage_durations']=history[-16:]
+        except (TypeError,ValueError):pass
+    value['stage_timing']=dict(stage=stage,entered_at=stamp)
+
+
 def save(cur, value):
+    measure_stage(value)
     value['updated_at'] = now()
     cur.execute('''INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())
         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''',
@@ -182,7 +200,10 @@ def restore_missing_recipient(value,resolver=None):
     return True
 
 
-def validate_order(order, snapshot, order_id, item_id, *, allow_unselected=False):
+def validate_order(order, snapshot, order_id, item_id, *, allow_unselected=False, binding=None):
+    if binding:
+        from prodigi_consolidation import bound_order
+        order=bound_order(order,snapshot,binding,item_id)
     if str(order.get('id')) != str(order_id):
         raise ProdigiError('Prodigi returned a different order ID.')
     if order.get('status') != 'draft' or 'update' not in order.get('allowedActions', []):
@@ -359,7 +380,7 @@ def run(value, provider, resolver, link, persist):
         persist(value)
     order = provider.order(value['order_id'])
     if value.get('browser_requested') and not value.get('browser') and not value.get('write_intent'):
-        candidate = validate_order(order, snapshot, value['order_id'], value['item_id'], allow_unselected=True)
+        candidate = validate_order(order, snapshot, value['order_id'], value['item_id'], allow_unselected=True,binding=value.get('consolidation_binding'))
         if candidate.get('sku') in (None, ''):
             if value.get('product_browser'):
                 raise ValueError('A product selection was already attempted. Recheck the same item before retrying.')
@@ -368,7 +389,7 @@ def run(value, provider, resolver, link, persist):
             value.update(status='Awaiting product selection',message='Companion will select the original Fulfilment product and frame, then upload artwork and run QA.')
             persist(value)
             return value
-    item = validate_order(order, snapshot, value['order_id'], value['item_id'])
+    item = validate_order(order, snapshot, value['order_id'], value['item_id'],binding=value.get('consolidation_binding'))
     if value.get('write_intent'):
         if value.get('artwork_expires_at') and datetime.fromisoformat(value['artwork_expires_at']) <= datetime.now(timezone.utc):
             raise ValueError('Artwork link needs renewal. Review this same supplier item manually before payment.')
@@ -399,7 +420,7 @@ def run(value, provider, resolver, link, persist):
     url, md5 = link(snapshot)
     # Re-read after transferring bytes, to detect dashboard changes before writing.
     latest = provider.order(value['order_id'])
-    validate_order(latest, snapshot, value['order_id'], value['item_id'])
+    validate_order(latest, snapshot, value['order_id'], value['item_id'],binding=value.get('consolidation_binding'))
     if digest(latest) != digest(order) or digest(resolver(value['allocation_id'])) != value['fingerprint']:
         raise ValueError('The order or allocation changed during preparation. No artwork was replaced.')
     value.update(status='Uploading', write_intent=True, url_hash=digest(url),
@@ -568,7 +589,7 @@ def complete_qa(user, allocation_id, answers, packing_slip):
         raise ValueError('Artwork link needs renewal before manual payment.')
     if digest(resolve(int(allocation_id))) != value['fingerprint']:
         raise ValueError('The saved artwork or allocation changed; recheck this preparation.')
-    item = validate_order(Client().order(value['order_id']), value['snapshot'], value['order_id'], value['item_id'])
+    item = validate_order(Client().order(value['order_id']), value['snapshot'], value['order_id'], value['item_id'],binding=value.get('consolidation_binding'))
     if not any(str(a.get('status', '')).casefold().replace('_', '') in ('complete', 'notyetdownloaded', 'inprogress')
                and digest(a.get('url')) == value['url_hash'] for a in item.get('assets', [])):
         raise ValueError('Prodigi has not confirmed this exact artwork attachment. Recheck the supplier status.')

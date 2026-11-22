@@ -63,7 +63,12 @@ async function prodigiResetControl(getEditor,sku,wait,text,visible) {
     catch(error){last=String(error.message||'Native image control unavailable');if(error.name==='SecurityError')throw error;return null;}
   });}catch{throw Error('Reset editor: '+last);}
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiRemovePoint,prodigiResetControl};
+function prodigiIndefiniteHold(scope,text,visible) {
+  const saysHeld=/\bpaused indefinitely\b|\bindefinitely paused\b|\bpaused until (?:you )?manually (?:release|resume)\b/i.test(text(scope));
+  return saysHeld&&!Array.from(scope.querySelectorAll('h1,h2,h3')).some(e=>visible(e)&&/until production/i.test(text(e)))&&
+    !prodigiControls(scope,'button').some(e=>visible(e)&&text(e)==='Pause indefinitely');
+}
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -106,19 +111,47 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
     },wait);
   }
   let running=false;
-  async function selectProduct(plan) {
+  async function holdDuplicate(plan) {
+    if(running)throw Error('An order operation is already in progress.');
+    running=true;let stage='merge-hold';
+    try {
+      locationMatches(plan);
+      if(dialogs().length)throw Error('Close the unsaved duplicate editor before its hold.');
+      const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:plan.sha256});
+      if(permission?.permitted!==true||permission.order_id!==plan.order_id||permission.operation!=='hold-duplicate')throw Error('The unpaid duplicate changed before its hold.');
+      locationMatches(plan);
+      const held=()=>prodigiIndefiniteHold(document.querySelector('main'),text,visible);
+      if(!held()){
+        button(document,'Pause indefinitely').click();
+        const state=await wait(()=>held()?true:dialogs()[0]||null);
+        if(state!==true){
+          if(!/pause/i.test(text(state))||/terms|conditions|agreement/i.test(text(state)))throw Error('The duplicate hold confirmation needs review.');
+          const choices=prodigiControls(state,'button').filter(e=>visible(e)&&!e.disabled&&['Pause indefinitely','Pause order','Confirm'].includes(text(e)));
+          if(choices.length!==1)throw Error('The duplicate hold confirmation is ambiguous.');
+          choices[0].click();
+        }
+        await wait(held);
+      }
+      locationMatches(plan);
+      return {stage:'merge-hold-confirmed'};
+    }catch(error){return {stage,error:String(error.message||'Duplicate hold unconfirmed').slice(0,240)}}
+    finally{running=false;}
+  }
+  async function selectProduct(plan,adding=false) {
     if(running)throw Error('An order operation is already in progress.');
     running=true;let stage='product';
     try {
       locationMatches(plan);
       if(dialogs().length)throw Error('An existing editor requires review.');
-      const row=await wait(()=>{
+      if(adding)await wait(()=>{try{return button(document,'Add another item');}catch{return null;}}).then(b=>b.click());
+      else {const row=await wait(()=>{
         const choices=Array.from(document.querySelectorAll('button[data-test]')).filter(b=>
           b.getAttribute('data-test')==='choose-product-button-'+plan.item_id&&visible(b)&&text(b)==='Choose product');
         if(choices.length>1)throw Error('The exact blank item is ambiguous.');
         return choices.length===1?choices[0].closest('tr'):null;
       });
       button(row,'Choose product').click();
+      }
       stage='product-search';
       const picker=await wait(()=>dialog('Select product'));
       // Some Prodigi accounts show the catalogue directly, without tabs.
@@ -141,16 +174,23 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       locationMatches(plan);
       const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:plan.sha256});
       if(permission?.permitted!==true)throw Error('The blank item changed before selection.');
+      if(adding&&(permission.order_id!==plan.order_id||permission.operation!=='add-item'))throw Error('The Add product permit belongs to another supplier order.');
       locationMatches(plan);
       // Resolve again after React commits the colour; never choose a prefix match/backloader.
       const current=prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);
       if(current.colour&&current.colour.value!==current.value)throw Error('The frame colour did not persist.');
       current.select.click();
       stage='product-readback';
+      if(adding){
+        await wait(()=>!dialog('Select product'));
+        const editor=dialog('Image Editor');
+        if(editor){const close=editor.querySelectorAll('button.col-start-10');if(close.length!==1)throw Error('Close the unsaved new-item editor before upload.');close[0].click();await wait(()=>!dialog('Image Editor'));}
+        return {stage}; // The server binds precisely the new empty item by ID.
+      }
       await wait(()=>!dialog('Select product')&&Array.from(document.querySelectorAll('table tbody tr')).some(r=>
         r.querySelector('[data-test="line-item-preview-'+plan.item_id+'"]')&&prodigiExactRow(r,plan.sku,plan.colour)));
       return {stage}; // Server independently verifies persistence before any artwork handoff.
-    }catch{return {stage};}finally{running=false;}
+    }catch(error){return {stage,error:String(error.message||'Product selection stopped').slice(0,240)};}finally{running=false;}
   }
   async function uploadCertificate(plan) {
     let stage='row';
@@ -274,7 +314,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
     if(sender.id!==chrome.runtime.id) return;
     if(message?.type==='prodigi:ready') {
       const match=location.pathname.match(/^\/orders\/([A-Za-z0-9-]+)\/detail$/);
-      reply({ready:document.readyState==='complete'&&Boolean(match)&&
+      reply({busy:dialogs().length>0,ready:document.readyState==='complete'&&Boolean(match)&&
         Array.from(document.querySelectorAll('main h1')).some(e=>text(e).startsWith(match[1]))});return;
     }
     if(message?.type==='prodigi:upload') {
@@ -282,6 +322,12 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
     }
     if(message?.type==='prodigi:product') {
       selectProduct(message.plan).then(reply,()=>reply({stage:'product'}));return true;
+    }
+    if(message?.type==='prodigi:merge-add') {
+      selectProduct(message.plan,true).then(reply,()=>reply({stage:'product'}));return true;
+    }
+    if(message?.type==='prodigi:merge-hold') {
+      holdDuplicate(message.plan).then(reply,()=>reply({stage:'merge-hold'}));return true;
     }
   });
 })();

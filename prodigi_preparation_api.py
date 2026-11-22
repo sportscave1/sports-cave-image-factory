@@ -8,15 +8,23 @@ import prodigi_preparation as queue
 def desktop(token):
     import product_upload_staff_queue as pairing
     import os_accounts
-    from companion_poll_transaction import connection, authenticate_and_touch
+    from companion_poll_transaction import connection
     with connection(queue.connect) as conn, conn.cursor() as cur:
-        row = authenticate_and_touch(cur, pairing.digest(token))
+        # Authenticate through MVCC; another worker's long transaction must not
+        # make Orders wait for the shared desktop heartbeat row lock.
+        cur.execute('''SELECT actor_id FROM product_upload_desktop
+            WHERE singleton AND token_hash=%s''', (pairing.digest(token),))
+        row = cur.fetchone()
     if not row:
         raise PermissionError('Pair this desktop in Companion control first.')
     user = os_accounts.DEFAULT_STORE.get_user(row['actor_id'])
     queue.require_user(user)
     if not os_accounts.can_access_page(user, 'Upload Companion'):
         raise PermissionError('Orders companion access is required.')
+    with connection(queue.connect) as conn,conn.cursor() as cur:
+        cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES('orders_companion_seen','true',now())
+            ON CONFLICT(key) DO UPDATE SET updated_at=now()
+            WHERE app_settings.updated_at<now()-interval '20 seconds'""")
     return user
 
 
@@ -37,6 +45,11 @@ async def tick(request):
         if not queue.enabled():
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         await run_in_threadpool(desktop, auth[7:])
+        merge_supported=request.headers.get('x-sports-cave-orders-merge')=='1'
+        if merge_supported:
+            from prodigi_consolidation import record_capability,commit_ready
+            await run_in_threadpool(record_capability)
+            await run_in_threadpool(commit_ready)
         from orders_automatic import kick as admit_orders
         admit_orders()
         value = await run_in_threadpool(queue.tick)
@@ -46,8 +59,11 @@ async def tick(request):
         sync_supplier_status()
         from prodigi_browser import claim
         browser = None
+        if merge_supported:
+            from prodigi_consolidation import claim as merge_claim
+            browser=await run_in_threadpool(merge_claim)
         # Finish already-uploaded orders before starting another large transfer.
-        if request.headers.get('x-sports-cave-orders-qa')=='1':
+        if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
             from prodigi_dashboard_qa import claim as qa_claim
             browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1')
         if browser is None and request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
@@ -88,13 +104,15 @@ async def browser_action(request):
             len(body.get('error',''))>240 or
             not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])):
             raise ValueError('Only an exact Orders handoff receipt is accepted.')
-        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','reset-image','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback'):
+        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','reset-image','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback','merge-hold','merge-hold-confirmed'):
             raise ValueError('Unknown browser stage.')
         import os
         if (re.fullmatch(r'(?:document:)?prodigi_sandbox_test:[a-f0-9-]{36}',body['key']) and
             os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true'):
             return JSONResponse({'status':'Stopped'},headers=HEADERS)
         from prodigi_browser import permit,finish
+        if body['key'].startswith(('merge:','mergehold:')):
+            from prodigi_consolidation import permit,finish
         if body['key'].startswith('document:'):
             from prodigi_document_browser import permit,finish
         if body['key'].startswith('product:'):
@@ -116,7 +134,7 @@ async def dashboard_qa_action(request):
         raw=bytearray()
         async for block in request.stream():
             raw.extend(block)
-            if len(raw)>8192:raise ValueError('QA receipt is too large.')
+            if len(raw)>32768:raise ValueError('QA receipt is too large.')
         body=json.loads(raw)
         if (not isinstance(body,dict) or set(body) not in ({'key','token','evidence'},{'key','token','evidence','error'})
             or not isinstance(body['key'],str) or not isinstance(body['token'],str)
@@ -125,6 +143,8 @@ async def dashboard_qa_action(request):
         from prodigi_dashboard_qa import permit,finish
         result=await run_in_threadpool(permit,body['key'],body['token'],body['evidence']) if request.url.path.endswith('/permit') else await run_in_threadpool(finish,body['key'],body['token'],body['evidence'],body.get('error',''))
         if request.url.path.endswith('/finish') and result.get('status')=='Ready for manual payment':
+            from prodigi_consolidation import kick_commit
+            kick_commit()
             from prodigi_submission import kick
             kick() # Owner gate and durable order fence still precede any POST.
         return JSONResponse(result,headers=HEADERS)
@@ -145,7 +165,11 @@ async def restart_order(request):
         if not isinstance(body,dict) or set(body)!={'allocation_id'} or type(body['allocation_id']) is not int or body['allocation_id']<=0:
             raise ValueError('Choose an allocated order to restart.')
         from prodigi_reset import reset_order
-        result=await run_in_threadpool(reset_order,user,body['allocation_id'])
+        current=await run_in_threadpool(queue.read,body['allocation_id'])
+        if current and current.get('merge_pending'):
+            from prodigi_consolidation import restart_qa
+            result=await run_in_threadpool(restart_qa,user,body['allocation_id'])
+        else:result=await run_in_threadpool(reset_order,user,body['allocation_id'])
         if result and result.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA'):
             def clear_request_failure():
                 with queue.connect() as c,c.cursor() as q:

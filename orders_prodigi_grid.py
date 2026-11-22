@@ -107,7 +107,8 @@ def review(saved,row,jpg):
         supplier_status=((saved or {}).get('submission') or {}).get('supplier_status',''),
         supplier_checked_at=((saved or {}).get('submission') or {}).get('checked_at'),
         supplier_delayed=((saved or {}).get('supplier_sync') or {}).get('delayed',False),
-        items=items,can_restart=stopped,can_reset=stopped and not bool((saved or {}).get('submission')),allocation_id=str(row.get('edition_order_id') or ''),
+        can_merge_restart=stopped and bool((saved or {}).get('merge_pending')),
+        items=items,can_restart=stopped,can_reset=stopped and not bool((saved or {}).get('submission')) and not bool((saved or {}).get('merge_pending')),allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
 

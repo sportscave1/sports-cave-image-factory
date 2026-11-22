@@ -16,6 +16,8 @@ def reset_order(user,allocation_id):
     if not prep.enabled():raise ValueError('Orders preparation is paused.')
     aid=int(allocation_id)
     old=prep.read(aid)
+    if old and old.get('merge_pending'):
+        raise ValueError('This order is being consolidated. Review its merge receipt before any Reset; the original supplier order has been preserved.')
     if not old:return prep.request(user,aid)
     if old.get('submission') or old.get('status') in ('Complete','Certificate pending','Submitted','Submitting','Submission uncertain'):
         raise ValueError('This order already has a submission intent. Reset cannot change submitted or production orders.')

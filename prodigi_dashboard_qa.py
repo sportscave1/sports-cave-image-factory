@@ -52,7 +52,7 @@ def pinned_order(order):
 
 def current_for_order(value,order,resolver):
     snap=browser.snapshot(value,resolver,False)
-    item=prep.validate_order(order,snap,value['order_id'],value['item_id'])
+    item=prep.validate_order(order,snap,value['order_id'],value['item_id'],binding=value.get('consolidation_binding'))
     if order.get('charges'):raise ValueError('A charged order cannot be changed by QA.')
     receipt=value.get('browser') or {}
     if not receipt.get('verified') or not receipt.get('full_image_fit_verified'):
@@ -80,6 +80,9 @@ def enqueue(value,provider,resolver,persist,*,verified_order=None):
         order=verified_order
         checked_resolver=lambda aid:value['snapshot'] if aid==value['allocation_id'] else resolver(aid)
         current_for_order(value,order,checked_resolver)
+    from prodigi_consolidation import hold_qa
+    if hold_qa(value):
+        value.update(status='Merge preparing',message='Preparing all additional numbered items before combined QA.');persist(value);return value
     from prodigi_order_group import members,WaitingForItems
     try:members(value,order,checked_resolver)
     except WaitingForItems as error:
@@ -110,9 +113,9 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
             if batch_supported and len(order.get('items',[]))>1:
                 from prodigi_order_group import members
                 values=members(value,order,resolver)
-                if len(values)>20:raise ValueError('More than 20 numbered items require a separate order review.')
+                if len(values)>100:raise ValueError('More than 100 numbered items require a separate order review.')
                 if any(v['allocation_id']!=value['allocation_id'] and v.get('status')==ACTIVE for v in values):return None
-                if any(v.get('submission') for v in values):raise ValueError('A submitted item cannot enter a new draft QA batch.')
+                if any(v.get('submission') and not v.get('merge_pending') for v in values):raise ValueError('A submitted item cannot enter a new draft QA batch.')
                 if any(intent(v['snapshot'].get('shipping'))!=intent(snap.get('shipping')) for v in values):
                     raise ValueError('Items in one supplier order have different shipping requirements.')
             batch=[v['allocation_id'] for v in values]
@@ -144,7 +147,7 @@ def authorised(q,key,token):
 
 def batch_values(q,value,receipt,token):
     ids=receipt.get('batch') or [value['allocation_id']]
-    if not isinstance(ids,list) or not 1<=len(ids)<=20 or len(set(ids))!=len(ids) or value['allocation_id'] not in ids:
+    if not isinstance(ids,list) or not 1<=len(ids)<=100 or len(set(ids))!=len(ids) or value['allocation_id'] not in ids:
         raise ValueError('QA group membership is invalid.')
     result=[]
     for aid in ids:
@@ -160,6 +163,9 @@ def permit(key,token,evidence):
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
         value,receipt=authorised(q,key,token)
+        if value.get('merge_pending'):
+            from prodigi_consolidation import check_write
+            check_write(value,provider,resolver)
         values=batch_values(q,value,receipt,token)
         if receipt.get('started') or value['status']!=ACTIVE:raise ValueError('QA shipping permit already used.')
         snap,order,_=current(value,provider,resolver)
@@ -222,7 +228,7 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
         edition_number=identity_verified,sent_to_production=(value.get('browser') or {}).get('full_image_fit_verified') is True,
         image_quality=evidence['quality']=='Excellent',customer_address=address_matches(snapshot.get('recipient'),order.get('recipient')),
         shipping=quote_ok,certificate=selected,packing_slip=selected,inserts_available=available)
-    checks['final_check']=all(checks.values()) and not order.get('issues') and (order.get('status')=='draft')
+    checks['final_check']=all(checks.values()) and not order.get('issues') and (order.get('status')=='draft' or bool(value.get('consolidation_binding') and value.get('merge_pending') and order.get('status')=='paused'))
     labels={'product_option':'Product/SKU differs.','frame':'Frame colour differs.','size':'Size mapping differs.',
         'artwork_upload':'Exact saved design is not verified.','edition_number':'Allocated edition number is not verified.',
         'sent_to_production':'Full-image fit/orientation is not verified.','image_quality':'Prodigi image quality must show Excellent.',

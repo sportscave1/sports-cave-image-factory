@@ -29,7 +29,7 @@ def members(value,order,resolver=None):
         receipt=unit.get('browser') or {};assets=item.get('assets') or []
         if not (receipt.get('verified') is True and receipt.get('full_image_fit_verified') is True):
             raise WaitingForItems('Waiting for all numbered artworks in this order to finish uploading.')
-        prep.validate_order(order,snap,unit['order_id'],unit['item_id'])
+        prep.validate_order(order,snap,unit['order_id'],unit['item_id'],binding=unit.get('consolidation_binding'))
         if len(assets)!=1 or prep.digest(assets[0].get('url'))!=unit.get('url_hash'):
             raise ValueError('A sibling item artwork differs from its verified numbered file.')
         result.append(unit)

@@ -150,13 +150,15 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
 
 
 def tick():
+    from prodigi_consolidation import admit_pending
+    if admit_pending() is False:return # another admission/readback owns this decision
     authorisation=setting()
     # Reconciliation and certificate retries continue if new submissions pause.
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(LOCK,))
         if not q.fetchone()['acquired']:return
         q.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
-          AND NOT COALESCE((value->>'hidden')::boolean,false) AND (
+          AND NOT COALESCE((value->>'hidden')::boolean,false) AND NOT value ? 'merge_pending' AND (
            (value->>'status'='Ready for manual payment' AND %s AND NOT value ? 'submission'
             AND COALESCE((value->>'submit_check_after')::timestamptz,'epoch')<now()) OR
            (value->>'status' IN ('Submitting','Submission uncertain','Certificate pending') AND

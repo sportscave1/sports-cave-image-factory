@@ -28,7 +28,7 @@ def business(order, target):
 def checked(value, provider, resolver):
     snap = browser.snapshot(value, resolver, False)
     order = provider.order(value['order_id'])
-    item = prep.validate_order(order, snap, value['order_id'], value['item_id'], allow_unselected=True)
+    item = prep.validate_order(order, snap, value['order_id'], value['item_id'], allow_unselected=True,binding=value.get('consolidation_binding'))
     if order.get('charges') or browser.has_existing_artwork(item):
         raise ValueError('Product selection requires an unpaid draft with no existing artwork.')
     return snap, order, item
@@ -115,7 +115,7 @@ def complete(cur,key,value,stage):
     try:
         provider,resolver,_,_=browser.context(key)
         snap,order,item=checked(value,provider,resolver)
-        prep.validate_order(order,snap,value['order_id'],value['item_id'])
+        prep.validate_order(order,snap,value['order_id'],value['item_id'],binding=value.get('consolidation_binding'))
         if not receipt['started'] or business(order,item['id'])!=receipt['before']:
             raise ValueError('The supplier order changed outside the permitted product selection.')
         receipt.update(verified=True,verified_at=prep.now(),sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''))

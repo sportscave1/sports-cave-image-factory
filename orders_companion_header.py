@@ -9,10 +9,11 @@ def snapshot(connect):
               FROM app_settings WHERE (key LIKE 'prodigi_prepare:%%' OR key LIKE 'orders_auto_jpg:%%' OR key LIKE 'prodigi_prepare_failure:%%') AND (key NOT LIKE 'prodigi_prepare_failure:%%' OR COALESCE((value->>'active')::boolean,false)) AND NOT COALESCE((value->>'hidden')::boolean,false)
               ORDER BY value->>'allocation_id',CASE WHEN key LIKE 'prodigi_prepare_failure:%%' THEN 0 WHEN key LIKE 'prodigi_prepare:%%' THEN 1 ELSE 2 END,updated_at DESC
             ), stats AS (SELECT count(*) FILTER(WHERE value->>'status' IN
-              ('Queued','Waiting','Preparing JPG','Awaiting product selection','Awaiting browser upload','Awaiting dashboard QA','Ready for manual payment','Submitted')) AS waiting FROM units)
+              ('Queued','Waiting','Preparing JPG','Awaiting product selection','Awaiting browser upload','Awaiting dashboard QA','Ready for manual payment','Submitted','Merge preparing')) AS waiting FROM units)
             SELECT value,updated_at,stats.waiting,
               EXISTS(SELECT 1 FROM app_settings WHERE key='orders_submit_after_qa' AND value->>'enabled'='true') AS automatic,
-              EXISTS(SELECT 1 FROM product_upload_desktop WHERE singleton AND seen_at>now()-interval '95 seconds') AS online
+              (EXISTS(SELECT 1 FROM app_settings WHERE key='orders_companion_seen' AND updated_at>now()-interval '95 seconds')
+               OR EXISTS(SELECT 1 FROM product_upload_desktop WHERE singleton AND seen_at>now()-interval '95 seconds')) AS online
             FROM stats LEFT JOIN LATERAL (SELECT * FROM units ORDER BY
               CASE WHEN value->>'status' IN ('Uploading','Selecting product','Browser uploading','Generating','Checking QA','Checking dashboard QA','Submitting','Certificate pending') THEN 0
                    WHEN value->>'status' IN ('Needs QA','Needs review','Repair','Submission uncertain') THEN 1

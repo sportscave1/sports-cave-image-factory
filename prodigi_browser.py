@@ -42,6 +42,7 @@ def read(cur, key):
 
 
 def save(cur, key, value):
+    prep.measure_stage(value)
     value['updated_at'] = prep.now()
     cur.execute('''UPDATE app_settings SET value=%s::jsonb,updated_at=now()
         WHERE key=%s AND NOT COALESCE((value->>'hidden')::boolean,false) RETURNING key''',
@@ -74,7 +75,7 @@ def business(order, target, *, after_save=False):
 def checked(value, provider, resolver, sandbox):
     snap = snapshot(value, resolver, sandbox)
     order = provider.order(value['order_id'])
-    item = prep.validate_order(order, snap, value['order_id'], value['item_id'])
+    item = prep.validate_order(order, snap, value['order_id'], value['item_id'],binding=value.get('consolidation_binding'))
     if order.get('charges'):
         raise ValueError('This order has charges; browser preparation stopped.')
     return snap, order, item
@@ -167,6 +168,9 @@ def permit(key,token,sha256):
         if age.total_seconds()>900:
             raise ValueError('The browser handoff expired before Save.')
         snap,order,item=checked(value,provider,resolver,sandbox)
+        if value.get('merge_pending'):
+            from prodigi_consolidation import check_write
+            check_write(value,provider,resolver)
         if sha256!=snap['output']['sha256']:
             raise ValueError('The companion did not verify this exact numbered JPG.')
         from prodigi_reset import replacement_allowed

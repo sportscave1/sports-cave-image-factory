@@ -1,6 +1,7 @@
-"""Restricted Prodigi v5 adapter: read existing orders and edit draft artwork only.
+"""Restricted Prodigi v5 adapter for existing orders and audited cancellations.
 
-No create or resume operation. Submission has a separate owner-activated gate.
+No create or resume operation. Submission has a separate owner-activated gate;
+duplicate cancellation requires the server consolidation workflow and readback.
 """
 import os
 import re
@@ -98,6 +99,20 @@ class Client:
 
     def find(self, reference):
         return self.request('GET', '/orders?' + urlencode({'merchantReference': reference, 'limit': 100}), listing=True)
+
+    def cancel_unpaid_duplicate(self,order_id):
+        """Only the server's committed consolidation intent may call this once."""
+        from prodigi_consolidation import unpaid,supported
+        if self.mode!='live' or not supported():raise ProdigiError('Consolidation cancellation is not active.')
+        order=self.order(order_id)
+        if str(order.get('id'))!=str(order_id):raise ProdigiError('Supplier cancellation readback returned a different order.')
+        unpaid(order,source=True)
+        try:
+            response=self.transport.request('POST','https://api.prodigi.com/v5/orders/'+identifier(order_id)+':cancel',
+                headers={'X-API-Key':self.key,'Content-Type':'application/json'},json={},timeout=(5,20),allow_redirects=False)
+        except requests.RequestException:
+            raise ProdigiError('Cancellation acknowledgement uncertain. Read back without repeating cancellation.') from None
+        if response.status_code not in (200,202):raise ProdigiError('Supplier cancellation was not acknowledged; read back the original order.')
 
     def assets(self):
         return self.request('GET','/assets?limit=100',listing=True)

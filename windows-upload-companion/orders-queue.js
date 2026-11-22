@@ -1,7 +1,7 @@
 'use strict';
 
-// Independent Orders worker; no Prodigi key, payment, submit or browser clicks.
-// All item identity checks and the durable write fence live in Sports Cave OS.
+// Independent Orders scheduler. Native actions follow exact server handoffs;
+// Prodigi credentials, payments and submission fences remain in Sports Cave OS.
 const ordersAlarm = 'sports-cave-orders-queue';
 let ordersTickRunning = false;
 async function ordersQueueTick() {
@@ -20,7 +20,7 @@ async function ordersQueueTick() {
     }
     const response = await fetch(osOrigin + '/api/orders-companion/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json',
-        'X-Sports-Cave-Orders-Browser':'1','X-Sports-Cave-Orders-QA':'1','X-Sports-Cave-Orders-Tax':'1','X-Sports-Cave-Orders-Products':'1','X-Sports-Cave-Orders-QA-Batch':'1','X-Sports-Cave-Orders-Reset':'1'},
+        'X-Sports-Cave-Orders-Browser':'1','X-Sports-Cave-Orders-QA':'1','X-Sports-Cave-Orders-Tax':'1','X-Sports-Cave-Orders-Products':'1','X-Sports-Cave-Orders-QA-Batch':'1','X-Sports-Cave-Orders-Reset':'1','X-Sports-Cave-Orders-Merge':'1'},
       body:'{}', credentials:'omit', signal:AbortSignal.timeout(150000),
     });
     if (!response.ok) return;
