@@ -23,6 +23,19 @@ def after(seconds):
     return (datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat()
 
 
+def budget(q):
+    # Tracking must yield promptly during a database incident. These apply only
+    # to this transaction, never to artwork/certificate uploads or other pages.
+    q.execute("SET LOCAL lock_timeout='1s'")
+    q.execute("SET LOCAL statement_timeout='3s'")
+
+
+def save(value):
+    with prep.connect() as c,c.cursor() as q:
+        budget(q)
+        prep.save(q,value)
+
+
 def refresh(value, order, persist):
     """Observe only the pinned supplier identity; never repeat submission/PDF."""
     before=(value.get('dashboard_qa') or {}).get('before') or {}
@@ -52,6 +65,7 @@ def refresh(value, order, persist):
 
 def tick(limit=20):
     with prep.connect() as c,c.cursor() as q:
+        budget(q)
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(LOCK,))
         if not q.fetchone()['acquired']:return
         q.execute("""SELECT key,value FROM app_settings
@@ -87,7 +101,7 @@ def tick(limit=20):
                     value.setdefault('supplier_sync',{}).update(next_at=after(60),delayed=True)
                 finally:
                     value['submission']['lease_until']=prep.now()
-                    submission._save(value)
+                    save(value)
     submission.kick()
 
 

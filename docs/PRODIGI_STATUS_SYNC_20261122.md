@@ -13,6 +13,9 @@ units. Submitted/held orders are due every 15 seconds, production/shipping every
 60 seconds. Failed requests retain the last good state and back off 60 seconds.
 Terminal supplier states stop passive polling. These are polling targets, not
 delivery guarantees; supplier latency and API availability still apply.
+Passive tracking transactions have a one-second lock timeout and three-second
+statement timeout so database contention causes a bounded retry instead of a
+long-running tracking transaction. These limits do not change other workers.
 
 The order ID and merchant reference must match the pinned QA receipt. Actual
 production still runs the existing exact product/artwork/quantity/manifest
