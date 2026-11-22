@@ -78,9 +78,15 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
     try {
       pin(plan);
       if(Array.from(document.querySelectorAll('[role="dialog"]')).some(visible))throw Error('Close the existing order editor before QA.');
-      const row=await wait(()=>prodigiPinnedRow(document.querySelectorAll('table tbody tr'),plan));
-      const quality=text(row.querySelector('[title="Image quality"]'));
-      if(!quality)throw Error('Supplier image quality is not visible.');
+      const items=[];
+      for(const pinned of plan.items||[plan]){
+        stage='product-row-'+(pinned.item_id||'single');
+        const row=await wait(()=>prodigiPinnedRow(document.querySelectorAll('table tbody tr'),{...plan,...pinned,exact_item:plan.items?true:plan.exact_item}));
+        const quality=text(row.querySelector('[title="Image quality"]'));
+        if(!quality)throw Error('Supplier image quality is not visible.');
+        items.push({item_id:pinned.item_id,sku:pinned.sku,colour:pinned.colour,quality});
+      }
+      const quality=items[0].quality;
       stage='inserts';
       const inserts=await inspectInserts(plan);
       stage='shipping';
@@ -98,7 +104,7 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
       if(shippingNow.length!==1||shippingNow[0].value.toLowerCase()!==target)throw Error('Shipping selection was not saved.');
       stage='tax-declaration';
       const tax_collected=await declareTax(plan,permit);
-      return {evidence:{...(plan.exact_item?{item_id:plan.item_id}:{}),tax_collected,quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
+      return {evidence:{...(plan.exact_item?{item_id:plan.item_id}:{}),...(plan.items?{items}:{}),tax_collected,quality,sku:plan.sku,colour:plan.colour,shipping:{options:prodigiShippingQuotes(shippingNow[0]),selected:target},inserts}};
     }catch(error){return {error:('QA '+stage+': '+String(error.message||'Dashboard QA stopped')).slice(0,240)};}
   }
   let running=false;

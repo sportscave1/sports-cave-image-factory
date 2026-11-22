@@ -500,6 +500,9 @@ def reconcile(user, allocation_id):
         from prodigi_product_browser import recheck
         return recheck(user, PREFIX + str(int(allocation_id)))
     receipt = (current or {}).get('browser') or {}
+    if receipt.get('started') is False and (current or {}).get('status')=='Needs review':
+        from prodigi_browser import resume_unstarted
+        return resume_unstarted(user,PREFIX+str(int(allocation_id)))
     document_receipt=(current or {}).get('document_browser') or {}
     from prodigi_full_qa import live_enabled
     if current and receipt.get('verified') and live_enabled():

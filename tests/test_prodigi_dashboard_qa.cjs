@@ -14,20 +14,22 @@ test('unpriced, ambiguous and missing Express quotes stop instead of guessing',(
  assert.throws(()=>prodigiCheapestShipping([{service:'budget',cents:100,currency:'$'},{service:'budget',cents:200,currency:'$'}],'standard','budget'));
 });
 
-for(const rowDelay of [0,25000])test('QA waits for late row '+rowDelay+' and inserts without changing a set',async()=>{
+for(const rowDelay of [0,25000])for(const batch of [false,true])test('QA waits for late row '+rowDelay+' batch '+batch+' and reads inserts once',async()=>{
  const vm=require('node:vm'),fs=require('node:fs');let listener,opened=false,lookups=0,edits=0,cancels=0,clock=0;
  const visible=text=>({textContent:text,isConnected:true,getClientRects:()=>[{}],getAttribute:()=>null});
  const edit={...visible('View & edit'),click(){opened=true;edits++}},cancel={...visible('Cancel'),click(){opened=false;cancels++}};
  const quotes={...visible(''),value:'standard',options:[{textContent:'Standard: $10.07',value:'standard',disabled:false},{textContent:'Express: $23.04',value:'express',disabled:false}]};
  const modal={...visible(''),querySelectorAll(selector){if(selector==='h1,h2')return [visible('Inserts on this order')];if(selector==='button')return [cancel];if(selector.startsWith('[data-test'))return [visible('Current slip'),visible('Current sticker')];throw Error('Unexpected modal read '+selector)}};
  const main={...visible('REF-TEST'),querySelectorAll(selector){if(selector==='button')return ++lookups===1?[]:[edit];throw Error('Unexpected main read '+selector)}};
- const row={querySelector:()=>visible('Excellent')};
+ const row={querySelector:()=>visible('Excellent')},second={querySelector:()=>visible('Poor')},seen=[];
  const document={querySelector:()=>main,querySelectorAll(selector){if(selector==='main h1')return [visible('99')];if(selector==='table tbody tr')return clock>=rowDelay?[row]:[];if(selector==='[role="dialog"]')return opened?[modal]:[];if(selector==='main select')return [quotes];throw Error('Unexpected document read '+selector)}};
- const context={document,URL,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},prodigiExactRow:()=>true,prodigiPinnedRow:rows=>rows[0],Date:{now:()=>clock},setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:async()=>({permitted:true})}}};
+ const context={document,URL,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},prodigiExactRow:()=>true,prodigiPinnedRow:(rows,plan)=>{if(!rows.length)return null;seen.push(plan.item_id);return plan.item_id==='89'?second:rows[0]},Date:{now:()=>clock},setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:async()=>({permitted:true})}}};
  vm.runInNewContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-dashboard-qa.js'),'utf8'),context);
- const result=await new Promise(resolve=>listener({type:'prodigi:qa',plan:{order_url:context.location.href,order_id:'99',reference:'REF-TEST',sku:'fixture',colour:'black',shipping_intent:'standard'}},{id:'paired'},resolve));
+ const items=[{item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Black'},{item_id:'89',sku:'GLOBAL-CFP-A4',colour:'Natural'}];
+ const result=await new Promise(resolve=>listener({type:'prodigi:qa',plan:{order_url:context.location.href,order_id:'99',reference:'REF-TEST',sku:'fixture',colour:'black',shipping_intent:'standard',...(batch?{items,exact_item:true,item_id:'88'}:{})}},{id:'paired'},resolve));
  assert.equal(result.error,undefined);assert.deepEqual(Array.from(result.evidence.inserts.saved,r=>r.name),['Current slip','Current sticker']);
  assert.equal(edits,1);assert.equal(cancels,1);assert.equal(opened,false);assert(lookups>=2);
+ if(batch){assert.deepEqual(seen,['88','89']);assert.deepEqual(Array.from(result.evidence.items,r=>r.quality),['Excellent','Poor']);assert.equal(result.evidence.items[1].sku,'GLOBAL-CFP-A4');}
 });
 
 

@@ -103,3 +103,51 @@ def test_group_publish_never_claims_a_sibling_certificate_is_uploaded(pair):
     assert prep.read(2)['status']=='Certificate pending'
     assert not prep.read(2).get('certificate_url')
     assert 'Awaiting this edition' in prep.read(2)['message']
+
+
+def batch_plan(pair,monkeypatch):
+    import prodigi_browser as browser
+    a,b,p,auth=pair
+    monkeypatch.setattr(browser,'context',lambda _:(p,prep.resolve,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    with prep.connect() as c,c.cursor() as q:
+        for unit in (a,b):
+            unit.pop('dashboard_qa',None);unit['status']=qa.WAITING;prep.save(q,unit)
+    plan=qa.claim(tax_supported=True,exact_item_supported=True,batch_supported=True)
+    return plan,p,auth
+
+
+def test_one_batch_checks_every_item_then_submits_order_only_once(pair,monkeypatch):
+    from test_prodigi_dashboard_qa import options,inserts
+    plan,p,auth=batch_plan(pair,monkeypatch)
+    assert [r['item_id'] for r in plan['items']]==['88','89']
+    assert prep.read(1)['dashboard_qa']['batch']==prep.read(2)['dashboard_qa']['batch']==[1,2]
+    assert prep.read(1)['status']==prep.read(2)['status']==qa.ACTIVE
+    qa.permit(plan['key'],plan['token'],dict(options=options(),current='standard',target='budget'))
+    assert prep.read(2)['dashboard_qa']['started'] is True
+    p.data['shippingMethod']='Budget'
+    evidence=dict(items=[dict(**row,quality='Excellent') for row in plan['items']],tax_collected=None,
+        shipping=dict(options=options(),selected='budget'),inserts=inserts())
+    assert qa.finish(plan['key'],plan['token'],evidence)['status']=='Ready for manual payment'
+    assert prep.read(1)['dashboard_qa']['checked_at']==prep.read(2)['dashboard_qa']['checked_at']
+    assert all(prep.read(1)['checks'].values()) and all(prep.read(2)['checks'].values())
+    submit.tick();assert p.submits==['99']
+    assert prep.read(1)['status']==prep.read(2)['status']=='Submitted'
+
+
+@pytest.mark.parametrize('failure',['missing','duplicate','quality','wrong_id','changed_order'])
+def test_batch_cannot_hide_a_missing_wrong_or_failed_item(pair,monkeypatch,failure):
+    from test_prodigi_dashboard_qa import options,inserts
+    plan,p,auth=batch_plan(pair,monkeypatch)
+    qa.permit(plan['key'],plan['token'],dict(options=options(),current='standard',target='budget'))
+    p.data['shippingMethod']='Budget'
+    evidence=dict(items=[dict(**row,quality='Excellent') for row in plan['items']],tax_collected=None,
+        shipping=dict(options=options(),selected='budget'),inserts=inserts())
+    if failure=='missing':evidence['items'].pop()
+    if failure=='duplicate':evidence['items'][1]['item_id']='88'
+    if failure=='wrong_id':evidence['items'][1]['item_id']='unrelated'
+    if failure=='quality':evidence['items'][1]['quality']='Poor'
+    if failure=='changed_order':p.data['recipient']['address']['line1']='Other destination'
+    qa.finish(plan['key'],plan['token'],evidence)
+    submit.tick();assert not p.submits
+    assert not prep.read(1).get('submission') and not prep.read(2).get('submission')

@@ -50,8 +50,10 @@ def pinned_order(order):
     return result
 
 
-def current(value,provider,resolver):
-    snap,order,item=browser.checked(value,provider,resolver,False)
+def current_for_order(value,order,resolver):
+    snap=browser.snapshot(value,resolver,False)
+    item=prep.validate_order(order,snap,value['order_id'],value['item_id'])
+    if order.get('charges'):raise ValueError('A charged order cannot be changed by QA.')
     receipt=value.get('browser') or {}
     if not receipt.get('verified') or not receipt.get('full_image_fit_verified'):
         raise ValueError('The saved numbered artwork and full-image fit must be verified first.')
@@ -61,6 +63,10 @@ def current(value,provider,resolver):
     if len(assets)!=1 or prep.digest(assets[0].get('url'))!=value.get('url_hash'):
         raise ValueError('The saved artwork changed; review this exact draft.')
     return snap,order,item
+
+
+def current(value,provider,resolver):
+    return current_for_order(value,provider.order(value['order_id']),resolver)
 
 
 def enqueue(value,provider,resolver,persist):
@@ -75,7 +81,7 @@ def enqueue(value,provider,resolver,persist):
     return value
 
 
-def claim(*,tax_supported=False,exact_item_supported=False):
+def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False):
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(browser.LOCK,))
         if not q.fetchone()['acquired']:return None
@@ -91,13 +97,29 @@ def claim(*,tax_supported=False,exact_item_supported=False):
             tax_required=clean((snap.get('recipient') or {}).get('address',{}).get('countryCode'))=='us'
             if tax_required and not tax_supported:return None
             token=secrets.token_urlsafe(32)
-            value['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=prep.now(),before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required)
-            value.update(status=ACTIVE,message='Companion is checking this saved order in one QA pass; no certificate upload.')
-            browser.save(q,key,value)
+            values=[value]
+            if batch_supported and len(order.get('items',[]))>1:
+                from prodigi_order_group import members
+                values=members(value,order,resolver)
+                if len(values)>20:raise ValueError('More than 20 numbered items require a separate order review.')
+                if any(v['allocation_id']!=value['allocation_id'] and v.get('status')==ACTIVE for v in values):return None
+                if any(v.get('submission') for v in values):raise ValueError('A submitted item cannot enter a new draft QA batch.')
+                if any(intent(v['snapshot'].get('shipping'))!=intent(snap.get('shipping')) for v in values):
+                    raise ValueError('Items in one supplier order have different shipping requirements.')
+            batch=[v['allocation_id'] for v in values]
+            stamp=prep.now()
+            for unit in values:
+                current_for_order(unit,order,resolver)
+                previous=unit.get('dashboard_qa')
+                if previous:unit.setdefault('dashboard_qa_history',[]).append({k:previous.get(k) for k in ('policy','claimed_at','checked_at','verified')})
+                unit['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=stamp,before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required,batch=batch)
+                unit.update(status=ACTIVE,message='Checking all numbered items, shipping, inserts and tax in one QA pass.')
+                browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
             return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],item_id=value['item_id'],exact_item=exact_item_supported,
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
                 reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),
-                shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required)
+                shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required,
+                **({'items':[dict(item_id=v['item_id'],sku=v['snapshot']['mapping']['prodigi_code'],colour='' if v['snapshot']['mapping']['frame']=='Unframed' else v['snapshot']['mapping']['prodigi_frame_colour']) for v in values]} if len(values)>1 else {}))
         except ValueError as error:
             value.update(status='Needs review',message=str(error));prep.record_failure(value,'dashboard_qa',str(error));browser.save(q,key,value)
 
@@ -111,21 +133,39 @@ def authorised(q,key,token):
     return value,receipt
 
 
+def batch_values(q,value,receipt,token):
+    ids=receipt.get('batch') or [value['allocation_id']]
+    if not isinstance(ids,list) or not 1<=len(ids)<=20 or len(set(ids))!=len(ids) or value['allocation_id'] not in ids:
+        raise ValueError('QA group membership is invalid.')
+    result=[]
+    for aid in ids:
+        unit,other=authorised(q,prep.PREFIX+str(aid),token)
+        if unit['order_id']!=value['order_id'] or other.get('batch',ids)!=ids:
+            raise ValueError('The grouped QA handoff changed.')
+        result.append(unit)
+    return result
+
+
 def permit(key,token,evidence):
     provider,resolver,_,_=browser.context(key)
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
         value,receipt=authorised(q,key,token)
+        values=batch_values(q,value,receipt,token)
         if receipt.get('started') or value['status']!=ACTIVE:raise ValueError('QA shipping permit already used.')
         snap,order,_=current(value,provider,resolver)
+        for unit in values:current_for_order(unit,order,resolver)
         if pinned_order(receipt['before'])!=pinned_order(order) or clean(receipt['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):
             raise ValueError('The supplier draft changed before the shipping check.')
         if not isinstance(evidence,dict) or set(evidence)!={'options','current','target'}:raise ValueError('Shipping evidence is incomplete.')
         target=shipping_choice(evidence['options'],intent(snap.get('shipping')),evidence['current'])
         if target!=evidence['target'] or clean(order.get('shippingMethod'))!=evidence['current']:
             raise ValueError('The selected shipping quote differs from this saved order.')
-        receipt.update(started=True,shipping=deepcopy(evidence),permitted_at=prep.now())
-        browser.save(q,key,value)
+        for unit in values:
+            other=unit['dashboard_qa']
+            if other.get('started') or unit['status']!=ACTIVE:raise ValueError('A grouped QA permit was already used.')
+            other.update(started=True,shipping=deepcopy(evidence),permitted_at=prep.now())
+            browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
     return {'permitted':True,'tax_declaration':receipt.get('tax_policy')==TAX_POLICY}
 
 
@@ -173,7 +213,7 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
         edition_number=identity_verified,sent_to_production=(value.get('browser') or {}).get('full_image_fit_verified') is True,
         image_quality=evidence['quality']=='Excellent',customer_address=address_matches(snapshot.get('recipient'),order.get('recipient')),
         shipping=quote_ok,certificate=selected,packing_slip=selected,inserts_available=available)
-    checks['final_check']=all(checks.values()) and not order.get('issues') and order.get('status')=='draft'
+    checks['final_check']=all(checks.values()) and not order.get('issues') and (order.get('status')=='draft')
     labels={'product_option':'Product/SKU differs.','frame':'Frame colour differs.','size':'Size mapping differs.',
         'artwork_upload':'Exact saved design is not verified.','edition_number':'Allocated edition number is not verified.',
         'sent_to_production':'Full-image fit/orientation is not verified.','image_quality':'Prodigi image quality must show Excellent.',
@@ -195,21 +235,41 @@ def finish(key,token,evidence,error=''):
         q.execute('SELECT pg_advisory_xact_lock(%s)',(browser.LOCK,))
         value,receipt=authorised(q,key,token)
         if receipt.get('verified'):return {'status':value['status']}
+        values=batch_values(q,value,receipt,token)
         try:
             if error:raise ValueError(error[:240])
             if not receipt.get('started'):raise ValueError('QA stopped before the shipping permit; recheck this same order.')
-            snap,order,item=current(value,provider,resolver)
-            if pinned_order(receipt['before'])!=pinned_order(order):raise ValueError('Product, artwork, address or inserts changed during QA.')
-            tax_seen=(evidence or {}).get('tax_collected')
-            if receipt.get('tax_required') and tax_seen is not True:raise ValueError('The sales-tax-collected declaration was not confirmed; recheck this draft.')
-            if tax_seen is True and order.get('usSalesTaxAlreadyCollected') is False:raise ValueError('Prodigi has not saved the sales-tax-collected declaration yet; recheck this draft.')
-            result=evaluate(value,snap,order,item,evidence,identity_verified=identity_proof(snap),asset_resolver=getattr(provider,'asset',None))
-            value.update(qa=result,checks=result['checks'],status='Ready for manual payment' if all(result['checks'].values()) else 'Needs QA',
-                message='All QA passed. Submission follows the owner’s Orders companion setting.' if all(result['checks'].values()) else ' '.join(result['blockers']))
-            pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
-            receipt.update(tax_collected=tax_seen,verified=True,evidence=evidence,checked_at=prep.now(),validated_order_hash=prep.digest(pinned))
+            order=provider.order(value['order_id'])
+            if not isinstance(evidence,dict):raise ValueError('Dashboard QA evidence is incomplete.')
+            rows=evidence.get('items')
+            if len(values)>1:
+                if not isinstance(rows,list) or len(rows)!=len(values) or any(not isinstance(r,dict) or set(r)!={'item_id','sku','colour','quality'} for r in rows):
+                    raise ValueError('Every grouped item needs its own quality and product evidence.')
+                if len({r['item_id'] for r in rows})!=len(rows) or {r['item_id'] for r in rows}!={v['item_id'] for v in values}:
+                    raise ValueError('Grouped QA item IDs differ from the pinned order.')
+            elif rows is not None:raise ValueError('Unexpected grouped QA evidence.')
+            stamp=prep.now();updates=[]
+            for unit in values:
+                other=unit['dashboard_qa']
+                if not other.get('started'):raise ValueError('A grouped QA shipping permit is missing.')
+                snap,_,item=current_for_order(unit,order,resolver)
+                if pinned_order(other['before'])!=pinned_order(order):raise ValueError('Product, artwork, address or inserts changed during QA.')
+                tax_seen=evidence.get('tax_collected')
+                if other.get('tax_required') and tax_seen is not True:raise ValueError('The sales-tax-collected declaration was not confirmed; recheck this draft.')
+                if tax_seen is True and order.get('usSalesTaxAlreadyCollected') is False:raise ValueError('Prodigi has not saved the sales-tax-collected declaration yet; recheck this draft.')
+                proof={k:v for k,v in evidence.items() if k!='items'}
+                if rows is not None:proof.update(next(r for r in rows if r['item_id']==unit['item_id']))
+                result=evaluate(unit,snap,order,item,proof,identity_verified=identity_proof(snap),asset_resolver=getattr(provider,'asset',None))
+                unit.update(qa=result,checks=result['checks'],status='Ready for manual payment' if all(result['checks'].values()) else 'Needs QA',
+                    message='All QA passed. Submission follows the configured Orders companion setting.' if all(result['checks'].values()) else ' '.join(result['blockers']))
+                pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
+                other.update(tax_collected=tax_seen,verified=True,evidence=proof,checked_at=stamp,validated_order_hash=prep.digest(pinned))
+                updates.append(unit)
+            values=updates
         except Exception as exc:
-            value.update(status='Needs review',message=str(exc) if isinstance(exc,ValueError) else 'Dashboard QA could not be verified; recheck this exact draft.')
-            prep.record_failure(value,'dashboard_qa',value['message'],type(exc).__name__)
-        browser.save(q,key,value)
-    return {'status':value['status']}
+            for unit in values:
+                unit['dashboard_qa']['verified']=False
+                unit.update(status='Needs review',message=str(exc) if isinstance(exc,ValueError) else 'Dashboard QA could not be verified; recheck this exact order.')
+                prep.record_failure(unit,'dashboard_qa',unit['message'],type(exc).__name__)
+        for unit in values:browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
+    return {'status':next(v for v in values if v['allocation_id']==value['allocation_id'])['status']}

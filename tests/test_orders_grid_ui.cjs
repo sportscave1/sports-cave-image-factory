@@ -22,3 +22,13 @@ test('countdown stays Submitted and completion follows the worker rather than st
  assert.equal(core.category({cells:{prodigi:'Needs certificate'},review:{status:'Complete'},state:{tone:'success'}}),'complete');
  assert.equal(core.category({cells:{prodigi:'Needs certificate'},review:{status:'Queued',can_restart:false},state:{tone:'pending'}}),'progress');
 });
+
+test('items from the same supplier order stay together without grouping a customer name alone',()=>{
+ const a={id:'a',cells:{order:'#1',customer:'Same name'},review:{order_url:'https://dashboard.prodigi.com/orders/1/detail'}};
+ const b={id:'b',cells:{order:'#2',customer:'Same name'},review:{order_url:'https://dashboard.prodigi.com/orders/2/detail'}};
+ const c={id:'c',cells:{order:'#1',customer:'Same name'},review:{order_url:a.review.order_url}};
+ assert.deepEqual(core.orderGroups([a,b,c]).map(r=>r.id),['a','c','b']);
+ assert.deepEqual(core.siblings([a,b,c],a).map(r=>r.id),['a','c']);
+ assert.deepEqual(core.siblings([a,b,c],b).map(r=>r.id),['b']);
+ assert.deepEqual(core.orderGroups([a,b,c]),[a,c,b]);
+});

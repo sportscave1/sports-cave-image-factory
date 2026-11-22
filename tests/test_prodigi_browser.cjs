@@ -124,6 +124,19 @@ test('catalogue selection uses exact SKU and canonical colour, excluding backloa
   assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[target,target]},'GLOBAL-CFP-A2','Natural'));
   assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[backloader]},'GLOBAL-CFP-A2','Natural'));
 });
+
+test('batch QA plans require unique exact canonical items including the primary item',()=>{
+ const {context}=setup();const base={kind:'qa',environment:'live',order_id:'99',item_id:'88',exact_item:true,
+  order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'prodigi_prepare:1',token:'a'.repeat(43),reference:'fixture',
+  sku:'GLOBAL-CFP-A2',colour:'Natural',shipping_intent:'standard',branding_set:'SC EDITION BRANDING',
+  items:[{item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Natural'},{item_id:'89',sku:'GLOBAL-FAP-A4',colour:''}]};
+ context.plan=base;assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ for(const change of [{items:[]},{exact_item:false},{items:[base.items[0],base.items[0]]},
+  {item_id:'other'},{items:[base.items[0],{...base.items[1],sku:'GLOBAL-CFP-A2-BACKLOADER'}]},
+  {items:[base.items[0],{...base.items[1],colour:'Black'}]}]){
+  context.plan={...base,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
+});
 test('unframed catalogue selection has no colour option',()=>{
  const target={getAttribute:()=> 'select-product-with-data-button-GLOBAL-FAP-A4',closest:()=>({querySelectorAll:()=>[]})};
  assert.equal(prodigiProductCard({querySelectorAll:()=>[target]},'GLOBAL-FAP-A4','').select,target);

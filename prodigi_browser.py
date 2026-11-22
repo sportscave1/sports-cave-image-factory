@@ -272,6 +272,28 @@ def recheck(user,key):
     return _finish(key,saved,'readback')
 
 
+def resume_unstarted(user,key):
+    """Retry only a proved untouched item; never repeat an uncertain Save."""
+    prep.require_user(user)
+    provider,resolver,_,sandbox=context(key)
+    with prep.connect() as conn,conn.cursor() as cur:
+        cur.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
+        value=read(cur,key);receipt=value.get('browser') or {}
+        if receipt.get('started') is not False or value.get('submission'):
+            raise ValueError('Only an upload stopped before its Save permit can restart.')
+        _,order,item=checked(value,provider,resolver,sandbox)
+        if (has_existing_artwork(item) or (item.get('assets') or [])!=receipt.get('empty_slots',[])
+                or business(order,item['id'])!=receipt['before']):
+            raise ValueError('The supplier item changed. Preserve it and recheck instead of uploading again.')
+        value.setdefault('browser_history',[]).append({k:receipt.get(k) for k in
+            ('claimed_at','filename','started','last_stage')})
+        value.pop('browser',None);value.pop('last_failure',None)
+        value.update(status=WAITING,message='Verified no artwork Save occurred. Retrying this same product and numbered JPG.')
+        value.setdefault('history',[]).append(dict(at=prep.now(),event='untouched_browser_upload_restarted'))
+        save(cur,key,value)
+        return value
+
+
 def _finish(key,read_receipt,stage):
     provider,resolver,_,sandbox=context(key)
     with prep.connect() as conn,conn.cursor() as cur:

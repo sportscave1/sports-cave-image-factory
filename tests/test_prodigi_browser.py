@@ -189,3 +189,22 @@ def test_updated_companion_can_pin_one_of_two_identical_product_rows(handoff):
     plan=browser.claim(exact_item_supported=True)
     assert plan['item_id']=='88' and plan['exact_item'] is True
     assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+
+def test_restart_before_save_retires_old_token_only_after_untouched_readback(handoff,monkeypatch):
+    _,provider,_=handoff;old=browser.claim()
+    browser.finish(KEY,old['token'],'readback')
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    assert browser.resume_unstarted({'id':'owner'},KEY)['status']==browser.WAITING
+    new=browser.claim();assert new['token']!=old['token']
+    assert browser.finish(KEY,old['token'])['status']=='Handoff unavailable'
+    assert not provider.writes
+
+@pytest.mark.parametrize('change',[
+    lambda p:p.data['items'][0].update(assets=[dict(url='https://fixture/art',printArea='default')]),
+    lambda p:p.data.update(recipient={'name':'Changed'}),
+])
+def test_restart_never_overwrites_artwork_or_business_changes(handoff,monkeypatch,change):
+    _,provider,_=handoff;old=browser.claim();browser.finish(KEY,old['token'])
+    monkeypatch.setattr(prep,'require_user',lambda _:None);change(provider)
+    with pytest.raises(ValueError,match='changed'):browser.resume_unstarted({'id':'owner'},KEY)
+    assert not provider.writes

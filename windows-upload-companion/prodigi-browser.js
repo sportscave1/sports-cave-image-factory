@@ -14,6 +14,11 @@ function prodigiOrderAddress(address,expected) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.kind==='qa' && plan.items!==undefined && (!Array.isArray(plan.items)||plan.items.length<2||plan.items.length>20||
+    plan.exact_item!==true||new Set(plan.items.map(r=>r?.item_id)).size!==plan.items.length||
+    !plan.items.some(r=>r?.item_id===plan.item_id&&r.sku===plan.sku&&r.colour===plan.colour)||
+    plan.items.some(r=>!r||!/^[A-Za-z0-9-]{1,100}$/.test(r.item_id)||!/^GLOBAL-(CFP|FAP)-A[1-4]$/.test(r.sku)||
+      !(r.sku.startsWith('GLOBAL-FAP-')?r.colour==='':['Black','Natural','White'].includes(r.colour)))))return false;
   if(plan?.kind==='product')return Boolean(host==='dashboard.prodigi.com' && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) && /^[A-Za-z0-9-]{1,100}$/.test(plan.item_id) && plan.order_url===`https://${host}/orders/${plan.order_id}/detail` && /^product:prodigi_prepare:\d+$/.test(plan.key) && /^[A-Za-z0-9_-]{43}$/.test(plan.token) && /^[a-f0-9]{64}$/.test(plan.sha256) && /^GLOBAL-(CFP|FAP)-A[1-4]$/.test(plan.sku) && (plan.sku.startsWith('GLOBAL-FAP-')?plan.colour==='':['Black','Natural','White'].includes(plan.colour)) && typeof plan.reference==='string');
   if(plan?.kind==='qa')return Boolean(host==='dashboard.prodigi.com' && plan.environment==='live' && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) && plan.order_url===`https://${host}/orders/${plan.order_id}/detail` && /^prodigi_prepare:\d+$/.test(plan.key) && /^[A-Za-z0-9_-]{43}$/.test(plan.token) && typeof plan.reference==='string' && typeof plan.sku==='string' && typeof plan.colour==='string' && ['standard','express'].includes(plan.shipping_intent) && plan.branding_set==='SC EDITION BRANDING');
   return Boolean(host && (plan.kind===undefined||plan.kind==='certificate') && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) &&
