@@ -174,6 +174,8 @@ if __name__ == "__main__":
         warm_renderer()
         from auto_editions_runtime import start_worker
         start_worker()
+        from prodigi_status_sync import start_worker as start_order_tracking
+        start_order_tracking()
         from database_read_pool import warm_application_reads
         warm_application_reads()
     uvicorn.run(

@@ -104,6 +104,9 @@ def review(saved,row,jpg):
         submission_enabled=(saved or {}).get('_submit_enabled'),
         insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
         shipping_quote=shipping_summary(saved),
+        supplier_status=((saved or {}).get('submission') or {}).get('supplier_status',''),
+        supplier_checked_at=((saved or {}).get('submission') or {}).get('checked_at'),
+        supplier_delayed=((saved or {}).get('supplier_sync') or {}).get('delayed',False),
         items=items,can_restart=stopped,can_reset=stopped and not bool((saved or {}).get('submission')),allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
@@ -135,7 +138,7 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
         if payload[-1]['jpg_label']=='Open':payload[-1]['jpg_label']='Open JPG'
         shipping=payload[-1]['cells']['shipping']
         if shipping.strip().lower() in ('standard','express'):payload[-1]['cells']['shipping']=shipping.strip()+' shipping'
-    active=allowed and any(str(r.get('prodigi','')).lower()!='complete' for r in rows)
+    active=allowed and (bool(statuses) or any(str(r.get('prodigi','')).lower()!='complete' for r in rows))
     event=component(rows=payload,selected=[row_identity(r) for r in selected],active=active,
                     key='orders-prodigi-grid',default=None)
     if not isinstance(event,dict) or not event.get('event') or event['event']==st.session_state.get('orders-grid-last-event'):return

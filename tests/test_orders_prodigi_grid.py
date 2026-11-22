@@ -3,6 +3,17 @@ import pytest
 import orders_prodigi_grid as grid
 
 
+def test_certificate_complete_and_live_production_are_independent(screen):
+    _,_,view,_=screen
+    saved={'status':'Complete','certificate_url':'https://cdn.shopify.com/cert.pdf',
+           'submission':{'supplier_status':'in_production','checked_at':'2026-11-22T05:00:00Z'}}
+    grid.render([{'edition_order_id':1,'prodigi':'Complete'}],[{'prodigi':'Complete'}],
+                grid_key='selection',selected=[],actor={'id':'staff'},statuses={'1':saved})
+    row=view['rows'][0]
+    assert row['cells']['prodigi']=='Complete' and row['certificate'].endswith('allocation_id=1')
+    assert row['review']['supplier_status']=='in_production' and view['active'] is True
+
+
 def test_uncertain_submission_keeps_warning_but_never_offers_full_reset():
     saved=dict(status='Submission uncertain',submission={'intent_at':'recorded'})
     result=grid.review(saved,{'edition_order_id':1},'')

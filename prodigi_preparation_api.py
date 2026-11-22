@@ -43,6 +43,8 @@ async def tick(request):
         value = await run_in_threadpool(queue.tick)
         from prodigi_submission import kick
         kick()
+        from prodigi_status_sync import kick as sync_supplier_status
+        sync_supplier_status()
         from prodigi_browser import claim
         browser = None
         # Finish already-uploaded orders before starting another large transfer.

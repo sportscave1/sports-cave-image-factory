@@ -131,8 +131,14 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
         receipt['lease_until']=prep.now()
         value.update(status='Submission uncertain',message=str(error) if isinstance(error,ValueError) else 'Supplier readback unavailable. The same order will be checked without resubmitting.')
         persist(value);return value
+    # Passive status reconciliation validates production without waiting for a
+    # PDF upload. The existing leased certificate worker finishes that job.
+    if certificate is None:
+        receipt['lease_until']=prep.now()
+        persist(value)
+        return value
     try:
-        value['certificate_url']=certificate(value)
+        value['certificate_url']=value.get('certificate_url') or certificate(value)
         value.pop('last_failure',None)
         value.update(status='Complete',message='Supplier submission and customer certificate upload confirmed.')
     except Exception as error:
@@ -153,7 +159,8 @@ def tick():
           AND NOT COALESCE((value->>'hidden')::boolean,false) AND (
            (value->>'status'='Ready for manual payment' AND %s AND NOT value ? 'submission'
             AND COALESCE((value->>'submit_check_after')::timestamptz,'epoch')<now()) OR
-           (value->>'status' IN ('Submitting','Submitted','Submission uncertain','Certificate pending') AND updated_at<now()-interval '30 seconds'
+           (value->>'status' IN ('Submitting','Submission uncertain','Certificate pending') AND
+            (value->>'status'='Certificate pending' OR updated_at<now()-interval '30 seconds')
             AND COALESCE((value->'submission'->>'lease_until')::timestamptz,'epoch')<now()))
           ORDER BY CASE value->>'status' WHEN 'Ready for manual payment' THEN 0
             WHEN 'Submitting' THEN 1 WHEN 'Submission uncertain' THEN 1
