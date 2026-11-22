@@ -45,11 +45,12 @@ def search_form(value='', *, hero=False, filters=None):
 
 
 def shell(content, *, title, description, path=BASE_PATH, schema=None, nonce='', noindex=False,
-          is_home=False, header_search=False, search_value='', search_filters=None):
+          is_home=False, header_search=False, search_value='', search_filters=None, account_page=False):
     canonical = PUBLIC_ORIGIN + path
     schema = schema or {'@context': 'https://schema.org', '@type': 'WebPage', 'name': title, 'url': canonical}
     home_styles = f'<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-restore.css?v=1">' if is_home else ''
     preload = f'<link rel="preload" as="image" href="{BASE_PATH}/assets/collector-room-1600.webp" imagesrcset="{BASE_PATH}/assets/collector-room-800.webp 800w, {BASE_PATH}/assets/collector-room-1600.webp 1600w" imagesizes="100vw">' if is_home else ''
+    account_assets = f'<link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-accounts.css?v=1"><script src="{BASE_PATH}/assets/marketplace-accounts.js?v=1" defer></script>' if account_page else ''
     return f'''<!doctype html><html lang="en-AU"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{h(title)}</title><meta name="description" content="{h(description)}">
@@ -61,12 +62,12 @@ def shell(content, *, title, description, path=BASE_PATH, schema=None, nonce='',
 <link rel="icon" href="/favicon.png"><link rel="preconnect" href="https://www.sportscaveshop.com" crossorigin>{preload}
 <link rel="stylesheet" href="{BASE_PATH}/assets/marketplace.css?v=2"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-home.css?v=3"><link rel="stylesheet" href="{BASE_PATH}/assets/marketplace-collect.css?v=1">{home_styles}
 <script type="application/ld+json" nonce="{h(nonce)}">{jsonld(schema)}</script>
-<script src="{BASE_PATH}/assets/marketplace.js?v=3" defer></script></head>
+<script src="{BASE_PATH}/assets/marketplace.js?v=3" defer></script>{account_assets}</head>
 <body class="{'is-home' if is_home else 'inner-page'}"><a class="skip" href="#main">Skip to content</a>
 <header class="header"><div class="header-inner {'has-search' if header_search else ''}"><div class="brand-links"><a class="brand" href="{BASE_PATH}" aria-label="Sports Cave Marketplace home"><img src="{BASE_PATH}/assets/logo.webp" alt="Sports Cave" width="158" height="49"><span>MARKETPLACE</span></a>
-</div><nav class="header-actions" aria-label="Main navigation"><a class="shop-link" href="{BASE_PATH}/terms">How it works</a><a class="sell-link" href="{BASE_PATH}/sell">{icon('plus')}<span>Sell an item</span></a></nav></div></header>
+</div><nav class="header-actions" aria-label="Main navigation"><a class="shop-link" href="{BASE_PATH}/terms">How it works</a><a class="account-link" href="{BASE_PATH}/account">Account</a><a class="sell-link" href="{BASE_PATH}/sell">{icon('plus')}<span>Sell an item</span></a></nav></div></header>
 {content}<footer class="footer"><div class="footer-top"><div class="footer-brand"><a class="brand" href="{BASE_PATH}" aria-label="Sports Cave Marketplace home"><img src="{BASE_PATH}/assets/logo.webp" alt="Sports Cave" width="158" height="49"></a><p>For the love of the game.</p></div>
-<nav aria-label="Footer marketplace"><strong>Marketplace</strong><a href="{BASE_PATH}">The collection</a><a href="{BASE_PATH}/terms">How it works</a><a href="{SHOP_URL}">Sports Cave shop</a></nav>
+<nav aria-label="Footer marketplace"><strong>Marketplace</strong><a href="{BASE_PATH}">The collection</a><a href="{BASE_PATH}/inbox">Your messages</a><a href="{BASE_PATH}/terms">How it works</a><a href="{SHOP_URL}">Sports Cave shop</a></nav>
 <nav aria-label="Footer buying"><strong>Buying</strong><a href="{BASE_PATH}/paypal">PayPal</a><a href="{BASE_PATH}/buyer-protection">Buyer Protection</a><a href="{BASE_PATH}/terms">Terms &amp; privacy</a></nav><nav aria-label="Footer selling"><strong>Sell</strong><a href="{BASE_PATH}/sell">List an item</a><a href="{BASE_PATH}/terms#fees">Founding seller offer</a><a href="mailto:hello@sportscaveshop.com">Get in touch</a></nav></div>
 <div class="footer-bottom"><span>Australia · AUD</span><p>Sports Cave Marketplace</p><a href="{BASE_PATH}/terms">Terms &amp; privacy</a></div></footer></body></html>'''
 
@@ -177,13 +178,16 @@ def sell(config, nonce='', *, video_available=False):
                  description='Submit your sporting collection to Sports Cave Marketplace. Free founding listings, reviewed before publication.', path=BASE_PATH + '/sell', nonce=nonce)
 
 
-def item(row, nonce=''):
+def item(row, nonce='', *, demo=False):
     row = public_listing(row)
     item_id = h(row['id'])
-    photo_url = f'{BASE_PATH}/images/{item_id}/0.webp'
+    item_path = BASE_PATH + '/demo' if demo else listing_url(row)
+    def image_url(index):
+        return f'{BASE_PATH}/assets/demo-{"jersey" if index == 0 else "detail"}.svg' if demo else f'{BASE_PATH}/images/{item_id}/{index}.webp'
+    photo_url = image_url(0)
     panels, thumbnails = [], []
     for index in range(row['photo_count']):
-        url = f'{BASE_PATH}/images/{item_id}/{index}.webp'
+        url = image_url(index)
         panels.append(f'<figure class="media-panel" id="media-photo-{index}" data-media-panel><img src="{url}" alt="{h(row["title"])} — photo {index + 1}" width="960" height="1200" {"loading=lazy" if index else "fetchpriority=high"} decoding="async"></figure>')
         thumbnails.append(f'<a class="media-thumb" href="#media-photo-{index}" data-media-target="media-photo-{index}" aria-label="View photo {index + 1}" {"aria-current=true" if not index else ""}><img src="{url}" alt="" width="72" height="90" loading="lazy"></a>')
     if row.get('has_video'):
@@ -192,24 +196,21 @@ def item(row, nonce=''):
     provenance = '<h2>Provenance</h2><p class="item-description">' + h(row['provenance']) + '</p>' if row.get('provenance') else ''
     content = f'''<main id="main" class="item collector-item"><a class="back" href="{BASE_PATH}#finds">Back to the collection</a><div class="item-layout">
 <section class="item-media" aria-label="Item photos and video"><div class="gallery" data-gallery><div class="media-stage">{''.join(panels)}</div><nav class="media-thumbs" aria-label="Choose an item photo or video">{''.join(thumbnails)}</nav><p class="gallery-caption"><span data-media-caption aria-live="polite">Photo 1 of {row['photo_count']}</span><span>Seller-supplied media</span></p></div></section>
-<section class="item-details"><p class="eyebrow">FROM ONE COLLECTION TO THE NEXT</p><h1>{h(row['title'])}</h1><div class="item-tags"><span>{h(row['condition'])}</span><span>{h(row['location'])}</span></div><p class="price">{money(row['price_cents'])}<span>AUD</span></p><p class="postage-line">{money(row['shipping_cents'])} tracked postage · Asking price</p>
+<section class="item-details"><p class="eyebrow">{'DEMO LISTING · NOT FOR SALE' if demo else 'FROM ONE COLLECTION TO THE NEXT'}</p><h1>{h(row['title'])}</h1><div class="item-tags"><span>{h(row['condition'])}</span><span>{h(row['location'])}</span></div><p class="price">{money(row['price_cents'])}<span>AUD</span></p><p class="postage-line">{money(row['shipping_cents'])} tracked postage · {'Example price' if demo else 'Asking price'}</p>
 <div class="seller-profile"><span class="seller-avatar" aria-hidden="true">{h(row['seller_name'][:1].upper())}</span><div><strong>{h(row['seller_name'])}</strong><span>{h(row['seller_type'])}</span></div></div>
-<details class="enquiry"><summary>Ask about this item {icon('chat')}</summary><div class="enquiry-body"><p>Sports Cave will review your question with the seller. An enquiry does not reserve this item. Checkout is coming next.</p>
-<form id="enquiry-form" data-endpoint="{BASE_PATH}/api/enquiries"><input type="hidden" name="listing_id" value="{item_id}">
-<label>Your name<input name="name" maxlength="70" autocomplete="name" required></label><label>Your email<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
-<label>Message<textarea name="message" rows="3" maxlength="1000" placeholder="Ask about condition, provenance or postage." required></textarea></label><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
-<label class="consent"><input name="consent" type="checkbox" required><span>I agree to the <a href="{BASE_PATH}/terms">privacy notice</a> and to sharing this enquiry with the seller.</span></label>
-<button class="button gold" type="submit">Send enquiry</button><p class="form-status" role="status" aria-live="polite"></p></form></div></details>
+<div class="product-actions"><a class="button dark" href="{BASE_PATH}/contact/{item_id}?intent=message">{icon('chat')} Message seller</a><a class="button outline" href="{BASE_PATH}/contact/{item_id}?intent=offer">Make offer</a></div><p class="item-note">Create an account or sign in to message and make an offer. {'This example cannot receive messages or payments.' if demo else 'Your email stays private.'}</p>
 <a class="item-protection" href="{BASE_PATH}/buyer-protection">{icon('review')}<span><strong>Know your Buyer Protection</strong><small>PayPal eligibility, payment tips and what to check.</small></span><span aria-hidden="true">↗</span></a>
 <div class="item-story"><h2>About this piece</h2><p class="item-description">{h(row['description'])}</p>{provenance}<dl><div><dt>Item type</dt><dd>{h(CATEGORIES[row['category']])}</dd></div><div><dt>Sport</dt><dd>{h(row['sport'])}</dd></div></dl></div>
 <p class="item-note">Seller-supplied details. Listing review is not independent authentication. <a href="mailto:hello@sportscaveshop.com?subject=Marketplace%20item%20{item_id}">Report this item</a></p></section></div></main>'''
     condition = {'New / unused': 'NewCondition', 'Excellent': 'UsedCondition', 'Good': 'UsedCondition', 'Fair': 'UsedCondition'}[row['condition']]
     product = {'@type': 'Product', 'name': row['title'], 'description': row['description'], 'sku': row['id'],
-         'image': [PUBLIC_ORIGIN + BASE_PATH + f'/images/{row["id"]}/{i}.webp' for i in range(row['photo_count'])],
+         'image': [PUBLIC_ORIGIN + image_url(i) for i in range(row['photo_count'])],
          'itemCondition': 'https://schema.org/' + condition, 'category': CATEGORIES[row['category']],
          'offers': {'@type': 'Offer', 'price': f'{row["price_cents"] / 100:.2f}', 'priceCurrency': 'AUD',
-                    'availability': 'https://schema.org/InStock', 'url': PUBLIC_ORIGIN + listing_url(row),
+                    'availability': 'https://schema.org/InStock', 'url': PUBLIC_ORIGIN + item_path,
                     'seller': {'@type': 'Organization' if row['seller_type'] == 'Business seller' else 'Person', 'name': row['seller_name']}}}
+    if demo:
+        product.pop('offers', None)
     if row.get('has_video') and row.get('published_at'):
         product['subjectOf'] = {'@type': 'VideoObject', 'name': row['title'] + ' — item video',
             'description': 'Seller-recorded item showcase. ' + row['description'][:160],
@@ -219,8 +220,8 @@ def item(row, nonce=''):
     schema = {'@context': 'https://schema.org', '@graph': [product,
         {'@type': 'BreadcrumbList', 'itemListElement': [
             {'@type': 'ListItem', 'position': 1, 'name': 'Marketplace', 'item': PUBLIC_ORIGIN + BASE_PATH},
-            {'@type': 'ListItem', 'position': 2, 'name': row['title'], 'item': PUBLIC_ORIGIN + listing_url(row)}]}]}
-    return shell(content, title=row['title'] + ' | Sports Cave Marketplace', description=row['description'][:160], path=listing_url(row), schema=schema, nonce=nonce)
+            {'@type': 'ListItem', 'position': 2, 'name': row['title'], 'item': PUBLIC_ORIGIN + item_path}]}]}
+    return shell(content, title=row['title'] + ' | Sports Cave Marketplace', description=row['description'][:160], path=item_path, schema=schema, nonce=nonce, noindex=demo)
 
 
 def payment_page(protection=False, nonce=''):
@@ -234,9 +235,9 @@ def payment_page(protection=False, nonce=''):
     else:
         path, title, headline = '/paypal', 'PayPal', 'A familiar way to pay.'
         lead = 'Goods & Services. Clear records. A more considered purchase.'
-        body = f'''<section class="paypal-intro"><div><p class="eyebrow">OUR PAYMENT DIRECTION</p><h2>PayPal, for the next chapter.</h2><p>We’re preparing PayPal payments for Sports Cave Marketplace. Today, send an enquiry to ask about an item; this website does not take payments or verify off-site transfers.</p><a class="button dark" href="{BASE_PATH}#finds">Meet the collection</a></div><aside><span class="payment-word">PayPal</span><h2>Goods &amp; Services</h2><p>Pay from your PayPal account for eligible purchases. Buyer Protection may apply if an item does not arrive or is significantly different from its description.</p><a class="text-link" href="{BASE_PATH}/buyer-protection">Explore Buyer Protection ↗</a></aside></section>
+        body = f'''<section class="paypal-intro"><div><p class="eyebrow">PAY THE SELLER ON PAYPAL</p><h2>Agree it here. Pay on PayPal.</h2><p>Message the seller and agree the total. The seller can share an invoice from their own PayPal Business account in your private conversation. Open it to check the recipient, item and amount, then pay on PayPal.</p><a class="button dark" href="{BASE_PATH}/inbox">Your messages</a></div><aside><span class="payment-word">PayPal</span><h2>Goods &amp; Services</h2><p>Pay from your PayPal account for eligible purchases. Buyer Protection may apply if an item does not arrive or is significantly different from its description.</p><a class="text-link" href="{BASE_PATH}/buyer-protection">Explore Buyer Protection ↗</a></aside></section>
 <section class="payment-checklist"><h2>Before you pay.</h2><div><p><strong>Agree the details.</strong> Confirm the actual item, condition, total price and tracked postage with the seller.</p><p><strong>Check the payment.</strong> Use Goods &amp; Services from your PayPal account. Friends &amp; Family is excluded from Buyer Protection.</p><p><strong>Keep everything.</strong> Save the listing, messages and payment receipt. Read <a href="{policy}">PayPal’s Australian terms</a> for eligibility, exclusions and deadlines.</p></div></section><p class="payment-footnote">PayPal is a separate payment provider. Sports Cave does not guarantee a refund or decide PayPal claims. <a href="{overview}">Read PayPal’s protection overview ↗</a></p>'''
-    content = f'''<main id="main" class="payment-page"><section class="protection-hero"><div class="section-width"><a class="back" href="{BASE_PATH}">Marketplace</a><p class="eyebrow">SPORTS CAVE · {h(title.upper())}</p><h1>{headline}</h1><p>{lead}</p><nav aria-label="Payment information"><a href="{BASE_PATH}/paypal" {'aria-current="page"' if not protection else ''}>PayPal</a><a href="{BASE_PATH}/buyer-protection" {'aria-current="page"' if protection else ''}>Buyer Protection</a></nav></div></section><div class="section-width payment-content"><p class="payment-status">Marketplace checkout is coming next. Enquiries are open; payments are not collected here yet.</p>{body}</div></main>'''
+    content = f'''<main id="main" class="payment-page"><section class="protection-hero"><div class="section-width"><a class="back" href="{BASE_PATH}">Marketplace</a><p class="eyebrow">SPORTS CAVE · {h(title.upper())}</p><h1>{headline}</h1><p>{lead}</p><nav aria-label="Payment information"><a href="{BASE_PATH}/paypal" {'aria-current="page"' if not protection else ''}>PayPal</a><a href="{BASE_PATH}/buyer-protection" {'aria-current="page"' if protection else ''}>Buyer Protection</a></nav></div></section><div class="section-width payment-content"><p class="payment-status">Seller-provided invoice links open on PayPal. This website does not collect payments or verify payment status.</p>{body}</div></main>'''
     return shell(content, title=title + ' | Sports Cave Marketplace', description='PayPal Goods & Services, eligible Buyer Protection and safer buying on Sports Cave Marketplace.', path=BASE_PATH + path, nonce=nonce)
 
 
@@ -244,7 +245,8 @@ def terms(nonce=''):
     content = f'''<main id="main" class="narrow legal"><a class="back" href="{BASE_PATH}">Marketplace</a><p class="eyebrow">FOUNDING SELLER LAUNCH</p><h1>Good pieces. Clear expectations.</h1>
 <h2>List your own collection</h2><p>Submit sporting memorabilia, jerseys or trading cards you own and are entitled to sell. Use current photographs of the actual item, describe flaws and provide evidence for signatures, grading or match-worn claims. Counterfeits and misleading listings are not accepted. Sports Cave may decline or remove a listing.</p>
 <h2>Review, then publish</h2><p>Submissions are private until Sports Cave approves them. Your seller name, seller type, suburb / state, asking price, postage, item description, provenance and uploaded photos and video appear publicly. Listing review does not authenticate an item or guarantee seller claims. Sellers remain responsible for accurate details. Private collectors and business sellers are identified separately.</p>
-<h2 id="fees">Free founding listings</h2><p>There is no submission or listing charge for this launch. The planned seller fee is 5% of the item price on a completed on-platform sale. Any payout illustration is indicative. Payment collection, seller onboarding, shipping arrangements and final sale terms will be available before checkout opens. This release accepts enquiries; it does not collect payments, reserve items or pay sellers.</p>
-<h2>Your information</h2><p>Sports Cave stores your submission and enquiries to review listings, contact you and operate the marketplace. Seller email addresses stay private. Buyer enquiry details are available to Sports Cave and may be shared with the relevant seller to answer that enquiry. We do not add you to a marketing list through these forms. Avoid personal details in public descriptions and photos and video; uploaded media metadata is removed. Recorded videos are optimised for playback and stay private until the listing is approved.</p>
+<h2 id="fees">Free founding listings</h2><p>There is no submission or listing charge for this launch. The planned seller fee is 5% of the item price on a completed on-platform sale. Any payout illustration is indicative. Commission collection is not active. Sellers may share invoices from their own PayPal Business accounts; buyers pay the seller on PayPal. Check the actual recipient, item and total there. This website does not collect payments, verify payment status, reserve items or pay sellers. Accepting an offer does not process a payment.</p>
+<h2>Your account &amp; conversations</h2><p>Create an account and confirm your email before messaging a seller or making an offer. Use the same verified email as your seller submission to receive its conversations. Your display name is shared with the other participant; your email and password are not. Keep messages relevant and do not share passwords, financial credentials or unnecessary personal details. You can block or report a conversation. Sports Cave may suspend marketplace access for misuse.</p>
+<h2>Your information</h2><p>Sports Cave stores your account, submissions, messages, offers and invoice links to operate the marketplace and review reports. Only the buyer, seller and authorised Sports Cave administrators can access their conversation. Support can review messages; messaging is not end-to-end encrypted. Account authentication is provided by Supabase. We do not add you to a marketing list through these forms. Avoid personal details in public descriptions, photos and video; uploaded media metadata is removed. Recorded videos stay private until the listing is approved.</p>
 <h2>Need a hand?</h2><p>To correct or remove a listing, request access to or deletion of your information, or report an item, contact <a href="mailto:hello@sportscaveshop.com">hello@sportscaveshop.com</a>. Include your listing reference. These launch terms do not exclude rights available under applicable law.</p></main>'''
     return shell(content, title='How It Works & Privacy | Sports Cave Marketplace', description='Founding seller submissions, review, fees and privacy at Sports Cave Marketplace.', path=BASE_PATH + '/terms', nonce=nonce)

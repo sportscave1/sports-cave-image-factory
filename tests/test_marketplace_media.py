@@ -210,7 +210,8 @@ class MediaPageTests(unittest.TestCase):
         product = schema['@graph'][0]
         self.assertEqual(product['subjectOf']['@type'], 'VideoObject')
         self.assertEqual(product['subjectOf']['duration'], 'PT1S')
-        self.assertIn('Ask about this item', response.text)
+        self.assertIn('Message seller', response.text)
+        self.assertIn('Make offer', response.text)
 
     def test_admin_video_review_uses_session_data_not_a_shared_media_url(self):
         from streamlit.testing.v1 import AppTest
@@ -233,7 +234,7 @@ class MediaPageTests(unittest.TestCase):
             response = self.client.get('/marketplace' + path)
             self.assertEqual(response.status_code, 200)
             self.assertIn(heading, response.text)
-            self.assertIn('Marketplace checkout is coming next.', response.text)
+            self.assertIn('This website does not collect payments or verify payment status.', response.text)
             self.assertIn('https://www.paypal.com/au/legalhub/paypal/buyer-protection', response.text)
             self.assertIn('href="' + core.PUBLIC_ORIGIN + '/marketplace' + path + '"', response.text)
             self.assertNotIn('guaranteed protection', response.text.lower())

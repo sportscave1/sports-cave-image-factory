@@ -53,6 +53,17 @@ class FakeConnection:
     def execute(self, sql, args=()):
         if 'pg_advisory_xact_lock' in sql:
             self.rows = []
+        elif 'DELETE FROM crm_runtime_state WHERE key IN' in sql:
+            old = [k for k, v in sorted(self.database.values.items())
+                   if args[0] < k < args[1] and v.get('expires', 0) < args[2]][:25]
+            for key in old:
+                del self.database.values[key]
+            self.rows = []
+        elif sql.lstrip().startswith('DELETE'):
+            self.database.values.pop(args[0], None)
+            self.rows = []
+        elif 'FROM auth.sessions' in sql:
+            self.rows = [{'id': args[0]}] if args and self.database.sessions.get(args[0]) == args[1] else []
         elif sql.lstrip().startswith('INSERT'):
             key, value = args
             if self.database.fail_photo and ':image:' in key:
@@ -66,6 +77,10 @@ class FakeConnection:
         elif 'WHERE key LIKE %s' in sql:
             self.rows = [{'value': deepcopy(v)} for k, v in self.database.values.items() if k.startswith(args[0].removesuffix('%'))
                          and ("value->>'status'='published'" not in sql or v['status'] == 'published')]
+        elif 'WHERE key > %s AND key < %s' in sql:
+            pairs = [(k, v) for k, v in self.database.values.items() if args[0] < k < args[1]]
+            pairs.sort(key=lambda pair: pair[0], reverse='updated_at DESC' in sql)
+            self.rows = [{'value': deepcopy(v)} for k, v in pairs[:args[2]]]
         else:
             raise AssertionError('Unexpected query: ' + sql)
         return self
@@ -78,6 +93,7 @@ class FakeConnection:
 class FakeDatabase:
     def __init__(self):
         self.values = {}
+        self.sessions = {}
         self.mutex = threading.RLock()
         self.fail_photo = False
         self.fail_listing = False
@@ -232,8 +248,8 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn('seller@example.invalid', result.text)
         self.assertEqual(self.client.get('/marketplace/images/' + key + '/0.webp').headers['content-type'], 'image/webp')
         payload = {'listing_id': key, 'name': 'Buyer', 'email': 'buyer@example.invalid', 'message': 'Is this available?', 'consent': True}
-        self.assertEqual(self.client.post('/marketplace/api/enquiries', json=payload, headers=self.headers).status_code, 201)
-        self.assertEqual(len(self.store.enquiries()), 1)
+        self.assertEqual(self.client.post('/marketplace/api/enquiries', json=payload, headers=self.headers).status_code, 401)
+        self.assertEqual(len(self.store.enquiries()), 0)
         self.assertIn(key, self.client.get('/marketplace/sitemap.xml').text)
         self.store.moderate(key, 'withdrawn', 2, 'admin')
         self.assertNotIn(key, self.client.get('/marketplace/sitemap.xml').text)
@@ -402,7 +418,7 @@ class AdminTests(unittest.TestCase):
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'admin'})").run()
             self.assertFalse(page.exception)
             self.assertIn('Marketplace', [t.value for t in page.title])
-            self.assertEqual([t.label for t in page.tabs], ['Listings', 'Enquiries', 'Website & publish', 'Outreach'])
+            self.assertEqual([t.label for t in page.tabs], ['Listings', 'Accounts', 'Conversations', 'Enquiries', 'Website & publish', 'Outreach'])
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'worker'})").run()
             self.assertFalse(page.exception)
             self.assertTrue(page.error)

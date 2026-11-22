@@ -44,6 +44,9 @@ async def page(request):
             document = views.terms(nonce)
         elif path in (core.BASE_PATH + '/paypal', core.BASE_PATH + '/buyer-protection'):
             document = views.payment_page(path.endswith('/buyer-protection'), nonce)
+        elif path == core.BASE_PATH + '/demo':
+            from marketplace_account_views import DEMO
+            document = views.item(DEMO, nonce, demo=True)
         elif 'listing_id' in request.path_params:
             listing_id = core.identifier(request.path_params['listing_id'])
             row = await run_in_threadpool(MarketplaceStore().listing, listing_id, public=True)
@@ -81,6 +84,10 @@ async def asset(request):
              'marketplace-home.css': (ASSET_ROOT / 'marketplace-home.css', 'text/css'),
              'marketplace-collect.css': (ASSET_ROOT / 'marketplace-collect.css', 'text/css'),
              'marketplace-restore.css': (ASSET_ROOT / 'marketplace-restore.css', 'text/css'),
+             'marketplace-accounts.css': (ASSET_ROOT / 'marketplace-accounts.css', 'text/css'),
+             'marketplace-accounts.js': (ASSET_ROOT / 'marketplace-accounts.js', 'text/javascript'),
+             'demo-jersey.svg': (ASSET_ROOT / 'demo-jersey.svg', 'image/svg+xml'),
+             'demo-detail.svg': (ASSET_ROOT / 'demo-detail.svg', 'image/svg+xml'),
              'collector-room-1600.webp': (ASSET_ROOT / 'collector-room-1600.webp', 'image/webp'),
              'collector-room-800.webp': (ASSET_ROOT / 'collector-room-800.webp', 'image/webp'),
              'marketplace.js': (ASSET_ROOT / 'marketplace.js', 'text/javascript'),
@@ -206,21 +213,9 @@ async def submit(request):
 
 
 async def enquire(request):
-    headers = security()
-    try:
-        payload = await body(request, 6000)
-        listing_id = core.identifier(payload.get('listing_id'))
-        name = core.clean_text(payload.get('name'), 'your name', 70)
-        address = core.email(payload.get('email'))
-        message = core.clean_text(payload.get('message'), 'your message', 1000)
-        if payload.get('consent') is not True:
-            raise ValueError('Agree to sharing your enquiry with the seller.')
-        if not allow_rate(request, address):
-            raise OverflowError('You have sent several enquiries. Please try again later.')
-        enquiry_id = await run_in_threadpool(MarketplaceStore().enquire, listing_id, name, address, message)
-        return JSONResponse({'ok': True, 'reference': enquiry_id}, status_code=201, headers=headers)
-    except Exception as exc:
-        return form_error(exc, headers)
+    # Old bookmarks cannot bypass the verified-account requirement.
+    from marketplace_account_api import start
+    return await start(request, legacy=True)
 
 
 def form_error(error, headers):
@@ -249,7 +244,7 @@ async def sitemap(request):
 
 
 async def robots(request):
-    return Response('User-agent: *\nAllow: /marketplace\nDisallow: /marketplace/api/\nDisallow: /?\nDisallow: /app\nSitemap: ' + core.PUBLIC_ORIGIN + core.BASE_PATH + '/sitemap.xml\n',
+    return Response('User-agent: *\nAllow: /marketplace\nDisallow: /marketplace/api/\nDisallow: /marketplace/inbox\nDisallow: /marketplace/account\nDisallow: /marketplace/contact/\nDisallow: /marketplace/auth/\nDisallow: /marketplace/demo\nDisallow: /?\nDisallow: /app\nSitemap: ' + core.PUBLIC_ORIGIN + core.BASE_PATH + '/sitemap.xml\n',
                     media_type='text/plain', headers={'Cache-Control': 'public,max-age=3600'})
 
 
@@ -261,6 +256,7 @@ ROUTES = (
     (BASE + '/terms', page, ('GET', 'HEAD')),
     (BASE + '/paypal', page, ('GET', 'HEAD')),
     (BASE + '/buyer-protection', page, ('GET', 'HEAD')),
+    (BASE + '/demo', page, ('GET', 'HEAD')),
     (BASE + '/item/{listing_id}', page, ('GET', 'HEAD')),
     (BASE + '/assets/{asset}', asset, ('GET', 'HEAD')),
     (BASE + '/images/{listing_id}/{index:int}.webp', photo, ('GET', 'HEAD')),
@@ -270,3 +266,6 @@ ROUTES = (
     (BASE + '/sitemap.xml', sitemap, ('GET', 'HEAD')),
     ('/robots.txt', robots, ('GET', 'HEAD')),
 )
+
+from marketplace_account_api import ROUTES as ACCOUNT_ROUTES
+ROUTES += ACCOUNT_ROUTES

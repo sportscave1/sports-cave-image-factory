@@ -35,8 +35,8 @@ def render_page(user, store=None):
         for column, label, value in zip(st.columns(3), ('Awaiting review', 'Published listings', 'New enquiries'),
                 (counts['pending'], counts['published'], sum(r['status'] == 'new' for r in enquiries))):
             column.metric(label, value)
-        tabs = st.tabs(['Listings', 'Enquiries', 'Website & publish', 'Outreach'], on_change='rerun', key='marketplace-tabs')
-        for name, tab in zip(('listings', 'enquiries', 'website', 'outreach'), tabs):
+        tabs = st.tabs(['Listings', 'Accounts', 'Conversations', 'Enquiries', 'Website & publish', 'Outreach'], on_change='rerun', key='marketplace-tabs')
+        for name, tab in zip(('listings', 'accounts', 'conversations', 'enquiries', 'website', 'outreach'), tabs):
             if not tab.open:
                 continue
             with tab:
@@ -47,6 +47,14 @@ def render_page(user, store=None):
                 elif name == 'outreach':
                     from marketplace_outreach import render
                     render(st, store.connect)
+                elif name in ('accounts', 'conversations'):
+                    from marketplace_chat import ChatStore
+                    from marketplace_accounts_page import render_accounts, render_conversations
+                    chat = ChatStore(store.connect, media_storage=store._media_storage)
+                    try:
+                        (render_accounts if name == 'accounts' else render_conversations)(st, chat, user)
+                    except Exception:
+                        st.error('Marketplace account storage is temporarily unavailable. Please reload before making a change.')
                 else:
                     render_website(st, store)
 
@@ -152,6 +160,8 @@ def render_enquiries(st, store, rows):
 
 
 def render_website(st, store):
+    st.link_button('Preview demo product', PUBLIC_ORIGIN + BASE_PATH + '/demo')
+    st.caption('Clearly labelled demo; excluded from live listings and marketplace sales totals.')
     with st.expander('Submission storage'):
         from marketplace_dropbox import ROOT, connection
         st.caption('Dropbox source: ' + ROOT)
