@@ -94,3 +94,12 @@ def test_multi_item_dashboard_evidence_must_name_the_exact_item(pair):
     a,b,p,_=pair;a['dashboard_qa']['shipping']=dict(options=options(),current='standard',target='budget')
     evidence=dict(quality='Excellent',sku=a['snapshot']['mapping']['prodigi_code'],colour='natural',shipping=dict(options=options(),selected='budget'),inserts=inserts())
     with pytest.raises(ValueError,match='another supplier item'):qa.evaluate(a,a['snapshot'],p.data,p.data['items'][0],evidence,identity_verified=True)
+
+def test_group_publish_never_claims_a_sibling_certificate_is_uploaded(pair):
+    a,b,p,_=pair;submit.tick();v=prep.read(1)
+    v.update(status='Complete',message='Supplier submission and customer certificate upload confirmed.')
+    v['submission'].update(supplier_status='in_production',finalised=True)
+    group.publish(v)
+    assert prep.read(2)['status']=='Certificate pending'
+    assert not prep.read(2).get('certificate_url')
+    assert 'Awaiting this edition' in prep.read(2)['message']

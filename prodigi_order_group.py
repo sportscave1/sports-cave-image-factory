@@ -71,7 +71,11 @@ def publish(value):
                 if key in receipt:child[key]=receipt[key]
             child['lease_until']=prep.now()
             # Each certificate is generated independently after actual production.
-            unit.update(status='Submitted' if receipt.get('confirmed') else 'Submission uncertain',message=value['message'])
+            from prodigi_submission import FINALISED
+            finalised=receipt.get('supplier_status') in FINALISED
+            unit.update(status=('Certificate pending' if finalised else 'Submitted') if receipt.get('confirmed') else 'Submission uncertain',
+                message=('Production confirmed. Awaiting this edition’s customer certificate.' if finalised else
+                    'Submitted to Prodigi · awaiting payment/production under your supplier countdown.') if receipt.get('confirmed') else value['message'])
             prep.save(q,unit)
 
 
