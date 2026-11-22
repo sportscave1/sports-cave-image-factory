@@ -575,10 +575,11 @@ def _step(key, value, job, event, age):
 
 def tick(token, event):
     from os_accounts import DEFAULT_STORE, can_access_page
+    from companion_poll_transaction import connection
 
     lease = str(uuid4())
     lease_key = PREFIX + 'lease'
-    with connect() as conn, conn.cursor() as cur:
+    with connection(connect) as conn, conn.cursor() as cur:
         cur.execute('SELECT 1 FROM product_upload_desktop WHERE singleton AND token_hash=%s FOR UPDATE',
                     (digest(token),))
         if not cur.fetchone():

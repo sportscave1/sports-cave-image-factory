@@ -413,13 +413,14 @@ def verify_outputs(jobs):
 
 
 def tick(token, events, capacity=1):
+    from companion_poll_transaction import connection
     # Accept older two-slot clients so existing work can report and finish.
     # Admission is always one design, regardless of the advertised capacity.
     if type(capacity) is not int or capacity not in (1, 2):
         raise ValueError('Choose one or two design slots.')
     if not isinstance(events, list) or len(events) > 2 or any(not isinstance(e, dict) for e in events):
         raise ValueError('Send at most two existing design reports.')
-    with connect() as conn, conn.cursor() as cur:
+    with connection(connect) as conn, conn.cursor() as cur:
         # Same singleton lock as Product Uploads serializes all desktop claims.
         cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
@@ -433,7 +434,7 @@ def tick(token, events, capacity=1):
         verified = poll_outputs(active)
     except Exception:
         verified = {}  # Connectivity failure is not proof of completion or failure.
-    with connect() as conn, conn.cursor() as cur:
+    with connection(connect) as conn, conn.cursor() as cur:
         cur.execute('''SELECT actor_id FROM product_upload_desktop
             WHERE singleton AND token_hash=%s FOR UPDATE''', (digest(token),))
         if not cur.fetchone():

@@ -349,7 +349,8 @@ def can_control_queues(user):
 
 def desktop_tick(token):
     # Updating the singleton row serializes claims even across server processes.
-    with connect() as conn, conn.cursor() as cur:
+    from companion_poll_transaction import connection
+    with connection(connect) as conn, conn.cursor() as cur:
         cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
         device = cur.fetchone()

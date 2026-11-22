@@ -8,10 +8,9 @@ import prodigi_preparation as queue
 def desktop(token):
     import product_upload_staff_queue as pairing
     import os_accounts
-    with queue.connect() as conn, conn.cursor() as cur:
-        cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
-            WHERE singleton AND token_hash=%s RETURNING actor_id''', (pairing.digest(token),))
-        row = cur.fetchone()
+    from companion_poll_transaction import connection, authenticate_and_touch
+    with connection(queue.connect) as conn, conn.cursor() as cur:
+        row = authenticate_and_touch(cur, pairing.digest(token))
     if not row:
         raise PermissionError('Pair this desktop in Companion control first.')
     user = os_accounts.DEFAULT_STORE.get_user(row['actor_id'])
