@@ -7,6 +7,7 @@ explicitly authorised an indefinite hold on an already-submitted duplicate only
 on 2026-11-22; no duration is parsed and no source is ever resumed automatically.
 """
 from copy import deepcopy
+from contextlib import contextmanager
 from datetime import datetime,timezone,timedelta
 import hmac,json,re,secrets,threading
 import prodigi_preparation as prep
@@ -16,10 +17,22 @@ from companion_poll_transaction import connection as bounded_connection
 
 # Merge discovery/readback must not consume the other companions' poll slots.
 _merge_slots=threading.BoundedSemaphore(2)
+_transaction=threading.local()
 
 
+@contextmanager
 def connection(factory):
-    return bounded_connection(factory,slots=_merge_slots)
+    # Nested identity/freshness reads belong to this same guarded transaction.
+    # Taking a second slot here can collide with a concurrent status poll and
+    # starve submission even though the database itself has spare capacity.
+    current=getattr(_transaction,'connection',None)
+    if current is not None:
+        yield current
+        return
+    with bounded_connection(factory,slots=_merge_slots) as conn:
+        _transaction.connection=conn
+        try:yield conn
+        finally:del _transaction.connection
 
 PREFIX='prodigi_merge:'
 LOCK=19721133

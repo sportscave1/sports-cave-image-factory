@@ -286,3 +286,21 @@ def test_cancel_adapter_rejects_paid_or_wrong_order_readbacks_without_a_post(mon
     wrong=p.order('99');wrong['id']='98';monkeypatch.setattr(client,'order',lambda _:wrong)
     with pytest.raises(ValueError):client.cancel_unpaid_duplicate('99')
     assert not calls
+
+
+def test_nested_identity_reads_reuse_transaction_even_when_other_slot_is_busy():
+    from unittest.mock import MagicMock
+    factory=MagicMock()
+    with merge.connection(factory) as outer:
+        assert merge._merge_slots.acquire(blocking=False)
+        try:
+            with merge.connection(factory) as inner:
+                assert inner is outer
+            assert factory.call_count==1
+        finally:merge._merge_slots.release()
+    assert getattr(merge._transaction,'connection',None) is None
+    with pytest.raises(ValueError):
+        with merge.connection(factory):raise ValueError('synthetic rollback')
+    assert getattr(merge._transaction,'connection',None) is None
+    with merge.connection(factory):pass
+    assert factory.call_count==3

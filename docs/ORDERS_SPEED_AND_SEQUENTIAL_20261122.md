@@ -14,6 +14,8 @@ Both SC3532 jobs retained the exact same artwork output and allocation. Producti
 - Orders authentication/heartbeat has one separate bounded slot and merge discovery/readback has its own two-slot limit; other workers retain their existing two-slot limit and all transaction-local deadlines. Live monitoring caught shared-slot 503s blocking pickup after the first fixes.
 - New JPG admission also runs independently of long package/catalogue work when the companion polls. Background loop admission precedes package draining.
 - Fulfilment admission throttle: 60s to 15s. Orders' existing read-only changed-marker check: 30s to 5s. Reload rows only on actual marker changes; row progress remains incremental.
+- Nested merge identity reads reuse the existing guarded transaction, avoiding a second-slot conflict with concurrent readback. The full live run exposed this after both item QA checks passed; regression covers another slot being occupied and rollback cleanup.
+- Newly Ready JPGs bypass only the waiting-state cooldown and are admitted once.
 - Countdown preferences, payment and production settings are untouched.
 
 ## Next phases
