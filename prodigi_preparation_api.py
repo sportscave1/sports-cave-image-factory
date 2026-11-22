@@ -148,7 +148,22 @@ async def restart_order(request):
         return JSONResponse({'status':(result or {}).get('status','Checking QA')},headers=HEADERS)
     except Exception as error:return failure(error)
 
-ROUTES = (('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+
+async def order_status(request):
+    from files_upload_api import _request_user
+    from product_upload_api import HEADERS,failure
+    try:
+        user=await run_in_threadpool(_request_user,request,required_page='Orders');queue.require_user(user)
+        raw=request.query_params.get('allocations','')
+        if len(raw)>2500 or not re.fullmatch(r'[1-9][0-9]*(?:,[1-9][0-9]*){0,199}',raw):
+            raise ValueError('Choose up to 200 allocated editions.')
+        ids=raw.split(',')
+        from orders_prodigi_grid import batch_status,review
+        saved=await run_in_threadpool(batch_status,ids)
+        return JSONResponse({'orders':{aid:review(saved.get(aid),{'edition_order_id':aid},'') for aid in ids}},headers=HEADERS)
+    except Exception as error:return failure(error)
+
+ROUTES = (('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),

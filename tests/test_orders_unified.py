@@ -91,3 +91,26 @@ def test_automatic_mirror_admission_skips_completed_invalid_and_previously_faile
     assert auto.admit()==1 and calls==[2]
     monkeypatch.setattr(auto,'_last',0)
     assert auto.admit()==0 and calls==[2]
+
+
+def test_progress_endpoint_is_bounded_authenticated_and_only_returns_review_fields(monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import prodigi_preparation_api as api,prodigi_preparation as prep,files_upload_api as files,orders_prodigi_grid as grid
+    monkeypatch.setattr(files,'_request_user',lambda *a,**k:dict(id='owner'))
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    calls=[]
+    def statuses(ids):
+        calls.append(ids)
+        return {'1':dict(status='Checking QA',checks={},snapshot={'recipient':'private-not-for-browser'})}
+    monkeypatch.setattr(grid,'batch_status',statuses)
+    client=TestClient(Starlette(routes=[Route('/status',api.order_status)]))
+    response=client.get('/status?allocations=1,2')
+    assert response.status_code==200 and response.json()['orders']['1']['status']=='Checking QA'
+    assert 'private-not-for-browser' not in response.text
+    assert client.get('/status?allocations='+','.join(str(i) for i in range(1,202))).status_code!=200
+    assert len(calls)==1
+    def denied(*a,**k):raise PermissionError('Orders access required')
+    monkeypatch.setattr(files,'_request_user',denied)
+    assert client.get('/status?allocations=1').status_code==403 and len(calls)==1

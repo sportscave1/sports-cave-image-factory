@@ -80,8 +80,12 @@ def review(saved,row,jpg):
     state=(saved or {}).get('status','Waiting')
     checks=(saved or {}).get('checks') or {}
     stopped=state in ('Needs QA','Needs review','Submission uncertain','Status unavailable')
+    snap=(saved or {}).get('snapshot') or {}
+    if re.fullmatch('[a-f0-9]{64}',str(snap.get('job_id') or '')) and snap.get('output',{}).get('sha256'):
+        jpg=ORIGIN+'/api/auto-editions/file?allocation_id='+str(row['edition_order_id'])+'&job_id='+snap['job_id']+'&inline=1'
     items=[dict(label=label,state='pass' if checks.get(key) is True else 'fail' if stopped and (checks.get(key) is False or key=='final_check') else 'pending') for key,label in CHECKS.items()]
     return dict(status=state,message=(saved or {}).get('message','Waiting for automatic artwork preparation.'),
+        updated_at=(saved or {}).get('updated_at') or ((saved or {}).get('last_failure') or {}).get('at'),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
         submission_enabled=(saved or {}).get('_submit_enabled'),
         items=items,can_restart=stopped,allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
