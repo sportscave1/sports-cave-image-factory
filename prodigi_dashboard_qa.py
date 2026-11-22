@@ -81,11 +81,15 @@ def recover_waiting_item_qa(user):
             AND (value->>'message'='QA inserts: The expected QA control did not finish loading.'
                  AND value->'dashboard_qa'->>'item_only'='true'
                  OR value->>'message'='QA product-row: Close the existing order editor before QA.'
+                 OR value->>'message'='QA tax-declaration: The expected Prodigi control did not finish loading.'
                  OR (value->>'message' IN ('QA shipping: The exact draft or shipping quotes changed before QA.',
                      'QA inserts: The expected Prodigi control did not finish loading.')
                      AND (COALESCE(value->>'qa_prepermit_recovery_policy','')<>'nonblocking-telemetry-v1'
                           OR COALESCE((value->>'qa_prepermit_recoveries')::int,0)<2)))
-            AND value->'dashboard_qa'->>'started'='false'
+            AND (value->'dashboard_qa'->>'started'='false' OR
+                 (value->>'message'='QA tax-declaration: The expected Prodigi control did not finish loading.'
+                  AND value->'dashboard_qa'->>'started'='true'
+                  AND COALESCE((value->>'qa_tax_readback_recoveries')::int,0)<1))
             AND value->'browser'->>'verified'='true'
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
             ORDER BY updated_at LIMIT 2""")
@@ -100,21 +104,28 @@ def _recover_item_qa(key):
         value=browser.read(cur,key);receipt=value.get('dashboard_qa') or {}
         prepermit=value.get('message') in ('QA shipping: The exact draft or shipping quotes changed before QA.',
             'QA inserts: The expected Prodigi control did not finish loading.')
-        known=(value.get('message')=='QA inserts: The expected QA control did not finish loading.' and receipt.get('item_only')
+        tax_readback=(value.get('message')=='QA tax-declaration: The expected Prodigi control did not finish loading.'
+                      and receipt.get('started') is True and receipt.get('tax_policy')==TAX_POLICY
+                      and value.get('qa_tax_readback_recoveries',0)<1)
+        known=(tax_readback or value.get('message')=='QA inserts: The expected QA control did not finish loading.' and receipt.get('item_only')
                or value.get('message')=='QA product-row: Close the existing order editor before QA.' or prepermit)
-        if (value.get('status')!='Needs review' or not known or receipt.get('started') is not False or value.get('submission')):
+        if (value.get('status')!='Needs review' or not known or (receipt.get('started') is not False and not tax_readback) or value.get('submission')):
             return False
         recoveries=value.get('qa_prepermit_recoveries',0) if value.get('qa_prepermit_recovery_policy')==RECOVERY_POLICY else 0
         if prepermit and recoveries>=2:return False
         try:
             _,order,_=current(value,provider,resolver)
+            if tax_readback:
+                if order.get('usSalesTaxAlreadyCollected') is not True:return False
+                if clean(order.get('shippingMethod'))!=receipt.get('shipping',{}).get('target'):return False
             if pinned_order(receipt['before'])!=pinned_order(order):return False
             if prepermit and clean(receipt['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):return False
         except (ValueError,PermissionError):return False
         value.setdefault('dashboard_qa_history',[]).append({k:receipt.get(k) for k in ('claimed_at','checked_at','verified','item_only')})
         value.pop('dashboard_qa');value.pop('last_failure',None)
+        if tax_readback:value['qa_tax_readback_recoveries']=value.get('qa_tax_readback_recoveries',0)+1
         if prepermit:value.update(qa_prepermit_recoveries=recoveries+1,qa_prepermit_recovery_policy=RECOVERY_POLICY)
-        value.update(status=WAITING,message='Retrying the pre-permit QA check; verified artwork retained.' if prepermit else 'Rechecking the saved edition; shared checks wait until every item is ready.')
+        value.update(status=WAITING,message='Rechecking saved tax and full QA; verified artwork retained.' if tax_readback else 'Retrying the pre-permit QA check; verified artwork retained.' if prepermit else 'Rechecking the saved edition; shared checks wait until every item is ready.')
         browser.save(cur,key,value)
     return True
 

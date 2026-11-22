@@ -1,6 +1,6 @@
 'use strict';
 let ordersProgressState=null;
-function ordersRuntimeVersion(){return typeof chrome.runtime.getManifest==='function'?chrome.runtime.getManifest().version:'1.7.44';}
+function ordersRuntimeVersion(){return typeof chrome.runtime.getManifest==='function'?chrome.runtime.getManifest().version:'1.7.45';}
 function ordersProgressBegin(plan){
   const kind=plan.kind==='product'?'product':plan.kind==='qa'?'qa':plan.kind===undefined?'artwork':null;
   if(!kind||! /^(product:)?prodigi_prepare:\d+$/.test(plan.key))return;

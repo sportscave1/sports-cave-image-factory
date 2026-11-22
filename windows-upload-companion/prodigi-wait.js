@@ -13,7 +13,9 @@ async function prodigiObserveReady(check,{timeout=120000,interval=1000,root}={})
     if(root&&typeof MutationObserver==='function'){
       observer=new MutationObserver(changed);observer.observe(root,{childList:true,subtree:true,attributes:true,characterData:true});
     }
-    deadline=setTimeout(()=>done(new Error('The expected Prodigi control did not finish loading.')),timeout);
+    // A sleeping tab may deliver its deadline before queued mutation/poll tasks.
+    // Re-read current positive evidence once before declaring a timeout.
+    deadline=setTimeout(()=>{inspect();if(!finished)done(new Error('The expected Prodigi control did not finish loading.'));},timeout);
     timer=setTimeout(poll,interval);inspect();
   });
 }

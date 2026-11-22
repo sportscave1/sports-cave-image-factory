@@ -25,3 +25,11 @@ test('identity errors are surfaced and still release observers',async()=>{
  const h=setup();let calls=0;h.context.check=()=>{if(++calls>2)throw Error('Wrong item');return null};
  const result=vm.runInContext('prodigiObserveReady(check)',h.context);h.mutate();await assert.rejects(result,/Wrong item/);assert.equal(h.timers.size,0);
 });
+
+test('a resumed tab checks current evidence before an overdue deadline rejects',async()=>{
+ const h=setup();let ready=false;h.context.check=()=>ready?'saved checkbox':null;
+ const result=vm.runInContext('prodigiObserveReady(check)',h.context);ready=true;
+ // Deliberately run the deadline before the overdue poll/mutation callback.
+ [...h.timers.values()].find(t=>t.ms===120000).fn();
+ assert.equal(await result,'saved checkbox');assert.equal(h.timers.size,0);assert.equal(h.disconnected(),1);
+});
