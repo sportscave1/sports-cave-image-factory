@@ -282,7 +282,7 @@ Every visual element must remain completely inside the inner edge of the border,
 * Main heroes and all supplied subjects
 * Heads, hair, helmets, hands, feet and equipment
 * Cars, motorcycles, jerseys and trophies
-* Titles, names, dates, statistics and supporting text
+* Titles, subject names and essential collector text
 * Signatures, logos, flags and collector details
 * Sports Cave plaque and edition information
 * Stadiums, tracks and venue elements
@@ -497,7 +497,7 @@ Optional supporting text may identify the matchup, such as:
 
 NAME VS NAME
 
-Do not add paragraphs, excessive statistics, fake quotes, invented dates or unnecessary descriptive copy.
+Do not add paragraphs, scores, results, statistics, rounds, times, fixture dates, venue/result captions, fake quotes or unnecessary descriptive copy. Keep factual match details in research notes; the artwork must remain timeless.
 
 Do not generate fake signatures. Include signatures only when authentic signature assets are supplied and explicitly intended for use.
 

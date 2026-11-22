@@ -116,6 +116,8 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
         request.update(target_dimensions=preparation_plan['output_dimensions'],preparation_plan=preparation_plan)
     from auto_editions_role_evidence import resolution
     reviewed=resolution(identity)
+    if reviewed and reviewed.get('exact_role_ids'):
+        request['reviewed_roles']={role:reviewed[role] for role in ('number','plaque')}
     if reviewed and reviewed.get('hidden_number'):request['approved_hidden_number']=reviewed['hidden_number']
     inspector = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
     preparation = (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')

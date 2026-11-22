@@ -60,8 +60,12 @@ def poll(config,host_request):
             LAST_STATUS={'state':'Running'}
             return True
         result=json.loads(receipt.read_text())
+        message=result.get('message')
+        verified=isinstance(message,str) and bool(message.strip())
         host_request(config,'/api/auto-editions/onboarding/repair-result',
-            {**{k:saved['repair'][k] for k in ('product_gid','request_id','handoff_token')},'ok':result['ok'] is True})
+            {**{k:saved['repair'][k] for k in ('product_gid','request_id','handoff_token')},
+             'ok':result['ok'] is True and verified,'message':message[:500] if verified else
+                 'Legacy Companion returned no structured repair result. Re-run PSD repair with the upgraded Companion.'})
         file.rename(file.with_suffix('.acknowledged'))
         return True
     binary=executable()
@@ -84,21 +88,35 @@ def poll(config,host_request):
         atomic(state.with_suffix('.result.json'),{'ok':False})
     return True
 
+def outcome(path,returncode):
+    """A normal CLI exit is not evidence that the PSD repair succeeded."""
+    try:
+        result=json.loads(path.read_text(encoding='utf-8'))
+        if (set(result)!={'outcome','message'} or result['outcome'] not in ('completed','queued','blocked')
+                or not isinstance(result['message'],str) or not result['message'].strip()):raise ValueError()
+    except (OSError,ValueError,TypeError):
+        return dict(ok=False,message='Companion returned no verified repair result. Check the local Codex runtime and retained repair log.')
+    return dict(ok=returncode==0 and result['outcome'] in ('completed','queued'),message=result['message'][:500])
+
+
 def execute(state):
     from device_trust import protect
     saved=json.loads(protect(state.read_bytes(),decrypt=True))
-    target=saved['target'];ok=False
+    target=saved['target'];result=dict(ok=False,message='Companion repair process did not complete. The PSD and repair log are retained.')
     # Keep ordinary Codex permission/sandbox configuration. Never bypass it.
     # The desktop can keep the configured chat's writer open indefinitely.
     # Each durable repair gets its own CLI session; the bounded server prompt
     # carries its complete scope and the configured working directory is kept.
-    command=[saved['executable'],'exec','--json','-']
+    final=state.with_suffix('.final.json')
+    command=[saved['executable'],'exec','--json','--output-schema',str(ROOT/'config/auto_editions/repair-result.schema.json'),
+             '--output-last-message',str(final),'-']
+    prompt=saved['repair']['prompt']+'\nReturn the required JSON result. Use blocked when tools are unavailable or no repair was applied. Use queued only after a durable native preparation/JPG queue acknowledgement, and completed only after verifying Ready/Open. Include the exact blocker in message without paths, credentials or customer data.'
     try:
         with state.with_suffix('.log').open('wb') as log:
-            result=subprocess.run(command,input=saved['repair']['prompt'].encode(),cwd=target['cwd'],
+            process=subprocess.run(command,input=prompt.encode(),cwd=target['cwd'],
                 stdout=log,stderr=log,timeout=5400,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        ok=result.returncode==0
+        result=outcome(final,process.returncode)
     except (OSError,subprocess.TimeoutExpired):pass
-    finally:atomic(state.with_suffix('.result.json'),{'ok':ok})
+    finally:atomic(state.with_suffix('.result.json'),result)
 
 if __name__=='__main__':execute(Path(sys.argv[1]))

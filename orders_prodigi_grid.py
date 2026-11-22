@@ -1,10 +1,18 @@
 """Compact Orders table. One batched local status read; no supplier I/O here."""
 from pathlib import Path
+from datetime import datetime
 import re,hashlib,json
 from urllib.parse import urljoin
 
 ORIGIN='https://sports-cave-image-factory.onrender.com'
 ACTIVE={'Waiting for order','Queued','Uploading','Creating sandbox draft','Awaiting product selection','Awaiting browser upload','Selecting product','Browser uploading','Checking QA','Preparing JPG','Preparing certificate','Awaiting certificate browser','Certificate browser uploading','Awaiting dashboard QA','Checking dashboard QA','Submitting','Certificate pending','Submitted'}
+
+
+def latest_update(values):
+    def stamp(value):
+        try:return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
+        except (ValueError,TypeError):return 0
+    return max(values,key=stamp,default=None)
 
 
 def supplier_link(order_id):
@@ -57,6 +65,9 @@ def batch_status(ids):
         value['_submit_enabled']=automatic
         value['_runtime']=public(value,runtime.get(aid,{}))
         value['_companion_version']=companion.get('version','')
+    from orders_artwork_repair import batch as artwork_status
+    for aid,artwork in artwork_status(queue.connect,ids).items():
+        states.setdefault(aid,{})['_artwork']=artwork
     return states
 
 
@@ -113,9 +124,20 @@ def review(saved,row,jpg):
     if re.fullmatch('[a-f0-9]{64}',str(snap.get('job_id') or '')) and snap.get('output',{}).get('sha256'):
         jpg=ORIGIN+'/api/auto-editions/file?allocation_id='+str(row['edition_order_id'])+'&job_id='+snap['job_id']+'&inline=1'
     items=[dict(label=label,state='pass' if checks.get(key) is True else 'fail' if stopped and (checks.get(key) is False or key=='final_check') else 'pending') for key,label in CHECKS.items()]
-    return dict(status=state,message=runtime.get('label') or (saved or {}).get('message','Waiting for automatic artwork preparation.'),
+    artwork=(saved or {}).get('_artwork') or {}
+    if state in ('Submitted','Complete','Certificate pending','Submission uncertain') or str(row.get('prodigi','')).lower()=='complete':
+        artwork={**artwork,'active':False,'repairable':False} if artwork else {}
+    repairing=bool(artwork.get('active') or artwork.get('repairable')) and state not in ('Submitted','Complete','Certificate pending','Submission uncertain')
+    if repairing:
+        state='PSD repairing' if artwork.get('active') else 'PSD repair'
+        stopped=False
+        items=[dict(label=label,state='pending') for label in CHECKS.values()]
+    timestamps=[str(v) for v in (runtime.get('seen_at'),(saved or {}).get('updated_at'),
+        ((saved or {}).get('last_failure') or {}).get('at'),artwork.get('updated_at')) if v]
+    return dict(status=state,message=(artwork.get('message') if repairing else None) or runtime.get('label') or (saved or {}).get('message','Waiting for automatic artwork preparation.'),
+        artwork=artwork,
         progress=runtime,companion_version=(saved or {}).get('_companion_version',''),
-        updated_at=runtime.get('seen_at') or (saved or {}).get('updated_at') or ((saved or {}).get('last_failure') or {}).get('at'),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
+        updated_at=latest_update(timestamps),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
         submission_enabled=(saved or {}).get('_submit_enabled'),
         insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
         shipping_quote=shipping_summary(saved),

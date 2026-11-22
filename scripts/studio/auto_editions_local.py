@@ -205,6 +205,16 @@ def sync_colour_configuration(config):
     os.environ['AUTO_EDITIONS_UNTAGGED_RGB_DEFAULT']=value['default_group']
 
 
+def reconcile_retained_checkpoint(row):
+    """A durable failure ACK must release the same idle in-memory checkpoint."""
+    current=JOBS.get(row['folder'].name)
+    if (current is not None and current.get('context')==row.get('context')
+            and not current.get('workers',0) and not row.get('checkpoint_pending')
+            and row.get('status')=='Blocked'):
+        current.update(status='Blocked',checkpoint_pending=False,error=row.get('error',''),
+                       checkpoint_reported=bool(row.get('checkpoint_reported')))
+
+
 def recover_retained(config):
     # No grants/secrets in journals. Reissue only the same host-owned lease.
     # Rotate the bounded read window: retained completed history must never hide
@@ -244,7 +254,9 @@ def recover_retained(config):
             response=getattr(error,'response',None)
             if response is not None and response.status_code in (400,403,409):
                 data.update(status='Blocked',checkpoint_pending=False,error='Lease or source changed; package retained for review.')
-                atomic_json(file,data);continue
+                atomic_json(file,data)
+                reconcile_retained_checkpoint(dict(data,folder=file.parent))
+                continue
             raise
         if result.get('completed'):
             if result['completed']['source']!=ctx['source']:raise ValueError('Completed source changed.')
@@ -254,7 +266,7 @@ def recover_retained(config):
             finish_upload(row,result['completed'],time.monotonic());journal(row);return True
         if data.get('checkpoint_pending'):
             row=dict(data,grant=result['grant'],folder=file.parent)
-            report_failure(row);return True
+            report_failure(row);reconcile_retained_checkpoint(row);return True
         start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0),upload_protocol=max(data.get('upload_protocol',0),result.get('upload_protocol',0)),upload_max_bytes=result.get('upload_max_bytes'))
         return True
     return False
@@ -517,7 +529,7 @@ def find_reusable_package(ctx,generation=None,*,max_bytes=None):
     return None
 
 
-def reconnect(row):
+def reconnect(row,*,checkpoint_only=False):
     from device_trust import protect
     import requests
     config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
@@ -531,8 +543,9 @@ def reconnect(row):
         if data['completed'].get('source')!=ctx['source']:raise ValueError('Completed source changed.')
         return data['completed']
     row['grant']=data['grant']
-    if row.get('upload_protocol')==1 and data.get('upload_protocol')!=1:raise ValueError('Resumable backend compatibility is required; legacy replay refused.')
-    row['upload_protocol']=data.get('upload_protocol',row.get('upload_protocol',0))
+    downgraded=row.get('upload_protocol')==1 and data.get('upload_protocol')!=1
+    if downgraded and not checkpoint_only:raise ValueError('Resumable backend compatibility is required; legacy replay refused.')
+    if not downgraded:row['upload_protocol']=data.get('upload_protocol',row.get('upload_protocol',0))
     row['upload_max_bytes']=data.get('upload_max_bytes')
     if context(row['grant'])!=ctx:raise ValueError('Preparation identity changed.')
 
@@ -726,7 +739,7 @@ def report_failure(row):
     row['checkpoint_pending']=True; journal(row)
     try:
         import requests
-        completed=reconnect(row)
+        completed=reconnect(row,checkpoint_only=True)
         if completed:
             finish_upload(row,completed,time.monotonic())
             return

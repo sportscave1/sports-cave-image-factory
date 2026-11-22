@@ -64,7 +64,7 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         self.assertEqual(
             design_studio_styles.STYLE_REGISTRY_VERSION,
-            "sports_cave_design_styles_v6_text_minimalism",
+            "sports_cave_design_styles_v7_timeless_artwork",
         )
 
     def test_every_style_builds_all_four_prompts(self):
