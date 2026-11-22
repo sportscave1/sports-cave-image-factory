@@ -107,6 +107,8 @@ class MetaCommunity:
             )
             result = response.json()
         except (requests.RequestException, ValueError):
+            if method == "GET":
+                raise CommunityError("Meta is temporarily unavailable. Use Refresh to retry this section.") from None
             raise CommunityError("Meta could not confirm the result. Refresh before retrying; a write may have succeeded.") from None
         if response.status_code >= 300 or (isinstance(result, dict) and result.get("error")):
             code = (result.get("error") or {}).get("code") if isinstance(result, dict) else None
@@ -150,6 +152,9 @@ class MetaCommunity:
             # older posts/comments fail with error 100. Never follow paging URLs.
             params["after"] = str(after)
         result = self._request("GET", path, params=params, advertising=advertising)
+        if (not isinstance(result, dict) or "data" not in result or not isinstance(result.get("data"), list)
+                or any(not isinstance(row, dict) for row in result.get("data", []))):
+            raise CommunityError("Meta returned an unexpected page. Refresh to retry this section.")
         paging = result.get("paging") or {}
         return {"data": result.get("data") or [],
                 "after": (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""}
@@ -199,6 +204,10 @@ class MetaCommunity:
 
     def messages(self, platform, thread_id, *, after=""):
         self._thread(platform, thread_id)
+        return self._thread_messages(thread_id, after=after)
+
+    def _thread_messages(self, thread_id, *, after=""):
+        # Internal only: the public reader and sender both verify ownership first.
         return self._edge(f"{identifier(thread_id)}/messages", "id,created_time,from,to,message,attachments", after=after)
 
     def send(self, platform, thread_id, text):
@@ -206,7 +215,7 @@ class MetaCommunity:
         if thread.get("is_owner") is False:
             raise CommunityError("Another app owns this conversation. Check conversation routing in Business Suite.")
         owner = self.owner(platform)
-        messages = self.messages(platform, thread_id)["data"]
+        messages = self._thread_messages(thread_id)["data"]
         if not reply_open(messages, owner):
             raise CommunityError("No inbound message within 24 hours. Open this conversation in Business Suite.")
         peers = [row for row in (thread.get("participants") or {}).get("data", [])

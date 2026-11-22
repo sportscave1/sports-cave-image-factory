@@ -8,9 +8,12 @@ import streamlit as st
 from meta_social import reply_open
 from social_community_feed import timestamp
 from social_media import SYDNEY_TZ
+from social_community_presentation import detail_header, empty_state, facts
 
 
 def dated(value):
+    if isinstance(value, datetime):
+        value = value.isoformat()
     if not timestamp(value):
         return "Date unavailable"
     return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(SYDNEY_TZ).strftime("%d %b %Y · %I:%M %p %Z")
@@ -53,8 +56,9 @@ def _select_thread(rows):
 def _messages(api, feed, thread, done):
     platform, thread_id = thread["platform"], thread["id"]
     suffix = platform + "-" + thread_id
-    st.markdown("**" + label_text(peer(thread, api)) + "**")
-    st.caption(platform + " · " + dated(thread.get("updated_time")))
+    detail_header(peer(thread, api), platform + " · " + dated(thread.get("updated_time")),
+                  "Unread" if thread.get("unread_count") else "Conversation",
+                  "gold" if thread.get("unread_count") else "neutral")
     first = feed.read("messages", platform, thread_id)
     messages = {row["id"]: row for row in first["data"]}
     after = first.get("after")
@@ -67,7 +71,7 @@ def _messages(api, feed, thread, done):
         if after not in cursors:
             cursors.append(after)
         st.rerun()
-    with st.container(height=350, border=True):
+    with st.container(height=370, border=True):
         for message in sorted(messages.values(), key=lambda row: timestamp(row.get("created_time"))):
             outgoing = str((message.get("from") or {}).get("id")) in {api.page, api.instagram}
             text = str(message.get("message") or "[Attachment]")
@@ -93,7 +97,7 @@ def _messages(api, feed, thread, done):
     with st.form("community-reply-form-" + suffix):
         text = st.text_area("Reply", max_chars=1000, key=draft_key, height=80,
                             placeholder="Write a reply…", label_visibility="collapsed")
-        if st.form_submit_button("Send reply", disabled=not can_send, type="primary"):
+        if st.form_submit_button("Send reply", disabled=not can_send, type="primary", width="stretch"):
             api.send(platform, thread_id, text)
             done("Reply sent.", draft_key=draft_key)
     if not can_send:
@@ -107,26 +111,32 @@ def _messages(api, feed, thread, done):
 def render_inbox(api, feed, done):
     snapshot = feed.threads()
     _errors(snapshot)
-    query = st.text_input("Search inbox", placeholder="Search conversations…", key="community-inbox-search",
-                          label_visibility="collapsed").strip().casefold()
-    rows = [row for row in snapshot["items"] if not query or query in (peer(row, api) + " " + row["platform"]).casefold()]
+    search, status = st.columns([3, 1])
+    query = search.text_input("Search inbox", placeholder="Search conversations…", key="community-inbox-search",
+                              icon=":material/search:", label_visibility="collapsed").strip().casefold()
+    unread_only = status.selectbox("Conversation status", ("All conversations", "Unread"),
+                                  key="community-inbox-filter", label_visibility="collapsed") == "Unread"
+    rows = [row for row in snapshot["items"] if (not query or query in (peer(row, api) + " " + row["platform"]).casefold())
+            and (not unread_only or int(row.get("unread_count") or 0) > 0)]
     unread = sum(int(row.get("unread_count") or 0) for row in snapshot["items"])
     st.caption(f"{len(rows)} conversations · {unread} unread · Facebook + Instagram")
     if rows:
-        left, right = st.columns([1.25, 1.75], gap="medium")
+        left, right = st.columns([1.55, 1.3], gap="large")
         with left:
             st.dataframe([{"Customer": peer(row, api), "Channel": row["platform"],
                            "Updated": dated(row.get("updated_time")), "Unread": int(row.get("unread_count") or 0)}
-                          for row in rows], hide_index=True, height=410, width="stretch",
+                          for row in rows], hide_index=True, height=505, width="stretch", row_height=52,
                          key="community-inbox-grid", selection_mode="single-row",
                          on_select=lambda: _select_thread(rows))
             st.caption("Select a conversation to read and reply.")
         selected = st.session_state.get("community-selected-thread")
         thread = next((row for row in rows if (row["platform"], row["id"]) == selected), rows[0])
-        with right:
+        with right, st.container(key="community-detail"):
             _messages(api, feed, thread, done)
     elif not snapshot["errors"]:
-        st.info("No conversations match." if query else "Your inbox is clear.")
+        empty_state("No conversations match" if query or unread_only else "Your inbox is clear",
+                    "Try another name or change the unread filter." if query or unread_only else
+                    "Facebook and Instagram messages will appear here together.")
     if any(snapshot["more"].values()) and st.button("Load more conversations", key="community-more-threads"):
         feed.more_threads(snapshot)
         st.rerun()
@@ -138,38 +148,42 @@ def _comment_actions(api, row, done):
                 "comment_edge": (row["post"].get("comments") or {}).get("comment_edge", "")}
                if platform == "Instagram" and row["post"].get("ad_id") else {})
     suffix = platform + "-" + comment_id
+    detail_header(author(row), platform + " · " + dated(row.get("created_time") or row.get("timestamp")),
+                  "Ad comment" if row["post"].get("advertising") else "Comment", "gold")
     st.text(row.get("text") or row.get("message") or "[Comment]")
     post_text = row["post"].get("message") or row["post"].get("caption") or "Sports Cave post"
     st.caption(("Advertising post: " if row["post"].get("advertising") else "Post: ") + post_text[:200])
     st.caption(dated(row.get("created_time") or row.get("timestamp")) +
                f" · {int(row.get('like_count') or 0)} likes")
-    actions = st.columns([1, 1, 1, 1, 1.5])
+    actions = st.columns([1, 1, 1.2])
     if platform == "Facebook":
         if actions[0].button("Like", icon=":material/thumb_up:", key="like-" + suffix, disabled=not api.writes):
             api.moderate(platform, post_id, comment_id, "like")
             done("Comment liked.")
-        if actions[1].button("Unlike", key="unlike-" + suffix, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, "unlike")
-            done("Like removed.")
     else:
         link = row["post"].get("permalink")
         if str(link or "").startswith("https://"):
             actions[0].link_button("Like on Instagram", link)
-    for column, action in zip(actions[2:4], ("hide", "unhide")):
-        if column.button(action.title(), key=action + "-" + suffix, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, action, **context)
-            done("Comment updated.")
+    if actions[1].button("Hide", key="hide-" + suffix, disabled=not api.writes):
+        api.moderate(platform, post_id, comment_id, "hide", **context)
+        done("Comment hidden.")
     link = row["post"].get("permalink") or row["post"].get("permalink_url")
     if str(link or "").startswith("https://"):
-        actions[4].link_button("Open post", link)
+        actions[2].link_button("Open post", link)
     draft_key = "community-comment-reply-" + suffix
     with st.form("community-comment-form-" + suffix):
         text = st.text_area("Public reply", max_chars=1000, key=draft_key, height=80,
                             placeholder="Reply to this comment…", label_visibility="collapsed")
-        if st.form_submit_button("Reply", icon=":material/reply:", type="primary", disabled=not api.writes):
+        if st.form_submit_button("Reply", icon=":material/reply:", type="primary", disabled=not api.writes, width="stretch"):
             api.moderate(platform, post_id, comment_id, "reply", text, **context)
             done("Reply sent.", draft_key=draft_key)
     with st.popover("More", icon=":material/more_horiz:"):
+        if platform == "Facebook" and st.button("Unlike", key="unlike-" + suffix, disabled=not api.writes):
+            api.moderate(platform, post_id, comment_id, "unlike")
+            done("Like removed.")
+        if st.button("Unhide", key="unhide-" + suffix, disabled=not api.writes):
+            api.moderate(platform, post_id, comment_id, "unhide", **context)
+            done("Comment restored.")
         confirm = st.checkbox("Confirm permanent deletion", key="community-delete-confirm-" + suffix)
         if st.button("Delete comment", key="delete-" + suffix, disabled=not (api.writes and confirm)):
             api.moderate(platform, post_id, comment_id, "delete", **context)
@@ -180,21 +194,33 @@ def render_comments(api, feed, done):
     snapshot = feed.comments()
     _errors(snapshot)
     query = st.text_input("Search comments", placeholder="Search comments or people…", key="community-comment-search",
-                          label_visibility="collapsed").strip().casefold()
+                          icon=":material/search:", label_visibility="collapsed").strip().casefold()
     rows = [row for row in snapshot["items"] if not query or query in
             (author(row) + " " + str(row.get("text") or row.get("message") or "") + " " + row["platform"]).casefold()]
     visible = st.session_state.get("community-comment-visible", 40)
     st.caption(f"{min(len(rows), visible)} of {len(rows)} loaded comments · newest first · dates in Sydney time")
-    for row in rows[:visible]:
-        platform, comment_id = row["platform"], row["id"]
-        date = dated(row.get("created_time") or row.get("timestamp"))
-        summary = (date + " · " + platform + " · " + label_text(author(row), 45) +
-                   " — " + label_text(row.get("text") or row.get("message") or "[Comment]"))
-        panel = st.expander(summary, key="community-comment-open-" + platform + "-" + comment_id, on_change="rerun")
-        # Closed rows send only summaries; forms/actions are constructed on demand.
-        if panel.open:
-            with panel:
-                _comment_actions(api, row, done)
+    listing, details = st.columns([1.8, 1.25], gap="large")
+    with listing:
+        for row in rows[:visible]:
+            platform, comment_id = row["platform"], row["id"]
+            date = dated(row.get("created_time") or row.get("timestamp"))
+            summary = (date + " · " + platform + " · " + label_text(author(row), 45) +
+                       " — " + label_text(row.get("text") or row.get("message") or "[Comment]"))
+            panel = st.expander(summary, key="community-comment-open-" + platform + "-" + comment_id,
+                on_change=lambda p=platform, c=comment_id: st.session_state.__setitem__("community-selected-comment", (p, c)))
+            if panel.open:
+                with panel:
+                    st.text(row.get("text") or row.get("message") or "[Comment]")
+                    st.caption("Reply and manage this comment in the detail panel.")
+        if not rows and snapshot["errors"]:
+            empty_state("Comments could not load", "Check the connection notice above, then use Refresh to try again.")
+    selected = st.session_state.get("community-selected-comment")
+    row = next((item for item in rows[:visible] if (item["platform"], item["id"]) == selected), None)
+    with details, st.container(key="community-detail"):
+        if row:
+            _comment_actions(api, row, done)
+        else:
+            empty_state("Comment details", "Open a comment to read its context, reply or manage it here.")
     if not rows and not snapshot["errors"]:
         pending = any(snapshot["more_posts"].values()) or snapshot.get("more_ads")
         st.info("No comments match the loaded results." if query else

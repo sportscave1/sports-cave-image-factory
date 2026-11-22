@@ -6,6 +6,8 @@ from meta_social import CommunityError, require_access
 
 PLATFORMS = ("Facebook", "Instagram")
 CACHE_SECONDS = 60
+HISTORY_CACHE_SECONDS = 300
+ERROR_CACHE_SECONDS = 15
 
 
 def timestamp(value):
@@ -37,7 +39,10 @@ class CommunityFeed:
         key = (method, args, tuple(sorted(kwargs.items())))
         cache = self.state.setdefault("cache", {})
         entry = cache.get(key)
-        if entry and self.now() - entry["at"] < CACHE_SECONDS:
+        # Editing/searching never re-fetches history. Older pages remain cached
+        # for five minutes, while the newest page still refreshes every minute.
+        ttl = ERROR_CACHE_SECONDS if entry and "error" in entry else HISTORY_CACHE_SECONDS if kwargs.get("after") else CACHE_SECONDS
+        if entry and self.now() - entry["at"] < ttl:
             if "error" in entry:
                 raise CommunityError(entry["error"])
             return entry["data"]
@@ -47,7 +52,8 @@ class CommunityFeed:
             cache[key] = {"at": self.now(), "error": str(exc)}
             raise
         cache[key] = {"at": self.now(), "data": data}
-        self.state["synced_at"] = datetime.now(timezone.utc).isoformat()
+        if not kwargs.get("after"):
+            self.state["synced_at"] = datetime.now(timezone.utc).isoformat()
         return data
 
     def invalidate(self):

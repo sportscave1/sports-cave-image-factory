@@ -101,14 +101,14 @@ class MetaContractTests(unittest.TestCase):
 
     def test_send_uses_verified_recipient_and_recent_inbound_only(self):
         self.api._thread = Mock(return_value={"participants": {"data": [{"id": "page"}, {"id": "customer"}]}})
-        self.api.messages = Mock(return_value={"data": [{
+        self.api._thread_messages = Mock(return_value={"data": [{
             "from": {"id": "customer"}, "created_time": datetime.now(timezone.utc).isoformat()}]})
         self.http.request.return_value = response({"message_id": "sent"})
         self.api.send("Facebook", "thread", "Thank you")
         body = self.http.request.call_args.kwargs["json"]
         self.assertEqual(body["recipient"], {"id": "customer"})
         self.assertEqual(body["messaging_type"], "RESPONSE")
-        self.api.messages.return_value = {"data": [{"from": {"id": "page"}, "created_time": datetime.now(timezone.utc).isoformat()}]}
+        self.api._thread_messages.return_value = {"data": [{"from": {"id": "page"}, "created_time": datetime.now(timezone.utc).isoformat()}]}
         self.http.reset_mock()
         with self.assertRaisesRegex(CommunityError, "24 hours"):
             self.api.send("Facebook", "thread", "Hello")
