@@ -1,11 +1,13 @@
 """Offline contracts for ad comments whose ordinary media node is unavailable."""
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from meta_social import CommunityError, MetaCommunity
 from tests.community_fixtures import ADMIN
 from tests.test_meta_social import ENV, response
+from tests.community_fixtures import FakeCommunity
+from social_community_feed import CommunityFeed
 
 
 def client():
@@ -96,3 +98,18 @@ def test_failed_reply_is_not_retried():
     with pytest.raises(CommunityError):
         api.moderate("Instagram", "media", "c", "reply", "Thanks", ad_id="ad1")
     assert sum(c.args[0] == "POST" for c in http.request.call_args_list) == 1
+
+
+def test_boosted_post_retains_ad_comments_and_context_when_organic_post_is_loaded():
+    api = FakeCommunity(dict(ADMIN))
+    post = {"id": "post", "platform": "Instagram", "advertising": True, "ad_id": "ad1",
+            "comments": {"data": [{"id": "ad-comment", "text": "Ad question"}], "after": "ad-cursor"}}
+    feed = CommunityFeed(api, {})
+    with patch.object(api, "ad_comment_feed", create=True, return_value={"data": [post], "after": ""}), \
+            patch.object(api, "comments", wraps=api.comments) as read:
+        first = feed.comments()
+        row = next(r for r in first["items"] if r["id"] == "ad-comment")
+        assert row["post"]["ad_id"] == "ad1"
+        feed.more_comments(first)
+        feed.comments()
+        read.assert_called_with("Instagram", "post", after="ad-cursor", ad_id="ad1", comment_edge="")

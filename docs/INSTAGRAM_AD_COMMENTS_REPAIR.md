@@ -21,7 +21,7 @@ without logging credentials or customer comment text.
 
 Reference: https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-media/comments
 
-Offline validation: 99 tests passed, 8 legacy opt-in database tests skipped,
+Offline validation: 100 tests passed, 8 legacy opt-in database tests skipped,
 68 subtests passed; Render topology validator passed. No real replies,
 moderation actions, ad changes or customer automations were sent during tests.
 Live availability must be verified after deployment; offline tests do not prove

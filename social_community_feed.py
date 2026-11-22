@@ -99,7 +99,13 @@ class CommunityFeed:
                 for after in cursors:
                     page = self.read("comment_feed", platform, after=after)
                     for post in page["data"]:
-                        posts[(platform, post["id"])] = dict(post, platform=platform)
+                        key = (platform, post["id"])
+                        existing = posts.get(key) or {}
+                        # A boosted organic post may also be an ad. Preserve
+                        # its cross-placement comments and verified ad context;
+                        # the ordinary /media expansion is a narrower view.
+                        posts[key] = (dict(post, **existing) if existing.get("ad_id")
+                                      else dict(post, platform=platform))
                         platform_posts[post["id"]] = post
                     next_after = next_cursor(page)
                     if (after == cursors[-1] and next_after and next_after not in cursors
