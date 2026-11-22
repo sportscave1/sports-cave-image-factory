@@ -77,13 +77,6 @@ def test_meta_new_destination_drops_stale_acquisition_keeps_variant_and_fragment
     assert tags["utm_id"]==["{{campaign.id}}"] and tags["ad_id"]==["{{ad.id}}"]
 
 
-def test_organic_social_never_inherits_paid_click_or_campaign_identifiers():
-    from social_media_creator import build_tracked_url
-    url=build_tracked_url("https://example.test/products/fixture?variant=123&gclid=old&fbclid=old&utm_id=old&UTM_Source=google&utm_medium=cpc&ad_id=old",platform="Facebook",series="fixture",product_handle="fixture",market="AUS",content_format="post",hook="fixture",value=date(2026,11,21))
-    query=parse_qs(urlsplit(url).query)
-    assert query["utm_source"]==["facebook"] and query["utm_medium"]==["organic_social"]
-    assert query["variant"]==["123"]
-    assert not ({"gclid","fbclid","utm_id","ad_id","UTM_Source"}&query.keys())
 
 
 @pytest.mark.parametrize("medium,tactic,source,expected", [
@@ -121,16 +114,3 @@ def test_referral_identity_is_visible_without_inventing_a_paid_status(source,ref
         "source":source,"referrerUrl":referrer,"landingPage":"https://example.test/"}}})
     assert evidence["channel"]=="Unresolved"
     assert evidence.get("observed_referral")==label
-
-
-def test_google_paid_diagnostics_and_linker_do_not_leak_into_new_social_links():
-    from social_media_creator import build_tracked_url
-    from meta_posting_service import validate_destination_url
-    old="https://example.test/products/fixture?variant=123&utm_term=sc_google_paid_123&SC_CHANNEL=google_paid&sc_network=x&_gl=old#details"
-    clean=validate_destination_url(old)
-    assert parse_qs(urlsplit(clean).query)=={"variant":["123"]}
-    organic=build_tracked_url(old,platform="Facebook",series="fixture",product_handle="fixture",market="AUS",content_format="post",hook="fixture",value=date(2026,11,21))
-    tags=parse_qs(urlsplit(organic).query)
-    assert tags["utm_medium"]==["organic_social"]
-    assert not ({"sc_channel","SC_CHANNEL","sc_network","_gl"}&tags.keys())
-    assert urlsplit(clean).fragment=="details"

@@ -134,8 +134,6 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
                 product_url="https://sportscave.com.au/products/shane-warne-king-of-spin",
             )
             self.assertNotIn(marker, prompt)
-        social_source = (ROOT / "social_media_creator.py").read_text(encoding="utf-8")
-        self.assertNotIn(marker, social_source)
 
 
 if __name__ == "__main__":

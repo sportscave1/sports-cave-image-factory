@@ -17,7 +17,6 @@ import ads_page
 from tests.ads_prompt_contracts import current_ie
 import ads_product_catalog
 import image_factory
-import social_media_catalog
 from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 
 
@@ -1758,21 +1757,6 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("FULL OUTER JOIN shopify_products", captured["query"])
         self.assertIn("sp.online_store_url", captured["query"])
 
-    def test_social_media_and_ads_share_the_authoritative_product_rows(self):
-        rows = [
-            {
-                "shopify_product_id": "product-123",
-                "product_title": "Six Laps Ahead",
-                "online_store_url": "https://www.sportscaveshop.com/products/six-laps-ahead",
-            }
-        ]
-
-        with patch.object(
-            social_media_catalog,
-            "load_live_edition_product_rows",
-            return_value=rows,
-        ):
-            self.assertEqual(social_media_catalog._database_products(), rows)
 
     def test_edition_ops_dropdown_combines_live_catalogue_with_snapshot_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4875,7 +4859,7 @@ PRIMARY TEXT VARIATIONS
         self.assertNotIn("importlib.import_module(\"marketing_factory_page\")", source)
 
     def test_existing_unrelated_route_modules_still_import_successfully(self):
-        for module_name in ("image_factory", "orders_page", "edition_ops", "social_media_reels_studio_page"):
+        for module_name in ("image_factory", "orders_page", "edition_ops"):
             with self.subTest(module_name=module_name):
                 self.assertIsNotNone(importlib.import_module(module_name))
 

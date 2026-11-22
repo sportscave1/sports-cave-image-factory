@@ -220,16 +220,6 @@ class PhysicalWorkflowTests(unittest.TestCase):
             self.assertIn('"width_cm": 87',current['prompt'])
             self.assertEqual(current['filename'],old['filename'])
 
-    def test_active_social_prompts_keep_creative_content_dimensions_and_copy(self):
-        import social_media_creator as creator
-        from tests.test_social_media_creator import base_payload
-        actual = creator.build_content_package(base_payload())
-        with patch.object(physical,'build',return_value=''):
-            previous = creator.build_content_package(base_payload())
-        for current,old in zip(actual['visual_prompts'],previous['visual_prompts']):
-            self.assertEqual(current['prompt'].count(physical.MARKER),1)
-            self.assertEqual(strip_physical(current['prompt']),old['prompt'])
-            self.assertIn('1080 x 1350',current['prompt'])
 
     def test_marketing_mockup_prompts_keep_nonimage_output(self):
         import marketing_factory_page as marketing
@@ -242,28 +232,16 @@ class PhysicalWorkflowTests(unittest.TestCase):
             self.assertEqual(strip_physical(value) if isinstance(value,str) else value,previous[key],key)
         self.assertEqual(actual['mockup_brief'].count(physical.MARKER),1)
 
-    def test_social_and_marketing_use_available_selected_variant_evidence(self):
-        import social_media_creator as creator
-        from tests.test_social_media_creator import base_payload
+    def test_marketing_uses_available_selected_variant_evidence(self):
         import marketing_factory_page as marketing
         from tests.test_marketing_factory_page import MarketingFactoryPageTests
         context = {'selected_size':'S','orientation':'portrait','frame_finish':'White'}
-        social = creator.build_content_package(base_payload(physical_product=context))
         pack = marketing._build_pack(MarketingFactoryPageTests()._inputs(physical_product=context))
-        for text in [p['prompt'] for p in social['visual_prompts']] + [pack['mockup_brief']]:
+        for text in [pack['mockup_brief']]:
             for block in physical.BLOCK.findall(text):
                 self.assertIn('"width_cm": 62',block)
                 self.assertIn('"frame_finish": "White"',block)
 
-    def test_active_reels_stills_and_video_keep_camera_and_artwork_freeze(self):
-        import social_media_reels_studio_page as reels
-        scene = reels.get_scene_by_slug('wall-only')
-        for builder in (reels.build_image_prompt,reels.build_video_prompt):
-            actual = builder(scene,'collector','Collector artwork','Motorsport','',prompt_records={})
-            with patch.object(physical,'build',return_value=''):
-                previous = builder(scene,'collector','Collector artwork','Motorsport','',prompt_records={})
-            self.assertEqual(actual.count(physical.MARKER),1)
-            self.assertEqual(strip_physical(actual).strip(),previous.strip())
 
     def test_google_display_prompts_use_metadata_without_changing_strategy(self):
         import ads_google_demand_gen as google

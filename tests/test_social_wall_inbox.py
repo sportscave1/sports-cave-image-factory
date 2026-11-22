@@ -112,13 +112,15 @@ class InboxUiTests(unittest.TestCase):
         self.assertNotIn('wall_preview_analytics_ui',source)
         self.assertNotIn('wall_preview_inbox.render',source)
 
-    def test_rendered_overview_makes_zero_wall_preview_reads(self):
-        from tests.test_social_media_page import READY_PAGE
-        script=READY_PAGE.replace('"social-media-workspace-view", "Create"','"social-media-workspace-view", "Overview"')
-        with patch('wall_preview_analytics.report',side_effect=AssertionError('Overview analytics query')) as report,patch.object(ledger,'list_previews',side_effect=AssertionError('Overview inbox query')) as previews:
+    def test_rendered_community_makes_zero_wall_preview_reads(self):
+        script = """import social_media_page
+from tests.community_fixtures import FakeCommunity, ADMIN
+social_media_page.render_page(ADMIN, api_factory=FakeCommunity)
+"""
+        with patch('wall_preview_analytics.report', side_effect=AssertionError('Community analytics query')) as report, patch.object(ledger,'list_previews',side_effect=AssertionError('Community inbox query')) as previews:
             app=AppTest.from_string(script).run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.segmented_control[0].value,'Overview')
+            self.assertEqual(app.segmented_control[0].value,'Inbox')
             report.assert_not_called();previews.assert_not_called()
 
     def test_batch_thumbnails_never_download_originals(self):
@@ -146,5 +148,6 @@ class InboxUiTests(unittest.TestCase):
         app.session_state['route']='Social Media'
         app.run()
         keys={button.key for button in app.sidebar.button}
-        self.assertIn('sidebar-child::AI Reels', keys)
+        self.assertNotIn('sidebar-child::AI Reels', keys)
+        self.assertIn('sidebar-nav::Social Media', keys)
         self.assertNotIn('sidebar-child::Wall Preview Inbox', keys)

@@ -120,7 +120,6 @@ edition_ops_module = None
 orders_page_module = None
 support_email_page_module = None
 design_studio_page_module = None
-social_media_reels_studio_page_module = None
 social_media_page_module = None
 ads_page_module = None
 ads_creative_refresh_module = None
@@ -240,15 +239,6 @@ def get_design_studio_page():
         design_studio_page_module = importlib.import_module("design_studio_page")
         log_startup_stage("DESIGN STUDIO IMPORT DONE")
     return design_studio_page_module
-
-
-def get_social_media_reels_studio_page():
-    global social_media_reels_studio_page_module
-    if social_media_reels_studio_page_module is None:
-        log_startup_stage("SOCIAL MEDIA REELS STUDIO IMPORT START")
-        social_media_reels_studio_page_module = importlib.import_module("social_media_reels_studio_page")
-        log_startup_stage("SOCIAL MEDIA REELS STUDIO IMPORT DONE")
-    return social_media_reels_studio_page_module
 
 
 def get_social_media_page():
@@ -2988,7 +2978,7 @@ def page_from_query_params():
     if not value:
         return ""
     if value == social_media.LEGACY_REELS_PAGE_KEY:
-        return social_media.AI_REELS_ROUTE
+        return social_media.SOCIAL_MEDIA_ROUTE
     route = normalise_app_page(value)
     if route:
         return route
@@ -7201,7 +7191,6 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Prodigi": ":material/inventory_2:",
     "Edition Ops": ":material/assignment:",
     social_media.SOCIAL_MEDIA_ROUTE: ":material/campaign:",
-    social_media.AI_REELS_ROUTE: ":material/movie_edit:",
     social_media.WALL_PREVIEW_ROUTE: ":material/photo_library:",
     "Product Uploads": ":material/upload_file:",
     "Design Studio": ":material/palette:",
@@ -7278,7 +7267,7 @@ def _active_sidebar_group(route):
         return "email"
     return navigation_runtime.active_disclosure_group(
         route,
-        social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.AI_REELS_ROUTE},
+        social_routes={social_media.SOCIAL_MEDIA_ROUTE},
         seo_routes=seo_nav.SEO_ROUTES,
         reporting_routes={
             "Reporting",
@@ -7376,22 +7365,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             set_current_page(route, source="sidebar")
             st.rerun(scope="app")
 
-    if social_media.SOCIAL_MEDIA_ROUTE in allowed_routes:
-        if disclosure(
-            "social",
-            SIDEBAR_NAV_LABELS.get(social_media.SOCIAL_MEDIA_ROUTE, "Social Media"),
-            SIDEBAR_ICON_BY_ROUTE[social_media.SOCIAL_MEDIA_ROUTE],
-            social_media.SOCIAL_MEDIA_ROUTE,
-        ):
-            children = st.container(key="sidebar-social-children")
-            children.markdown('<span id="sidebar-social-children"></span>', unsafe_allow_html=True)
-            child_button(children, social_media.SOCIAL_MEDIA_ROUTE, "Overview")
-            child_button(
-                children,
-                social_media.AI_REELS_ROUTE,
-                social_media.AI_REELS_ROUTE,
-                icon=SIDEBAR_ICON_BY_ROUTE[social_media.AI_REELS_ROUTE],
-            )
+    _sidebar_route_button(social_media.SOCIAL_MEDIA_ROUTE, current_page, allowed_routes, root=st)
     for route in ("Product Uploads", "Design Studio", "Prompts", "Marketplace"):
         _sidebar_route_button(route, current_page, allowed_routes, root=st)
 
@@ -7597,7 +7571,7 @@ def render_sidebar():
 
     if (
         current_page not in MENU_OPTIONS
-        and current_page not in {social_media.AI_REELS_ROUTE, social_media.WALL_PREVIEW_ROUTE}
+        and current_page not in {social_media.WALL_PREVIEW_ROUTE}
         and current_page not in analytics_nav.ANALYTICS_ROUTES
         and current_page not in seo_nav.SEO_ROUTES
         and current_page not in ads_nav.ADS_ROUTES
@@ -13835,7 +13809,7 @@ def render_selected_page(current_page):
         inject_compact_page(st)
     elif current_page in {
         "Edition Ops", social_media.SOCIAL_MEDIA_ROUTE,
-        social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE,
+        social_media.WALL_PREVIEW_ROUTE,
         ads_nav.CREATIVE_REFRESH_ROUTE, ads_nav.POSTING_ROUTE,
         ads_nav.META_REVIEW_ROUTE, *seo_nav.SEO_ROUTES,
     }:
@@ -13898,12 +13872,6 @@ def render_selected_page(current_page):
     elif current_page == social_media.WALL_PREVIEW_ROUTE:
         import wall_preview_inbox
         wall_preview_inbox.render(current_os_user())
-    elif current_page == social_media.AI_REELS_ROUTE:
-        from social_media_ui import inject_styles as inject_social_styles
-        inject_social_styles()
-        get_social_media_reels_studio_page().render_page(
-            can_edit_prompts=prompt_editing_allowed()
-        )
     elif current_page in analytics_nav.ANALYTICS_ROUTES:
         get_analytics_page().render_page(
             current_os_user(),
