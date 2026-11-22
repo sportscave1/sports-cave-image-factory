@@ -119,11 +119,20 @@ def _recover_item_qa(key):
                 # Some provider reads omit this dashboard-only flag. Missing is
                 # not confirmation: admit a fresh full DOM QA pass, never mark it
                 # passed here. An explicit unsaved value must still block.
-                if order.get('usSalesTaxAlreadyCollected') is False:return False
-                if clean(order.get('shippingMethod'))!=receipt.get('shipping',{}).get('target'):return False
-            if pinned_order(receipt['before'])!=pinned_order(order):return False
+                if order.get('usSalesTaxAlreadyCollected') is False:
+                    __import__('logging').getLogger(__name__).info('Tax QA recovery held: provider_tax_false');return False
+                if clean(order.get('shippingMethod'))!=receipt.get('shipping',{}).get('target'):
+                    __import__('logging').getLogger(__name__).info('Tax QA recovery held: shipping_target_changed');return False
+            before=pinned_order(receipt['before']);after=pinned_order(order)
+            if before!=after:
+                if tax_readback:
+                    fields=','.join(sorted(k for k in before.keys()|after.keys() if before.get(k)!=after.get(k)))
+                    __import__('logging').getLogger(__name__).info('Tax QA recovery held: business_changed fields=%s',fields)
+                return False
             if prepermit and clean(receipt['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):return False
-        except (ValueError,PermissionError):return False
+        except (ValueError,PermissionError) as exc:
+            if tax_readback:__import__('logging').getLogger(__name__).info('Tax QA recovery held: current_validation kind=%s',type(exc).__name__)
+            return False
         value.setdefault('dashboard_qa_history',[]).append({k:receipt.get(k) for k in ('claimed_at','checked_at','verified','item_only')})
         value.pop('dashboard_qa');value.pop('last_failure',None)
         if tax_readback:value['qa_tax_readback_recoveries']=value.get('qa_tax_readback_recoveries',0)+1
