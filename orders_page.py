@@ -839,6 +839,8 @@ def _orders_supabase_visibility_marker():
 
 
 def _check_orders_supabase_live_refresh():
+    if st.session_state.get('orders-grid-feed-active'):
+        return
     if st.session_state.get('current_page', 'Orders') != 'Orders':
         return
     if _certificate_action_in_progress() or st.session_state.get(LOAD_FUTURE_KEY) is not None:
@@ -857,7 +859,8 @@ def _check_orders_supabase_live_refresh():
     except Exception as error:
         print(f"ORDERS SYNC: orders_page_live_refresh_check_failed status=failed error={error}", flush=True)
         return
-    if (st.session_state.get("current_page") != page
+    if (st.session_state.get('orders-grid-feed-active')
+            or st.session_state.get("current_page") != page
             or dict(st.session_state.get("sports_cave_current_user") or {}) != user
             or st.session_state.get(LOAD_GENERATION_KEY) != generation
             or st.session_state.get(LOAD_FUTURE_KEY) is not None
@@ -884,6 +887,10 @@ def _check_orders_supabase_live_refresh():
 
 
 def _render_orders_supabase_live_refresh():
+    # The account-authenticated table feed owns live row updates. Keep the old
+    # marker path for fallback/non-component views without refreshing this page.
+    if st.session_state.get('orders-grid-feed-active'):
+        return
     fragment = getattr(st, "fragment", None)
     if callable(fragment):
         # Read-only marker I/O must not hold up the completed Orders page.

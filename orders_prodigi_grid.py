@@ -62,6 +62,10 @@ def safe_link(value):
 def row_identity(row):
     aid=str(row.get('edition_order_id') or '')
     if aid:return 'allocation:'+aid
+    return unit_identity(row)
+
+
+def unit_identity(row):
     return 'unit:'+hashlib.sha256(json.dumps([str(row.get(k) or '') for k in
         ('shopify_order_id','shopify_line_item_id','allocation_index','unit_ordinal','shopify_product_id')]).encode()).hexdigest()[:24]
 
@@ -114,15 +118,7 @@ def review(saved,row,jpg):
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
 
 
-def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
-    import streamlit as st
-    import streamlit.components.v1 as components
-    import prodigi_preparation as queue
-    import os_accounts
-    component=components.declare_component('orders_prodigi_grid',path=str(Path(__file__).parent/'components/orders_prodigi_grid'))
-    allowed=queue.enabled() and os_accounts.is_admin(actor) and os_accounts.can_access_page(actor,'Prodigi')
-    by_id={row_identity(r):r for r in rows}
-    if statuses is None:statuses=read_statuses(rows,actor)
+def payload_rows(rows,display_rows,statuses,*,allowed):
     payload=[]
     for r,d in zip(rows,display_rows):
         aid=str(r.get('edition_order_id') or '')
@@ -140,14 +136,50 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
         if payload[-1]['jpg_label']=='Open':payload[-1]['jpg_label']='Open JPG'
         shipping=payload[-1]['cells']['shipping']
         if shipping.strip().lower() in ('standard','express'):payload[-1]['cells']['shipping']=shipping.strip()+' shipping'
+    for raw,item in zip(rows,payload):
+        item['unit_key']=unit_identity(raw) if raw.get('shopify_order_id') and raw.get('shopify_line_item_id') else ''
+        item['revision']=hashlib.sha256(json.dumps(item,sort_keys=True,default=str).encode()).hexdigest()
+    return payload
+
+
+def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
+    import streamlit as st
+    import streamlit.components.v1 as components
+    import prodigi_preparation as queue
+    import os_accounts
+    component=components.declare_component('orders_prodigi_grid',path=str(Path(__file__).parent/'components/orders_prodigi_grid'))
+    allowed=queue.enabled() and os_accounts.is_admin(actor) and os_accounts.can_access_page(actor,'Prodigi')
+    import orders_feed
+    query=str(st.session_state.get('orders_loaded_query') or '')
+    scope=orders_feed.signature([str(actor.get('id') or ''),bool(allowed),query,st.session_state.get('orders_load_generation')])
+    live=st.session_state.get('orders-grid-feed') or {}
+    if live.get('scope')==scope:
+        rows=live['snapshot']['raw']
+    by_id={row_identity(r):r for r in rows}
+    if statuses is None:statuses=read_statuses(rows,actor)
+    payload=live['snapshot']['rows'] if live.get('scope')==scope else payload_rows(rows,display_rows,statuses,allowed=allowed)
+    st.session_state['orders-grid-feed-active']=True
     active=allowed and (bool(statuses) or any(str(r.get('prodigi','')).lower()!='complete' for r in rows))
-    event=component(rows=payload,selected=[row_identity(r) for r in selected],active=active,
+    chosen=st.session_state.get('orders-grid-selected-ids',[row_identity(r) for r in selected])
+    event=component(rows=payload,selected=chosen,active=active,feed=dict(scope=scope,query=query,version=live.get('snapshot',{}).get('version','') if live.get('scope')==scope else ''),
                     key='orders-prodigi-grid',default=None)
     if not isinstance(event,dict) or not event.get('event') or event['event']==st.session_state.get('orders-grid-last-event'):return
     st.session_state['orders-grid-last-event']=event['event']
+    if event.get('type') in ('feed','select') and event.get('scope') and event['scope']!=scope:return
+    if event.get('type') in ('feed','select') and event.get('scope')==scope:
+        saved=orders_feed.recalled(actor,query,event.get('version'))
+        if saved is not None:
+            st.session_state['orders-grid-feed']=dict(scope=scope,snapshot=saved)
+            st.session_state['orders_allocation_rows']=saved['raw']
+            rows=saved['raw'];by_id={row_identity(r):r for r in rows}
+    if event.get('type')=='feed':
+        if event.get('scope')!=scope or saved is None:return
+        st.rerun(scope='fragment')
+        return
     if event.get('type')=='select':
         st.session_state.pop('orders-prodigi-review',None)
-        chosen=set(str(i) for i in event.get('ids',[]) if str(i) in by_id)
+        previous=set(st.session_state.get('orders-grid-selected-ids') or [])
+        chosen=set(str(i) for i in event.get('ids',[]) if str(i) in by_id or str(i) in previous)
         st.session_state['orders-grid-selected-ids']=list(chosen)
         st.session_state[grid_key]={'selection':{'rows':[i for i,r in enumerate(rows) if row_identity(r) in chosen]}}
         st.rerun(scope='fragment')

@@ -217,8 +217,9 @@ async def order_status(request):
     except Exception as error:return failure(error)
 
 from orders_wake import listen as orders_notifications
+from orders_feed import feed as orders_row_feed
 
-ROUTES = (('/api/orders-companion/notifications',orders_notifications,('GET',)),('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+ROUTES = (('/api/orders/feed',orders_row_feed,('POST',)),('/api/orders-companion/notifications',orders_notifications,('GET',)),('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),
