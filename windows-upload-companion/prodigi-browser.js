@@ -25,9 +25,24 @@ async function prodigiWorkerTab(plan) {
   await chrome.storage.local.set({ordersWorkerTabs:Object.fromEntries([...entries,[plan.order_url,tab.id]])});
   return {...tab,ordersReused:false};
 }
+async function prodigiWaitForPage(tab,refresh=false,attempts=60) {
+  let previousPage,reloaded=false;
+  if(refresh&&tab.ordersReused){
+    try{previousPage=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.page_instance;}catch{}
+    await chrome.tabs.reload(tab.id);reloaded=true;
+  }
+  for(let n=0;n<attempts;n++){
+    try{const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
+      if(state?.ready&&(!reloaded||(typeof state.page_instance==='string'&&state.page_instance!==previousPage)))return true;
+    }catch{}
+    await ordersDelay(1000);
+  }
+  return false;
+}
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.fresh_saved_order!==undefined && (plan.fresh_saved_order!==true || host!=='dashboard.prodigi.com' || plan.kind!=='qa'))return false;
   if(plan?.item_only!==undefined && (plan.item_only!==true || plan.kind!=='qa' || plan.exact_item!==true || plan.items!==undefined ||
     !/^[A-Za-z0-9-]{1,100}$/.test(plan.item_id)))return false;
   if(plan?.selected_empty_product!==undefined && (plan.selected_empty_product!==true || host!=='dashboard.prodigi.com' ||
@@ -75,12 +90,14 @@ async function prodigiBrowserRun(plan) {
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
       const tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
+      let refresh=plan.kind==='qa'&&plan.fresh_saved_order===true;
       if(plan.kind==='merge-hold'&&tab.ordersReused){
         const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
         if(state?.busy!==false)throw Error('Close the unsaved duplicate-order editor before holding it.');
-        await chrome.tabs.reload(tab.id); // current pause controls; never reload an open editor
+        refresh=true; // current pause controls; never reload an open duplicate editor
       }
-      let ready=false;for(let n=0;n<30;n++){try{ready=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.ready;if(ready)break;}catch{}await ordersDelay(1000);}
+      // Read verified persisted artwork, not a leftover post-Save editor.
+      const ready=await prodigiWaitForPage(tab,refresh,30);
       if(!ready)throw Error('Sign into Prodigi before checking the saved order.');
       const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan});
       return plan.kind==='qa'?await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||''):await prodigiReceipt(plan,'finish',result?.stage||'product',result?.error||'');
@@ -94,22 +111,9 @@ async function prodigiBrowserRun(plan) {
     if(hash!==plan.sha256) throw Error('The numbered JPG checksum changed.');
     stage='open';
     const tab=await prodigiWorkerTab(plan);
-    let reloaded=false,previousPage;
-    if(plan.selected_empty_product===true && tab.ordersReused) {
-      // Prodigi opens an empty Image Editor after choosing a blank product.
-      // Only a fresh server-verified empty-item handoff may clear that shell.
-      // The tab is worker-owned and exact-order; Save still needs its own permit.
-      try {previousPage=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.page_instance;}catch{}
-      await chrome.tabs.reload(tab.id);reloaded=true;
-    }
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
-    let ready=false;
-    for(let n=0;n<60;n++) {
-      try {const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
-        ready=state?.ready && (!reloaded || (typeof state.page_instance==='string' && state.page_instance!==previousPage));
-        if(ready) break;} catch {}
-      await ordersDelay(1000);
-    }
+    // Only a server-verified empty item may clear a product-selection shell.
+    const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true);
     if(!ready) {stage='signin';throw Error('Sign into Prodigi in Edge, then review the same draft.');}
     const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan});
     stage=result?.stage||'page';

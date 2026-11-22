@@ -142,29 +142,29 @@ test('upload and QA reuse only the worker-owned exact order tab',async()=>{
 });
 
 test('blank product auto-opens an editor; fresh empty handoff reloads once then uploads and runs QA on the same tab',async()=>{
- const {context,tabs,storage}=setup();const events=[];let editor=false,page='old',oldReady=true;
+ const {context,tabs,storage}=setup();const events=[];let editor=false,page='old',oldReady=true,reloads=0;
  const live={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
    key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true};
  context.chrome.tabs.get=async id=>({id,url:live.order_url});
- context.chrome.tabs.reload=async()=>{events.push('reload');editor=false;page='new';};
+ context.chrome.tabs.reload=async()=>{events.push('reload');editor=false;page='new-'+(++reloads);};
  context.chrome.tabs.sendMessage=async(id,m)=>{
    if(m.type==='prodigi:ready'){
      // A reload callback can resolve before the old content script disappears.
-     if(page==='new'&&oldReady){oldReady=false;events.push('old-ready');return{ready:true,page_instance:'old'};}
+     if(page==='new-1'&&oldReady){oldReady=false;events.push('old-ready');return{ready:true,page_instance:'old'};}
      return{ready:true,page_instance:page,busy:editor};
    }
    if(m.type==='prodigi:product'){events.push('variant');editor=true;return{stage:'product-readback'};}
-   if(m.type==='prodigi:upload'){assert(!editor);assert(!oldReady);events.push('upload');return{saved:true,stage:'save'};}
-   if(m.type==='prodigi:qa'){events.push('qa');return{evidence:{}};}
+   if(m.type==='prodigi:upload'){assert(!editor);assert(!oldReady);events.push('upload');editor=true;return{saved:true,stage:'save'};}
+   if(m.type==='prodigi:qa'){assert(!editor);events.push('qa');return{evidence:{}};}
    assert.fail('Unexpected message');
  };
  context.product={...live,kind:'product',key:'product:prodigi_prepare:1',sku:'GLOBAL-CFP-A2',colour:'Natural'};
  await vm.runInContext('prodigiBrowserRun(product)',context);
  context.upload={...live,selected_empty_product:true};
  await vm.runInContext('prodigiBrowserRun(upload)',context);
- context.qa={...live,kind:'qa',sku:'GLOBAL-CFP-A2',colour:'Natural',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+ context.qa={...live,kind:'qa',fresh_saved_order:true,sku:'GLOBAL-CFP-A2',colour:'Natural',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
  await vm.runInContext('prodigiBrowserRun(qa)',context);
- assert.deepEqual(events,['variant','reload','old-ready','upload','qa']);
+ assert.deepEqual(events,['variant','reload','old-ready','upload','reload','qa']);
  assert.equal(tabs.length,1);assert(!storage.ordersBrowserPending);
 });
 

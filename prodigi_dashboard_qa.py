@@ -71,14 +71,15 @@ def current(value,provider,resolver):
 
 
 def recover_waiting_item_qa(user):
-    """Retire only the old pre-permit inserts wait on an incomplete order."""
+    """Retire known pre-permit UI waits; preserve independently saved artwork."""
     prep.require_user(user)
     from companion_poll_transaction import connection
     with connection(prep.connect) as conn,conn.cursor() as cur:
         cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
             AND value->>'status'='Needs review'
-            AND value->>'message'='QA inserts: The expected QA control did not finish loading.'
-            AND value->'dashboard_qa'->>'item_only'='true'
+            AND (value->>'message'='QA inserts: The expected QA control did not finish loading.'
+                 AND value->'dashboard_qa'->>'item_only'='true'
+                 OR value->>'message'='QA product-row: Close the existing order editor before QA.')
             AND value->'dashboard_qa'->>'started'='false'
             AND value->'browser'->>'verified'='true'
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
@@ -92,12 +93,13 @@ def _recover_item_qa(key):
     provider,resolver,_,_=browser.context(key)
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key);receipt=value.get('dashboard_qa') or {}
-        if (value.get('status')!='Needs review' or not receipt.get('item_only') or receipt.get('started') is not False
-            or value.get('submission') or value.get('message')!='QA inserts: The expected QA control did not finish loading.'):
+        known=(value.get('message')=='QA inserts: The expected QA control did not finish loading.' and receipt.get('item_only')
+               or value.get('message')=='QA product-row: Close the existing order editor before QA.')
+        if (value.get('status')!='Needs review' or not known or receipt.get('started') is not False or value.get('submission')):
             return False
         try:
             _,order,_=current(value,provider,resolver)
-            if len(order.get('items',[]))<2 or pinned_order(receipt['before'])!=pinned_order(order):return False
+            if pinned_order(receipt['before'])!=pinned_order(order):return False
         except (ValueError,PermissionError):return False
         value.setdefault('dashboard_qa_history',[]).append({k:receipt.get(k) for k in ('claimed_at','checked_at','verified','item_only')})
         value.pop('dashboard_qa');value.pop('last_failure',None)
@@ -171,7 +173,7 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
                 browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
             return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],item_id=value['item_id'],exact_item=exact_item_supported,
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
-                reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),
+                reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),fresh_saved_order=True,
                 shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required,
                 **({'item_only':True} if item_only else {}),
                 **({'items':[dict(item_id=v['item_id'],sku=v['snapshot']['mapping']['prodigi_code'],colour='' if v['snapshot']['mapping']['frame']=='Unframed' else v['snapshot']['mapping']['prodigi_frame_colour']) for v in values]} if len(values)>1 else {}))

@@ -225,7 +225,8 @@ def test_item_qa_cannot_bypass_identity_quality_or_submission_checks(pair,monkey
 
 
 @pytest.mark.parametrize('changed',[False,True])
-def test_known_item_inserts_wait_recovers_saved_artwork_without_upload(pair,monkeypatch,changed):
+@pytest.mark.parametrize('message',['QA inserts: The expected QA control did not finish loading.','QA product-row: Close the existing order editor before QA.'])
+def test_known_item_inserts_wait_recovers_saved_artwork_without_upload(pair,monkeypatch,changed,message):
     import prodigi_browser as browser
     a,b,p,_=pair
     monkeypatch.setattr(prep,'require_user',lambda _:None)
@@ -235,7 +236,7 @@ def test_known_item_inserts_wait_recovers_saved_artwork_without_upload(pair,monk
     b.update(status='Awaiting product selection',browser={})
     with prep.connect() as c,c.cursor() as q:prep.save(q,a);prep.save(q,b)
     plan=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True,item_qa_supported=True)
-    qa.finish(plan['key'],plan['token'],None,error='QA inserts: The expected QA control did not finish loading.')
+    qa.finish(plan['key'],plan['token'],None,error=message)
     if changed:p.data['recipient']['address']['line1']='Different'
     assert qa.recover_waiting_item_qa({'id':'fixture'})==(0 if changed else 1)
     assert prep.read(1)['status']==('Needs review' if changed else qa.WAITING)
