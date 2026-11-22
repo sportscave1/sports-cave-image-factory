@@ -60,6 +60,22 @@ def test_only_fixed_companion_can_recover_known_empty_editor_failure(monkeypatch
     response=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])])).post('/tick',content='{}',headers=headers)
     assert response.status_code==200 and calls==([actor] if capable else [])
 
+@pytest.mark.parametrize('capable',[False,True])
+def test_only_item_qa_companion_can_recover_the_old_shared_control_wait(monkeypatch,capable):
+    calls=[];actor={'id':'fixture'}
+    monkeypatch.setattr(prep,'enabled',lambda:True)
+    monkeypatch.setattr(api,'desktop',lambda _:actor)
+    monkeypatch.setattr('orders_automatic.kick',lambda:None)
+    monkeypatch.setattr('prodigi_submission.kick',lambda:None)
+    monkeypatch.setattr('prodigi_status_sync.kick',lambda:None)
+    monkeypatch.setattr('prodigi_dashboard_qa.recover_waiting_item_qa',lambda user:calls.append(user))
+    async def ready(*_):return {'key':'fixture'}
+    monkeypatch.setattr(api,'ready_handoff',ready)
+    headers={'Authorization':'Bearer '+'x'*43}
+    if capable:headers['X-Sports-Cave-Orders-Item-QA']='1'
+    response=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])])).post('/tick',content='{}',headers=headers)
+    assert response.status_code==200 and calls==([actor] if capable else [])
+
 
 @pytest.mark.parametrize('status',['Ready for manual payment','Needs QA','Needs review','Handoff unavailable'])
 def test_only_successful_qa_completion_wakes_existing_guarded_submission_worker(monkeypatch,status):

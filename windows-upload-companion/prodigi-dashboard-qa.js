@@ -87,6 +87,9 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
         items.push({item_id:pinned.item_id,sku:pinned.sku,colour:pinned.colour,quality});
       }
       const quality=items[0].quality;
+      // Shipping, tax and inserts belong to the whole order. Prodigi may not
+      // expose those controls while another product is still unconfigured.
+      if(plan.item_only===true)return {evidence:items[0]};
       stage='inserts';
       const inserts=await inspectInserts(plan);
       stage='shipping';

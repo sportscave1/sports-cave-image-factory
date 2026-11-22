@@ -42,7 +42,7 @@ async def ready_handoff(request, merge_supported):
     # Finish already-uploaded orders before starting another large transfer.
     if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
         from prodigi_dashboard_qa import claim as qa_claim
-        browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1',sequential_supported=request.headers.get('x-sports-cave-orders-sequential')=='1')
+        browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1',sequential_supported=request.headers.get('x-sports-cave-orders-sequential')=='1',item_qa_supported=request.headers.get('x-sports-cave-orders-item-qa')=='1')
     # Continue the selected item through upload before choosing a sibling.
     if browser is None and request.headers.get('x-sports-cave-orders-browser')=='1':
         browser=await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1')
@@ -78,6 +78,10 @@ async def tick(request):
             stage='empty_product_editor_recovery'
             from prodigi_browser import recover_selected_empty_editors
             await run_in_threadpool(recover_selected_empty_editors,actor)
+        if request.headers.get('x-sports-cave-orders-item-qa')=='1':
+            stage='item_qa_recovery'
+            from prodigi_dashboard_qa import recover_waiting_item_qa
+            await run_in_threadpool(recover_waiting_item_qa,actor)
         merge_supported=request.headers.get('x-sports-cave-orders-merge')=='1'
         if merge_supported:
             stage='merge_readback'

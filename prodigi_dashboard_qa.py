@@ -70,6 +70,42 @@ def current(value,provider,resolver):
     return current_for_order(value,provider.order(value['order_id']),resolver)
 
 
+def recover_waiting_item_qa(user):
+    """Retire only the old pre-permit inserts wait on an incomplete order."""
+    prep.require_user(user)
+    from companion_poll_transaction import connection
+    with connection(prep.connect) as conn,conn.cursor() as cur:
+        cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+            AND value->>'status'='Needs review'
+            AND value->>'message'='QA inserts: The expected QA control did not finish loading.'
+            AND value->'dashboard_qa'->>'item_only'='true'
+            AND value->'dashboard_qa'->>'started'='false'
+            AND value->'browser'->>'verified'='true'
+            AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
+            ORDER BY updated_at LIMIT 2""")
+        keys=[row['key'] for row in cur.fetchall()]
+    return sum(_recover_item_qa(key) for key in keys)
+
+
+@stages.stale_result(False)
+def _recover_item_qa(key):
+    provider,resolver,_,_=browser.context(key)
+    with stages.edit(browser.LOCK) as cur:
+        value=browser.read(cur,key);receipt=value.get('dashboard_qa') or {}
+        if (value.get('status')!='Needs review' or not receipt.get('item_only') or receipt.get('started') is not False
+            or value.get('submission') or value.get('message')!='QA inserts: The expected QA control did not finish loading.'):
+            return False
+        try:
+            _,order,_=current(value,provider,resolver)
+            if len(order.get('items',[]))<2 or pinned_order(receipt['before'])!=pinned_order(order):return False
+        except (ValueError,PermissionError):return False
+        value.setdefault('dashboard_qa_history',[]).append({k:receipt.get(k) for k in ('claimed_at','checked_at','verified','item_only')})
+        value.pop('dashboard_qa');value.pop('last_failure',None)
+        value.update(status=WAITING,message='Rechecking the saved edition; shared checks wait until every item is ready.')
+        browser.save(cur,key,value)
+    return True
+
+
 def enqueue(value,provider,resolver,persist,*,verified_order=None):
     # Upload completion has just independently verified this exact readback and
     # source. Reuse it for queue admission, avoiding another provider/file read.
@@ -97,7 +133,7 @@ def enqueue(value,provider,resolver,persist,*,verified_order=None):
 
 
 @stages.stale_result(None)
-def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False,sequential_supported=False):
+def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False,sequential_supported=False,item_qa_supported=False):
     with stages.edit(browser.LOCK) as q:
         q.execute("SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->>'status'=%s AND NOT COALESCE((value->>'hidden')::boolean,false) ORDER BY updated_at LIMIT 1",(WAITING,))
         row=q.fetchone()
@@ -117,7 +153,7 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
                 from prodigi_order_group import members,WaitingForItems
                 try:values=members(value,order,resolver)
                 except WaitingForItems:
-                    if not sequential_supported:return None
+                    if not sequential_supported or not item_qa_supported:return None
                     item_only=True
                 if len(values)>100:raise ValueError('More than 100 numbered items require a separate order review.')
                 if any(v['allocation_id']!=value['allocation_id'] and v.get('status')==ACTIVE for v in values):return None
@@ -137,6 +173,7 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
                 reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),
                 shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required,
+                **({'item_only':True} if item_only else {}),
                 **({'items':[dict(item_id=v['item_id'],sku=v['snapshot']['mapping']['prodigi_code'],colour='' if v['snapshot']['mapping']['frame']=='Unframed' else v['snapshot']['mapping']['prodigi_frame_colour']) for v in values]} if len(values)>1 else {}))
         except ValueError as error:
             value.update(status='Needs review',message=str(error));prep.record_failure(value,'dashboard_qa',str(error));browser.save(q,key,value)
@@ -173,6 +210,7 @@ def permit(key,token,evidence):
             from prodigi_consolidation import check_write
             check_write(value,provider,resolver)
         values=batch_values(q,value,receipt,token)
+        if receipt.get('item_only'):raise ValueError('Item QA cannot change order shipping or tax; wait for final whole-order QA.')
         if receipt.get('started') or value['status']!=ACTIVE:raise ValueError('QA shipping permit already used.')
         snap,order,_=current(value,provider,resolver)
         for unit in values:current_for_order(unit,order,resolver)
@@ -216,6 +254,16 @@ def insert_checks(evidence,asset_resolver=None):
     return present,present
 
 
+def item_checks(value,snapshot,order,item,evidence,*,identity_verified):
+    mapping=snapshot['mapping'];frame=mapping['frame']=='Unframed' or clean((item.get('attributes') or {}).get('color'))==clean(mapping['prodigi_frame_colour'])
+    assets=item.get('assets') or []
+    attached=(value.get('browser') or {}).get('verified') is True and len(assets)==1 and prep.digest(assets[0].get('url'))==value.get('url_hash')
+    return dict(product_option=item.get('sku')==evidence['sku']==mapping['prodigi_code'],frame=frame and clean(evidence['colour'])==clean((item.get('attributes') or {}).get('color')),
+        size=item.get('sku')==mapping['prodigi_code'],artwork_upload=attached and identity_verified,
+        edition_number=identity_verified,sent_to_production=(value.get('browser') or {}).get('full_image_fit_verified') is True,
+        image_quality=evidence['quality']=='Excellent',customer_address=address_matches(snapshot.get('recipient'),order.get('recipient')))
+
+
 def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolver=None):
     required={'quality','sku','colour','shipping','inserts'}
     if not isinstance(evidence,dict) or not required<=set(evidence) or set(evidence)-required-{'tax_collected','item_id'}:raise ValueError('Dashboard QA evidence is incomplete.')
@@ -226,14 +274,9 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
     choice=shipping_choice(shipping['options'],intent(snapshot.get('shipping')),shipping['selected'])
     quote_ok=(shipping['options']==planned['options'] and choice==planned['target']==shipping['selected']==clean(order.get('shippingMethod')))
     selected,available=insert_checks(evidence['inserts'],asset_resolver)
-    mapping=snapshot['mapping'];frame=mapping['frame']=='Unframed' or clean((item.get('attributes') or {}).get('color'))==clean(mapping['prodigi_frame_colour'])
     assets=item.get('assets') or []
-    attached=(value.get('browser') or {}).get('verified') is True and len(assets)==1 and prep.digest(assets[0].get('url'))==value.get('url_hash')
-    checks=dict(product_option=item.get('sku')==evidence['sku']==mapping['prodigi_code'],frame=frame and clean(evidence['colour'])==clean((item.get('attributes') or {}).get('color')),
-        size=item.get('sku')==mapping['prodigi_code'],artwork_upload=attached and identity_verified,
-        edition_number=identity_verified,sent_to_production=(value.get('browser') or {}).get('full_image_fit_verified') is True,
-        image_quality=evidence['quality']=='Excellent',customer_address=address_matches(snapshot.get('recipient'),order.get('recipient')),
-        shipping=quote_ok,certificate=selected,packing_slip=selected,inserts_available=available)
+    checks=item_checks(value,snapshot,order,item,evidence,identity_verified=identity_verified)
+    checks.update(shipping=quote_ok,certificate=selected,packing_slip=selected,inserts_available=available)
     checks['final_check']=all(checks.values()) and not order.get('issues') and (order.get('status')=='draft' or bool(value.get('consolidation_binding') and value.get('merge_pending') and order.get('status')=='paused'))
     labels={'product_option':'Product/SKU differs.','frame':'Frame colour differs.','size':'Size mapping differs.',
         'artwork_upload':'Exact saved design is not verified.','edition_number':'Allocated edition number is not verified.',
@@ -263,6 +306,21 @@ def finish(key,token,evidence,error=''):
             return {'status':'Handoff unavailable'} # Reset retired this token; release the desktop queue.
         try:
             if error:raise ValueError(error[:240])
+            if receipt.get('item_only'):
+                if len(values)!=1 or receipt.get('started'):raise ValueError('Item-only QA scope changed.')
+                if not isinstance(evidence,dict) or set(evidence)!={'item_id','sku','colour','quality'} or evidence['item_id']!=value['item_id']:
+                    raise ValueError('The exact item-only QA evidence is incomplete.')
+                snap,order,item=current(value,provider,resolver)
+                if pinned_order(receipt['before'])!=pinned_order(order):raise ValueError('The saved supplier order changed during item QA.')
+                checks=item_checks(value,snap,order,item,evidence,identity_verified=identity_proof(snap))
+                passed=all(checks.values());checks['final_check']=False
+                stamp=prep.now()
+                value.update(checks=checks,qa=dict(policy=POLICY,scope='item',checks=checks,checked_at=stamp),
+                    status='Waiting for order' if passed else 'Needs QA',
+                    message='This edition passed item QA. Shared shipping, tax and inserts will be checked after all items are ready.' if passed else 'This edition failed item QA; review its artwork, variant, quality or shipping details.')
+                receipt.update(verified=passed,evidence=evidence,checked_at=stamp,scope='item')
+                browser.save(q,key,value)
+                return {'status':value['status']}
             if not receipt.get('started'):raise ValueError('QA stopped before the shipping permit; recheck this same order.')
             order=provider.order(value['order_id'])
             if not isinstance(evidence,dict):raise ValueError('Dashboard QA evidence is incomplete.')

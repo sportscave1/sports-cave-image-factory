@@ -177,25 +177,66 @@ def test_each_edition_finishes_qa_before_sibling_then_final_batch_submits_once(p
         prep.save(q,a);prep.save(q,b)
     # An old companion cannot silently claim an incomplete grouped batch.
     assert qa.claim(exact_item_supported=True,batch_supported=True) is None
-    first=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True)
-    assert first['item_id']=='88' and 'items' not in first
-    qa.permit(first['key'],first['token'],dict(options=options(),current='standard',target='budget'))
-    p.data['shippingMethod']='Budget'
-    evidence=dict(item_id='88',quality='Excellent',sku=a['snapshot']['mapping']['prodigi_code'],colour='natural',
-        shipping=dict(options=options(),selected='budget'),inserts=inserts())
+    assert qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True) is None
+    first=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True,item_qa_supported=True)
+    assert first['item_id']=='88' and 'items' not in first and first['item_only'] is True
+    with pytest.raises(ValueError,match='Item QA cannot change'):
+        qa.permit(first['key'],first['token'],dict(options=options(),current='standard',target='budget'))
+    evidence=dict(item_id='88',quality='Excellent',sku=a['snapshot']['mapping']['prodigi_code'],colour='natural')
     assert qa.finish(first['key'],first['token'],evidence)['status']=='Waiting for order'
-    assert all(prep.read(1)['checks'].values())
+    assert prep.read(1)['checks']['image_quality'] is True and prep.read(1)['checks']['final_check'] is False
+    assert 'shipping' not in prep.read(1)['checks'] and 'packing_slip' not in prep.read(1)['checks']
     submit.tick();assert not p.submits and not prep.read(1).get('submission')
     # The next item's variant/upload occurs after the first QA, on the same order.
     p.data['items'][1].update(sku=b['snapshot']['mapping']['prodigi_code'],attributes={'color':'natural'},
         assets=[dict(url='https://fixture/art2',printArea='default',status='complete')])
     b['browser']=dict(verified=True,full_image_fit_verified=True);b['status']=qa.WAITING
     with prep.connect() as c,c.cursor() as q:prep.save(q,b)
-    final=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True)
+    final=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True,item_qa_supported=True)
     assert {i['item_id'] for i in final['items']}=={'88','89'}
-    qa.permit(final['key'],final['token'],dict(options=options(),current='budget',target='budget'))
+    qa.permit(final['key'],final['token'],dict(options=options(),current='standard',target='budget'))
+    p.data['shippingMethod']='Budget'
     combined=dict(items=[dict(**r,quality='Excellent') for r in final['items']],
         shipping=dict(options=options(),selected='budget'),inserts=inserts())
     assert qa.finish(final['key'],final['token'],combined)['status']=='Ready for manual payment'
     submit.tick();assert p.submits==['99']
     assert prep.read(1)['status']==prep.read(2)['status']=='Submitted'
+
+
+@pytest.mark.parametrize('change',['poor','wrong_item','extra_shared','address','artwork'])
+def test_item_qa_cannot_bypass_identity_quality_or_submission_checks(pair,monkeypatch,change):
+    import prodigi_browser as browser
+    a,b,p,_=pair
+    monkeypatch.setattr(browser,'context',lambda _:(p,prep.resolve,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    a.pop('dashboard_qa',None);a['status']=qa.WAITING
+    b.update(status='Awaiting product selection',browser={})
+    with prep.connect() as c,c.cursor() as q:prep.save(q,a);prep.save(q,b)
+    plan=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True,item_qa_supported=True)
+    evidence=dict(item_id='88',sku=a['snapshot']['mapping']['prodigi_code'],colour='natural',quality='Excellent')
+    if change=='poor':evidence['quality']='Poor'
+    if change=='wrong_item':evidence['item_id']='89'
+    if change=='extra_shared':evidence['shipping']={}
+    if change=='address':p.data['recipient']['address']['line1']='Different'
+    if change=='artwork':p.data['items'][0]['assets'][0]['url']='https://fixture/other'
+    result=qa.finish(plan['key'],plan['token'],evidence)
+    assert result['status'] in ('Needs QA','Needs review')
+    submit.tick();assert not p.submits and not prep.read(1).get('submission')
+
+
+@pytest.mark.parametrize('changed',[False,True])
+def test_known_item_inserts_wait_recovers_saved_artwork_without_upload(pair,monkeypatch,changed):
+    import prodigi_browser as browser
+    a,b,p,_=pair
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(browser,'context',lambda _:(p,prep.resolve,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    a.pop('dashboard_qa',None);a['status']=qa.WAITING
+    b.update(status='Awaiting product selection',browser={})
+    with prep.connect() as c,c.cursor() as q:prep.save(q,a);prep.save(q,b)
+    plan=qa.claim(exact_item_supported=True,batch_supported=True,sequential_supported=True,item_qa_supported=True)
+    qa.finish(plan['key'],plan['token'],None,error='QA inserts: The expected QA control did not finish loading.')
+    if changed:p.data['recipient']['address']['line1']='Different'
+    assert qa.recover_waiting_item_qa({'id':'fixture'})==(0 if changed else 1)
+    assert prep.read(1)['status']==('Needs review' if changed else qa.WAITING)
+    assert prep.read(1)['browser']['verified'] is True and not p.submits

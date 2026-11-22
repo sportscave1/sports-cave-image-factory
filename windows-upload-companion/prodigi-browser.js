@@ -28,6 +28,8 @@ async function prodigiWorkerTab(plan) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.item_only!==undefined && (plan.item_only!==true || plan.kind!=='qa' || plan.exact_item!==true || plan.items!==undefined ||
+    !/^[A-Za-z0-9-]{1,100}$/.test(plan.item_id)))return false;
   if(plan?.selected_empty_product!==undefined && (plan.selected_empty_product!==true || host!=='dashboard.prodigi.com' ||
     plan.kind!==undefined || plan.exact_item!==true || plan.replace_artwork!==undefined ||
     !/^prodigi_prepare:\d+$/.test(plan.key) || !/^[A-Za-z0-9_-]{43}$/.test(plan.token) ||

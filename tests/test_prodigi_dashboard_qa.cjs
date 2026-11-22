@@ -14,6 +14,27 @@ test('unpriced, ambiguous and missing Express quotes stop instead of guessing',(
  assert.throws(()=>prodigiCheapestShipping([{service:'budget',cents:100,currency:'$'},{service:'budget',cents:200,currency:'$'}],'standard','budget'));
 });
 
+for(const quality of ['Excellent','Poor'])test('item QA reads only its exact saved item while sibling products have no shared controls: '+quality,async()=>{
+ const vm=require('node:vm'),fs=require('node:fs');let listener;
+ const visible=text=>({textContent:text,isConnected:true,getClientRects:()=>[{}]});
+ const row={querySelector:()=>visible(quality)},main=visible('REF-TEST');
+ main.querySelectorAll=()=>assert.fail('No order-level inserts or shipping reads during item QA');
+ const document={querySelector:()=>main,querySelectorAll(selector){
+   if(selector==='main h1')return [visible('99')];
+   if(selector==='[role="dialog"]')return [];
+   if(selector==='table tbody tr')return [row];
+   assert.fail('Unexpected shared control read '+selector);
+ }};
+ const context={document,URL,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},
+   prodigiPinnedRow:(rows,plan)=>{assert.equal(plan.item_id,'88');return rows[0]},
+   chrome:{runtime:{id:'paired',onMessage:{addListener:fn=>listener=fn},sendMessage:()=>assert.fail('No shipping or tax writes during item QA')}}};
+ vm.runInNewContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-dashboard-qa.js'),'utf8'),context);
+ const result=await new Promise(resolve=>listener({type:'prodigi:qa',plan:{item_only:true,exact_item:true,
+   item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Black',order_url:context.location.href,order_id:'99',reference:'REF-TEST'}},{id:'paired'},resolve));
+ assert.equal(result.error,undefined);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.evidence)),{item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Black',quality});
+});
+
 for(const rowDelay of [0,25000])for(const batch of [false,true])test('QA waits for late row '+rowDelay+' batch '+batch+' and reads inserts once',async()=>{
  const vm=require('node:vm'),fs=require('node:fs');let listener,opened=false,lookups=0,edits=0,cancels=0,clock=0;
  const visible=text=>({textContent:text,isConnected:true,getClientRects:()=>[{}],getAttribute:()=>null});

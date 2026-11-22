@@ -12,6 +12,14 @@ The server issues `selected_empty_product` only for a live, exact-item upload wi
 
 Companion 1.7.37 advertises the fixed transition. Only that capability enables narrow recovery of the known page-stage error: verified product selection, unused Save permit, no submission and an unchanged empty supplier item are required. Existing source, address, artwork or business-state changes stop recovery. There are no blind Save retries or paid/submitted order resets. Supplier countdown/preferences are unchanged.
 
+## Live follow-up: item QA must not wait for whole-order controls
+
+The first repaired upload completed and independently verified its saved artwork. The subsequent old per-item QA then timed out at `QA inserts` while two sibling products were unprepared. Although scheduling was sequential, that QA still tried to inspect order-level controls after each individual image. This is a second stage-contract defect, not another upload failure.
+
+Companion 1.7.38 supports explicit item-only QA: exact item ID, SKU/frame/size, saved numbered image and full fit, Excellent rating and customer address are checked immediately. It neither reads nor changes shared inserts/shipping/tax. Those remain pending, and final QA is explicitly incomplete. The complete set of required check keys, final order hash, tax evidence, fresh grouped readback and one submission fence are still mandatory before submitting. Once all artworks are uploaded, the existing combined QA checks every item plus shared controls. An older companion cannot claim this item-only handoff.
+
+The old untouched item-only inserts timeout can be recovered only by a capable companion after independently checking that the verified artwork and entire pinned supplier business state have not changed. It retires the unused QA receipt, not the artwork receipt. PSD repair blocks remain separate and are never converted into passed QA.
+
 ## Separate artwork prerequisites
 
 Two additional editions in the three-item order have no generated JPG because their PSD preparation reports `Exactly one visible, editable edition-number layer is required.` Their repair requests are already queued. This release does not fabricate a numbered print, approve an invalid PSD or claim those editions have passed QA. They must finish the existing repair/preparation pipeline before whole-order submission.
