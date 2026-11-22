@@ -9,7 +9,7 @@ from meta_social import CommunityError, MetaCommunity, assess_creator, reply_ope
 import social_collaborations as collabs
 import os_accounts
 import social_media
-from tests.community_fixtures import ADMIN, EVENTS, FakeCommunity, FakeStore
+from tests.community_fixtures import ADMIN, EVENTS, READS, FakeCommunity, FakeStore
 
 ENV = {"META_FACEBOOK_PAGE_ID": "page", "META_INSTAGRAM_ACTOR_ID": "ig",
        "META_PAGE_ACCESS_TOKEN": "fixture-page-token", "META_SOCIAL_DISCOVERY_TOKEN": "fixture-discovery-token",
@@ -246,6 +246,7 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
         FakeStore.rows = []
         FakeStore.enabled = False
         EVENTS.clear()
+        READS.clear()
 
     def app(self):
         return AppTest.from_string(self.SCRIPT).run()
@@ -253,12 +254,26 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
     def button(self, app, text):
         return next(b for b in app.button if b.label == text)
 
-    def test_replacement_tabs_and_instagram_only_shortcut(self):
+    def open_comment(self, app, platform):
+        # AppTest doesn't yet serialize tracked expanders. Send the same bool
+        # widget state that a real browser emits, alongside the other controls.
+        states = app._tree.get_widget_states()
+        panel = next(p for p in app.expander if platform in p.label)
+        expanded = states.widgets.add()
+        expanded.id = panel.proto.id
+        expanded.bool_value = True
+        return app._run(widget_state=states)
+
+    def test_replacement_tabs_and_all_original_profile_shortcuts(self):
         app = self.app()
         self.assertFalse(app.exception)
         self.assertEqual(app.segmented_control[0].options, ["Inbox", "Comments", "Collaborations", "Connection"])
         rendered = "\n".join(m.value for m in app.markdown)
-        self.assertIn("instagram.com/sportscaveshop/", rendered)
+        for platform, url in social_media.SOCIAL_PROFILES:
+            self.assertIn(url.replace("&", "&amp;"), rendered)
+        self.assertNotIn("Your community", rendered)
+        self.assertEqual(app.title[0].value, "Social Media")
+        self.assertEqual(len(app.radio), 0)
         for old in ("Playbook", "Post Tracker", "AI Reels", "Tracking view"):
             self.assertNotIn(old, rendered)
 
@@ -274,16 +289,19 @@ social_media_page.render_page(ADMIN, api_factory=FakeCommunity, store=FakeStore)
         app = self.app()
         app.segmented_control[0].set_value("Comments").run()
         self.assertFalse(app.exception)
+        self.open_comment(app, "Facebook")
         self.assertTrue(self.button(app, "Delete comment").disabled)
-        app.checkbox[0].check().run()
-        self.button(app, "Delete comment").click().run()
+        app.checkbox[0].check()
+        self.open_comment(app, "Facebook")
+        self.button(app, "Delete comment").click()
+        self.open_comment(app, "Facebook")
         self.assertFalse(app.exception)
         self.assertIn(("delete", "Facebook", "comment", ""), EVENTS)
 
     def test_instagram_hides_unavailable_like_actions(self):
         app = self.app()
         app.segmented_control[0].set_value("Comments").run()
-        app.radio[0].set_value("Instagram").run()
+        self.open_comment(app, "Instagram")
         self.assertFalse(app.exception)
         self.assertNotIn("Like", [b.label for b in app.button])
         self.assertIn("Hide", [b.label for b in app.button])

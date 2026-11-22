@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 ADMIN = {"id": "fixture-admin", "role": "admin", "is_active": True}
 EVENTS = []
+READS = []
 
 
 class FakeCommunity:
@@ -16,10 +17,12 @@ class FakeCommunity:
         return self.page if platform == "Facebook" else self.instagram
 
     def conversations(self, platform, **kwargs):
-        return {"data": [{"id": "thread", "unread_count": 1, "participants": {"data": [
+        READS.append(("conversations", platform))
+        return {"data": [{"id": "thread", "unread_count": 1, "updated_time": "2026-11-22T00:00:00Z" if platform == "Facebook" else "2026-11-21T23:00:00Z", "participants": {"data": [
             {"id": self.owner(platform), "name": "Sports Cave"}, {"id": "person", "name": "Fixture customer"}]}}], "after": ""}
 
     def messages(self, platform, thread, **kwargs):
+        READS.append(("messages", platform))
         return {"data": [{"id": "message", "from": {"id": "person", "name": "Fixture customer"},
                           "created_time": datetime.now(timezone.utc).isoformat(), "message": "Do you deliver to Sydney?"}], "after": ""}
 
@@ -33,7 +36,12 @@ class FakeCommunity:
 
     def comments(self, platform, post, **kwargs):
         return {"data": [{"id": "comment", "text": "Love this edition", "message": "Love this edition",
-                          "username": "fixture", "from": {"id": "person", "name": "Fixture fan"}}], "after": ""}
+                          "timestamp": "2026-11-21T23:00:00Z", "created_time": "2026-11-22T00:00:00Z", "like_count": 3, "username": "fixture", "from": {"id": "person", "name": "Fixture fan"}}], "after": ""}
+
+    def comment_feed(self, platform, **kwargs):
+        READS.append(("comment_feed", platform))
+        posts = self.posts(platform)
+        return {"data": [dict(post, comments=self.comments(platform, post["id"])) for post in posts["data"]], "after": ""}
 
     def moderate(self, platform, post, comment, action, text=""):
         EVENTS.append((action, platform, comment, text))

@@ -185,6 +185,19 @@ class MetaCommunity:
         fields = "id,message,created_time,permalink_url" if platform == "Facebook" else "id,caption,timestamp,permalink"
         return self._edge(f"{owner}/{edge}", fields, after=after)
 
+    def comment_feed(self, platform, *, after=""):
+        """Read owned posts and their first comment page in one Graph request."""
+        owner = self.owner(platform)
+        if platform == "Facebook":
+            edge = "posts"
+            fields = ("id,message,created_time,permalink_url,"
+                      "comments.filter(stream).limit(20){id,message,from,created_time,like_count}")
+        else:
+            edge = "media"
+            fields = ("id,caption,timestamp,permalink,"
+                      "comments.limit(20){id,text,username,timestamp,like_count}")
+        return self._edge(f"{owner}/{edge}", fields, after=after, extra={"limit": 8})
+
     def _own_post(self, platform, post_id):
         post_id = identifier(post_id)
         owner = self.owner(platform)

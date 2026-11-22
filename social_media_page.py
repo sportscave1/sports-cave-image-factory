@@ -1,215 +1,147 @@
 """Facebook and Instagram community workspace in the existing Social Media tab."""
 import html
 import os
-from datetime import datetime, timezone
 
 import streamlit as st
 
 import os_accounts
 import social_media
-from meta_social import CommunityError, MetaCommunity, reply_open
+from meta_social import CommunityError, MetaCommunity
+from social_community_feed import CommunityFeed
+from social_community_views import render_inbox, render_comments, dated
 import social_collaborations
 import social_community_store as ledger
 
 
+PLATFORM_ICONS = {
+    "Instagram": """
+        <rect x="3" y="3" width="18" height="18" rx="5"></rect>
+        <circle cx="12" cy="12" r="4"></circle>
+        <circle cx="17.4" cy="6.7" r="1" class="fill"></circle>
+    """,
+    "Facebook": """
+        <path class="fill" d="M14.2 22v-8h2.8l.5-3.2h-3.3V8.7c0-.9.3-1.6 1.7-1.6h1.8V4.2c-.3 0-1.4-.2-2.6-.2-2.6 0-4.4 1.6-4.4 4.5v2.3H8v3.2h2.7v8h3.5z"></path>
+    """,
+    "Pinterest": """
+        <circle cx="12" cy="12" r="9"></circle>
+        <path d="M10.1 18.5c.7-2 1.1-3 1.4-4.3-.7-1.3.1-4 1.5-4 1.2 0 1.3 1.5.9 2.6-.4 1.1.1 2 1.1 2 1.4 0 2.4-1.8 2.4-4.3 0-2.3-1.7-4-4.2-4-2.9 0-4.6 2.2-4.6 4.4 0 .9.3 1.8.8 2.3"></path>
+    """,
+    "TikTok": """
+        <path class="fill" d="M14.2 3h3.1c.2 1.7 1.2 3 2.7 3.7v3.1c-1.4 0-2.7-.4-3.8-1.2v6.2c0 3.6-2.5 6.2-6 6.2-3.2 0-5.8-2.6-5.8-5.8s2.6-5.8 5.8-5.8c.4 0 .8 0 1.2.1v3.2c-.4-.1-.7-.2-1.1-.2-1.5 0-2.7 1.2-2.7 2.7s1.2 2.7 2.7 2.7c1.7 0 2.8-1.1 2.8-3.2V3h1.1z"></path>
+    """,
+    "YouTube": """
+        <rect x="2.5" y="5.5" width="19" height="13" rx="4"></rect>
+        <path class="fill-bg" d="M10 9l6 3-6 3z"></path>
+    """,
+}
+
+
 def _profile_shortcuts():
-    url = dict(social_media.SOCIAL_PROFILES)["Instagram"]
-    st.markdown(
-        '<a class="sc-instagram" href="' + html.escape(url, quote=True) +
-        '" target="_blank" rel="noopener noreferrer" aria-label="Open Sports Cave Instagram">'
-        '<svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.8">'
-        '<rect x="3" y="3" width="18" height="18" rx="5"></rect><circle cx="12" cy="12" r="4"></circle>'
-        '<circle cx="17.4" cy="6.7" r="1"></circle></svg> Instagram · @sportscaveshop ↗</a>',
-        unsafe_allow_html=True,
-    )
+    links = []
+    for platform, url in social_media.SOCIAL_PROFILES:
+        links.append(
+            '<a class="sc-social-link" href="' + html.escape(url, quote=True) +
+            '" target="_blank" rel="noopener noreferrer" aria-label="Open Sports Cave ' + platform + '">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true">' + " ".join(PLATFORM_ICONS[platform].split()) + '</svg>' +
+            '<span>' + platform + '</span></a>'
+        )
+    st.markdown('<nav class="sc-social-links" aria-label="Social profiles">' + ''.join(links) + '</nav>', unsafe_allow_html=True)
 
 
 def _notice():
+    clear_key = st.session_state.pop("community-clear-draft", "")
+    if clear_key:
+        st.session_state.pop(clear_key, None)
     notice = st.session_state.pop("community-notice", "")
     if notice:
         st.success(notice)
 
 
-def _done(message):
+def _done(message, *, draft_key=""):
     st.session_state["community-notice"] = message
+    if draft_key:
+        st.session_state["community-clear-draft"] = draft_key
+    state = st.session_state.get("community-feed-state", {})
+    state.pop("cache", None)
     st.rerun()
 
 
-def _next(key, page):
-    left, right = st.columns(2)
-    if left.button("First page", key=key + "-first", disabled=not st.session_state.get(key)):
-        st.session_state[key] = ""
-        st.rerun()
-    if right.button("Next page", key=key + "-next", disabled=not page.get("after")):
-        st.session_state[key] = page["after"]
-        st.rerun()
+def _creator_detail(api, store, creator):
+    st.link_button("Instagram profile", "https://www.instagram.com/" + creator["username"] + "/")
+    st.text(creator["reason"])
+    st.caption(f"Fit score: {creator['score']}/100 · recent post engagement: {creator.get('engagement') if creator.get('engagement') is not None else 'unavailable'}%")
+    st.caption("Suitable follower range and sports interests" if creator["fit"] else "Outside the current collaboration criteria")
+    draft = st.text_area("Invitation", value=creator["draft"], max_chars=1000, key="draft-" + creator["username"])
+    states = ("discovered", "shortlisted", "agreed", "declined")
+    state = st.selectbox("Pipeline", states, index=states.index(creator["state"]) if creator["state"] in states else 0,
+                         key="state-" + creator["username"])
+    if st.button("Save collaboration", key="save-" + creator["username"]):
+        store.update_creator(api.user, creator["username"], state, draft)
+        _done("Collaboration saved.")
+    if st.button("Send saved invitation", key="invite-" + creator["username"],
+                 disabled=not api.writes or not creator["fit"] or creator["state"] not in ("discovered", "shortlisted")):
+        result = social_collaborations.invite(api, creator, store=store)
+        if result == "waiting_for_inbound":
+            st.info("This creator needs to message Sports Cave first. Use the saved draft for a personal introduction.")
+        else:
+            _done("Invitation " + result.replace("_", " ") + ". Replies appear in Inbox.")
+    if creator["state"] in ("sending", "unknown"):
+        st.warning("Delivery needs checking in Inbox before any further invitation. Automatic retries are blocked.")
 
 
-def _peer(thread, api):
-    people = [p for p in (thread.get("participants") or {}).get("data", [])
-              if str(p.get("id")) not in {api.page, api.instagram}]
-    return ", ".join(p.get("name") or p.get("username") or p.get("id", "") for p in people) or thread["id"]
-
-
-def _inbox(api, platform):
-    page = api.conversations(platform, after=st.session_state.get("community-threads-" + platform, ""))
-    threads = page["data"]
-    st.caption("Updated " + datetime.now(timezone.utc).strftime("%H:%M UTC") +
-               " · refreshes every 60 seconds while open. Unread counts come from Meta.")
-    if not threads:
-        st.info("No conversations returned for this account.")
-        return
-    st.metric("Unread in this page", sum(int(row.get("unread_count") or 0) for row in threads))
-    ids = [row["id"] for row in threads]
-    mapping = {row["id"]: row for row in threads}
-    key = "community-thread-" + platform
-    if st.session_state.get(key) not in ids:
-        st.session_state.pop(key, None)
-    thread_id = st.selectbox("Conversation", ids, format_func=lambda value: _peer(mapping[value], api), key=key)
-    _next("community-threads-" + platform, page)
-    messages = api.messages(platform, thread_id)
-    with st.container(height=430, border=True):
-        for message in reversed(messages["data"]):
-            sender = message.get("from") or {}
-            outgoing = str(sender.get("id")) in {api.page, api.instagram}
-            with st.chat_message("assistant" if outgoing else "user"):
-                st.caption(("Sports Cave" if outgoing else sender.get("name") or "Customer") +
-                           " · " + str(message.get("created_time", "")))
-                st.text(message.get("message") or "[Attachment or unsupported message]")
-                if message.get("attachments"):
-                    st.caption("Attachment included · view the original in Business Suite.")
-    if messages.get("after"):
-        if st.button("Load older messages", key="older-" + platform + thread_id):
-            st.session_state["older-cursor-" + thread_id] = messages["after"]
-        if st.session_state.get("older-cursor-" + thread_id):
-            older = api.messages(platform, thread_id, after=st.session_state["older-cursor-" + thread_id])
-            for message in reversed(older["data"]):
-                st.text((message.get("message") or "[Attachment]"))
-            if older.get("after") and st.button("Earlier messages", key="earlier-" + thread_id):
-                st.session_state["older-cursor-" + thread_id] = older["after"]
-                st.rerun()
-    can_send = (api.writes and mapping[thread_id].get("is_owner") is not False
-                and reply_open(messages["data"], api.owner(platform)))
-    if not can_send:
-        st.caption("Replies require enabled sending and a customer message within the last 24 hours.")
-    with st.form("reply-" + platform + thread_id, clear_on_submit=True):
-        text = st.text_area("Reply", max_chars=1000)
-        if st.form_submit_button("Send reply", disabled=not can_send, type="primary"):
-            api.send(platform, thread_id, text)
-            _done("Reply sent. The conversation has been refreshed.")
-
-
-def _comments(api, platform):
-    # Notifications cover the latest ten owned posts, with bounded API reads.
-    posts = api.posts(platform, after=st.session_state.get("community-posts-" + platform, ""))
-    post_map = {p["id"]: p for p in posts["data"]}
-    if not post_map:
-        st.info("No published posts returned for this account.")
-        return
-    notifications = []
-    for post in posts["data"][:10]:
-        try:
-            for comment in api.comments(platform, post["id"])["data"]:
-                notifications.append((post, comment))
-        except CommunityError:
-            st.warning("Comments for one post could not load. Other available comments are shown.")
-    notifications.sort(key=lambda pair: str(pair[1].get("created_time") or pair[1].get("timestamp") or ""), reverse=True)
-    st.caption("Recent activity · latest 10 posts on this page, up to 30 comments per post. Refreshes every 60 seconds.")
-    with st.expander(f"Recent comment notifications ({len(notifications)})", expanded=bool(notifications)):
-        for post, comment in notifications[:30]:
-            author = comment.get("username") or (comment.get("from") or {}).get("name") or "Customer"
-            st.text(f"{author}: {comment.get('text') or comment.get('message') or '[Comment]'}")
-            if st.button("Open comment", key="notification-" + platform + comment["id"]):
-                st.session_state["community-post-" + platform] = post["id"]
-                st.session_state["community-comment-" + platform + post["id"]] = comment["id"]
-                st.rerun()
-    key = "community-post-" + platform
-    if st.session_state.get(key) not in post_map:
-        st.session_state.pop(key, None)
-    post_id = st.selectbox("Post", list(post_map), key=key,
-                           format_func=lambda value: (post_map[value].get("message") or post_map[value].get("caption") or value)[:120])
-    _next("community-posts-" + platform, posts)
-    post = post_map[post_id]
-    link = post.get("permalink") or post.get("permalink_url")
-    if link and str(link).startswith("https://"):
-        st.link_button("Open original post", link)
-    page = api.comments(platform, post_id, after=st.session_state.get("community-comments-" + post_id, ""))
-    comments = {row["id"]: row for row in page["data"]}
-    if not comments:
-        st.info("No comments on this page of the selected post.")
-        return
-    key = "community-comment-" + platform + post_id
-    if st.session_state.get(key) not in comments:
-        st.session_state.pop(key, None)
-    comment_id = st.selectbox("Comment", list(comments), key=key,
-                              format_func=lambda value: (comments[value].get("text") or comments[value].get("message") or value)[:160])
-    _next("community-comments-" + post_id, page)
-    st.text(comments[comment_id].get("text") or comments[comment_id].get("message") or "[Comment]")
-    with st.form("comment-reply-" + platform + comment_id, clear_on_submit=True):
-        text = st.text_area("Public reply", max_chars=1000)
-        if st.form_submit_button("Reply to comment", disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, "reply", text)
-            _done("Public reply sent.")
-    actions = ("like", "unlike", "hide", "unhide") if platform == "Facebook" else ("hide", "unhide")
-    columns = st.columns(len(actions))
-    for column, action in zip(columns, actions):
-        if column.button(action.title(), key=action + platform + comment_id, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, action)
-            _done("Comment updated.")
-    if platform == "Instagram":
-        st.caption("Use the original Instagram post to like a comment; this integration supports replies, hide and delete.")
-    confirm = st.checkbox("Confirm permanent deletion of this comment", key="delete-confirm-" + comment_id)
-    if st.button("Delete comment", key="delete-" + comment_id, disabled=not (confirm and api.writes)):
-        api.moderate(platform, post_id, comment_id, "delete")
-        _done("Comment deleted.")
+def _select_creator(rows):
+    selected = st.session_state.get("community-creators-grid", {}).get("selection", {}).get("rows", [])
+    if selected and selected[0] < len(rows):
+        st.session_state["community-selected-creator"] = rows[selected[0]]["username"]
 
 
 def _collaborations(api, store):
-    st.subheader("Find your next Sports Cave collaborator")
-    st.caption("Discover engaged Instagram commenters and assess professional accounts with 1,000–50,000 followers. "
-               "Sports fit and engagement are signals for review; audience location and willingness to collaborate are unverified.")
-    handles = st.text_area("Optional Instagram usernames", placeholder="One username per line")
-    if st.button("Discover and assess creators", type="primary"):
-        rows, errors = social_collaborations.discover(api, handles.splitlines(), store=store)
-        st.success(f"Assessed {len(rows)} creators.")
-        for error in errors:
-            st.warning(error)
+    heading, find = st.columns([3, 1])
+    heading.subheader("Collaborations")
+    with find.popover("Find creators", icon=":material/person_search:"):
+        st.caption("Find engaged Instagram commenters and professional accounts with 1,000–50,000 followers.")
+        handles = st.text_area("Optional Instagram usernames", placeholder="One username per line")
+        if st.button("Discover and assess creators", type="primary"):
+            with st.spinner("Finding creators…"):
+                rows, errors = social_collaborations.discover(api, handles.splitlines(), store=store)
+            st.success(f"Assessed {len(rows)} creators.")
+            for error in errors:
+                st.warning(error)
     creators = store.list_creators(api.user)
-    for creator in creators:
-        with st.expander(f"@{creator['username']} · {creator['followers']:,} followers · {creator['state']}"):
-            st.link_button("Instagram profile", "https://www.instagram.com/" + creator["username"] + "/")
-            st.text(creator["reason"])
-            st.caption(f"Fit score: {creator['score']}/100 · recent post engagement: {creator.get('engagement') if creator.get('engagement') is not None else 'unavailable'}%")
-            st.caption("Suitable follower range and sports interests" if creator["fit"] else "Outside the current collaboration criteria")
-            draft = st.text_area("Invitation", value=creator["draft"], max_chars=1000, key="draft-" + creator["username"])
-            states = ("discovered", "shortlisted", "agreed", "declined")
-            state = st.selectbox("Pipeline", states, index=states.index(creator["state"]) if creator["state"] in states else 0,
-                                 key="state-" + creator["username"])
-            if st.button("Save collaboration", key="save-" + creator["username"]):
-                store.update_creator(api.user, creator["username"], state, draft)
-                _done("Collaboration saved.")
-            if st.button("Send saved invitation", key="invite-" + creator["username"],
-                         disabled=not api.writes or not creator["fit"] or creator["state"] not in ("discovered", "shortlisted")):
-                result = social_collaborations.invite(api, creator, store=store)
-                if result == "waiting_for_inbound":
-                    st.info("This creator needs to message Sports Cave first. Use the saved draft for a personal introduction.")
-                else:
-                    _done("Invitation " + result.replace("_", " ") + ". Replies appear in Inbox.")
-            if creator["state"] in ("sending", "unknown"):
-                st.warning("Delivery needs checking in Inbox before any further invitation. Automatic retries are blocked.")
-    if not creators:
-        st.info("No saved creators yet. Discover commenters or enter professional account usernames above.")
-    st.info("Meta does not provide unrestricted creator search or cold automated DMs. Invitations can be sent "
-            "when the creator has an eligible inbound Instagram conversation. Their replies appear in Inbox.")
+    search, stage = st.columns([3, 1])
+    query = search.text_input("Search creators", placeholder="Search creators…", label_visibility="collapsed").strip().casefold()
+    selected_stage = stage.selectbox("Stage", ("All stages", *ledger.STATES), label_visibility="collapsed")
+    rows = [row for row in creators if (not query or query in row["username"].casefold())
+            and (selected_stage == "All stages" or row["state"] == selected_stage)]
+    if rows:
+        table, details = st.columns([2, 1.25], gap="medium")
+        with table:
+            st.dataframe([{"Creator": "@" + row["username"], "Followers": row["followers"],
+                           "Stage": row["state"].replace("_", " ").title(), "Fit": "Suitable" if row["fit"] else "Review",
+                           "Score": row["score"]} for row in rows], hide_index=True, width="stretch", height=430,
+                         key="community-creators-grid", selection_mode="single-row",
+                         on_select=lambda: _select_creator(rows))
+            st.caption(f"{len(rows)} collaborators · select a row for details")
+        selected = st.session_state.get("community-selected-creator")
+        creator = next((row for row in rows if row["username"] == selected), rows[0])
+        with details, st.container(border=True):
+            st.markdown("**@" + creator["username"] + "**")
+            st.caption(creator["state"].replace("_", " ").title())
+            _creator_detail(api, store, creator)
+    else:
+        st.info("No creators match these filters." if creators else "No collaborations yet. Use Find creators to get started.")
     if os_accounts.is_admin(api.user):
-        enabled = store.automation(api.user)["automation_enabled"]
-        desired = st.checkbox("Automatically discover and invite eligible creators while this workspace is open",
-                              value=enabled, disabled=not api.writes or os.getenv("META_SOCIAL_AUTOMATION_ENABLED") != "1")
-        if desired != enabled:
-            store.automation(api.user, desired)
-            st.rerun()
-        st.caption("When enabled, runs every five minutes while Collaborations is open. Up to five invitations per run; "
-                   "one invitation per creator. A recent inbound message is always required.")
+        with st.popover("Automatic invitations", icon=":material/bolt:"):
+            enabled = store.automation(api.user)["automation_enabled"]
+            desired = st.checkbox("Automatically discover and invite eligible creators while this workspace is open",
+                                  value=enabled, disabled=not api.writes or os.getenv("META_SOCIAL_AUTOMATION_ENABLED") != "1")
+            if desired != enabled:
+                store.automation(api.user, desired)
+                st.rerun()
+            st.caption("Runs every five minutes while Collaborations is open, with up to five invitations per run. "
+                       "One invitation per creator; a recent inbound message is required.")
+            st.caption("Meta does not support unrestricted creator search or unsolicited cold DMs through this connection. "
+                       "Audience authenticity and willingness to collaborate need review.")
 
 
 def _connection(api):
@@ -229,12 +161,16 @@ def _connection(api):
 
 
 @st.fragment(run_every="60s")
-def _live_panel(api, platform, view):
+def _live_panel(api, view):
+    state = st.session_state.setdefault("community-feed-state", {})
+    feed = CommunityFeed(api, state)
     try:
         if view == "Inbox":
-            _inbox(api, platform)
+            render_inbox(api, feed, _done)
         else:
-            _comments(api, platform)
+            render_comments(api, feed, _done)
+        if state.get("synced_at"):
+            st.caption("Updated " + dated(state["synced_at"]))
     except CommunityError as exc:
         st.warning(str(exc))
 
@@ -266,29 +202,45 @@ def render_page(user, *, store=ledger, account_store=None, api_factory=MetaCommu
                 del st.session_state[key]
         st.session_state["community-legacy-state-cleared"] = True
     st.markdown("""<style>
-        .sc-community{border-bottom:1px solid #d8d4ca;padding:0 0 14px;margin-bottom:14px}
-        .sc-community h1{font-size:1.8rem;margin:0}.sc-community p{color:#767166;margin:4px 0 0}
-        .sc-instagram{display:inline-flex;align-items:center;gap:9px;border:1px solid #dedbd3;
-        border-radius:8px;padding:10px 14px;text-decoration:none;color:inherit!important;margin-bottom:16px}
-        </style><div class="sc-community"><h1>Social Media</h1>
-        <p>Your community. Every conversation, in one place.</p></div>""", unsafe_allow_html=True)
-    _profile_shortcuts()
-    _notice()
-    view = st.segmented_control("Social Media workspace", ("Inbox", "Comments", "Collaborations", "Connection"),
-                                default="Inbox", key="community-view")
-    try:
-        api = api_factory(user)
-        if view in ("Inbox", "Comments"):
-            platform = st.radio("Account", ("Facebook", "Instagram"), horizontal=True)
-            st.button("Refresh", key="community-refresh")
-            _live_panel(api, platform, view)
-            st.link_button("Open Meta Business Suite", "https://business.facebook.com/latest/inbox/all")
-        elif view == "Collaborations":
-            _collaborations(api, store)
-            _automation_panel(api, store)
-        else:
-            _connection(api)
-    except (CommunityError, PermissionError, ValueError) as exc:
-        st.warning(str(exc))
-    except Exception:
-        st.warning("The collaboration ledger is unavailable. Provision its schema and check the server connection.")
+.st-key-community-shell{--sc-social-gold:#ae8126}
+.st-key-community-shell h1{font-size:1.65rem!important;line-height:1.2!important;padding:0!important;margin:0!important}
+.st-key-community-shell [data-testid="stHeading"]{margin:0!important}
+.sc-social-links{display:flex;justify-content:flex-end;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 10px}
+.sc-social-link{display:inline-flex;align-items:center;gap:6px;border:1px solid #e4e1da;border-radius:7px;padding:7px 9px;color:#222!important;text-decoration:none!important;font-size:12px;white-space:nowrap;background:white}
+.sc-social-link:hover{border-color:#b88c32;background:#fcf9f1}
+.sc-social-link svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sc-social-link svg .fill{fill:currentColor;stroke:none}.sc-social-link svg .fill-bg{fill:white;stroke:none}
+.sc-social-link[aria-label$="Facebook"] svg{color:#1877f2}.sc-social-link[aria-label$="Instagram"] svg{color:#dc287b}
+.sc-social-link[aria-label$="Pinterest"] svg,.sc-social-link[aria-label$="YouTube"] svg{color:#d0212b}
+.st-key-community-shell [data-testid="stBaseButton-primary"]{background:#ae8126;border-color:#ae8126;color:white}
+.st-key-community-shell [data-testid="stExpander"]{border-color:#e7e3db;border-radius:6px}
+.st-key-community-shell [data-testid="stExpander"] summary{font-size:13px;min-height:43px}
+.st-key-community-shell [data-testid="stSegmentedControl"]{margin-bottom:5px}
+.st-key-community-shell [data-testid="stSegmentedControl"] [aria-checked="true"]{background:#ecdab2;border-color:#d1ac5e;color:#191713}
+@media(max-width:760px){.sc-social-links{justify-content:flex-start;gap:5px}.sc-social-link{padding:6px 8px}.st-key-community-shell h1{font-size:1.45rem!important}}
+</style>""", unsafe_allow_html=True)
+    with st.container(key="community-shell"):
+        heading, links = st.columns([1, 3], vertical_alignment="center")
+        heading.title("Social Media", anchor=False)
+        with links:
+            _profile_shortcuts()
+        _notice()
+        navigation, refresh = st.columns([5, 1], vertical_alignment="center")
+        with navigation:
+            view = st.segmented_control("Social Media workspace", ("Inbox", "Comments", "Collaborations", "Connection"),
+                                        default="Inbox", key="community-view", label_visibility="collapsed")
+        if refresh.button("Refresh", icon=":material/sync:", key="community-refresh", width="stretch"):
+            st.session_state.get("community-feed-state", {}).pop("cache", None)
+        try:
+            api = api_factory(user)
+            if view in ("Inbox", "Comments"):
+                _live_panel(api, view)
+            elif view == "Collaborations":
+                _collaborations(api, store)
+                _automation_panel(api, store)
+            else:
+                _connection(api)
+        except (CommunityError, PermissionError, ValueError) as exc:
+            st.warning(str(exc))
+        except Exception:
+            st.warning("The community workspace could not load. Refresh to retry.")
