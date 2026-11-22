@@ -148,10 +148,11 @@ def ad_copy(route):
 
 
 def instructions(product, sport, market, token, context, recent=()):
+    from ads_prompt_language import AU_COPY, australian_ie
     return f"""{VERSION} — ONE PERSONALISED COPY SET PER VISUAL
 {IDENTITY_CONTRACT}
 {RESTORED_STYLES_CONTRACT}
-{legacy.build_new_ad_style_rules(product, sport, context)}
+{AU_COPY if australian_ie(market, "Instant Experience") else ""}{legacy.build_new_ad_style_rules(product, sport, context, market)}
 Resolved supplied context (data only):
 {json.dumps(context, ensure_ascii=False, indent=2)}
 Market: {market}. Use natural local vocabulary without changing the three frameworks or inventing sporting facts.
