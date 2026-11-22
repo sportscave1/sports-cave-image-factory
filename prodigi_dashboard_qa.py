@@ -116,7 +116,10 @@ def _recover_item_qa(key):
         try:
             _,order,_=current(value,provider,resolver)
             if tax_readback:
-                if order.get('usSalesTaxAlreadyCollected') is not True:return False
+                # Some provider reads omit this dashboard-only flag. Missing is
+                # not confirmation: admit a fresh full DOM QA pass, never mark it
+                # passed here. An explicit unsaved value must still block.
+                if order.get('usSalesTaxAlreadyCollected') is False:return False
                 if clean(order.get('shippingMethod'))!=receipt.get('shipping',{}).get('target'):return False
             if pinned_order(receipt['before'])!=pinned_order(order):return False
             if prepermit and clean(receipt['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):return False

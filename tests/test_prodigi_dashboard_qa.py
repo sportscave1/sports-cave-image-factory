@@ -213,7 +213,7 @@ def test_us_declaration_accepts_checked_receipt_but_not_explicit_unsaved_api_val
     saved=prep.read(1);assert saved['dashboard_qa']['tax_collected'] is True and all(saved['checks'].values())
 
 
-@pytest.mark.parametrize('case',['saved','unchecked','changed_shipping','changed_asset','charged','exhausted','wrong_policy'])
+@pytest.mark.parametrize('case',['saved','omitted','unchecked','changed_shipping','changed_asset','charged','exhausted','wrong_policy'])
 def test_tax_timeout_recovery_requires_independent_saved_tax_and_unchanged_draft(store,monkeypatch,case):
     value,snap,p,_=fixture()
     monkeypatch.setattr(prep,'require_user',lambda _:None)
@@ -227,13 +227,18 @@ def test_tax_timeout_recovery_requires_independent_saved_tax_and_unchanged_draft
     if case=='exhausted':value['qa_tax_readback_recoveries']=1
     if case=='wrong_policy':value['dashboard_qa']['tax_policy']='unconfirmed'
     with prep.connect() as c,c.cursor() as q:prep.save(q,value)
+    if case=='omitted':p.data.pop('usSalesTaxAlreadyCollected')
     if case=='unchecked':p.data['usSalesTaxAlreadyCollected']=False
     if case=='changed_shipping':p.data['shippingMethod']='Express'
     if case=='changed_asset':p.data['items'][0]['assets'][0]['url']='https://fixture/changed'
     if case=='charged':p.data['charges']=[{'id':'fixture-charge'}]
-    assert qa.recover_waiting_item_qa({'id':'fixture'})==(1 if case=='saved' else 0)
+    assert qa.recover_waiting_item_qa({'id':'fixture'})==(1 if case in ('saved','omitted') else 0)
     saved=prep.read(1)
     assert saved['browser']['verified'] and not p.writes
-    if case=='saved':
+    if case in ('saved','omitted'):
         assert saved['status']==qa.WAITING and saved['qa_tax_readback_recoveries']==1
         assert 'dashboard_qa' not in saved
+        # Recovery is admission only: fresh DOM evidence and permit still required.
+        next_plan=qa.claim(exact_item_supported=True,tax_supported=True)
+        assert next_plan and next_plan['token']!=plan['token']
+        assert prep.read(1)['dashboard_qa']['started'] is False
