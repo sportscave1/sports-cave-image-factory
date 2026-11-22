@@ -6,12 +6,12 @@ import prodigi_preparation as prep
 import prodigi_browser as browser
 from prodigi_qa import address_matches, clean
 
-POLICY='prodigi-dashboard-inserts-qa-v1'
+POLICY='prodigi-dashboard-inserts-observed-v2'
 WAITING='Awaiting dashboard QA'
 ACTIVE='Checking dashboard QA'
 SET='SC EDITION BRANDING'
 TYPES={'Round packaging sticker','Packing slip (colour)'}
-CHECKS={'product_option':'Product and variant SKU','frame':'Frame colour','size':'Print size','artwork_upload':'Exact saved design','edition_number':'Allocated edition number','sent_to_production':'Full-image fit and orientation','image_quality':'Prodigi image quality: Excellent','customer_address':'Customer shipping details','shipping':'Cheapest shipping / required Express','certificate':'SC EDITION BRANDING saved inserts','packing_slip':'Colour packing slip and round packaging sticker','inserts_available':'Supplier insert availability','final_check':'All QA checks passed'}
+CHECKS={'product_option':'Product and variant SKU','frame':'Frame colour','size':'Print size','artwork_upload':'Exact saved design','edition_number':'Allocated edition number','sent_to_production':'Full-image fit and orientation','image_quality':'Prodigi image quality: Excellent','customer_address':'Customer shipping details','shipping':'Cheapest shipping / required Express','certificate':'Saved supplier inserts','packing_slip':'Observed packing slip and sticker','inserts_available':'Supplier inserts present','final_check':'All QA checks passed'}
 
 
 def intent(value):
@@ -132,30 +132,18 @@ def identity_proof(snapshot):
         and {1,snapshot['total']}<={p.get('number') for p in proofs if p.get('pixel_exact') is True})
 
 
+def observed_inserts(evidence):
+    """Record supplier-selected names, independent of branding templates/assets."""
+    rows=evidence.get('saved') if isinstance(evidence,dict) else None
+    if not isinstance(rows,list) or not 0<len(rows)<=100:return []
+    if any(not isinstance(row,dict) or not isinstance(row.get('name'),str) or not row['name'].strip() for row in rows):return []
+    return list(dict.fromkeys(' '.join(row['name'].split())[:200] for row in rows))
+
+
 def insert_checks(evidence,asset_resolver=None):
-    if not isinstance(evidence,dict) or set(evidence)!={'set_name','saved','expected','available'}:return False,False
-    def rows(items):
-        if not isinstance(items,list) or len(items)!=2:return None
-        if any(not isinstance(i,dict) or set(i)!={'name','asset'} or i['name'] not in TYPES or
-               not isinstance(i['asset'],str) or not __import__('re').fullmatch(r'[A-Za-z0-9-]{1,100}',i['asset']) for i in items):return None
-        return {(i['name'],i['asset']) for i in items}
-    saved,expected=rows(evidence['saved']),rows(evidence['expected'])
-    # Dashboard previews use library UUIDs; saved branding uses transform IDs.
-    # Resolve the provider's own canonical URL, never infer image equivalence.
-    if saved is not None and expected is not None and saved!=expected and asset_resolver:
-        from urllib.parse import urlparse
-        normalised=set()
-        for name,asset_id in expected:
-            asset=asset_resolver(asset_id)
-            parsed=urlparse(asset.get('url') or '')
-            match=__import__('re').fullmatch(r'/image-library/transform/([A-Za-z0-9-]+)/image',parsed.path)
-            if str(asset.get('id'))!=asset_id or parsed.scheme!='https' or parsed.hostname!='live-services.pwinty.com' or not match:
-                return False,False
-            normalised.add((name,match[1]))
-        expected=normalised
-    selected=(evidence['set_name']==SET and saved is not None and expected is not None and len(saved)==len(expected)==2
-              and {n for n,_ in expected}==TYPES and saved==expected)
-    return selected,selected and evidence['available'] is True
+    # Owner policy: presence is required; set, asset and availability are informational.
+    present=bool(observed_inserts(evidence))
+    return present,present
 
 
 def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolver=None):
@@ -180,12 +168,13 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
         'sent_to_production':'Full-image fit/orientation is not verified.','image_quality':'Prodigi image quality must show Excellent.',
         'customer_address':'Customer shipping details differ from the saved Shopify order.',
         'shipping':'The cheapest quoted shipping (or required Express) is not selected.',
-        'certificate':'Saved inserts do not match SC EDITION BRANDING.',
-        'packing_slip':'The exact colour packing slip and round packaging sticker are not selected.',
-        'inserts_available':'Prodigi reports unavailable inserts, or availability could not be verified.',
+        'certificate':'No saved inserts are shown in Prodigi.',
+        'packing_slip':'No saved inserts are shown in Prodigi.',
+        'inserts_available':'No saved inserts are shown in Prodigi.',
         'final_check':'QA has unresolved checks or supplier issues.'}
-    return dict(policy=POLICY,checks=checks,blockers=[labels[k] for k,v in checks.items() if not v],
-        checked_at=prep.now(),basis='Pinned artwork receipt and edition proofs, saved supplier order, live Excellent rating, saved branding assets and current shipping quotes',
+    return dict(policy=POLICY,checks=checks,blockers=list(dict.fromkeys(labels[k] for k,v in checks.items() if not v)),
+        inserts=dict(names=observed_inserts(evidence['inserts']),supplier_available=evidence['inserts'].get('available')),
+        checked_at=prep.now(),basis='Pinned artwork receipt and edition proofs, saved supplier order, live Excellent rating, observed supplier inserts and current shipping quotes',
         supplier_status=order.get('status'),supplier_download_confirmed=bool(assets and clean(assets[0].get('status'))=='complete'))
 
 

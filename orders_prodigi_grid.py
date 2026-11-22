@@ -87,6 +87,7 @@ def review(saved,row,jpg):
     return dict(status=state,message=(saved or {}).get('message','Waiting for automatic artwork preparation.'),
         updated_at=(saved or {}).get('updated_at') or ((saved or {}).get('last_failure') or {}).get('at'),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
         submission_enabled=(saved or {}).get('_submit_enabled'),
+        insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
         items=items,can_restart=stopped,allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')

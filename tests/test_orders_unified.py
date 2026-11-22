@@ -5,19 +5,13 @@ from test_auto_editions_jobs import database
 from test_prodigi_preparation import store
 
 
-def test_insert_library_ids_resolve_to_exact_saved_transform_ids():
-    from prodigi_dashboard_qa import insert_checks,SET
-    saved=[dict(name='Round packaging sticker',asset='saved-sticker'),dict(name='Packing slip (colour)',asset='saved-slip')]
-    expected=[dict(name='Round packaging sticker',asset='library-sticker'),dict(name='Packing slip (colour)',asset='library-slip')]
-    proof=dict(set_name=SET,saved=saved,expected=expected,available=True)
-    assert insert_checks(proof)==(False,False)
-    calls=[]
-    def asset(key):
-        calls.append(key);return dict(id=key,url='https://live-services.pwinty.com/image-library/transform/'+key.replace('library-','saved-')+'/image?access_token=not-logged')
-    assert insert_checks(proof,asset)==(True,True) and len(calls)==2
-    proof['available']=False
-    assert insert_checks(proof,asset)==(True,False) # Local unavailability is never waived.
-    assert insert_checks(proof,lambda key:dict(id='wrong',url=asset(key)['url']))==(False,False)
+def test_observed_insert_names_reach_the_drawer_without_asset_lookup():
+    from prodigi_dashboard_qa import insert_checks
+    from orders_prodigi_grid import review
+    proof=dict(saved=[dict(name='New slip',asset=None),dict(name='New sticker',asset=None)],available=False)
+    assert insert_checks(proof,lambda _:pytest.fail('No image-library lookup'))==(True,True)
+    result=review(dict(qa=dict(inserts=dict(names=['New slip','New sticker']))),dict(edition_order_id=1),'')
+    assert result['insert_names']==['New slip','New sticker']
 
 
 def test_thumbnail_is_small_and_never_changes_the_print_file(tmp_path,monkeypatch):

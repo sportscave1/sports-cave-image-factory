@@ -35,13 +35,30 @@ def test_cheapest_and_express_rules_do_not_confuse_price_ties():
     with pytest.raises(ValueError,match='currencies'):qa.shipping_choice(rows,'standard','standard')
 
 
-def test_insert_check_requires_exact_saved_set_assets_and_availability():
+def test_inserts_record_presence_without_matching_templates_assets_or_availability():
     proof=inserts();assert qa.insert_checks(proof)==(True,True)
-    proof['available']=False;assert qa.insert_checks(proof)==(True,False)
-    proof['available']=True;proof['saved'][1]['asset']='different-packing-slip'
-    assert qa.insert_checks(proof)==(False,False)
-    proof=inserts();proof['saved'][1]['name']='Flyer'
-    assert qa.insert_checks(proof)==(False,False)
+    proof.update(set_name='New seasonal branding',available=False,expected=[])
+    proof['saved'][1].update(name='Seasonal packing slip',asset=None)
+    assert qa.insert_checks(proof)==(True,True)
+    assert qa.observed_inserts(proof)==['Round packaging sticker','Seasonal packing slip']
+    proof['saved']=[dict(name='New flyer',asset=None)]
+    assert qa.insert_checks(proof)==(True,True)
+    for missing in ([],None,[{}],[dict(name='   ')]):
+        proof['saved']=missing
+        assert qa.insert_checks(proof)==(False,False)
+
+
+def test_presence_only_inserts_do_not_block_final_qa_but_missing_inserts_do():
+    value,snap,p,evidence=fixture();p.data['shippingMethod']='Budget'
+    value['dashboard_qa']={'shipping':dict(options=options(),current='standard',target='budget')}
+    evidence['inserts'].update(set_name='New set',expected=[],available=False)
+    evidence['inserts']['saved']=[dict(name='Current flyer',asset=None),dict(name='Current sticker',asset=None)]
+    result=qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)
+    assert all(result['checks'].values()) and not result['blockers']
+    assert result['inserts']==dict(names=['Current flyer','Current sticker'],supplier_available=False)
+    evidence['inserts']['saved']=[]
+    result=qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)
+    assert not result['checks']['final_check'] and not result['checks']['packing_slip']
 
 
 def test_live_full_qa_queues_a_dashboard_check_without_creating_a_certificate(monkeypatch):

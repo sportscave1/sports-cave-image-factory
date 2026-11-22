@@ -30,40 +30,26 @@ if(typeof module!=='undefined')module.exports={prodigiShippingQuotes,prodigiChea
   function insertDialog(){return Array.from(document.querySelectorAll('[role="dialog"]')).find(e=>visible(e)&&Array.from(e.querySelectorAll('h1,h2')).some(h=>text(h)==='Inserts on this order'));}
   function insertRows(scope){
     const rows=Array.from(scope.querySelectorAll('[data-test^="insert-item-"][data-test$="-name"]')).filter(visible).map(n=>{
-      const images=Array.from(n.closest('li').querySelectorAll('img')).filter(visible);
-      const ids=images.map(i=>{try{const u=new URL(i.currentSrc||i.src);return u.hostname==='live-services.pwinty.com'?u.pathname.match(/\/image-library\/(?:transform|image)\/([A-Za-z0-9-]+)\//)?.[1]:null;}catch{return null;}}).filter(Boolean);
-      return {name:text(n),asset:ids.length&&new Set(ids).size===1?ids[0]:null};
+      return {name:text(n),asset:null};
     });
-    return rows.length>0&&rows.every(r=>r.asset)?rows:null;
+    return rows;
   }
   async function inspectInserts(plan){
     pin(plan);uniqueButton(document.querySelector('main'),'View & edit').click();
-    const modal=await wait(insertDialog);
-    let saved,expected;
+    let saved=[];
     try {
-      saved=await wait(()=>insertRows(modal));
-      const selects=Array.from(modal.querySelectorAll('select')).filter(e=>visible(e)&&Array.from(e.options).some(o=>o.textContent.trim()===plan.branding_set));
-      if(selects.length!==1)throw Error('SC EDITION BRANDING cannot be uniquely found.');
-      const options=Array.from(selects[0].options).filter(o=>o.textContent.trim()===plan.branding_set);
-      if(options.length!==1)throw Error('Branding set selection is ambiguous.');
-      selects[0].value=options[0].value;selects[0].dispatchEvent(new Event('change',{bubbles:true}));
-      (await wait(()=>{try{return uniqueButton(modal,'Use this set');}catch{return null;}})).click();
-      // Use only the unsaved preview to identify the set's exact image assets.
-      // Cancel is mandatory; this worker never assigns or saves paid inserts.
-      expected=await wait(()=>{const r=insertRows(modal);return r&&r.length===2&&r.some(i=>i.name==='Round packaging sticker')&&r.some(i=>i.name==='Packing slip (colour)')&&r;});
+      const modal=await wait(insertDialog);
+      // Read the currently saved selection only. Never select, assign or save a set.
+      saved=await wait(()=>{const rows=insertRows(modal);return rows.length?rows:null;},5000).catch(()=>[]);
     } finally {
       const open=insertDialog();if(open)uniqueButton(open,'Cancel').click();
       await wait(()=>!insertDialog());
     }
     pin(plan);
-    uniqueButton(document.querySelector('main'),'View & edit').click();
-    try {
-      const reopened=await wait(insertDialog),confirmed=await wait(()=>insertRows(reopened));
-      if(JSON.stringify(confirmed)!==JSON.stringify(saved))throw Error('Saved inserts changed during the check.');
-    } finally {const open=insertDialog();if(open)uniqueButton(open,'Cancel').click();await wait(()=>!insertDialog());}
     const main=text(document.querySelector('main'));
-    return {set_name:plan.branding_set,saved,expected,available:!(/inserts are unavailable|inserts are not available|will not be charged for unavailable inserts/i.test(main))};
+    return {set_name:'',saved,expected:[],available:!(/inserts are unavailable|inserts are not available|will not be charged for unavailable inserts/i.test(main))};
   }
+
   async function run(plan){
     try {
       pin(plan);
