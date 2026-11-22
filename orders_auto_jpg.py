@@ -27,7 +27,8 @@ def admit(connect,limit=3):
                          NULLIF(to_jsonb(e)->>'created_at','')::timestamptz)>=%s::timestamptz
             AND (COALESCE(a.value->>'status','')<>'Ready' OR NOT COALESCE((a.value->>'fulfilment_queued')::boolean,false))
             AND COALESCE(a.value->>'status','') NOT IN ('Needs review','Repair')
-            AND (a.updated_at IS NULL OR a.updated_at<now()-interval '30 seconds')
+            AND (a.updated_at IS NULL OR a.updated_at<now()-interval '30 seconds'
+                 OR (j.status='Ready' AND COALESCE(a.value->>'status','')<>'Ready'))
           ORDER BY a.updated_at NULLS FIRST,e.id LIMIT %s""",(PREFIX,since,max(1,min(limit,10))))
         rows=q.fetchall()
     _,jobs=runtime.stores()

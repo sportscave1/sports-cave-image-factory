@@ -12,7 +12,14 @@ import hmac,json,re,secrets,threading
 import prodigi_preparation as prep
 import prodigi_browser as browser
 from prodigi_client import ProdigiError
-from companion_poll_transaction import connection
+from companion_poll_transaction import connection as bounded_connection
+
+# Merge discovery/readback must not consume the other companions' poll slots.
+_merge_slots=threading.BoundedSemaphore(2)
+
+
+def connection(factory):
+    return bounded_connection(factory,slots=_merge_slots)
 
 PREFIX='prodigi_merge:'
 LOCK=19721133

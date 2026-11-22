@@ -11,7 +11,7 @@ Both SC3532 jobs retained the exact same artwork output and allocation. Producti
 - Product selection commits directly to Awaiting browser upload. Upload claims precede another product selection. One worker-owned exact-order tab is reused.
 - A sequential-capable companion checks the saved item immediately, before the next item. Successful item QA waits for the rest of the order. A final fresh combined QA batch and the existing one-order submission fence are still required.
 - Bounded chains of up to six successful stages remove the alarm gap between actions. Any review/error stops the chain. No parallel native writes or blind Save retries.
-- Orders authentication/heartbeat has one separate bounded slot; other workers retain their existing two-slot limit and all transaction-local deadlines. Live monitoring caught shared-slot 503s blocking pickup after the first fixes.
+- Orders authentication/heartbeat has one separate bounded slot and merge discovery/readback has its own two-slot limit; other workers retain their existing two-slot limit and all transaction-local deadlines. Live monitoring caught shared-slot 503s blocking pickup after the first fixes.
 - New JPG admission also runs independently of long package/catalogue work when the companion polls. Background loop admission precedes package draining.
 - Fulfilment admission throttle: 60s to 15s. Orders' existing read-only changed-marker check: 30s to 5s. Reload rows only on actual marker changes; row progress remains incremental.
 - Countdown preferences, payment and production settings are untouched.

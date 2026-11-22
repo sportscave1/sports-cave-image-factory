@@ -51,3 +51,20 @@ def test_orders_header_is_bounded_local_and_exposes_real_status(database,monkeyp
     assert not value.get('unavailable') and value['online']
     assert value['jobs'][0]['state']=='running' and value['jobs'][0]['percent']==0
     assert value['jobs'][0]['title']=='#TEST1 · Artwork'
+
+
+def test_fresh_ready_jpg_bypasses_waiting_cooldown_and_queues_only_once(database,monkeypatch):
+    import prodigi_preparation as prep,orders_automatic as automatic
+    jobs,sql=database;tables(sql);calls=[]
+    sql.execute('INSERT INTO app_settings(key,value) VALUES(%s,to_jsonb(%s::text))',(auto.SINCE,'2020-01-01T00:00:00Z'))
+    # A just-observed queued file becomes Ready before its 30-second cooldown.
+    sql.execute("INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)",(auto.PREFIX+'1',json.dumps(dict(status='Queued'))))
+    import auto_editions as ae
+    identity=dict(allocation_id=1)
+    jobs.enqueue(dict(id=ae.fingerprint(identity),identity=identity),'fixture')
+    sql.execute("UPDATE auto_edition_jobs SET status='Ready'")
+    monkeypatch.setattr(runtime,'stores',lambda:(None,jobs))
+    monkeypatch.setattr(automatic,'owner',lambda:{'id':'owner'})
+    monkeypatch.setattr(prep,'request',lambda user,aid:calls.append(aid))
+    assert auto.admit(jobs.connect)==1 and calls==[1]
+    assert auto.admit(jobs.connect)==0 and calls==[1]
