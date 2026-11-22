@@ -14,6 +14,7 @@ import prodigi_stage as stages
 
 WAITING = 'Awaiting product selection'
 ACTIVE = 'Selecting product'
+READBACK_POLICY='supplier-price-readback-v1'
 
 
 def business(order, target):
@@ -23,6 +24,15 @@ def business(order, target):
             for key in ('sku', 'catalogueVariantId', 'catalogueProductId', 'attributes',
                         'assets', 'sizing', 'unitPrice', 'lineTotal', 'name', 'productName'):
                 item.pop(key, None)
+    return result
+
+
+def after_selection_business(value):
+    """Selection can recalculate existing draft line prices, not their currency."""
+    result=deepcopy(value)
+    for item in result.get('items',[]):
+        for key in ('unitPrice','lineTotal'):
+            if isinstance(item.get(key),dict):item[key].pop('amount',None)
     return result
 
 
@@ -134,8 +144,11 @@ def complete(cur,key,value,stage,*,error=''):
         snap,order,item=checked(value,provider,resolver)
         prep.validate_order(order,snap,value['order_id'],value['item_id'],binding=value.get('consolidation_binding'))
         current_business=business(order,item['id'])
-        receipt['readback_changed_fields']=changed_fields(receipt['before'],current_business)
-        if not receipt['started'] or current_business!=receipt['before']:
+        observed=changed_fields(receipt['before'],current_business)
+        before_stable=after_selection_business(receipt['before']);current_stable=after_selection_business(current_business)
+        receipt['readback_changed_fields']=changed_fields(before_stable,current_stable)
+        receipt['readback_repriced_fields']=[p for p in observed if p.endswith(('.unitPrice.amount','.lineTotal.amount'))]
+        if not receipt['started'] or current_stable!=before_stable:
             raise ValueError('The supplier order changed outside the permitted product selection.')
         receipt.update(verified=True,verified_at=prep.now(),sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''))
         value.update(status=browser.WAITING,message='Original Fulfilment product and frame verified. Uploading this edition next, before selecting another product.')
@@ -189,7 +202,8 @@ def recover_readbacks(user):
           AND value->'product_browser'->>'started'='true'
           AND NOT COALESCE((value->'product_browser'->>'verified')::boolean,false)
           AND value->'product_browser'->>'client_stage'='product-readback'
-          AND COALESCE((value->>'product_readback_recoveries')::int,0)<2
+          AND (COALESCE(value->>'product_readback_recovery_policy','')<>'supplier-price-readback-v1'
+               OR COALESCE((value->>'product_readback_recoveries')::int,0)<2)
           AND NOT value ? 'submission' AND NOT value ? 'browser'
           AND NOT COALESCE((value->>'hidden')::boolean,false)
           ORDER BY updated_at LIMIT 2""")
@@ -203,8 +217,9 @@ def _recover_readback(key):
         value=browser.read(q,key);receipt=value.get('product_browser') or {}
         if (value.get('status')!='Needs review' or not receipt.get('started') or receipt.get('verified')
             or receipt.get('client_stage')!='product-readback' or value.get('submission') or value.get('browser')
-            or value.get('product_readback_recoveries',0)>=2):return False
-        value['product_readback_recoveries']=value.get('product_readback_recoveries',0)+1
+            or (value.get('product_readback_recovery_policy')==READBACK_POLICY and value.get('product_readback_recoveries',0)>=2)):return False
+        count=value.get('product_readback_recoveries',0) if value.get('product_readback_recovery_policy')==READBACK_POLICY else 0
+        value.update(product_readback_recoveries=count+1,product_readback_recovery_policy=READBACK_POLICY)
         # Keep the original receipt and consumed permit for independent proof.
         complete(q,key,value,'product-readback')
         if receipt.get('verified'):value.pop('last_failure',None)

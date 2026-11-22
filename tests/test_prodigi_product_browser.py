@@ -187,7 +187,7 @@ def test_automatic_product_readback_never_repeats_select_and_requires_full_proof
     if case=='wrong_colour':blank.data['items'][0]['attributes']={'color':'black'}
     if case=='charged':blank.data['charges']=[{'id':'synthetic-paid'}]
     if case=='exhausted':
-        v=saved();v['product_readback_recoveries']=2
+        v=saved();v.update(product_readback_recoveries=2,product_readback_recovery_policy=product.READBACK_POLICY)
         with prep.connect() as c,c.cursor() as q:prep.save(q,v)
     assert product.recover_readbacks({'id':'fixture'})==(1 if case=='late_correct' else 0)
     assert bool(saved()['product_browser'].get('verified'))==(case=='late_correct')
@@ -207,3 +207,36 @@ def test_product_readback_diagnostics_store_paths_without_values(blank):
 def test_changed_field_diagnostics_preserve_null_key_presence():
     assert product.changed_fields({},dict(unexpected=None))==['unexpected']
     assert product.changed_fields(dict(unexpected=None),{})==['unexpected']
+
+
+@pytest.mark.parametrize('case',['prices','currency','quantity','sku','artwork','address','paid'])
+def test_post_selection_allows_only_sibling_price_amount_recalculation(blank,case):
+    sibling=dict(id='89',merchantReference='sibling-fixture',sku='GLOBAL-CFP-A2',quantity=1,
+                 attributes={'color':'black'},assets=[dict(url='https://fixture/saved',printArea='default')],
+                 unitPrice=dict(amount='52.94',currency='AUD'),lineTotal=dict(amount='52.94',currency='AUD'))
+    blank.data['items'].append(sibling)
+    p=product.claim();product.permit(p['key'],p['token'],p['sha256'])
+    blank.data['items'][0].update(sku=p['sku'],attributes={'color':'natural'})
+    sibling['unitPrice']['amount']='45.00';sibling['lineTotal']['amount']='45.00'
+    if case=='currency':sibling['unitPrice']['currency']='USD'
+    if case=='quantity':sibling['quantity']=2
+    if case=='sku':sibling['sku']='GLOBAL-CFP-A1'
+    if case=='artwork':sibling['assets'][0]['url']='https://fixture/wrong'
+    if case=='address':blank.data['recipient']={'name':'Changed synthetic recipient'}
+    if case=='paid':blank.data['charges']=[{'id':'fixture-paid'}]
+    result=product.finish(p['key'],p['token'],'product-readback')
+    assert result['status']==(browser.WAITING if case=='prices' else 'Needs review')
+    assert bool(saved()['product_browser'].get('verified'))==(case=='prices')
+    assert not blank.writes
+    if case=='prices':
+        receipt=saved()['product_browser']
+        assert receipt['readback_changed_fields']==[]
+        assert set(receipt['readback_repriced_fields'])=={'items[1].unitPrice.amount','items[1].lineTotal.amount'}
+
+
+def test_price_changes_before_select_still_reject_the_permit(blank):
+    blank.data['items'].append(dict(id='89',merchantReference='sibling',sku='GLOBAL-CFP-A2',quantity=1,
+        assets=[],unitPrice=dict(amount='52.94',currency='AUD')))
+    p=product.claim();blank.data['items'][1]['unitPrice']['amount']='45.00'
+    with pytest.raises(ValueError,match='changed'):product.permit(p['key'],p['token'],p['sha256'])
+    assert saved()['product_browser']['started'] is False and not blank.writes
