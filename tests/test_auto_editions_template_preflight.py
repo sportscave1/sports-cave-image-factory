@@ -104,6 +104,8 @@ def test_invalid_source_identity_stops_before_native_processing(tmp_path):
 
 def native(tmp_path):
     data=inspection()
+    data['layers'].append(dict(layer_id=46,path=[dict(name='Artwork')],kind='raster',
+        visible=True,bounds_px=[0,0,2835,2004]))
     Image.new('RGB',(2835,2004),(31,72,111)).save(tmp_path/'preflight-original.png')
     Image.new('RGB',(2835,2004),(31,72,111)).save(tmp_path/'preflight-artwork.png')
     return dict(inspection=data,resize_background={'layer_id':46,'name':'Artwork'})
@@ -116,6 +118,27 @@ def check(tmp_path,report):
 def test_opaque_artwork_keeps_the_exact_pinned_background(tmp_path):
     report=native(tmp_path)
     assert check(tmp_path,report)==report['resize_background']
+
+
+def test_integrated_full_canvas_plaque_uses_its_own_opaque_pixels(tmp_path):
+    report=native(tmp_path)
+    report['inspection']['layers'].pop()
+    backing=report['inspection']['layers'][-1]
+    backing.update(layer_id=46,bounds_px=[0,0,2835,2004])
+    report['resize_background']['name']='limited-edition-plaque'
+    assert check(tmp_path,report)==report['resize_background']
+    Image.new('RGBA',(2835,2004),(31,72,111,222)).save(tmp_path/'preflight-artwork.png')
+    assert check(tmp_path,report) is None
+
+
+@pytest.mark.parametrize('fault',['wrong_id','wrong_name','number','higher_layer'])
+def test_resize_candidate_cannot_select_an_unverified_or_editable_layer(tmp_path,fault):
+    report=native(tmp_path)
+    if fault=='wrong_id':report['resize_background']['layer_id']=99
+    elif fault=='wrong_name':report['resize_background']['name']='Another artwork'
+    elif fault=='number':report['inspection']['layers'][-1]['kind']='text'
+    else:report['inspection']['layers'].append(dict(layer_id=47,path=[dict(name='Lower artwork')],kind='raster',visible=True))
+    with pytest.raises(ValueError,match='exact visible bottom'):check(tmp_path,report)
 
 
 def test_opaque_composite_resizes_without_promoting_partial_layer(tmp_path):

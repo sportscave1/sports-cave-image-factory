@@ -157,7 +157,10 @@ var SCAutoEditionsPreparation = (function () {
                     if(doc.layers[v].visible && doc.layers[v]!==hidden)bottom=doc.layers[v];
                 }
                 var candidate = null;
-                if(scale!==1 && bottom && bottom!==layer && bottom!==plaque && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
+                // An integrated footer/plaque can also be the bottom artwork.
+                // Python verifies this isolated canvas is fully opaque and
+                // requires unchanged native composite pixels after promotion.
+                if(scale!==1 && bottom && bottom!==layer && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
                     candidate={layer_id:bottom.id,name:bottom.name};
                     try {
                         for(var hide=0;hide<doc.layers.length;hide++)if(doc.layers[hide]!==bottom)doc.layers[hide].visible=false;
@@ -173,7 +176,7 @@ var SCAutoEditionsPreparation = (function () {
             if(r.opaque_resize_layer) {
                 var bg=[], approved=r.opaque_resize_layer;
                 named(doc,approved.name,bg);
-                if(bg.length!==1 || bg[0].id!==approved.layer_id || bg[0]===layer || bg[0]===plaque || !bg[0].visible)
+                if(bg.length!==1 || bg[0].id!==approved.layer_id || bg[0]===layer || !bg[0].visible)
                     throw Error("resize_background_identity_changed");
                 // Only Python-verified opaque native pixels, on the disposable
                 // staged document. No fill colour and no source PSD writes.
