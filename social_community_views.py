@@ -134,6 +134,9 @@ def render_inbox(api, feed, done):
 
 def _comment_actions(api, row, done):
     platform, post_id, comment_id = row["platform"], row["post"]["id"], row["id"]
+    context = ({"ad_id": row["post"]["ad_id"],
+                "comment_edge": (row["post"].get("comments") or {}).get("comment_edge", "")}
+               if platform == "Instagram" and row["post"].get("ad_id") else {})
     suffix = platform + "-" + comment_id
     st.text(row.get("text") or row.get("message") or "[Comment]")
     post_text = row["post"].get("message") or row["post"].get("caption") or "Sports Cave post"
@@ -154,7 +157,7 @@ def _comment_actions(api, row, done):
             actions[0].link_button("Like on Instagram", link)
     for column, action in zip(actions[2:4], ("hide", "unhide")):
         if column.button(action.title(), key=action + "-" + suffix, disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, action)
+            api.moderate(platform, post_id, comment_id, action, **context)
             done("Comment updated.")
     link = row["post"].get("permalink") or row["post"].get("permalink_url")
     if str(link or "").startswith("https://"):
@@ -164,12 +167,12 @@ def _comment_actions(api, row, done):
         text = st.text_area("Public reply", max_chars=1000, key=draft_key, height=80,
                             placeholder="Reply to this comment…", label_visibility="collapsed")
         if st.form_submit_button("Reply", icon=":material/reply:", type="primary", disabled=not api.writes):
-            api.moderate(platform, post_id, comment_id, "reply", text)
+            api.moderate(platform, post_id, comment_id, "reply", text, **context)
             done("Reply sent.", draft_key=draft_key)
     with st.popover("More", icon=":material/more_horiz:"):
         confirm = st.checkbox("Confirm permanent deletion", key="community-delete-confirm-" + suffix)
         if st.button("Delete comment", key="delete-" + suffix, disabled=not (api.writes and confirm)):
-            api.moderate(platform, post_id, comment_id, "delete")
+            api.moderate(platform, post_id, comment_id, "delete", **context)
             done("Comment deleted.")
 
 

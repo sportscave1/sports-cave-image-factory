@@ -5,6 +5,7 @@ All public operations enforce OS permissions; mutations also require explicit
 runtime enablement. Tokens never enter session state, query strings or errors.
 """
 import os
+import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -255,6 +256,7 @@ class MetaCommunity:
             params["after"] = str(after)
         ads = self._request("GET", identifier(self.ad_account) + "/ads", params=params, advertising=True)
         ids = {"Facebook": set(), "Instagram": set()}
+        ad_proofs = {}
         for ad in ads.get("data") or []:
             creative = ad.get("creative") or {}
             story = str(creative.get("effective_object_story_id") or "")
@@ -266,6 +268,8 @@ class MetaCommunity:
                 if (creative.get("effective_instagram_media_id") and self.instagram
                         and (not ig_actor or ig_actor == self.instagram)):
                     ids["Instagram"].add(identifier(creative["effective_instagram_media_id"]))
+                    if ig_actor == self.instagram and ad.get("id"):
+                        ad_proofs[str(creative["effective_instagram_media_id"])] = identifier(ad["id"])
         posts, errors = [], []
         for platform, post_ids in ids.items():
             if not post_ids:
@@ -279,10 +283,23 @@ class MetaCommunity:
                 # These unpublished objects reject the root multi-ID expansion
                 # with error 100. Read each bounded ad post directly instead.
                 try:
-                    post = self._request("GET", post_id, params={"fields": fields}, advertising=platform == "Instagram")
+                    if platform == "Instagram" and post_id in ad_proofs:
+                        # Ad media can expose its comments edge while rejecting
+                        # the ordinary media metadata expansion (100/33). The
+                        # creative came from our ad account and names our exact
+                        # Instagram actor, so metadata is not an access gate.
+                        comments = self._instagram_ad_comments(post_id)
+                        post = {"id": post_id, "owner": {"id": self.instagram},
+                                "ad_id": ad_proofs[post_id], "comments": comments}
+                    else:
+                        post = self._request("GET", post_id, params={"fields": fields}, advertising=platform == "Instagram")
                 except CommunityError as exc:
                     unreadable += 1
                     reason = str(exc)
+                    if platform == "Instagram":
+                        logging.getLogger(__name__).warning(
+                            "social_ad_comments_unavailable media=%s ad=%s reason=%s",
+                            post_id, ad_proofs.get(post_id, "unverified"), reason)
                     continue
                 owner = post.get("from" if platform == "Facebook" else "owner") or {}
                 if post.get("error"):
@@ -296,6 +313,40 @@ class MetaCommunity:
         paging = ads.get("paging") or {}
         cursor = (paging.get("cursors") or {}).get("after", "") if paging.get("next") else ""
         return {"data": posts, "after": cursor, "errors": errors}
+
+    def _instagram_ad_comments(self, post_id, *, after=""):
+        """Read all ad placements, falling back for Story/carousel child media.
+
+        ordered_comments is documented for Facebook Login and includes the
+        other media used by placement customization. No writes are retried.
+        """
+        fields = "id,text,from{id,username},timestamp,like_count"
+        try:
+            return self._edge(f"{post_id}/ordered_comments", fields, after=after, advertising=True)
+        except CommunityError:
+            # ordered_comments excludes Story and carousel child media. Its
+            # cursor must never be passed to the different /comments edge.
+            if after:
+                raise
+            page = self._edge(f"{post_id}/comments", fields, advertising=True)
+            page["comment_edge"] = "comments"
+            return page
+
+    def _verify_instagram_ad(self, post_id, ad_id):
+        """Recheck untrusted UI context against Meta before every action."""
+        if not self.ad_account or not self._ads_token:
+            raise CommunityError("The advertising connection is not configured.")
+        ad = self._request("GET", identifier(ad_id), params={
+            "fields": "id,account_id,creative{effective_object_story_id,effective_instagram_media_id,instagram_user_id}"
+        }, advertising=True)
+        creative = ad.get("creative") or {}
+        if (str(ad.get("id")) != str(ad_id)
+                or "act_" + str(ad.get("account_id")) != self.ad_account
+                or str(creative.get("instagram_user_id")) != self.owner("Instagram")
+                or str(creative.get("effective_instagram_media_id")) != str(post_id)
+                or not str(creative.get("effective_object_story_id", "")).startswith(self.page + "_")):
+            raise CommunityError("This advertising post does not belong to the connected account.")
+        self._instagram_user_posts.add(str(post_id))
 
     def advertising_access_hint(self):
         """Distinguish missing advertising-token grants from unavailable media."""
@@ -335,7 +386,14 @@ class MetaCommunity:
             raise CommunityError("This post does not belong to the connected account.")
         return post_id
 
-    def comments(self, platform, post_id, *, after=""):
+    def comments(self, platform, post_id, *, after="", ad_id="", comment_edge=""):
+        if platform == "Instagram" and ad_id:
+            post_id = identifier(post_id)
+            self._verify_instagram_ad(post_id, ad_id)
+            if comment_edge == "comments":
+                return self._edge(f"{post_id}/comments", "id,text,from{id,username},timestamp,like_count",
+                                  after=after, advertising=True)
+            return self._instagram_ad_comments(post_id, after=after)
         post_id = self._own_post(platform, post_id)
         fields = "id,message,from,created_time,like_count" if platform == "Facebook" else "id,text,username,timestamp,like_count"
         try:
@@ -349,7 +407,7 @@ class MetaCommunity:
             self._instagram_user_posts.add(post_id)
             return result
 
-    def moderate(self, platform, post_id, comment_id, action, text=""):
+    def moderate(self, platform, post_id, comment_id, action, text="", *, ad_id="", comment_edge=""):
         if action not in ("reply", "delete", "like", "unlike", "hide", "unhide"):
             raise CommunityError("Unknown comment action.")
         if platform == "Instagram" and action in ("like", "unlike"):
@@ -358,7 +416,9 @@ class MetaCommunity:
         after = ""
         found = False
         for _ in range(20):
-            page = self.comments(platform, post_id, after=after)
+            context = {"ad_id": ad_id, "comment_edge": comment_edge} if ad_id else {}
+            page = self.comments(platform, post_id, after=after, **context)
+            comment_edge = page.get("comment_edge", comment_edge)
             if any(str(row.get("id")) == comment_id for row in page["data"]):
                 found = True
                 break

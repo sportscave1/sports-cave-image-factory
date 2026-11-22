@@ -117,7 +117,10 @@ class CommunityFeed:
             after = next_cursor(page)
             for cursor in extras.get(post_key, []):
                 try:
-                    page = self.read("comments", platform, post_id, after=cursor)
+                    context = ({"ad_id": post["ad_id"],
+                                "comment_edge": (post.get("comments") or {}).get("comment_edge", "")}
+                               if platform == "Instagram" and post.get("ad_id") else {})
+                    page = self.read("comments", platform, post_id, after=cursor, **context)
                 except CommunityError as exc:
                     errors.append(f"{platform}: {exc}")
                     break
