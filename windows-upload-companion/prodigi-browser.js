@@ -14,6 +14,7 @@ function prodigiOrderAddress(address,expected) {
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.kind==='product')return Boolean(host==='dashboard.prodigi.com' && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) && /^[A-Za-z0-9-]{1,100}$/.test(plan.item_id) && plan.order_url===`https://${host}/orders/${plan.order_id}/detail` && /^product:prodigi_prepare:\d+$/.test(plan.key) && /^[A-Za-z0-9_-]{43}$/.test(plan.token) && /^[a-f0-9]{64}$/.test(plan.sha256) && /^GLOBAL-(CFP|FAP)-A[1-4]$/.test(plan.sku) && (plan.sku.startsWith('GLOBAL-FAP-')?plan.colour==='':['Black','Natural','White'].includes(plan.colour)) && typeof plan.reference==='string');
   if(plan?.kind==='qa')return Boolean(host==='dashboard.prodigi.com' && plan.environment==='live' && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) && plan.order_url===`https://${host}/orders/${plan.order_id}/detail` && /^prodigi_prepare:\d+$/.test(plan.key) && /^[A-Za-z0-9_-]{43}$/.test(plan.token) && typeof plan.reference==='string' && typeof plan.sku==='string' && typeof plan.colour==='string' && ['standard','express'].includes(plan.shipping_intent) && plan.branding_set==='SC EDITION BRANDING');
   return Boolean(host && (plan.kind===undefined||plan.kind==='certificate') && /^[A-Za-z0-9-]{1,100}$/.test(plan.order_id) &&
     plan.order_url===`https://${host}/orders/${plan.order_id}/detail` &&
@@ -42,12 +43,12 @@ async function prodigiBrowserRun(plan) {
   await chrome.storage.local.set({ordersBrowserPending:plan});
   let stage='download';
   try {
-    if(plan.kind==='qa'){
+    if(plan.kind==='qa'||plan.kind==='product'){
       const tab=await chrome.tabs.create({url:plan.order_url,active:false});prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
       let ready=false;for(let n=0;n<30;n++){try{ready=(await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'}))?.ready;if(ready)break;}catch{}await ordersDelay(1000);}
       if(!ready)throw Error('Sign into Prodigi before checking the saved order.');
-      const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:qa',plan});
-      return await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||'');
+      const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='product'?'prodigi:product':'prodigi:qa',plan});
+      return plan.kind==='product'?await prodigiReceipt(plan,'finish',result?.stage||'product'):await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||'');
     }
     const file=await fetch(plan.artwork_url,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(150000)});
     if(!file.ok || (file.headers.get('content-length') && Number(file.headers.get('content-length'))!==plan.bytes))

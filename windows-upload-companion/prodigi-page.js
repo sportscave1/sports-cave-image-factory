@@ -11,13 +11,26 @@ function prodigiControls(scope,selector) {
   }
   return found;
 }
+function prodigiProductCard(scope,sku,colour) {
+  const found=Array.from(scope.querySelectorAll('button[data-test]')).filter(e=>
+    e.getAttribute('data-test')==='select-product-with-data-button-'+sku);
+  if(found.length!==1)throw Error('An exact catalogue SKU is required.');
+  const select=found[0],card=select.closest('li');
+  if(!card)throw Error('Catalogue product card unavailable.');
+  const controls=Array.from(card.querySelectorAll('select'));
+  if(!colour){if(controls.length)throw Error('Unframed product unexpectedly has options.');return {select};}
+  if(controls.length!==1)throw Error('A unique frame colour is required.');
+  const options=Array.from(controls[0].options).filter(o=>o.textContent.trim().toLowerCase()===colour.toLowerCase()&&!o.disabled);
+  if(options.length!==1)throw Error('The reference frame colour is unavailable.');
+  return {select,colour:controls[0],value:options[0].value};
+}
 async function prodigiFilePicker(getInput,openOptions,findUploadChoice,wait) {
   const existing=getInput();if(existing)return existing;
   await openOptions();
   const choice=await wait(findUploadChoice);choice.click();
   return wait(getInput);
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,prodigiFilePicker};
+if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,prodigiFilePicker,prodigiProductCard};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -60,6 +73,49 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,
     },wait);
   }
   let running=false;
+  async function selectProduct(plan) {
+    if(running)throw Error('An order operation is already in progress.');
+    running=true;let stage='product';
+    try {
+      locationMatches(plan);
+      if(dialogs().length)throw Error('An existing editor requires review.');
+      const row=await wait(()=>{
+        const choices=Array.from(document.querySelectorAll('button[data-test]')).filter(b=>
+          b.getAttribute('data-test')==='choose-product-button-'+plan.item_id&&visible(b)&&text(b)==='Choose product');
+        if(choices.length>1)throw Error('The exact blank item is ambiguous.');
+        return choices.length===1?choices[0].closest('tr'):null;
+      });
+      button(row,'Choose product').click();
+      stage='product-search';
+      const picker=await wait(()=>dialog('Select product'));
+      const catalogue=button(picker,'Catalogue');if(catalogue.getAttribute('aria-selected')!=='true')catalogue.click();
+      const search=await wait(()=>picker.querySelector('input[type="search"]'));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(search,plan.sku);
+      search.dispatchEvent(new Event('input',{bubbles:true}));
+      const selected=await wait(()=>{
+        try{return prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);}catch{return null;}
+      });
+      if(selected.colour){selected.colour.value=selected.value;selected.colour.dispatchEvent(new Event('change',{bubbles:true}));}
+      await wait(()=>{
+        try {const c=prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);
+          return !c.select.disabled&&(!c.colour||c.colour.value===c.value);
+        }catch{return false;}
+      });
+      stage='product-select';
+      locationMatches(plan);
+      const permission=await chrome.runtime.sendMessage({type:'prodigi:permit',sha256:plan.sha256});
+      if(permission?.permitted!==true)throw Error('The blank item changed before selection.');
+      locationMatches(plan);
+      // Resolve again after React commits the colour; never choose a prefix match/backloader.
+      const current=prodigiProductCard(dialog('Select product'),plan.sku,plan.colour);
+      if(current.colour&&current.colour.value!==current.value)throw Error('The frame colour did not persist.');
+      current.select.click();
+      stage='product-readback';
+      await wait(()=>!dialog('Select product')&&Array.from(document.querySelectorAll('table tbody tr')).some(r=>
+        r.querySelector('[data-test="line-item-preview-'+plan.item_id+'"]')&&prodigiExactRow(r,plan.sku,plan.colour)));
+      return {stage}; // Server independently verifies persistence before any artwork handoff.
+    }catch{return {stage};}finally{running=false;}
+  }
   async function uploadCertificate(plan) {
     let stage='row';
     try {
@@ -176,6 +232,9 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiControls,
     }
     if(message?.type==='prodigi:upload') {
       upload(message.plan).then(reply,()=>reply({saved:false}));return true;
+    }
+    if(message?.type==='prodigi:product') {
+      selectProduct(message.plan).then(reply,()=>reply({stage:'product'}));return true;
     }
   });
 })();

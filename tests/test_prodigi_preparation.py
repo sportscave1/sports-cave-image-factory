@@ -364,7 +364,7 @@ def test_automatic_matching_runs_in_companion_and_missing_product_is_diagnosed(s
     queued=queue.request({'id':'fixture'},1)
     assert queued['order_id']=='' and queued['status']=='Queued'
     result=queue.tick()
-    assert result['status']=='Needs review' and 'No Prodigi product' in result['message']
+    assert result['status']=='Awaiting product selection'
     assert queue.read(1)['order_id']=='99' and not p.writes
     assert queue.request({'id':'fixture'},1)['order_id']=='99'
 

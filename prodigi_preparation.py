@@ -182,7 +182,7 @@ def restore_missing_recipient(value,resolver=None):
     return True
 
 
-def validate_order(order, snapshot, order_id, item_id):
+def validate_order(order, snapshot, order_id, item_id, *, allow_unselected=False):
     if str(order.get('id')) != str(order_id):
         raise ProdigiError('Prodigi returned a different order ID.')
     if order.get('status') != 'draft' or 'update' not in order.get('allowedActions', []):
@@ -203,6 +203,11 @@ def validate_order(order, snapshot, order_id, item_id):
     if sum(str(i.get('merchantReference')) == str(item.get('merchantReference')) for i in order['items']) != 1:
         raise ProdigiError('Multiple items share this line reference; the numbered unit cannot be proved.')
     mapping = snapshot['mapping']
+    if allow_unselected and item.get('sku') in (None, ''):
+        from prodigi_browser import has_existing_artwork
+        if has_existing_artwork(item):
+            raise ProdigiError('An unselected product with existing artwork requires manual preservation.')
+        return item  # Identity/editability still proved above; no upload is permitted here.
     if not item.get('sku'):
         raise ProdigiError('No Prodigi product is selected on this item. Select the existing Fulfilment reference '
                            + mapping['prodigi_code'] + ' and matching frame before preparing artwork.')
@@ -303,6 +308,9 @@ def _request(user, allocation_id, order_id='', item_id=''):
                 raise ValueError('This Prodigi item is already bound to another numbered unit.')
             if saved['allocation_id'] == allocation_id:
                 if saved.get('submission'):return saved
+                if saved.get('product_browser'):
+                    if not saved['product_browser'].get('verified'):return saved
+                    value['product_browser']=saved['product_browser']
                 if saved['status'] in ('Needs QA','Needs review') and not any(saved.get(k) for k in ('browser','write_intent','document_write_intent')):
                     if order_id and any(saved.get(k) and saved[k]!=value[k] for k in ('order_id','item_id')):
                         raise ValueError('The existing supplier target cannot be changed by a retry.')
@@ -345,6 +353,16 @@ def run(value, provider, resolver, link, persist):
         value['history'].append(dict(at=now(), event='existing_item_matched'))
         persist(value)
     order = provider.order(value['order_id'])
+    if value.get('browser_requested') and not value.get('browser') and not value.get('write_intent'):
+        candidate = validate_order(order, snapshot, value['order_id'], value['item_id'], allow_unselected=True)
+        if candidate.get('sku') in (None, ''):
+            if value.get('product_browser'):
+                raise ValueError('A product selection was already attempted. Recheck the same item before retrying.')
+            if order.get('charges'):
+                raise ValueError('Product selection requires an unpaid editable draft.')
+            value.update(status='Awaiting product selection',message='Companion will select the original Fulfilment product and frame, then upload artwork and run QA.')
+            persist(value)
+            return value
     item = validate_order(order, snapshot, value['order_id'], value['item_id'])
     if value.get('write_intent'):
         if value.get('artwork_expires_at') and datetime.fromisoformat(value['artwork_expires_at']) <= datetime.now(timezone.utc):
@@ -478,6 +496,9 @@ def reconcile(user, allocation_id):
     current = read(allocation_id)
     if current and current.get('submission'):
         raise ValueError('Submission is already recorded. Open the same supplier order; only readback and certificate retries are allowed.')
+    if current and current.get('product_browser') and not current['product_browser'].get('verified'):
+        from prodigi_product_browser import recheck
+        return recheck(user, PREFIX + str(int(allocation_id)))
     receipt = (current or {}).get('browser') or {}
     document_receipt=(current or {}).get('document_browser') or {}
     from prodigi_full_qa import live_enabled

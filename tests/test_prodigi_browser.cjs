@@ -112,3 +112,52 @@ test('dashboard QA opens only the pinned live order and never downloads artwork'
   context.plan.order_url='https://dashboard.prodigi.com/orders/other/detail';
   assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
 });
+const {prodigiProductCard}=require('../windows-upload-companion/prodigi-page.js');
+test('catalogue selection uses exact SKU and canonical colour, excluding backloader',()=>{
+  const option={textContent:'Natural',value:'natural',disabled:false};
+  const colour={options:[option],value:'black'};
+  const target={getAttribute:()=> 'select-product-with-data-button-GLOBAL-CFP-A2',closest:()=>({querySelectorAll:()=>[colour]})};
+  const backloader={getAttribute:()=> 'select-product-with-data-button-GLOBAL-CFP-A2-BACKLOADER'};
+  const result=prodigiProductCard({querySelectorAll:()=>[backloader,target]},'GLOBAL-CFP-A2','Natural');
+  assert.equal(result.select,target);assert.equal(result.value,'natural');
+  assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[target]},'GLOBAL-CFP-A2','White'));
+  assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[target,target]},'GLOBAL-CFP-A2','Natural'));
+  assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[backloader]},'GLOBAL-CFP-A2','Natural'));
+});
+test('unframed catalogue selection has no colour option',()=>{
+ const target={getAttribute:()=> 'select-product-with-data-button-GLOBAL-FAP-A4',closest:()=>({querySelectorAll:()=>[]})};
+ assert.equal(prodigiProductCard({querySelectorAll:()=>[target]},'GLOBAL-FAP-A4','').select,target);
+});
+test('product repair opens only the pinned draft, without downloading artwork or submitting',async()=>{
+ const {context,calls,tabs}=setup();
+ context.plan={kind:'product',environment:'live',order_id:'99',item_id:'88',order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'product:prodigi_prepare:1',token:'b'.repeat(43),sha256:'a'.repeat(64),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Natural'};
+ assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+ assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
+ assert.equal(tabs.length,1);assert.equal(tabs[0].active,false);
+ for(const change of [{sku:'GLOBAL-CFP-A2-BACKLOADER'},{colour:'Oak'},{environment:'sandbox'},{key:'prodigi_prepare:1'}]){
+  context.changed={...context.plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(changed)',context),false);
+ }
+});
+test('blank-product page flow searches, selects colour, obtains permit and reads back without Submit',async()=>{
+ const listeners=[],events=[];let dialogOpen=false,selected=false,inputValue='';
+ const node=(value='')=>({innerText:value,textContent:value,isConnected:true,getClientRects:()=>[{}],querySelectorAll:()=>[],getAttribute:()=>null});
+ const control=(label,click)=>({...node(label),disabled:false,click});
+ const code=node('GLOBAL-CFP-A2'),frame=node('Natural');
+ const choose=control('Choose product',()=>{events.push('choose');dialogOpen=true;});choose.getAttribute=k=>k==='data-test'?'choose-product-button-88':null;choose.closest=()=>row;
+ const row={...node(),querySelector:()=>selected?{}:null,querySelectorAll:s=>s==='button'?(selected?[]:[choose]):s==='strong'?(selected?[frame]:[]):selected?[code,frame]:[]};
+ const colour={options:[{textContent:'Black',value:'black'},{textContent:'Natural',value:'natural'}],value:'black',dispatchEvent:()=>events.push('colour')};
+ const select=control('Select',()=>{events.push('select');assert.equal(colour.value,'natural');selected=true;dialogOpen=false;});
+ const card={querySelectorAll:()=>[colour]};select.closest=()=>card;select.getAttribute=k=>k==='data-test'?'select-product-with-data-button-GLOBAL-CFP-A2':null;
+ const catalogue=control('Catalogue',()=>{});catalogue.getAttribute=k=>k==='aria-selected'?'true':null;
+ class Input {dispatchEvent(){events.push('search:'+inputValue);}}
+ Object.defineProperty(Input.prototype,'value',{get(){return inputValue;},set(v){inputValue=v;}});
+ const input=new Input();
+ const picker={...node(),querySelector:s=>s==='input[type="search"]'?input:null,querySelectorAll:s=>s==='h1,h2'?[node('Select product')]:s==='button'?[catalogue,select]:s==='button[data-test]'?[select]:[]};
+ const document={readyState:'complete',querySelector:s=>s==='main'?node('fixture'):null,querySelectorAll:s=>s==='button[data-test]'?[choose]:s==='h1'?[node('99')]:s==='strong'?[]:s==='[role="dialog"]'?(dialogOpen?[picker]:[]):s==='table tbody tr'?[row]:[]};
+ const chrome={runtime:{id:'same',onMessage:{addListener:f=>listeners.push(f)},sendMessage:async m=>{events.push('permit');assert(selected===false);assert.equal(m.type,'prodigi:permit');return{permitted:true};}}};
+ const ctx=vm.createContext({document,chrome,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},URL,Date,setTimeout,HTMLInputElement:Input,Event:class{constructor(type){this.type=type;}}});
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-page.js'),'utf8'),ctx);
+ const result=await new Promise(resolve=>listeners[0]({type:'prodigi:product',plan:{environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',order_id:'99',item_id:'88',reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Natural',sha256:'a'.repeat(64)}},{id:'same'},resolve));
+ assert.equal(result.stage,'product-readback');assert.deepEqual(events,['choose','search:GLOBAL-CFP-A2','colour','permit','select']);
+});

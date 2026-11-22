@@ -44,7 +44,11 @@ async def tick(request):
         from prodigi_submission import kick
         kick()
         from prodigi_browser import claim
-        browser = (await run_in_threadpool(claim)
+        browser = None
+        if request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
+            from prodigi_product_browser import claim as product_claim
+            browser=await run_in_threadpool(product_claim)
+        browser = browser or (await run_in_threadpool(claim)
             if request.headers.get('x-sports-cave-orders-browser') == '1' else None)
         if browser is None and request.headers.get('x-sports-cave-orders-qa')=='1':
             from prodigi_dashboard_qa import claim as qa_claim
@@ -81,7 +85,7 @@ async def browser_action(request):
             not all(isinstance(v,str) for v in body.values()) or
             not re.fullmatch(r'[A-Za-z0-9_-]{43}',body['token'])):
             raise ValueError('Only an exact Orders handoff receipt is accepted.')
-        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','picker','transfer','uploaded','orientation','permit','save'):
+        if not is_permit and body.get('stage','readback') not in ('readback','download','open','signin','page','row','editor','picker','transfer','uploaded','orientation','permit','save','product','product-search','product-select','product-readback'):
             raise ValueError('Unknown browser stage.')
         import os
         if (re.fullmatch(r'(?:document:)?prodigi_sandbox_test:[a-f0-9-]{36}',body['key']) and
@@ -90,6 +94,8 @@ async def browser_action(request):
         from prodigi_browser import permit,finish
         if body['key'].startswith('document:'):
             from prodigi_document_browser import permit,finish
+        if body['key'].startswith('product:'):
+            from prodigi_product_browser import permit,finish
         result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'))
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:
@@ -137,7 +143,7 @@ async def restart_order(request):
             # Restart after submit means readback, never a second Submit.
             from prodigi_submission import kick
             kick();result=saved
-        elif saved.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA','Browser uploading','Awaiting browser upload'):result=saved
+        elif saved.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA','Browser uploading','Awaiting browser upload','Awaiting product selection','Selecting product'):result=saved
         else:result=await run_in_threadpool(queue.reconcile,user,body['allocation_id'])
         if result and result.get('status') in ('Queued','Preparing JPG','Checking QA','Awaiting dashboard QA','Checking dashboard QA'):
             def clear_request_failure():

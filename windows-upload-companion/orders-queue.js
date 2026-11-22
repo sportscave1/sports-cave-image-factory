@@ -20,7 +20,7 @@ async function ordersQueueTick() {
     }
     const response = await fetch(osOrigin + '/api/orders-companion/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json',
-        'X-Sports-Cave-Orders-Browser':'1','X-Sports-Cave-Orders-QA':'1','X-Sports-Cave-Orders-Tax':'1'},
+        'X-Sports-Cave-Orders-Browser':'1','X-Sports-Cave-Orders-QA':'1','X-Sports-Cave-Orders-Tax':'1','X-Sports-Cave-Orders-Products':'1'},
       body:'{}', credentials:'omit', signal:AbortSignal.timeout(150000),
     });
     if (!response.ok) return;
