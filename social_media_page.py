@@ -9,6 +9,7 @@ import social_media
 from meta_social import CommunityError, MetaCommunity
 from social_community_feed import CommunityFeed
 from social_community_views import render_inbox, render_comments, dated
+from page_presentation import inject_compact_page
 import social_collaborations
 import social_community_store as ledger
 
@@ -146,17 +147,26 @@ def _collaborations(api, store):
 
 def _connection(api):
     st.subheader("Meta connection")
-    st.caption("Uses the existing Facebook Page and its linked Instagram professional account.")
+    st.caption("One workspace for the Facebook Page and linked Instagram account. Check each feature independently.")
     if st.button("Check Meta connection"):
-        details = api.connection()
-        st.success("Connected to " + str(details["name"]) + (" · @" + details["instagram"] if details["instagram"] else ""))
-    st.text("Sending and moderation: " + ("enabled" if api.writes else "disabled"))
-    if os_accounts.is_admin(api.user):
-        st.code("META_FACEBOOK_PAGE_ID\nMETA_INSTAGRAM_ACTOR_ID\nMETA_PAGE_ACCESS_TOKEN\nMETA_SOCIAL_DISCOVERY_TOKEN\nMETA_SOCIAL_WRITES_ENABLED=0\nMETA_SOCIAL_AUTOMATION_ENABLED=0", language="text")
-        st.caption("A Page token needs pages_messaging, pages_manage_metadata, pages_read_engagement, pages_read_user_content, "
-                   "pages_manage_engagement, instagram_basic, instagram_manage_messages and instagram_manage_comments. "
-                   "Business Discovery uses a separate Facebook User token. Advanced access/App Review may be required. "
-                   "Configure tokens securely on the server. Never paste tokens into this page.")
+        try:
+            details = api.connection()
+            st.success("Connected to " + str(details["name"]) + (" · @" + details["instagram"] if details["instagram"] else ""))
+        except CommunityError as exc:
+            st.warning(str(exc))
+        st.session_state["community-connection-checks"] = api.connection_checks()
+    checks = st.session_state.get("community-connection-checks")
+    if checks:
+        st.dataframe(checks, hide_index=True, width="stretch")
+    with st.expander("Fix a connection problem"):
+        st.markdown("**Instagram messages**: the Page connection needs `instagram_basic`, `instagram_manage_messages` "
+                    "and `pages_manage_metadata`, a Page administrator with the Messaging task, and a verified Meta business. "
+                    "Check Instagram’s connected tools settings allow access to messages. Missing permissions require reconnecting through Meta.")
+        st.markdown("**Comments**: check `pages_read_engagement`, `pages_read_user_content` and `pages_manage_engagement` "
+                    "for Facebook, and `instagram_manage_comments` for Instagram. The connection can only return posts and comments Meta permits this app to read.")
+        st.caption("Checks verify reading only. Meta separately checks permission to send, reply, hide or delete when you use those actions.")
+        st.link_button("Meta connection requirements", "https://developers.facebook.com/docs/graph-api/reference/page/conversations/")
+    st.caption("Sending and moderation: " + ("enabled" if api.writes else "disabled"))
     st.link_button("Open Meta Business Suite", "https://business.facebook.com/latest/inbox/all")
 
 
@@ -201,8 +211,19 @@ def render_page(user, *, store=ledger, account_store=None, api_factory=MetaCommu
                                     "smrs_", "social-reels-", "reels_")):
                 del st.session_state[key]
         st.session_state["community-legacy-state-cleared"] = True
+    inject_compact_page(st)
     st.markdown("""<style>
+[data-testid="stMainBlockContainer"]:has(.st-key-community-shell){padding-left:24px!important;padding-right:24px!important;max-width:100%!important}
 .st-key-community-shell{--sc-social-gold:#ae8126}
+.st-key-community-shell [data-testid="stVerticalBlock"]{gap:.6rem!important}
+.st-key-community-shell [data-testid="stTextInput"] input{font-size:14px}
+.st-key-community-shell [data-testid="stForm"]{background:#fff}
+.st-key-community-shell [data-testid="stButton"] button{background:#fff!important;border:1px solid #deddd7!important;color:#27251f!important;min-height:34px!important}
+.st-key-community-shell [data-testid="stFormSubmitButton"] button{background:#ae8126!important;border-color:#ae8126!important;color:#fff!important}
+.st-key-community-shell [data-testid="stAlert"]{padding:8px 12px;font-size:13px}
+.sc-message{padding:10px 13px;margin:0 0 8px;border-radius:8px;max-width:88%;font-size:14px;line-height:1.5;overflow-wrap:anywhere;white-space:normal}
+.sc-message.incoming{background:#f2f3f5;margin-right:auto}.sc-message.outgoing{background:#f6eedc;margin-left:auto}
+.sc-message-meta{font-size:11px;color:#747169;margin-bottom:5px}
 .st-key-community-shell h1{font-size:1.65rem!important;line-height:1.2!important;padding:0!important;margin:0!important}
 .st-key-community-shell [data-testid="stHeading"]{margin:0!important}
 .sc-social-links{display:flex;justify-content:flex-end;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 10px}
@@ -215,8 +236,9 @@ def render_page(user, *, store=ledger, account_store=None, api_factory=MetaCommu
 .st-key-community-shell [data-testid="stBaseButton-primary"]{background:#ae8126;border-color:#ae8126;color:white}
 .st-key-community-shell [data-testid="stExpander"]{border-color:#e7e3db;border-radius:6px}
 .st-key-community-shell [data-testid="stExpander"] summary{font-size:13px;min-height:43px}
-.st-key-community-shell [data-testid="stSegmentedControl"]{margin-bottom:5px}
-.st-key-community-shell [data-testid="stSegmentedControl"] [aria-checked="true"]{background:#ecdab2;border-color:#d1ac5e;color:#191713}
+.st-key-community-shell [data-testid="stButtonGroup"]{margin-bottom:5px}
+.st-key-community-shell [data-testid="stButtonGroup"] [role="radio"]{background:#fff!important;border-color:#deddd7!important;color:#292720!important;min-height:34px!important;font-size:14px!important}
+.st-key-community-shell [data-testid="stButtonGroup"] [aria-checked="true"]{background:#ecdab2!important;border-color:#d1ac5e!important;color:#191713!important;font-weight:600!important}
 @media(max-width:760px){.sc-social-links{justify-content:flex-start;gap:5px}.sc-social-link{padding:6px 8px}.st-key-community-shell h1{font-size:1.45rem!important}}
 </style>""", unsafe_allow_html=True)
     with st.container(key="community-shell"):

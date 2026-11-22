@@ -107,7 +107,19 @@ class MetaCommunity:
                     200: "Check the Page token permissions and Page tasks.",
                     4: "Meta is rate limiting requests. Try again later.",
                     100: "This operation or object is unavailable to this Meta connection."}.get(code, "Check the connection and refresh before retrying.")
-            raise CommunityError("Meta rejected the request. " + hint)
+            error = result.get("error") or {} if isinstance(result, dict) else {}
+            # Report useful diagnostics without echoing provider text, URLs or tokens.
+            scopes = re.findall(r"\b(?:instagram|pages)_[a-z_]+\b", str(error.get("message", "")))
+            allowed = {"instagram_basic", "instagram_manage_messages", "instagram_manage_comments",
+                       "pages_manage_metadata", "pages_messaging", "pages_read_engagement",
+                       "pages_read_user_content", "pages_manage_engagement"}
+            missing = sorted(set(scopes) & allowed)
+            detail = " Required permissions: " + ", ".join(missing) + "." if missing else ""
+            reference = f" (Meta {code}" if isinstance(code, int) else ""
+            subcode = error.get("error_subcode")
+            if reference:
+                reference += f"/{subcode})" if isinstance(subcode, int) else ")"
+            raise CommunityError("Meta rejected the request" + reference + ". " + hint + detail)
         if result is False or (isinstance(result, dict) and result.get("success") is False):
             raise CommunityError("Meta did not confirm this operation. Refresh before retrying.")
         return result
@@ -115,7 +127,9 @@ class MetaCommunity:
     def _edge(self, path, fields, *, after="", extra=None):
         params = {"fields": fields, "limit": 30, **(extra or {})}
         if after:
-            params["after"] = str(after)[:500]
+            # Meta cursors are opaque. Truncation corrupts long cursors and makes
+            # older posts/comments fail with error 100. Never follow paging URLs.
+            params["after"] = str(after)
         result = self._request("GET", path, params=params)
         paging = result.get("paging") or {}
         return {"data": result.get("data") or [],
@@ -136,6 +150,18 @@ class MetaCommunity:
         # Facebook Login Instagram conversations use the Page conversations edge.
         return self._edge(f"{self.owner('Facebook')}/conversations", "id,updated_time,participants,unread_count,is_owner",
                           after=after, extra={"platform": "instagram" if platform == "Instagram" else "messenger"})
+
+    def connection_checks(self):
+        """Read-only capability probes; a valid Page token alone proves little."""
+        checks = []
+        for platform in ("Facebook", "Instagram"):
+            for capability, method in (("Messages", self.conversations), ("Comments", self.comment_feed)):
+                try:
+                    method(platform)
+                    checks.append({"Channel": platform, "Feature": capability, "Status": "Available", "Details": "Read access verified"})
+                except CommunityError as exc:
+                    checks.append({"Channel": platform, "Feature": capability, "Status": "Needs attention", "Details": str(exc)})
+        return checks
 
     def _thread(self, platform, thread_id):
         owner = self.owner(platform)

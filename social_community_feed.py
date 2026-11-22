@@ -81,10 +81,20 @@ class CommunityFeed:
         extras = self.state.setdefault("comment_pages", {})
         for platform, cursors in self._pages("post").items():
             try:
+                platform_posts = {}
+                # New posts frequently have no comments. Read through up to four
+                # empty batches per visit instead of presenting a false empty inbox.
+                budget = self.state.setdefault("post_scan_targets", {}).setdefault(platform, 4)
                 for after in cursors:
                     page = self.read("comment_feed", platform, after=after)
                     for post in page["data"]:
                         posts[(platform, post["id"])] = dict(post, platform=platform)
+                        platform_posts[post["id"]] = post
+                    next_after = next_cursor(page)
+                    if (after == cursors[-1] and next_after and next_after not in cursors
+                            and len(cursors) < budget
+                            and not any((post.get("comments") or {}).get("data") for post in platform_posts.values())):
+                        cursors.append(next_after)
                 more_posts[platform] = next_cursor(page)
             except CommunityError as exc:
                 errors.append(f"{platform}: {exc}")
@@ -107,7 +117,7 @@ class CommunityFeed:
                 more_comments.append((platform, post_id, after))
         items = sorted(rows.values(), key=lambda row: timestamp(row.get("created_time") or row.get("timestamp")), reverse=True)
         return {"items": items, "errors": list(dict.fromkeys(errors)), "more_posts": more_posts,
-                "more_comments": more_comments}
+                "more_comments": more_comments, "posts_scanned": len(posts)}
 
     def more_comments(self, snapshot):
         """Advance two comment edges at most; only then fetch older post pages."""
@@ -122,3 +132,4 @@ class CommunityFeed:
                 cursors = self._pages("post")[platform]
                 if after and after not in cursors:
                     cursors.append(after)
+                    self.state.setdefault("post_scan_targets", {})[platform] = len(cursors) + 3

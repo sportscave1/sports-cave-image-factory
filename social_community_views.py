@@ -1,5 +1,6 @@
 """Compact merged inbox and lazy comment rows for the Social Media page."""
 import re
+import html
 from datetime import datetime
 
 import streamlit as st
@@ -62,11 +63,23 @@ def _messages(api, feed, thread, done):
     with st.container(height=350, border=True):
         for message in sorted(messages.values(), key=lambda row: timestamp(row.get("created_time"))):
             outgoing = str((message.get("from") or {}).get("id")) in {api.page, api.instagram}
-            with st.chat_message("assistant" if outgoing else "user"):
-                st.caption(("Sports Cave" if outgoing else author(message)) + " · " + dated(message.get("created_time")))
-                st.text(message.get("message") or "[Attachment]")
-                if message.get("attachments"):
-                    st.caption("Attachment · open in Business Suite")
+            text = str(message.get("message") or "[Attachment]")
+            # Messenger includes a Page comment referral as a system event. Keep
+            # its context and link, without dumping a long tracking URL in chat.
+            referral = text.startswith("You are responding to a user comment to a post on your Page.")
+            links = re.findall(r"https://(?:www\.)?facebook\.com/[^\s)]+", text) if referral else []
+            if referral:
+                st.caption("Conversation started from a Facebook comment")
+                if links:
+                    st.link_button("View original comment", links[0])
+                continue
+            name = "Sports Cave" if outgoing else author(message)
+            markup = ('<div class="sc-message ' + ('outgoing' if outgoing else 'incoming') + '"><div class="sc-message-meta">' +
+                      html.escape(name + " · " + dated(message.get("created_time"))) + '</div><div>' +
+                      html.escape(text).replace('\n', '<br>') + '</div></div>')
+            st.markdown(markup, unsafe_allow_html=True)
+            if message.get("attachments"):
+                st.caption("Attachment · open in Business Suite")
     can_send = (api.writes and thread.get("is_owner") is not False
                 and reply_open(messages.values(), api.owner(platform)))
     draft_key = "community-reply-" + suffix
@@ -77,7 +90,11 @@ def _messages(api, feed, thread, done):
             api.send(platform, thread_id, text)
             done("Reply sent.", draft_key=draft_key)
     if not can_send:
-        st.caption("Sending requires a recent customer message and control of this conversation.")
+        reason = ("Sending is disabled for this environment." if not api.writes else
+                  "Another app controls this conversation." if thread.get("is_owner") is False else
+                  "The 24-hour reply window has closed. The customer needs to message again before an API reply can be sent.")
+        st.caption(reason)
+        st.link_button("Open in Business Suite", "https://business.facebook.com/latest/inbox/all", key="suite-" + suffix)
 
 
 def render_inbox(api, feed, done):
@@ -89,7 +106,7 @@ def render_inbox(api, feed, done):
     unread = sum(int(row.get("unread_count") or 0) for row in snapshot["items"])
     st.caption(f"{len(rows)} conversations · {unread} unread · Facebook + Instagram")
     if rows:
-        left, right = st.columns([1.15, 1.85], gap="medium")
+        left, right = st.columns([1.25, 1.75], gap="medium")
         with left:
             st.dataframe([{"Customer": peer(row, api), "Channel": row["platform"],
                            "Updated": dated(row.get("updated_time")), "Unread": int(row.get("unread_count") or 0)}
@@ -169,9 +186,14 @@ def render_comments(api, feed, done):
             with panel:
                 _comment_actions(api, row, done)
     if not rows and not snapshot["errors"]:
-        st.info("No comments match." if query else "No comments yet.")
+        pending = any(snapshot["more_posts"].values())
+        st.info("No comments match the loaded results." if query else
+                "No comments in the posts checked so far. Continue searching older posts below." if pending else
+                "No comments were returned for the posts available to this connection.")
+    st.caption(f"{snapshot.get('posts_scanned', 0)} posts checked · Facebook and Instagram together")
     more = len(rows) > visible or snapshot["more_comments"] or any(snapshot["more_posts"].values())
-    if more and st.button("Show more comments", icon=":material/expand_more:", key="community-more-comments"):
+    more_label = "Search older posts" if not rows and any(snapshot["more_posts"].values()) else "Show more comments"
+    if more and st.button(more_label, icon=":material/expand_more:", key="community-more-comments"):
         if len(rows) <= visible:
             feed.more_comments(snapshot)
         st.session_state["community-comment-visible"] = visible + 40
