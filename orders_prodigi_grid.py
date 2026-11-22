@@ -142,6 +142,19 @@ def payload_rows(rows,display_rows,statuses,*,allowed):
     return payload
 
 
+def _rerun_active_fragment(st):
+    """A fragment called in a full app render may consume a pending grid event.
+
+    Its browser already applied the delta/selection. Persist that event, but do
+    not request an illegal fragment rerun (or force a full-page reload). During
+    an actual fragment rerun, acknowledge the adopted state immediately.
+    """
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    context=get_script_run_ctx(suppress_warning=True)
+    if context and context.fragment_ids_this_run:
+        st.rerun(scope='fragment')
+
+
 def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
     import streamlit as st
     import streamlit.components.v1 as components
@@ -174,7 +187,7 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
             rows=saved['raw'];by_id={row_identity(r):r for r in rows}
     if event.get('type')=='feed':
         if event.get('scope')!=scope or saved is None:return
-        st.rerun(scope='fragment')
+        _rerun_active_fragment(st)
         return
     if event.get('type')=='select':
         st.session_state.pop('orders-prodigi-review',None)
@@ -182,7 +195,7 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
         chosen=set(str(i) for i in event.get('ids',[]) if str(i) in by_id or str(i) in previous)
         st.session_state['orders-grid-selected-ids']=list(chosen)
         st.session_state[grid_key]={'selection':{'rows':[i for i,r in enumerate(rows) if row_identity(r) in chosen]}}
-        st.rerun(scope='fragment')
+        _rerun_active_fragment(st)
         return
     if event.get('type')=='refresh':
         st.rerun()

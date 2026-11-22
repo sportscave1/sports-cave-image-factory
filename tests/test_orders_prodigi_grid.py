@@ -24,11 +24,14 @@ def test_uncertain_submission_keeps_warning_but_never_offers_full_reset():
 
 @pytest.fixture
 def screen(monkeypatch):
+    from types import SimpleNamespace
+    import streamlit.runtime.scriptrunner as runner
     import streamlit as st
     import streamlit.components.v1 as components
     import prodigi_preparation as queue
     import os_accounts
     state={};calls=[];view={};reply={}
+    monkeypatch.setattr(runner,'get_script_run_ctx',lambda **_:SimpleNamespace(fragment_ids_this_run=['orders-fixture']))
     monkeypatch.setattr(st,'session_state',state)
     monkeypatch.setattr(st,'rerun',lambda **kw:calls.append(('rerun',kw)))
     monkeypatch.setattr(st,'toast',lambda *_:None)
