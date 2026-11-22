@@ -50,12 +50,15 @@ def request(connect,pid,actor,request_id,allocation_id=None):
         if previous and previous['detail']['state'] in ACTIVE:
             if allocation_id:
                 detail={**previous['detail'],'allocation_id':allocation_id,'user_requested':True,
+                        'allocation_ids':sorted(set(previous['detail'].get('allocation_ids') or
+                            ([previous['detail']['allocation_id']] if previous['detail'].get('allocation_id') else []))|{allocation_id}),
                         'next_check':datetime.now(timezone.utc).isoformat()}
                 cur.execute('UPDATE auto_edition_onboarding_audit SET detail=%s::jsonb WHERE id=%s',(encode(detail),previous['id']))
                 return {**detail,'duplicate':True}
             return {**previous['detail'],'duplicate':True}
         if previous and previous['detail']['request_id']==request_id:return previous['detail']
         detail=dict(request_id=request_id,state='Queued',allocation_id=allocation_id,
+            allocation_ids=[allocation_id] if allocation_id else [],
             user_requested=actor!='auto-editions-repair',
             product_gid=pid,file_id=mapping['dropbox_file_id'],source=row.get('source'),
             original_checkpoint=str(row['updated_at']),previous_status=row['status'],
@@ -148,7 +151,10 @@ def order_jpgs(connect,record,pid,preparation_hash=None):
           AND invalidated_at IS NULL AND to_jsonb(e)->>'cancelled_at' IS NULL
           AND COALESCE(to_jsonb(e)->>'duplicate_allocation_warning','') IN ('','false') ORDER BY id""",(pid,))
         ids=[r['id'] for r in cur.fetchall()]
-    if d.get('allocation_id') and d['allocation_id'] not in ids:ids.append(d['allocation_id'])
+    selected=d.get('allocation_ids') or ([d['allocation_id']] if d.get('allocation_id') else [])
+    # Explicit Orders repairs must not wait behind historical allocations for
+    # the same design. Other current orders retain their normal auto-JPG intake.
+    if selected:ids=list(dict.fromkeys(selected))
     same=d.get('jpg_preparation_hash')==preparation_hash
     ready=set(d.get('jpg_ready',[]) if same else []);blocked=dict(d.get('jpg_blocked',{}) if same else {})
     remaining=[i for i in ids if i not in ready and str(i) not in blocked]

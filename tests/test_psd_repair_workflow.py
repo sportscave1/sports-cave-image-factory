@@ -71,6 +71,23 @@ def test_orders_reads_repair_journal_in_batch_without_writing(broken):
     assert all('Exactly one' in r['cause'] for r in active.values())
 
 
+def test_explicit_units_do_not_wait_for_historical_allocations(broken):
+    d,sql=broken
+    sql.execute("INSERT INTO edition_orders SELECT n,%s,'assigned',true,true,NULL FROM generate_series(1,30) n",(PID,))
+    repair.request(d.connect,PID,'admin',str(uuid.uuid4()),29)
+    duplicate=repair.request(d.connect,PID,'admin',str(uuid.uuid4()),30)
+    assert duplicate['allocation_ids']==[29,30] and duplicate['duplicate']
+    sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready'")
+    calls=[]
+    def job(allocation):return dict(id=str(allocation),identity=dict(source=dict(product_gid=PID))),None
+    def enqueue(job,actor):calls.append(job['id']);return dict(status='Ready')
+    with patch('auto_editions_runtime.job_for',side_effect=job),patch('auto_editions_runtime.stores',return_value=(None,SimpleNamespace(enqueue=enqueue))):
+        repair.run_one(d.connect)
+    assert calls==['29','30']
+    with d.connect() as c,c.cursor() as cur:detail=repair.latest(cur,PID)['detail']
+    assert detail['state']=='Complete' and detail['jpg_ready']==[29,30]
+
+
 def test_orders_exposes_psd_cause_and_queue_without_supplier_reset():
     import orders_prodigi_grid as grid
     raw=dict(id=7,product_gid=PID,status='assigned',allocation_valid=True,identity_enforced=True,
