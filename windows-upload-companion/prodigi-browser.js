@@ -26,16 +26,18 @@ function prodigiOrderAddress(address,expected) {
         key=>['imageLibraryType','imageLibraryFileType'].includes(key));
   } catch {return false;}
 }
-async function prodigiWorkerTab(plan) {
+async function prodigiWorkerTab(plan,replaceStale=false) {
   // Reuse only tabs this worker created. Never navigate or claim a user's tab.
   const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
   const id=saved[plan.order_url];
   if(Number.isInteger(id)) {
     try {const tab=await chrome.tabs.get(id);
-      if(prodigiOrderAddress(tab.url,plan.order_url))return {...tab,ordersReused:true};
-    } catch {}
+      if(replaceStale&&!prodigiOrderAddress(tab.url,plan.order_url))throw Error('The worker order tab changed before fresh-page recovery.');
+      if(!replaceStale&&prodigiOrderAddress(tab.url,plan.order_url))return {...tab,ordersReused:true};
+    } catch(error) {if(replaceStale)throw error;}
   }
-  const tab=await chrome.tabs.create({url:plan.order_url,active:false});
+  if(replaceStale&&!Number.isInteger(id))throw Error('The owned worker tab is unavailable for fresh-page recovery.');
+  const tab=await chrome.tabs.create({url:plan.order_url,active:replaceStale});
   const entries=Object.entries(saved).filter(([url])=>url!==plan.order_url).slice(-19);
   await chrome.storage.local.set({ordersWorkerTabs:Object.fromEntries([...entries,[plan.order_url,tab.id]])});
   return {...tab,ordersReused:false};
@@ -95,6 +97,19 @@ async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
   }
   return false;
 }
+async function prodigiReadyOwnedPage(plan,tab,refresh,attempts){
+  if(await prodigiWaitForPage(tab,refresh,attempts,plan.order_url))return tab;
+  // No supplier action has started. Use a new browser context once rather than
+  // repeatedly reloading an unresponsive owned tab. Preserve the old tab.
+  const allowed=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true)||
+    plan.selected_empty_product===true||plan.replace_artwork===true;
+  if(!allowed||!tab.ordersReused)return null;
+  const fresh=await prodigiWorkerTab(plan,true);
+  if(prodigiBrowserTransfer)prodigiBrowserTransfer.tab=fresh.id;
+  if(await prodigiWaitForPage(fresh,false,attempts,plan.order_url))return fresh;
+  return null;
+}
+
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
@@ -150,7 +165,7 @@ async function prodigiBrowserRun(plan) {
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
       stage='open';
-      const tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
+      let tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
       let refresh=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true);
       if(plan.kind==='merge-hold'&&tab.ordersReused){
         const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
@@ -158,8 +173,8 @@ async function prodigiBrowserRun(plan) {
         refresh=true; // current pause controls; never reload an open duplicate editor
       }
       // Read verified persisted artwork, not a leftover post-Save editor.
-      const ready=await prodigiWaitForPage(tab,refresh,30,plan.order_url);
-      if(!ready)throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');
+      tab=await prodigiReadyOwnedPage(plan,tab,refresh,30);
+      if(!tab)throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');
       stage=plan.kind==='qa'?'qa':'product';
       const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
       return plan.kind==='qa'?await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||''):await prodigiReceipt(plan,'finish',result?.stage||'product',result?.error||'');
@@ -172,11 +187,11 @@ async function prodigiBrowserRun(plan) {
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
     if(hash!==plan.sha256) throw Error('The numbered JPG checksum changed.');
     stage='open';if(typeof ordersProgressStage==='function')ordersProgressStage('open');
-    const tab=await prodigiWorkerTab(plan);
+    let tab=await prodigiWorkerTab(plan);
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
     // Only a server-verified empty item may clear a product-selection shell.
-    const ready=await prodigiWaitForPage(tab,plan.selected_empty_product===true||plan.replace_artwork===true,60,plan.order_url);
-    if(!ready) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
+    tab=await prodigiReadyOwnedPage(plan,tab,plan.selected_empty_product===true||plan.replace_artwork===true,60);
+    if(!tab) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
     const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
     stage=result?.stage||'page';
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');

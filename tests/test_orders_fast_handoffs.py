@@ -136,6 +136,6 @@ def test_fixed_page_ready_capability_reaches_qa_recovery(monkeypatch):
     monkeypatch.setattr('prodigi_dashboard_qa.recover_waiting_item_qa',lambda user,**kw:calls.append((user,kw)))
     async def ready(*_):return {'key':'fixture'}
     monkeypatch.setattr(api,'ready_handoff',ready)
-    headers={'Authorization':'Bearer '+'x'*43,'X-Sports-Cave-Orders-Item-QA':'1','X-Sports-Cave-Orders-Page-Ready':'1'}
+    headers={'Authorization':'Bearer '+'x'*43,'X-Sports-Cave-Orders-Item-QA':'1','X-Sports-Cave-Orders-Fresh-Page':'1'}
     response=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])])).post('/tick',content='{}',headers=headers)
     assert response.status_code==200 and calls==[(actor,dict(page_supported=True))]

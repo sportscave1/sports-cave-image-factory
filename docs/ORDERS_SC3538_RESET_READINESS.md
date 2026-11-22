@@ -41,3 +41,12 @@ Tyson's readback after the price fix independently verified the canonical produc
 
 
 Tyson subsequently hit the same pre-Save signin/readiness fallback under1.7.45, even after one old-policy retry; no Save permit was committed. The Page-Ready capability in1.7.46 is also required for a single fresh owned-page-ready-v1 recovery budget. Existing source/business/empty-slot/generation checks remain, and that fixed-policy exhausted retry stays blocked. This prevents older companions repeatedly consuming readiness attempts and does not reset any saved sibling artwork.
+
+
+## Fresh context fallback,1.7.47
+
+1.7.46's bounded wake did not make the retained SC3538 QA tab ready. Its accurate failure remained QA open, before any permit; saved artwork intact. Read-only browser comparison: binding the old tab timed out, while a newly opened tab at the exact same order URL loaded with document.readyState=complete and the exact main h1. Close that diagnostic tab without supplier edits. This demonstrates a usable fresh context, without proving the exact browser-internal cause of the old context failure.
+
+1.7.47 adds one fresh owned-tab fallback only for an already-authorised fresh QA/product or explicit empty/replacement upload handoff. Recheck the old tab's ownership/URL, preserve it, create exactly one active tab at the pinned URL, retarget the in-memory transfer, and require actual page readiness again. Ordinary editor-preservation flow has no fallback authority; a new failed tab cannot recurse/create a tab loop. No new browser permissions.
+
+The fresh-context capability gates a policy-specific recovery budget. A pre-Save active handoff may also be retired only after five minutes, matching token-scoped progress stale for90seconds, unchanged empty assets/full business/source and a verified product or unconsumed exact Reset. Revoking that unused token prevents a late Save permit; already-used Save permits and changed assets stay blocked. Successful original JPG receipts/sibling QA remain untouched.

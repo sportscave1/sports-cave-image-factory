@@ -13,6 +13,7 @@ TAX_POLICY='owner-confirmed-sales-tax-collected-2026-11-22'
 WAITING='Awaiting dashboard QA'
 ACTIVE='Checking dashboard QA'
 RECOVERY_POLICY='nonblocking-telemetry-v1'
+PAGE_RECOVERY_POLICY='fresh-owned-context-v1'
 SET='SC EDITION BRANDING'
 TYPES={'Round packaging sticker','Packing slip (colour)'}
 CHECKS={'product_option':'Product and variant SKU','frame':'Frame colour','size':'Print size','artwork_upload':'Exact saved design','edition_number':'Allocated edition number','sent_to_production':'Full-image fit and orientation','image_quality':'Prodigi image quality: Excellent','customer_address':'Customer shipping details','shipping':'Cheapest shipping / required Express','certificate':'Saved supplier inserts','packing_slip':'Observed packing slip and sticker','inserts_available':'Supplier inserts present','final_check':'All QA checks passed'}
@@ -85,7 +86,9 @@ def recover_waiting_item_qa(user,*,page_supported=False):
                  OR ((value->>'message' IN ('QA shipping: The exact draft or shipping quotes changed before QA.',
                      'QA inserts: The expected Prodigi control did not finish loading.') OR (%s AND
                      (value->>'message'='Interrupted QA; recheck the saved order without repeating an upload.' OR value->>'message' LIKE 'QA open: %%')))
-                     AND (COALESCE(value->>'qa_prepermit_recovery_policy','')<>'nonblocking-telemetry-v1'
+                     AND (COALESCE(value->>'qa_prepermit_recovery_policy','')<>
+                          CASE WHEN value->>'message'='Interrupted QA; recheck the saved order without repeating an upload.'
+                            OR value->>'message' LIKE 'QA open: %%' THEN 'fresh-owned-context-v1' ELSE 'nonblocking-telemetry-v1' END
                           OR COALESCE((value->>'qa_prepermit_recoveries')::int,0)<2)))
             AND (value->'dashboard_qa'->>'started'='false' OR
                  (value->>'message'='QA tax-declaration: The expected Prodigi control did not finish loading.'
@@ -115,7 +118,8 @@ def _recover_item_qa(key,*,page_supported=False):
                or value.get('message')=='QA product-row: Close the existing order editor before QA.' or prepermit)
         if (value.get('status')!='Needs review' or not known or (receipt.get('started') is not False and not tax_readback) or value.get('submission')):
             return False
-        recoveries=value.get('qa_prepermit_recoveries',0) if value.get('qa_prepermit_recovery_policy')==RECOVERY_POLICY else 0
+        recovery_policy=PAGE_RECOVERY_POLICY if page_wait else RECOVERY_POLICY
+        recoveries=value.get('qa_prepermit_recoveries',0) if value.get('qa_prepermit_recovery_policy')==recovery_policy else 0
         if prepermit and recoveries>=2:return False
         try:
             _,order,_=current(value,provider,resolver)
@@ -140,7 +144,7 @@ def _recover_item_qa(key,*,page_supported=False):
         value.setdefault('dashboard_qa_history',[]).append({k:receipt.get(k) for k in ('claimed_at','checked_at','verified','item_only')})
         value.pop('dashboard_qa');value.pop('last_failure',None)
         if tax_readback:value['qa_tax_readback_recoveries']=value.get('qa_tax_readback_recoveries',0)+1
-        if prepermit:value.update(qa_prepermit_recoveries=recoveries+1,qa_prepermit_recovery_policy=RECOVERY_POLICY)
+        if prepermit:value.update(qa_prepermit_recoveries=recoveries+1,qa_prepermit_recovery_policy=recovery_policy)
         value.update(status=WAITING,message='Rechecking saved tax and full QA; verified artwork retained.' if tax_readback else 'Retrying the pre-permit QA check; verified artwork retained.' if prepermit else 'Rechecking the saved edition; shared checks wait until every item is ready.')
         browser.save(cur,key,value)
     return True

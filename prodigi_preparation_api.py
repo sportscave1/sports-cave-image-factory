@@ -85,7 +85,7 @@ async def tick(request):
         if request.headers.get('x-sports-cave-orders-empty-editor')=='1':
             stage='empty_product_editor_recovery'
             from prodigi_browser import recover_selected_empty_editors
-            if request.headers.get('x-sports-cave-orders-page-ready')=='1':
+            if request.headers.get('x-sports-cave-orders-fresh-page')=='1':
                 await run_in_threadpool(recover_selected_empty_editors,actor,page_supported=True)
             else:await run_in_threadpool(recover_selected_empty_editors,actor)
             stage='product_selection_readback_recovery'
@@ -94,7 +94,7 @@ async def tick(request):
         if request.headers.get('x-sports-cave-orders-item-qa')=='1':
             stage='item_qa_recovery'
             from prodigi_dashboard_qa import recover_waiting_item_qa
-            if request.headers.get('x-sports-cave-orders-page-ready')=='1':
+            if request.headers.get('x-sports-cave-orders-fresh-page')=='1':
                 await run_in_threadpool(recover_waiting_item_qa,actor,page_supported=True)
             else:await run_in_threadpool(recover_waiting_item_qa,actor)
         merge_supported=request.headers.get('x-sports-cave-orders-merge')=='1'

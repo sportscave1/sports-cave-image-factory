@@ -35,7 +35,7 @@ def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(stor
     qa.finish(plan['key'],plan['token'],None,error=message)
     value=prep.read(1)
     if case=='started':value['dashboard_qa']['started']=True
-    if case=='exhausted':value.update(qa_prepermit_recoveries=2,qa_prepermit_recovery_policy=qa.RECOVERY_POLICY)
+    if case=='exhausted':value.update(qa_prepermit_recoveries=2,qa_prepermit_recovery_policy=qa.PAGE_RECOVERY_POLICY if message.startswith(('Interrupted','QA open:')) else qa.RECOVERY_POLICY)
     if case=='old_policy':value.update(qa_prepermit_recoveries=2,qa_prepermit_recovery_policy='before-lock-fix')
     if case in ('started','exhausted','old_policy'):
         with prep.connect() as c,c.cursor() as q:prep.save(q,value)
@@ -45,7 +45,7 @@ def test_prepermit_connection_failure_recovers_only_unchanged_verified_work(stor
     assert qa.recover_waiting_item_qa({'id':'fixture'},page_supported=True)==(1 if case in ('unchanged','old_policy') else 0)
     saved=prep.read(1)
     assert saved['browser']['verified'] and not p.writes
-    if case in ('unchanged','old_policy'):assert saved['qa_prepermit_recoveries']==1 and saved['status']==qa.WAITING and saved['qa_prepermit_recovery_policy']==qa.RECOVERY_POLICY
+    if case in ('unchanged','old_policy'):assert saved['qa_prepermit_recoveries']==1 and saved['status']==qa.WAITING and saved['qa_prepermit_recovery_policy']==(qa.PAGE_RECOVERY_POLICY if message.startswith(('Interrupted','QA open:')) else qa.RECOVERY_POLICY)
 
 
 def test_verified_upload_enters_qa_immediately_without_repeating_provider_or_source_reads():

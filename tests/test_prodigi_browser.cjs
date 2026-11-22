@@ -456,3 +456,37 @@ test('QA connection failure preserves stage and original cause in finish receipt
  assert.equal(body.error,'QA open: Receiving end does not exist');
  assert(calls[0].url.endsWith('/qa/finish'));
 });
+
+
+
+test('one fresh owned context recovers a stalled authorised saved-order QA tab',async()=>{
+ const {context,storage,tabs}=setup();const url='https://dashboard.prodigi.com/orders/99/detail';
+ storage.ordersWorkerTabs={[url]:9};context.chrome.tabs.get=async id=>({id,url});
+ context.chrome.tabs.create=async options=>{tabs.push(options);return{id:10,url:options.url}};
+ vm.runInContext('prodigiWaitForPage=async tab=>tab.id===10',context);
+ context.qaPlan={kind:'qa',fresh_saved_order:true,order_url:url};context.oldTab={id:9,url,ordersReused:true};
+ const result=await vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context);
+ assert.equal(result.id,10);assert.equal(tabs.length,1);assert.equal(tabs[0].url,url);assert.equal(tabs[0].active,true);
+ assert.equal(storage.ordersWorkerTabs[url],10);
+});
+
+
+test('fresh-context fallback never abandons an ordinary unsaved editor',async()=>{
+ const {context}=setup();context.oldTab={id:9,ordersReused:true};context.ordinary={order_url:plan.order_url};
+ context.chrome.tabs.create=()=>assert.fail('No authority to replace ordinary context');
+ vm.runInContext('prodigiWaitForPage=async()=>false',context);
+ assert.equal(await vm.runInContext('prodigiReadyOwnedPage(ordinary,oldTab,false,3)',context),null);
+});
+
+
+test('fresh-context fallback blocks changed ownership and cannot create a tab loop',async()=>{
+ const {context,storage,tabs}=setup();const url='https://dashboard.prodigi.com/orders/99/detail';
+ storage.ordersWorkerTabs={[url]:9};context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/other/detail'});
+ context.chrome.tabs.create=()=>assert.fail('Changed user tab is preserved');
+ vm.runInContext('prodigiWaitForPage=async()=>false',context);
+ context.qaPlan={kind:'qa',fresh_saved_order:true,order_url:url};context.oldTab={id:9,ordersReused:true};
+ await assert.rejects(vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context),/changed before fresh-page/);
+ context.oldTab.ordersReused=false;
+ assert.equal(await vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context),null);
+ assert.equal(tabs.length,0);
+});

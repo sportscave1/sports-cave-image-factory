@@ -19,7 +19,7 @@ from prodigi_client import Client
 
 LOCK = 19721124
 WAITING = 'Awaiting browser upload'
-READINESS_POLICY='owned-page-ready-v1'
+READINESS_POLICY='fresh-owned-context-v1'
 
 
 def context(key):
@@ -328,7 +328,8 @@ def recover_selected_empty_editors(user,*,page_supported=False):
     from companion_poll_transaction import connection
     with connection(prep.connect) as conn,conn.cursor() as cur:
         cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
-            AND value->>'status'='Needs review'
+            AND (value->>'status'='Needs review' OR (%s AND value->>'status'='Browser uploading'
+                 AND (value->'browser'->>'claimed_at')::timestamptz<now()-interval '5 minutes'))
             AND value->'browser'->>'started'='false'
             AND ((value->'browser'->>'last_stage'='page'
                   AND value->'browser'->>'client_error'='An existing editor requires manual review.'
@@ -337,11 +338,14 @@ def recover_selected_empty_editors(user,*,page_supported=False):
                   AND value->'browser'->>'client_error' IN ('Sign into Prodigi in Edge, then review the same draft.',
                     'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
                   AND (COALESCE((value->>'readiness_recoveries')::int,0)<1
-                    OR (%s AND COALESCE(value->>'readiness_recovery_policy','')<>'owned-page-ready-v1'))
-                  AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation')))
+                    OR (%s AND COALESCE(value->>'readiness_recovery_policy','')<>'fresh-owned-context-v1'))
+                  AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation'))
+              OR (%s AND value->>'status'='Browser uploading'
+                  AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation')
+                  AND COALESCE(value->>'readiness_recovery_policy','')<>'fresh-owned-context-v1'))
             AND NOT value ? 'submission'
             AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 2""",(page_supported,))
+            ORDER BY updated_at LIMIT 2""",(page_supported,page_supported,page_supported))
         keys=[row['key'] for row in cur.fetchall()]
     recovered=0
     for key in keys:
@@ -360,8 +364,17 @@ def _recover_ready_editor(user,key,*,page_supported=False):
     provider,resolver,_,sandbox=context(key)
     with stages.edit(LOCK) as q:
         value=read(q,key);receipt=value.get('browser') or {}
-        if value.get('status')!='Needs review' or receipt.get('started') is not False or value.get('submission'):return False
-        readiness=receipt.get('last_stage') in ('signin','readiness') and receipt.get('client_error') in (
+        stalled=False
+        if page_supported and value.get('status')=='Browser uploading' and value.get('readiness_recovery_policy')!=READINESS_POLICY:
+            try:
+                age=(datetime.now(timezone.utc)-datetime.fromisoformat(receipt['claimed_at'])).total_seconds()
+                q.execute('SELECT key,value FROM app_settings WHERE key=%s',('orders_runtime:'+str(value['allocation_id']),))
+                seen=q.fetchone();seen=seen['value'] if seen else {}
+                stale=(datetime.now(timezone.utc)-datetime.fromisoformat(seen['seen_at'])).total_seconds()>90
+                stalled=age>300 and stale and seen.get('claim')==receipt.get('token_hash')
+            except (KeyError,TypeError,ValueError):pass
+        if (value.get('status')!='Needs review' and not stalled) or receipt.get('started') is not False or value.get('submission'):return False
+        readiness=stalled or receipt.get('last_stage') in ('signin','readiness') and receipt.get('client_error') in (
             'Sign into Prodigi in Edge, then review the same draft.',
             'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
         if readiness:

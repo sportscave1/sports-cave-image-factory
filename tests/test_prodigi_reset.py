@@ -180,3 +180,20 @@ def test_fixed_page_ready_worker_gets_one_new_guarded_recovery_budget(draft):
     browser.finish(next_plan['key'],next_plan['token'],'readiness',error='The exact Prodigi order page did not become ready; check its loading or sign-in state.')
     assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==0
     assert prep.read(1)['readiness_recovery_policy']==browser.READINESS_POLICY and not p.writes
+
+
+@pytest.mark.parametrize('case',['stale','recent_progress','used_permit','changed_asset'])
+def test_fresh_context_worker_can_retire_only_stale_unused_empty_handoff(draft,case):
+    from datetime import datetime,timezone,timedelta
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    v=prep.read(1);v['browser']['claimed_at']=(datetime.now(timezone.utc)-timedelta(minutes=6)).isoformat()
+    if case=='used_permit':v['browser']['started']=True
+    if case=='changed_asset':p.data['items'][0]['assets']=[dict(url='https://fixture/other',printArea='default')]
+    save(v)
+    record=dict(claim=v['browser']['token_hash'],seen_at=(datetime.now(timezone.utc)-timedelta(seconds=10 if case=='recent_progress' else 180)).isoformat())
+    with prep.connect() as c,c.cursor() as q:
+        q.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',('orders_runtime:1',json.dumps(record)))
+    assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==(1 if case=='stale' else 0)
+    assert not p.writes
