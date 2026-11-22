@@ -34,7 +34,8 @@ def test_thumbnail_is_small_and_never_changes_the_print_file(tmp_path,monkeypatc
     with pytest.raises(ValueError):preview.cached('../outside')
 
 
-def test_new_ready_jpg_enters_fulfilment_once_when_owner_enabled(database,monkeypatch):
+@pytest.mark.parametrize('enabled',[True,False])
+def test_new_ready_jpg_enters_fulfilment_once_for_authorised_owner(database,monkeypatch,enabled):
     from test_orders_auto_jpg import tables
     import orders_auto_jpg as auto,auto_editions_runtime as runtime,auto_editions as ae
     import prodigi_preparation as prep,os_accounts
@@ -43,7 +44,7 @@ def test_new_ready_jpg_enters_fulfilment_once_when_owner_enabled(database,monkey
     identity={'allocation_id':1};job={'id':ae.fingerprint(identity),'identity':identity}
     jobs.enqueue(job,'fixture');sql.execute("UPDATE auto_edition_jobs SET status='Ready'")
     monkeypatch.setattr(runtime,'stores',lambda:(None,jobs))
-    monkeypatch.setattr('prodigi_submission.setting',lambda:dict(enabled=True,actor='owner'))
+    monkeypatch.setattr('prodigi_submission.setting',lambda:dict(enabled=enabled,actor='owner'))
     monkeypatch.setattr(os_accounts,'DEFAULT_STORE',SimpleNamespace(get_user=lambda _:dict(id='owner')))
     monkeypatch.setattr(prep,'request',lambda owner,aid:calls.append((owner['id'],aid)))
     monkeypatch.setattr(prep,'require_user',lambda _:None)

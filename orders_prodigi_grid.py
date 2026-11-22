@@ -40,11 +40,14 @@ def batch_status(ids):
     keys=[queue.PREFIX+str(int(i)) for i in ids if str(i).isdigit()]
     if not keys:return {}
     keys += [queue.FAILURE_PREFIX+str(int(i)) for i in ids if str(i).isdigit()]
+    keys.append('orders_submit_after_qa')
     with queue.connect() as c,c.cursor() as q:
         q.execute('SELECT key,value FROM app_settings WHERE key=ANY(%s)',(keys,))
         rows=q.fetchall()
     states={r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.PREFIX)}
     states.update({r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.FAILURE_PREFIX) and r['value'].get('active')})
+    automatic=next((r['value'].get('enabled') is True for r in rows if r['key']=='orders_submit_after_qa'),False)
+    for value in states.values():value['_submit_enabled']=automatic
     return states
 
 
@@ -79,6 +82,7 @@ def review(saved,row,jpg):
     stopped=state in ('Needs QA','Needs review','Submission uncertain','Status unavailable')
     items=[dict(label=label,state='pass' if checks.get(key) is True else 'fail' if stopped and (checks.get(key) is False or key=='final_check') else 'pending') for key,label in CHECKS.items()]
     return dict(status=state,message=(saved or {}).get('message','Waiting for automatic artwork preparation.'),
+        submission_enabled=(saved or {}).get('_submit_enabled'),
         items=items,can_restart=stopped,allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
@@ -110,7 +114,7 @@ def render(rows,display_rows,*,grid_key,selected,actor,statuses=None):
         if payload[-1]['jpg_label']=='Open':payload[-1]['jpg_label']='Open JPG'
         shipping=payload[-1]['cells']['shipping']
         if shipping.strip().lower() in ('standard','express'):payload[-1]['cells']['shipping']=shipping.strip()+' shipping'
-    active=any(v.get('status') in ACTIVE for v in statuses.values())
+    active=allowed and any(str(r.get('prodigi','')).lower()!='complete' for r in rows)
     event=component(rows=payload,selected=[row_identity(r) for r in selected],active=active,
                     key='orders-prodigi-grid',default=None)
     if not isinstance(event,dict) or not event.get('event') or event['event']==st.session_state.get('orders-grid-last-event'):return
