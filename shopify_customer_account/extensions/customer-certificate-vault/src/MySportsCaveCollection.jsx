@@ -649,7 +649,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
       id={modalId}
       heading={framingOnly ? "Get your certificate framed" : title}
       accessibilityLabel={`Certificate viewer for ${title}`}
-      size="large"
+      size="large-100"
       padding="base"
       onAfterHide={onClose}
     >

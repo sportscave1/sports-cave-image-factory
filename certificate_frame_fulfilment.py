@@ -106,7 +106,7 @@ def _read(aid, connect):
         raise ValueError('The original issued certificate identity changed.')
     customer = vault._canonical_gid('Customer', (raw.get('customer') or {}).get('id') or raw.get('shopify_customer_id') or raw.get('customer_id'))
     if (request['shopify_customer_id'] not in vault.customer_id_candidates(customer)
-            or certificate.get('shopify_customer_id') not in vault.customer_id_candidates(customer)):
+            or (certificate.get('shopify_customer_id') and certificate['shopify_customer_id'] not in vault.customer_id_candidates(customer))):
         raise ValueError('The paid certificate owner changed.')
     if (str(certificate.get('certificate_id') or '') != str(request.get('certificate_id') or '')
             or int(certificate.get('edition_number') or 0) != unit['edition_number']
