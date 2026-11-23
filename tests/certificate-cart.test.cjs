@@ -20,3 +20,11 @@ for(const present of [false,true]) test(`preserves existing cart and deduplicate
 test('refused handoff does not touch storefront cart',async()=>{
  let calls=0;await assert.rejects(transfer('invalid',{fetch:async()=>{calls++;return {ok:false,json:async()=>({ok:false})};},origin}));assert.equal(calls,1);
 });
+
+for(const present of [false,true])test(`account cart goes directly to checkout after merging, already present: ${present}`,async()=>{
+ const calls=[];const item={ok:true,destination:'checkout',variant_id:'68066069938483',request_reference:'certificate',properties:{_sports_cave_frame_request:'certificate'}};
+ const fetch=async(url,options={})=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('cart.js')?{items:present?[{variant_id:item.variant_id,quantity:1,properties:item.properties}]:[]}:item};};
+ assert.equal(await transfer('signed',{fetch,origin,root:'/en-us/',lastPage:'/products/previous'}),'/en-us/checkout');
+ assert.equal(calls.filter(c=>c.url.endsWith('cart/add.js')).length,present?0:1);
+ assert.ok(calls.every(c=>!c.url.includes('clear')&&!c.url.includes('update')));
+});

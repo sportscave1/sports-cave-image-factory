@@ -29,7 +29,7 @@
       if (!added.ok) throw new Error('Certificate could not be added');
     }
     // Preserve every existing product. Never replace/clear the browser cart.
-    return targetPath(env.lastPage, env.origin);
+    return item.destination === 'checkout' ? root + 'checkout' : targetPath(env.lastPage, env.origin);
   }
   if (typeof module !== 'undefined' && module.exports) { module.exports = {transfer, targetPath}; return; }
   const url = new URL(location.href);

@@ -10,6 +10,7 @@ def test_country_is_pinned_in_signed_cart_handoff(monkeypatch):
         token=result['cart_handoff_url'].split('sc_certificate_cart=')[1]
         payload=vault._verify_signed_token(token,expected_purpose='frame_cart')
         assert payload['country']==country and payload['variant_id'].endswith('/42')
+        assert payload['destination']=='checkout'
 
 def test_malformed_country_never_enters_signed_handoff(monkeypatch):
     monkeypatch.setenv('COLLECTOR_VAULT_ASSET_SIGNING_SECRET',SECRET)
