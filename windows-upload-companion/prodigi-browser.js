@@ -26,15 +26,30 @@ function prodigiOrderAddress(address,expected) {
         key=>['imageLibraryType','imageLibraryFileType'].includes(key));
   } catch {return false;}
 }
+function prodigiLoginAddress(address,expected) {
+  try {
+    const actual=new URL(address),pinned=new URL(expected);
+    const redirects=actual.searchParams.getAll('redirect');
+    return actual.origin===pinned.origin && !actual.username && !actual.password && !actual.hash &&
+      actual.pathname==='/login' && redirects.length===1 &&
+      Array.from(actual.searchParams.keys()).every(key=>key==='redirect') &&
+      redirects[0]===pinned.pathname;
+  } catch {return false;}
+}
+function prodigiSignInRequired() {
+  return Object.assign(Error('Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.'),
+    {code:'PRODIGI_SIGNIN_REQUIRED',prodigiStage:'signin'});
+}
 async function prodigiWorkerTab(plan,replaceStale=false) {
   // Reuse only tabs this worker created. Never navigate or claim a user's tab.
   const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
   const id=saved[plan.order_url];
   if(Number.isInteger(id)) {
     try {const tab=await chrome.tabs.get(id);
+      if(prodigiLoginAddress(tab.url,plan.order_url))throw prodigiSignInRequired();
       if(replaceStale&&!prodigiOrderAddress(tab.url,plan.order_url))throw Error('The worker order tab changed before fresh-page recovery.');
       if(!replaceStale&&prodigiOrderAddress(tab.url,plan.order_url))return {...tab,ordersReused:true};
-    } catch(error) {if(replaceStale)throw error;}
+    } catch(error) {if(replaceStale||error.code==='PRODIGI_SIGNIN_REQUIRED')throw error;}
   }
   if(replaceStale&&!Number.isInteger(id))throw Error('The owned worker tab is unavailable for fresh-page recovery.');
   const tab=await chrome.tabs.create({url:plan.order_url,active:replaceStale});
@@ -52,6 +67,7 @@ async function prodigiWakeOwnedTab(tab,orderUrl) {
   // Waking is not navigation or supplier authority. Recheck ownership and URL.
   const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
   const current=await chrome.tabs.get(tab.id);
+  if(orderUrl&&saved[orderUrl]===tab.id&&prodigiLoginAddress(current.url,orderUrl))throw prodigiSignInRequired();
   if(!orderUrl||saved[orderUrl]!==tab.id||!prodigiOrderAddress(current.url,orderUrl))
     throw Error('The worker order tab changed before wake-up.');
   await chrome.tabs.update(tab.id,{active:true,autoDiscardable:false});
@@ -66,8 +82,16 @@ async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
   let previousPage,reloaded=false;
   let woke=false;
   async function probe(){
-    try{return await prodigiReadyProbe(tab.id);}
+    try{
+      if(orderUrl){
+        const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
+        const current=await chrome.tabs.get(tab.id);
+        if(saved[orderUrl]===tab.id&&prodigiLoginAddress(current.url,orderUrl))throw prodigiSignInRequired();
+      }
+      return await prodigiReadyProbe(tab.id);
+    }
     catch(error){
+      if(error.code==='PRODIGI_SIGNIN_REQUIRED'){error.prodigiOwnershipLost=true;throw error;}
       // Edge may freeze a background content script indefinitely. One targeted
       // wake keeps the probe bounded without touching user-owned tabs/settings.
       if(error.code==='PRODIGI_READY_TIMEOUT'&&!woke&&orderUrl){
@@ -206,6 +230,7 @@ async function prodigiBrowserRun(plan) {
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');
     return await prodigiReceipt(plan,'finish',stage);
   } catch(error) {
+    stage=error.prodigiStage||stage;
     // Read back this same item; never repeat an uncertain Save or upload.
     return await prodigiReceipt(plan,'finish',stage,String(error.message||'Browser handoff interrupted'));
   } finally {
