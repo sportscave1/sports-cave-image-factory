@@ -545,7 +545,7 @@ def _step(key, value, job, event, age):
             if value.get('auto_recovery'):
                 value['auto_recovery'].update(state='complete', completed_at=time.time())
             write(key, value)
-        elif row.get('status') in TERMINAL or (stage_age > 1800 and not row.get('running_here') and not row.get('lease_active')):
+        elif row.get('status') in TERMINAL or (row.get('running_here') is False and row.get('lease_active') is False):
             from ads_auto_recovery import posting_can_resume, schedule
             from meta_posting_recovery import requires_reconciliation
             if posting_can_resume(row):
@@ -575,16 +575,18 @@ def _step(key, value, job, event, age):
 
 def tick(token, event):
     from os_accounts import DEFAULT_STORE, can_access_page
+    from ads_companion_liveness import heartbeat
 
+    # Contact is independent of claiming work. A busy queue must not make an
+    # authenticated, retrying browser appear disconnected.
+    heartbeat(connect, digest(token), HEARTBEAT_KEY)
+    if event.get('heartbeat_only') is True:
+        return {}
     lease = str(uuid4())
     lease_key = PREFIX + 'lease'
     with connect() as conn, conn.cursor() as cur:
-        cur.execute('SELECT 1 FROM product_upload_desktop WHERE singleton AND token_hash=%s FOR UPDATE',
-                    (digest(token),))
-        if not cur.fetchone():
-            raise PermissionError('The paired desktop credential is required.')
-        cur.execute("""INSERT INTO app_settings(key,value,updated_at) VALUES (%s,'true',now())
-            ON CONFLICT(key) DO UPDATE SET updated_at=now()""", (HEARTBEAT_KEY,))
+        # The existing durable Ads lease serializes claims. Holding the shared
+        # desktop credential row here unnecessarily couples independent queues.
         enabled = _enabled(cur)
         reported = str(event.get('id') or '')
         if re.fullmatch(r'[a-f0-9-]{36}',reported):

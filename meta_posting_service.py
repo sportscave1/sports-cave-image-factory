@@ -2056,14 +2056,14 @@ class SupabasePostingStore:
                         WHERE submission_id=%s::uuid
                         AND (status='FAILED' AND lease_token IS NULL
                              OR status NOT IN ('COMPLETE','FAILED','AMBIGUOUS','ABANDONED_EXTERNALLY')
-                                AND (lease_token IS NULL OR lease_expires_at<now())
-                                AND updated_at<now()-interval '30 minutes')
-                        AND COALESCE(safe_error,'') NOT LIKE 'The Meta request failed.%'
-                        AND COALESCE(safe_error,'') NOT LIKE 'The Meta Carousel request failed.%'
+                                AND (lease_expires_at<now()
+                                     OR lease_token IS NULL AND updated_at<now()-interval '2 minutes'))
+                        AND COALESCE(safe_error,'') NOT LIKE %s
+                        AND COALESCE(safe_error,'') NOT LIKE %s
                         AND NOT EXISTS (SELECT 1 FROM jsonb_each(
                             COALESCE(ad_results->0->'posting_operations_v1','{}'::jsonb)) operation
                             WHERE operation.value->>'state'='pending')
-                        RETURNING submission_id""",(identity,))
+                        RETURNING submission_id""",(identity,'The Meta request failed.%','The Meta Carousel request failed.%'))
                     reserved=bool(cur.fetchone())
             conn.commit()
         return reserved
@@ -3844,6 +3844,9 @@ class MetaPostingService:
                 )
                 ad_result["meta_ad_configured_status"] = str(
                     copy_result.get("copied_configured_status") or ""
+                )
+                ad_result["unavailable_requested_enhancements"] = list(
+                    copy_result.get("unavailable_requested_enhancements") or []
                 )
                 ad_result["status"] = "CREATED"
                 ad_result["safe_error"] = ""

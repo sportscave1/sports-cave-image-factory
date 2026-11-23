@@ -3,6 +3,7 @@
 const adProject = 'https://chatgpt.com/g/g-p-6a6bd98cd6f081918788b544dcdecfc2/project';
 const adStorage = 'publishAdJob';
 let adTickRunning = false;
+let adHeartbeatRunning = false;
 let adFollowupTimer = null;
 function followUpAdTransfer(outcome) {
   // One prompt-free fast check after progress, with the durable alarm as fallback.
@@ -195,8 +196,35 @@ async function startAd(job) {
   queue = queue.then(() => run(job.receipt, job.prompt, operation)).catch(() => {});
 }
 
+async function pollAdCheckpoint(token, event) {
+  // Server backpressure is transient. Retry this same observation after other
+  // queues release their slots; Send/repair permits are never retried here.
+  const body=JSON.stringify(event);
+  for(let attempt=0;attempt<3;attempt++) {
+    const response=await fetch(osOrigin+'/api/staff-product-uploads/ad-tick',{
+      method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body,credentials:'omit',signal:AbortSignal.timeout(25000)});
+    if(response.status!==503 || attempt===2)return response;
+    await delay(2000*(attempt+1)+Math.floor(Math.random()*500));
+  }
+}
+
+async function adHeartbeat() {
+  if(adHeartbeatRunning)return;
+  adHeartbeatRunning=true;
+  try {
+    const token=await staffRead(staffDeviceKey);
+    if(token)await fetch(osOrigin+'/api/staff-product-uploads/ad-tick',{
+      method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({heartbeat_only:true}),credentials:'omit',signal:AbortSignal.timeout(8000)});
+  } catch { /* The next durable alarm reports contact again. */ }
+  finally {adHeartbeatRunning=false;}
+}
+
 async function adQueueTick() {
-  if (adTickRunning) return;
+  // Collection and composer handoffs can exceed the online window. Report
+  // contact on their alarm without starting another claim or touching a send.
+  if (adTickRunning) return adHeartbeat();
   adTickRunning = true;
   const keepAlive=setInterval(()=>{void chrome.storage.local.get(adStorage).catch(()=>{});},20000);
   try {
@@ -221,15 +249,13 @@ async function adQueueTick() {
     }
     if(matched && local.chat_url!==progress.chat_url)
       await staffWrite(adStorage,{...local,chat_url:progress.chat_url});
-    const response = await fetch(osOrigin + '/api/staff-product-uploads/ad-tick', {
-      method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
-      body:JSON.stringify({id:local?.id, state:matched && progress.blocked ? 'blocked' : report.state,
+    const response = await pollAdCheckpoint(token, {
+                          id:local?.id, state:matched && progress.blocked ? 'blocked' : report.state,
                           reason:matched && progress.reason || report.reason, chat_url:matched ? progress.chat_url : undefined,
                           generating:matched ? progress.generating : undefined,
                           finished:matched ? progress.finished : undefined, activity:matched ? progress.activity : undefined,
                           transfer_detail:local?.transferError,transfer_failed:local?.transferFailed===true,
-                          repair_id:local?.repair?.id,repair_seen:repairStatus?.found?local.repair.id:undefined}),
-      credentials:'omit', signal:AbortSignal.timeout(25000),
+                          repair_id:local?.repair?.id,repair_seen:repairStatus?.found?local.repair.id:undefined,
     });
     if (!response.ok) return;
     const {job, busy, stop} = await response.json();
