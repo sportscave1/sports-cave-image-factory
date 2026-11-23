@@ -328,6 +328,8 @@ async def collector_vault_cart_launch(request: Request):
         page=f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opening your Sports Cave cart</title><body>
         <form id="market-cart" method="post" action="https://www.sportscaveshop.com/localization">
         <input type="hidden" name="form_type" value="localization">
+        <input type="hidden" name="_method" value="put">
+        <input type="hidden" name="utf8" value="&#x2713;">
         <input type="hidden" name="country_code" value="{html.escape(country,quote=True)}">
         <input type="hidden" name="return_to" value="{html.escape(destination,quote=True)}">
         <p>Opening your Sports Cave cart…</p><button type="submit">Continue to your cart</button></form>

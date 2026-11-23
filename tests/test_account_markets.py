@@ -29,6 +29,7 @@ def test_launch_uses_only_shopify_localization_without_replacing_cart(monkeypatc
     assert response.status_code==200
     assert 'action="https://www.sportscaveshop.com/localization"' in response.text
     assert 'name="country_code" value="US"' in response.text
+    assert 'name="_method" value="put"' in response.text
     assert 'name="return_to" value="/?sc_certificate_cart=' in response.text
     assert '/cart/clear' not in response.text and response.headers['cache-control']=='no-store'
     assert TestClient(app).get('/launch',params={'sc_certificate_cart':'invalid'}).status_code in (401,403)
