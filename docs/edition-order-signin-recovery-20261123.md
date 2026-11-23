@@ -107,3 +107,19 @@ Disposable-database tests prove successful and rejected recovery and duplicate p
 The release preserves the concurrently approved collection/certificate release by
 rebasing onto current remote main; the task never edits another task checkout.
 Companion 1.7.52 was observed in the server runtime record after owner reload.
+
+## Companion readiness follow-up 1.7.53
+
+Both original JPGs passed independent source/asset verification. Shared dashboard QA
+then timed out at open. Read-only inspection of the exact rendered supplier draft
+showed both numbered artworks as Excellent, its exact order heading under main, and
+document.readyState still interactive. The old readiness handler required complete,
+which can wait on unrelated supplier resources even after the order is usable.
+
+Version 1.7.53 accepts interactive or complete only with one exact rendered order
+heading matching the pinned order path. Loading, sign-in, missing/duplicate headings,
+and another/prefix-matched order stay rejected. All action permits remain unchanged.
+Eight readiness regressions were added; no backend behavior changes in this follow-up.
+This extension-only follow-up is committed with skip-render to retain the verified
+running backend. The installed extension and an offline package are updated directly;
+the hosted package will pick it up on the next normal backend release.

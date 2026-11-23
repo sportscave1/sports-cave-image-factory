@@ -1,3 +1,10 @@
+function prodigiOrderPageReady(state,pathname,headings) {
+  // Supplier resources can keep DOMContentLoaded pending after the order renders.
+  // Readiness alone grants no action: every supplier permit still runs separately.
+  const match=pathname.match(/^\/orders\/([A-Za-z0-9-]+)\/detail$/);
+  return ['interactive','complete'].includes(state)&&Boolean(match)&&headings.length===1&&
+    new RegExp('^'+match[1]+'(?:\\s|$)').test(headings[0].replace(/\s+/g,' ').trim());
+}
 function prodigiExactRow(row,sku,colour) {
   const clean=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
   return Array.from(row.querySelectorAll('*')).some(e=>clean(e)===sku) &&
@@ -81,7 +88,7 @@ function prodigiIndefiniteHold(scope,text,visible) {
   return saysHeld&&!Array.from(scope.querySelectorAll('h1,h2,h3')).some(e=>visible(e)&&/until production/i.test(text(e)))&&
     !prodigiControls(scope,'button').some(e=>visible(e)&&text(e)==='Pause indefinitely');
 }
-if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiReadyProductCard,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
+if(typeof module!=='undefined') module.exports={prodigiOrderPageReady,prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiReadyProductCard,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -320,9 +327,8 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
   chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(sender.id!==chrome.runtime.id) return;
     if(message?.type==='prodigi:ready') {
-      const match=location.pathname.match(/^\/orders\/([A-Za-z0-9-]+)\/detail$/);
-      reply({page_instance:pageInstance,busy:dialogs().length>0,ready:document.readyState==='complete'&&Boolean(match)&&
-        Array.from(document.querySelectorAll('main h1')).some(e=>text(e).startsWith(match[1]))});return;
+      reply({page_instance:pageInstance,busy:dialogs().length>0,ready:prodigiOrderPageReady(document.readyState,location.pathname,
+        Array.from(document.querySelectorAll('main h1')).map(text))});return;
     }
     if(message?.type==='prodigi:upload') {
       upload(message.plan).then(reply,()=>reply({saved:false}));return true;

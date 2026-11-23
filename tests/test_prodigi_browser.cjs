@@ -514,3 +514,18 @@ test('fresh-context fallback blocks changed ownership and cannot create a tab lo
  assert.equal(await vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context),null);
  assert.equal(tabs.length,0);
 });
+
+
+for(const [state,path,headings,ready] of [
+ ['interactive','/orders/99/detail',['99\\nCopy to clipboard'.replace('\\n','\n')],true],
+ ['complete','/orders/99/detail',['99 Copy to clipboard'],true],
+ ['loading','/orders/99/detail',['99 Copy to clipboard'],false],
+ ['interactive','/orders/99/detail',[],false],
+ ['interactive','/orders/99/detail',['Loading'],false],
+ ['interactive','/orders/99/detail',['999 Copy to clipboard'],false],
+ ['interactive','/login',['99 Copy to clipboard'],false],
+ ['interactive','/orders/99/detail',['99','99'],false],
+]) test(`rendered order readiness ${state} ${path} ${JSON.stringify(headings)}`,()=>{
+ const {prodigiOrderPageReady}=require('../windows-upload-companion/prodigi-page.js');
+ assert.equal(prodigiOrderPageReady(state,path,headings),ready);
+});
