@@ -138,7 +138,8 @@ def new_ad_sport_language(sport, context):
     return words
 
 
-def build_new_ad_style_rules(product, sport, context):
+def build_new_ad_style_rules(product, sport, context, market=""):
+    from ads_prompt_language import australian_ie
     sport_word, identity, comparison = new_ad_sport_language(sport, context)
     limit = 100  # Owner-confirmed worldwide edition policy.
     scarcity = "Limited to 100 worldwide."
@@ -148,6 +149,10 @@ def build_new_ad_style_rules(product, sport, context):
         NEW_AD_STYLE_KEYS, NEW_AD_TEMPLATES,
         ("Claim Your Edition",) * 3,
     ), 1):
+        if australian_ie(market, "Instant Experience"):
+            template = template.replace("[SUBJECT / ATHLETE / TEAM]", "[NAME-FREE EDITION REFERENCE / COLLECTOR EMOTION]")
+            template = template.replace("[ATHLETE / TEAM / MOMENT]", "[NAME-FREE EDITION REFERENCE / SPORTING EMOTION]")
+            template = template.replace("[PRODUCT / SUBJECT / MOMENT]", "[NAME-FREE EDITION REFERENCE / SPORTING MEMORY]")
         body = template.format(sport=sport_word, identity=identity, comparison=comparison, limit=limit)
         body = body.replace(f"Limited to {limit} worldwide.", scarcity)
         if not limit:
@@ -156,7 +161,7 @@ def build_new_ad_style_rules(product, sport, context):
         if index == 3:
             headline_rule += " For this collector-centrepiece description, make the written Meta headline collector-focused: express why this exact subject, verified sporting memory or legacy deserves a lasting place in a meaningful collection. Add a complementary emotional idea rather than repeating or paraphrasing the opening, centrepiece wording or 100-collector scarcity claim. Keep it premium, natural and product-specific, with nostalgia only where supported; no generic collector slogan or purchase CTA. This is the third written headline only, in every market; preserve the description and all on-image headline assignments."
         blocks.append(f"AD {index} — {key}\nDescription framework:\n{body}\n\nHeadline: {headline_rule}\nCTA: {cta}")
-    return f"""LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS — NEW ADS ONLY
+    rules = f"""LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS — NEW ADS ONLY
 Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Product being personalised: {product}
 Use exactly one framework per creative in this permanent order: legacy_standard, framed_greatness, choose_a_side. These are the three copy styles, not three options for each image.
@@ -179,3 +184,8 @@ FINAL COPY CONTRACT
 Return exactly THREE active ad-copy combinations total. Each group contains AD COPY with one Description, one Headline and one CTA. No extra options or tables. Preserve intentional short lines and blank lines; concise, collector-first, confident, premium, emotional without filler. Nostalgia only where product truth supports it. No perfect for, elevate your space, transform your room, generic home-decor language, corporate explanation, emojis or excessive exclamation marks. Keep each headline product-specific; aim for 2–6 words, preferring natural phrasing over a rigid count. One approved CTA per ad, no alternatives. Native Meta Instant Experience button remains Shop Now.
 The three style keys are unchanged. CSV description identity cells and variation=1 are compatibility fields: preserve the exported template cells exactly, even where an existing single-copy row uses legacy_standard. They do not override the slot's assigned writing framework. No new CSV columns, rows or image instructions.
 """
+
+    if australian_ie(market, "Instant Experience"):
+        rules = rules.replace("Empty ATHLETE_NAMES does not erase a name explicitly supplied in the title.",
+                              "Use athlete/team identity internally only; never copy names from the title into customer-facing copy.")
+    return rules

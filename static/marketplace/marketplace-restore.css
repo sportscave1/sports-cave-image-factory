@@ -1,0 +1,17 @@
+/* Restore the original homepage proportions without changing inner pages. */
+.is-home .hero{min-height:560px;height:min(760px,85svh);max-height:none}
+.is-home .hero-copy{padding:72px 0 0}
+.is-home .catalogue{padding-top:35px}
+@media(max-width:760px){
+  .is-home .hero{min-height:520px;height:min(680px,83svh);max-height:none}
+  .is-home .hero-copy{padding:65px 0 0}
+  .is-home .hero h1{font-size:2.5rem}
+  .is-home .catalogue{padding-top:29px}
+}
+@media(max-width:480px){
+  .is-home .hero{height:79svh;min-height:540px;max-height:665px}
+  .is-home .hero-copy{padding:48px 0 0}
+  .is-home .hero h1{font-size:2.2rem}
+  .is-home .catalogue{padding-top:27px}
+}
+@media(max-width:350px){.is-home .hero h1{font-size:1.95rem}}

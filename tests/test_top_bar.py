@@ -288,16 +288,12 @@ class TopBarComponentTests(unittest.TestCase):
         search = markup.index('id="sc-os-global-search"')
         planner = markup.index('id="sc-os-daily-planner"')
         notifications = markup.index('id="sc-os-notifications"')
-        repairs = markup.index('id="sc-os-repairs"')
-        profile = markup.index('id="sc-os-profile"')
-        settings = markup.index('id="sc-os-settings"')
-        self.assertLess(refresh, search)
         self.assertLess(refresh, greeting)
-        self.assertLess(greeting, search)
+        self.assertLess(greeting, planner)
         self.assertLess(planner, notifications)
-        self.assertLess(notifications, repairs)
-        self.assertLess(repairs, profile)
-        self.assertLess(profile, settings)
+        self.assertLess(notifications, markup.index('id="sc-os-companion-status"'))
+        for name in ('repairs', 'profile', 'settings'):
+            self.assertNotIn('id="sc-os-'+name+'"', markup)
         self.assertIn('aria-label="Open Daily Planner"', markup)
         self.assertIn('title="Open Daily Planner"', markup)
         self.assertNotIn("Shopify", source)
@@ -490,9 +486,9 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertEqual(1, body.count('id="sc-os-files"'))
         self.assertEqual(1, body.count('id="sc-os-daily-planner"'))
         self.assertEqual(1, body.count('id="sc-os-notifications"'))
-        self.assertEqual(1, body.count('id="sc-os-repairs"'))
-        self.assertEqual(1, body.count('id="sc-os-profile"'))
-        self.assertEqual(1, body.count('id="sc-os-settings"'))
+        self.assertEqual(0, body.count('id="sc-os-repairs"'))
+        self.assertEqual(0, body.count('id="sc-os-profile"'))
+        self.assertEqual(0, body.count('id="sc-os-settings"'))
 
 
 if __name__ == "__main__":

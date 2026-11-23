@@ -1111,6 +1111,13 @@ def upload_revision(access_token, path, local_path, expected_revision):
                                  expected_revision=expected_revision)
 
 
+def immutable_asset_uploader(access_token):
+    """Edition-only strict-add publisher; general Files conflict policy is unchanged."""
+    import sys
+    from edition_asset_publisher import ImmutableAssetUploader
+    return ImmutableAssetUploader(sys.modules[__name__], access_token)
+
+
 def upload_local_file(
     access_token,
     dropbox_path,

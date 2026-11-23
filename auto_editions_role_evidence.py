@@ -25,7 +25,8 @@ def plaque(inspection,source):
     rows=inspection.get('layers',[])
     for role in ('number','plaque')+ (('hidden_number',) if selected.get('hidden_number') else ()):
         expected=selected[role]
-        found=[r for r in rows if len(r.get('path',[]))==1 and r['path'][0].get('name')==expected['name']]
+        found=[r for r in rows if len(r.get('path',[]))==1 and r['path'][0].get('name')==expected['name']
+               and r.get('layer_id')==expected['layer_id']]
         if len(found)!=1:raise ValueError('Pinned '+role+' identity changed; artwork review required.')
         row=found[0]
         if (row.get('layer_id')!=expected['layer_id'] or row.get('bounds_px')!=expected['bounds_px']
@@ -48,3 +49,11 @@ def reviewed_rows(inspection,source):
     for row in rows:
         if row.get('layer_id')==selected['hidden_number']['layer_id']:row['visible']=False
     return rows
+
+
+def selected_roles(inspection,source):
+    """Resolve duplicate legacy names only through exact reviewed source/IDs."""
+    selected=resolution(source)
+    if not selected or not selected.get('exact_role_ids'):return None
+    plaque(inspection,source) # Revalidate dimensions, IDs, bounds, kinds and visibility.
+    return {role:selected[role] for role in ('number','plaque')}

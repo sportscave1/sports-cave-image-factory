@@ -575,6 +575,7 @@ def _step(key, value, job, event, age):
 
 def tick(token, event):
     from os_accounts import DEFAULT_STORE, can_access_page
+    from companion_poll_transaction import connection
     from ads_companion_liveness import heartbeat
 
     # Contact is independent of claiming work. A busy queue must not make an
@@ -584,7 +585,7 @@ def tick(token, event):
         return {}
     lease = str(uuid4())
     lease_key = PREFIX + 'lease'
-    with connect() as conn, conn.cursor() as cur:
+    with connection(connect) as conn, conn.cursor() as cur:
         # The existing durable Ads lease serializes claims. Holding the shared
         # desktop credential row here unnecessarily couples independent queues.
         enabled = _enabled(cur)

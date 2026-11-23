@@ -12,7 +12,9 @@ importScripts('staff-queue.js');
 importScripts('design-queue.js');
 importScripts('ad-queue.js');
 importScripts('orders-queue.js');
+importScripts('orders-progress.js');
 importScripts('prodigi-browser.js');
+importScripts('orders-wake.js');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const keyFor = id => 'upload:' + id;
 

@@ -35,8 +35,8 @@ def render_page(user, store=None):
         for column, label, value in zip(st.columns(3), ('Awaiting review', 'Published listings', 'New enquiries'),
                 (counts['pending'], counts['published'], sum(r['status'] == 'new' for r in enquiries))):
             column.metric(label, value)
-        tabs = st.tabs(['Listings', 'Enquiries', 'Website & publish', 'Outreach'], on_change='rerun', key='marketplace-tabs')
-        for name, tab in zip(('listings', 'enquiries', 'website', 'outreach'), tabs):
+        tabs = st.tabs(['Listings', 'Accounts', 'Conversations', 'Enquiries', 'Website & publish', 'Outreach'], on_change='rerun', key='marketplace-tabs')
+        for name, tab in zip(('listings', 'accounts', 'conversations', 'enquiries', 'website', 'outreach'), tabs):
             if not tab.open:
                 continue
             with tab:
@@ -47,6 +47,14 @@ def render_page(user, store=None):
                 elif name == 'outreach':
                     from marketplace_outreach import render
                     render(st, store.connect)
+                elif name in ('accounts', 'conversations'):
+                    from marketplace_chat import ChatStore
+                    from marketplace_accounts_page import render_accounts, render_conversations
+                    chat = ChatStore(store.connect, media_storage=store._media_storage)
+                    try:
+                        (render_accounts if name == 'accounts' else render_conversations)(st, chat, user)
+                    except Exception:
+                        st.error('Marketplace account storage is temporarily unavailable. Please reload before making a change.')
                 else:
                     render_website(st, store)
 
@@ -61,6 +69,11 @@ def render_listings(st, store, rows, user):
     selected = st.selectbox('Item', [r['id'] for r in filtered],
         format_func=lambda key: next(f'{r["title"]} · {money(r["price_cents"])}' for r in filtered if r['id'] == key))
     row = next(r for r in filtered if r['id'] == selected)
+    try:
+        row = store.review_listing(selected)
+    except Exception:
+        st.error('The submitted files are temporarily unavailable. Reload before reviewing or approving this item.')
+        return
     detail, photos = st.columns([1.2, 1])
     with detail:
         st.subheader(row['title'])
@@ -72,21 +85,40 @@ def render_listings(st, store, rows, user):
         st.write(f'Seller: {row["seller_name"]} · {row["seller_type"]}')
         st.text(row['seller_email'])
         st.caption(row['location'])
+        if row.get('team'):
+            st.caption('Team / player: ' + row['team'])
+        st.caption('Submitted ' + row['submitted_at'][:16].replace('T', ' ') + ' UTC')
+        if row.get('media_source', {}).get('provider') == 'dropbox':
+            from urllib.parse import quote
+            folder = row['media_source']['folder']
+            st.link_button('Open source files', 'https://www.dropbox.com/home' + quote(folder, safe='/'))
         quote = fee_quote(row['price_cents'])
         st.caption(f'Asking {money(row["price_cents"])} · Postage {money(row["shipping_cents"])} · Indicative 5% fee {money(quote["fee_cents"])}')
     with photos:
         for i, column in enumerate(st.columns(2)):
             image = store.photo(row['id'], i, public=False)
             if image:
-                column.image(base64.b64decode(image), width='stretch')
+                column.image('data:image/webp;base64,' + image, width='stretch')
         if row['photo_count'] > 2:
             with st.expander('More photographs'):
                 for i in range(2, row['photo_count']):
                     image = store.photo(row['id'], i, public=False)
                     if image:
-                        st.image(base64.b64decode(image), width='stretch')
+                        st.image('data:image/webp;base64,' + image, width='stretch')
+        if row.get('has_video'):
+            st.caption('Recorded item video · ' + str(row.get('video_seconds', 0)) + ' seconds')
+            if st.button('Load video for review', key='video-review-' + row['id']):
+                try:
+                    from marketplace_media import VideoStorage
+                    metadata = store.video(row['id'], public=False)
+                    data = VideoStorage().preview(row['id'], metadata)
+                    # Keep pending media inside the authenticated OS session rather
+                    # than registering bytes with Streamlit's shared media server.
+                    st.video('data:video/mp4;base64,' + base64.b64encode(data).decode('ascii'), format='video/mp4')
+                except Exception:
+                    st.error('Video could not be loaded. Review it before approving this listing.')
     if status in ('pending', 'withdrawn'):
-        checked = st.checkbox('I reviewed the photos, condition, seller and provenance. The listing is suitable to publish.', key='review-' + row['id'])
+        checked = st.checkbox('I reviewed all photos and video, condition, seller and provenance. The listing is suitable to publish.', key='review-' + row['id'])
         approve, decline = st.columns(2)
         action = 'published' if approve.button('Approve & publish listing', type='primary', disabled=not checked, width='stretch') else None
         if decline.button('Decline listing', width='stretch'):
@@ -128,6 +160,18 @@ def render_enquiries(st, store, rows):
 
 
 def render_website(st, store):
+    st.link_button('Preview demo product', PUBLIC_ORIGIN + BASE_PATH + '/demo')
+    st.caption('Clearly labelled demo; excluded from live listings and marketplace sales totals.')
+    with st.expander('Submission storage'):
+        from marketplace_dropbox import ROOT, connection
+        st.caption('Dropbox source: ' + ROOT)
+        st.caption('One folder per item contains the listing record, photos and optional video. The public website does not expose this location.')
+        if st.button('Check storage connection'):
+            try:
+                connection()
+                st.success('Connected to the Marketplace source folder.')
+            except Exception:
+                st.error('Submission storage is unavailable. Check the existing OS Dropbox connection before accepting new items.')
     deployed = deployed_site()
     draft = store.draft(deployed)
     receipt = store.receipt()

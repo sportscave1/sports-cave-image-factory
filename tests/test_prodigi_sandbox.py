@@ -12,6 +12,7 @@ from test_auto_editions_jobs import database
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','true')
     monkeypatch.setattr(requests.sessions.Session, 'request', lambda *a, **k: pytest.fail('Live network forbidden'))
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_PREPARE','true')
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED','true')
@@ -53,6 +54,33 @@ def test_sandbox_uses_separate_environment_key_never_live_fallback(monkeypatch):
         sandbox.SandboxClient('live_other')
     with pytest.raises(ProdigiError,match='separate'):
         sandbox.SandboxClient('sandbox_fixture')
+
+
+def test_synthetic_recipient_test_never_reads_or_copies_live_customer_details(store,monkeypatch):
+    original=source();before=deepcopy(original)
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(sandbox,'SandboxClient',lambda:SandboxProvider())
+    monkeypatch.setattr(sandbox,'resolve',lambda _:original)
+    monkeypatch.setattr(sandbox,'Client',lambda:pytest.fail('Synthetic tests must not read a live supplier order'))
+    result=sandbox.request({'id':'fixture-admin'},1,synthetic_recipient=True)
+    assert result['synthetic_recipient'] is True and result['environment']=='sandbox'
+    assert result['snapshot']['recipient']['name']=='Sports Cave Synthetic QA'
+    assert result['snapshot']['output']==original['output'] and original==before
+    assert result['source_order_id']==result['source_item_id']==''
+    assert not {'email','phoneNumber'}&result['snapshot']['recipient'].keys()
+    assert 'line2' not in sandbox.payload(result['snapshot'])['recipient']['address']
+
+
+def test_real_customer_mode_still_blocks_mismatched_supplier_address(store,monkeypatch):
+    provider=SandboxProvider();original=source()
+    provider.data['recipient']=deepcopy(original['recipient']);provider.data['recipient']['address']['line1']='2 Different Street'
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    monkeypatch.setattr(sandbox,'SandboxClient',lambda:provider)
+    monkeypatch.setattr(sandbox,'resolve',lambda _:original)
+    monkeypatch.setattr(sandbox,'Client',lambda:provider)
+    monkeypatch.setattr(prep,'discover',lambda *_:('99','88'))
+    with pytest.raises(ValueError,match='address differs'):sandbox.request({'id':'fixture-admin'},1)
+    assert sandbox.list_tests()==[]
 
 
 def test_sandbox_create_cannot_submit_and_never_uses_browser_cookies():

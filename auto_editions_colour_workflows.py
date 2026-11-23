@@ -13,7 +13,7 @@ from auto_editions_colour_source import ColourReview
 def validate_scope(scope):
     expected={'kind','workflow_id','mode','depth','identity','default_for_untagged_rgb'}
     if (not isinstance(scope,dict) or set(scope)!=expected
-            or scope['kind']!='verified_workflow' or scope['mode']!='RGB' or scope['depth']!=8
+            or scope['kind'] not in ('verified_workflow','owner_default') or scope['mode']!='RGB' or scope['depth']!=8
             or scope['identity']!='file_id+content_hash' or scope['default_for_untagged_rgb'] is not True
             or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,79}',str(scope['workflow_id']))):
         raise ColourReview('Colour policy awaiting approval: explicit verified RGB8 workflow scope required.')
@@ -65,13 +65,19 @@ def matches(source,policies,*,memberships=None,default_group=None):
     from auto_editions_colour_policy import validate,fingerprint
     default_group=os.getenv('AUTO_EDITIONS_UNTAGGED_RGB_DEFAULT','') if default_group is None else default_group
     # Default disabled without an explicitly selected, approved workflow policy.
-    found=[]
+    found=[];defaults=[]
     hashes=[p.get('approval_hash') for p in policies]
     if len(set(hashes))!=len(hashes):raise ColourReview('Colour policy awaiting approval: duplicate policy records.')
     for p in policies:
         validate(p)
         exact=any(m['source']==source for m in p.get('members',[]))
         scope=p.get('scope')
+        if scope and scope['kind']=='owner_default':
+            # This is the owner's explicit missing-profile interpretation,
+            # separate from the older provenance-based workflow selector.
+            content_identity(source)
+            defaults.append(p)
+            continue
         if scope:
             # Already reviewed file bytes may be mapped to another product or
             # receive a metadata-only revision, solely under the reviewed scope.
@@ -92,7 +98,7 @@ def matches(source,policies,*,memberships=None,default_group=None):
     # members, only when every overlapping workflow agrees on the ICC bytes.
     legacy=[p for p in found if p.get('schema')==1]
     if len(legacy)==1 and all(p['profile']['sha256']==legacy[0]['profile']['sha256'] for p in found):return legacy
-    return found
+    return found or defaults
 
 
 def recovery_sources(policies,*,memberships=None,default_group=None):

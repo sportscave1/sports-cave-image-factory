@@ -85,12 +85,19 @@ def payload(snapshot):
                    'quantity': 1, 'sizing': 'fitPrintArea', 'attributes': attributes}]}
 
 
-def request(user, allocation_id):
+def request(user, allocation_id, *, synthetic_recipient=False):
     prep.require_user(user)
+    if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':raise ValueError('Test preparation is disabled; use live Orders.')
     if not prep.enabled():
         raise ValueError('Enable Orders preparation first.')
     SandboxClient()  # Reject missing/cross-environment credentials before storing anything.
     source = resolve(int(allocation_id))
+    if type(synthetic_recipient) is not bool:raise ValueError('Select a sandbox test mode explicitly.')
+    if synthetic_recipient:
+        recipient={'name':'Sports Cave Synthetic QA','address':{'line1':'1 Example Test Street',
+            'townOrCity':'Sydney','stateOrCounty':'NSW','postalOrZipCode':'2000','countryCode':'AU'},
+            'state_aliases':['NSW','New South Wales']}
+        return _queue_test(user,allocation_id,source,recipient,source['shipping'],synthetic=True)
     live = Client()
     order_id, item_id = prep.discover(source, live)
     order = live.order(order_id)  # Read only, including completed/production source orders.
@@ -103,19 +110,23 @@ def request(user, allocation_id):
     if (source['mapping']['frame'] != 'Unframed' and str((item.get('attributes') or {}).get('color','')).casefold()
             != source['mapping']['prodigi_frame_colour'].casefold()):
         raise ValueError('Source frame differs from the selected numbered unit.')
-    key = str(uuid.uuid4())
-    reference = 'SC-SANDBOX-' + key
     recipient = deepcopy(order['recipient'])
     recipient['state_aliases'] = source['recipient'].get('state_aliases', [])
     shipping = order.get('shippingMethod')
     if shipping not in ('Budget','Standard','Express','Overnight'):
         raise ValueError('The supplier shipping service could not be copied safely.')
+    return _queue_test(user,allocation_id,source,recipient,shipping,order_id,item_id)
+
+
+def _queue_test(user,allocation_id,source,recipient,shipping,order_id='',item_id='',*,synthetic=False):
+    key = str(uuid.uuid4())
+    reference = 'SC-SANDBOX-' + key
     snap = adapted(source, reference, recipient, shipping)
     value = dict(id=key, environment='sandbox', allocation_id=int(allocation_id),
         source_order_id=order_id, source_item_id=item_id, source_snapshot=source,
         snapshot=snap, fingerprint=prep.digest(snap), order_id='', item_id='',
         status='Queued', checks={}, history=[], message='Sandbox only; waiting for Orders companion.',
-        requester=str(user['id']), hidden=False,browser_requested=True)
+        requester=str(user['id']), hidden=False,browser_requested=True,synthetic_recipient=synthetic)
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(%s)', (LOCK,))
         cur.execute('SELECT value FROM app_settings WHERE key LIKE %s', (PREFIX+'%',))
@@ -184,18 +195,19 @@ def run(value, provider, resolver, link, persist):
 
 
 def tick():
+    if os.getenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','').lower()!='true':return None
     with prep.connect() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired', (LOCK,))
         if not cur.fetchone()['acquired']:
             return None
         cur.execute("SET LOCAL idle_in_transaction_session_timeout = '0'")
         cur.execute('''SELECT value FROM app_settings WHERE key LIKE %s AND value->>'status'
-            IN ('Queued','Uploading','Creating sandbox draft') ORDER BY updated_at LIMIT 1''', (PREFIX+'%',))
+            IN ('Queued','Uploading','Creating sandbox draft','Checking QA') ORDER BY updated_at LIMIT 1''', (PREFIX+'%',))
         found = cur.fetchone()
         if not found:
             return None
         value = found['value']
-        fenced = {field: bool(value.get(field)) for field in ('create_intent', 'write_intent')}
+        fenced = {field: bool(value.get(field)) for field in ('create_intent', 'write_intent','document_write_intent')}
         def persist(v):
             with prep.connect() as c, c.cursor() as q:
                 new_fence = next((field for field in fenced if v.get(field) and not fenced[field]), None)
@@ -215,6 +227,9 @@ def tick():
                     if not q.fetchone():
                         raise prep.UploadFenceLost('The sandbox test was removed; no stale update is allowed.')
         try:
+            if value['status']=='Checking QA':
+                from prodigi_full_qa import run as full_qa
+                return full_qa(value,SandboxClient(),resolve,persist)
             return run(value, SandboxClient(), resolve, lambda s:artwork_link(s,value['id']), persist)
         except prep.UploadFenceLost:
             return None
@@ -223,6 +238,21 @@ def tick():
                          else 'Sandbox could not be verified. No production action was taken.')
             persist(value)
             return value
+
+
+def recheck(user,key):
+    prep.require_user(user)
+    current=next((v for v in list_tests() if v['id']==key),None)
+    document_receipt=(current or {}).get('document_browser') or {}
+    if document_receipt.get('started') and not document_receipt.get('verified'):
+        from prodigi_document_browser import recheck as document_recheck
+        return document_recheck(user,PREFIX+key)
+    with prep.connect() as c,c.cursor() as q:
+        q.execute('SELECT pg_advisory_xact_lock(%s)',(LOCK,))
+        q.execute('SELECT value FROM app_settings WHERE key=%s',(PREFIX+str(uuid.UUID(key)),));r=q.fetchone()
+        if not r or r['value'].get('hidden') or not (r['value'].get('browser') or {}).get('verified'):
+            raise ValueError('Verify the existing sandbox artwork first.')
+        value=r['value'];value.update(status='Checking QA',message='Rechecking the same saved sandbox artwork and certificate.');save(q,value)
 
 
 def remove(user, key):
@@ -234,7 +264,7 @@ def remove(user, key):
         if not row or row['value'].get('environment') != 'sandbox':
             raise ValueError('Sandbox test not found.')
         value = row['value']
-        if value['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading'):
+        if value['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading','Checking QA','Awaiting certificate browser','Certificate browser uploading'):
             raise ValueError('Wait for the sandbox worker to finish before removing the test row.')
         value.update(hidden=True, removed_at=prep.now())
         save(cur, value)  # Recoverable test-row removal; no live order or supplier deletion.

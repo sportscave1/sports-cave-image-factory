@@ -20,6 +20,7 @@ import marketplace_api as api
 from marketplace_publish import publish_website
 from marketplace_store import MarketplaceStore
 from prompt_releases import ReleaseError
+from tests.marketplace_storage_fakes import MemorySource
 
 
 def sample():
@@ -52,10 +53,25 @@ class FakeConnection:
     def execute(self, sql, args=()):
         if 'pg_advisory_xact_lock' in sql:
             self.rows = []
+        elif 'DELETE FROM crm_runtime_state WHERE key IN' in sql:
+            compare = self.database.collation
+            old = [k for k, v in sorted(self.database.values.items())
+                   if compare(args[0]) < compare(k) < compare(args[1])
+                   and k.startswith(args[2].removesuffix('%')) and v.get('expires', 0) < args[3]][:25]
+            for key in old:
+                del self.database.values[key]
+            self.rows = []
+        elif sql.lstrip().startswith('DELETE'):
+            self.database.values.pop(args[0], None)
+            self.rows = []
+        elif 'FROM auth.sessions' in sql:
+            self.rows = [{'id': args[0]}] if args and self.database.sessions.get(args[0]) == args[1] else []
         elif sql.lstrip().startswith('INSERT'):
             key, value = args
             if self.database.fail_photo and ':image:' in key:
                 raise OSError('synthetic failure')
+            if self.database.fail_listing and ':listing:' in key:
+                raise OSError('synthetic index failure')
             self.database.values[key] = json.loads(value)
             self.rows = []
         elif 'WHERE key=%s' in sql:
@@ -63,6 +79,14 @@ class FakeConnection:
         elif 'WHERE key LIKE %s' in sql:
             self.rows = [{'value': deepcopy(v)} for k, v in self.database.values.items() if k.startswith(args[0].removesuffix('%'))
                          and ("value->>'status'='published'" not in sql or v['status'] == 'published')]
+        elif 'WHERE key > %s AND key < %s' in sql:
+            compare = self.database.collation
+            guarded = 'AND key LIKE %s' in sql
+            pairs = [(k, v) for k, v in self.database.values.items()
+                     if compare(args[0]) < compare(k) < compare(args[1])
+                     and (not guarded or k.startswith(args[2].removesuffix('%')))]
+            pairs.sort(key=lambda pair: compare(pair[0]), reverse='updated_at DESC' in sql)
+            self.rows = [{'value': deepcopy(v)} for k, v in pairs[:args[-1]]]
         else:
             raise AssertionError('Unexpected query: ' + sql)
         return self
@@ -75,10 +99,19 @@ class FakeConnection:
 class FakeDatabase:
     def __init__(self):
         self.values = {}
+        self.sessions = {}
         self.mutex = threading.RLock()
         self.fail_photo = False
+        self.fail_listing = False
+        self.media = MemorySource()
+        self.collation = lambda value: value
     def connect(self):
         return FakeConnection(self)
+
+
+def memory_store():
+    database = FakeDatabase()
+    return MarketplaceStore(database.connect, media_storage=database.media)
 
 
 class OutreachTests(unittest.TestCase):
@@ -127,7 +160,7 @@ class ContractTests(unittest.TestCase):
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.database = FakeDatabase()
-        self.store = MarketplaceStore(self.database.connect)
+        self.store = MarketplaceStore(self.database.connect, media_storage=self.database.media)
     def submit(self):
         return self.store.submit(core.submission(sample()), core.prepare_photos([photograph(), photograph()]))['id']
     def test_approval_gate_privacy_images_and_withdrawal(self):
@@ -145,8 +178,8 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(self.store.photo(key, 0))
         with self.assertRaises(ValueError):
             self.store.enquire(key, 'Buyer', 'buyer@example.invalid', 'Is this available?')
-    def test_partial_image_failure_rolls_back_the_submission(self):
-        self.database.fail_photo = True
+    def test_partial_source_upload_does_not_create_an_approval_record(self):
+        self.database.media.backend.fail_upload = 'photo-2.webp'
         with self.assertRaises(Exception):
             self.submit()
         self.assertEqual(self.database.values, {})
@@ -174,7 +207,7 @@ class StoreTests(unittest.TestCase):
         config = deepcopy(core.DEFAULT_SITE)
         self.store.save_draft({**config, 'headline': 'A new chapter.'}, config, 0)
         first = self.store.begin_publish(1)
-        new_session = MarketplaceStore(self.database.connect)
+        new_session = MarketplaceStore(self.database.connect, media_storage=self.database.media)
         second = new_session.begin_publish(1)
         self.assertEqual(first['release_id'], second['release_id'])
         with self.assertRaises(ValueError):
@@ -186,7 +219,7 @@ class StoreTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.database = FakeDatabase()
-        self.store = MarketplaceStore(self.database.connect)
+        self.store = MarketplaceStore(self.database.connect, media_storage=self.database.media)
         self.override = patch.object(api, 'MarketplaceStore', return_value=self.store)
         self.override.start()
         api._RATE.clear()
@@ -222,8 +255,8 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn('seller@example.invalid', result.text)
         self.assertEqual(self.client.get('/marketplace/images/' + key + '/0.webp').headers['content-type'], 'image/webp')
         payload = {'listing_id': key, 'name': 'Buyer', 'email': 'buyer@example.invalid', 'message': 'Is this available?', 'consent': True}
-        self.assertEqual(self.client.post('/marketplace/api/enquiries', json=payload, headers=self.headers).status_code, 201)
-        self.assertEqual(len(self.store.enquiries()), 1)
+        self.assertEqual(self.client.post('/marketplace/api/enquiries', json=payload, headers=self.headers).status_code, 401)
+        self.assertEqual(len(self.store.enquiries()), 0)
         self.assertIn(key, self.client.get('/marketplace/sitemap.xml').text)
         self.store.moderate(key, 'withdrawn', 2, 'admin')
         self.assertNotIn(key, self.client.get('/marketplace/sitemap.xml').text)
@@ -260,14 +293,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get('/marketplace/assets/marketplace.css', headers={'If-None-Match': response.headers['etag']}).status_code, 304)
 
-    def test_home_has_responsive_priority_hero_and_real_search_schema(self):
+    def test_home_restores_banner_search_and_marketplace_only_totals(self):
         import re
         response = self.client.get('/marketplace')
         self.assertIn('class="hero-photo"', response.text)
         self.assertIn('fetchpriority="high"', response.text)
         self.assertIn('collector-room-800.webp 800w', response.text)
+        self.assertNotIn('class="browse-menu"', response.text)
         self.assertIn('action="/marketplace/browse"', response.text)
-        self.assertIn('class="browse-menu"', response.text)
+        self.assertIn('Popular collections', response.text)
+        self.assertIn('class="marketplace-facts"', response.text)
+        self.assertIn('aria-label="Marketplace-only totals"', response.text)
+        self.assertIn('<strong>0</strong><span>Total sales</span>', response.text)
+        self.assertIn('marketplace-restore.css', response.text)
+        self.assertIn('/marketplace/buyer-protection', response.text)
         self.assertEqual(len(re.findall(r'<h1\b', response.text)), 1)
         graph = json.loads(re.search(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', response.text, re.S).group(1))
         website = next(row for row in graph['@graph'] if row['@type'] == 'WebSite')
@@ -358,7 +397,7 @@ class AdminTests(unittest.TestCase):
     def test_website_draft_controls_save_and_publish_through_mocked_git(self):
         from streamlit.testing.v1 import AppTest
         import marketplace_page
-        store = MarketplaceStore(FakeDatabase().connect)
+        store = memory_store()
         fake_git = Mock(token='synthetic', render_token='')
         result = {'release_id': 'synthetic-release', 'commit': 'c' * 40, 'published_at': core.now()}
         with patch.object(marketplace_page, 'MarketplaceStore', return_value=store), \
@@ -381,12 +420,12 @@ class AdminTests(unittest.TestCase):
         import marketplace_page
         accounts = types.ModuleType('os_accounts')
         accounts.is_admin = lambda user: user.get('role') == 'admin'
-        store = MarketplaceStore(FakeDatabase().connect)
+        store = memory_store()
         with patch.dict(sys.modules, {'os_accounts': accounts}), patch.object(marketplace_page, 'MarketplaceStore', return_value=store):
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'admin'})").run()
             self.assertFalse(page.exception)
             self.assertIn('Marketplace', [t.value for t in page.title])
-            self.assertEqual([t.label for t in page.tabs], ['Listings', 'Enquiries', 'Website & publish', 'Outreach'])
+            self.assertEqual([t.label for t in page.tabs], ['Listings', 'Accounts', 'Conversations', 'Enquiries', 'Website & publish', 'Outreach'])
             page = AppTest.from_string("from marketplace_page import render_page\nrender_page({'id':'test','role':'worker'})").run()
             self.assertFalse(page.exception)
             self.assertTrue(page.error)

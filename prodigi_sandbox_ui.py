@@ -16,9 +16,11 @@ def render(selected, user):
         if not ready:
             st.info('The separate Prodigi sandbox API key is required on the server.')
         eligible = len(selected) == 1 and str(selected[0].get('edition_order_id') or '').isdigit()
+        synthetic=st.checkbox('Use a synthetic recipient for technical sandbox QA',value=False,key='orders-sandbox-synthetic')
+        if synthetic:st.caption('Tests artwork, certificate and QA machinery with made-up contact details. It does not validate the real customer’s supplier address.')
         if st.button('Create sandbox test from selected unit', disabled=not ready or not eligible, key='orders-sandbox-create'):
             try:
-                sandbox.request(user, int(selected[0]['edition_order_id']))
+                sandbox.request(user, int(selected[0]['edition_order_id']),synthetic_recipient=synthetic)
             except Exception as error:
                 st.error(str(error) if isinstance(error, ValueError) else 'The sandbox test could not be created.')
             else:
@@ -34,17 +36,22 @@ def render(selected, user):
             st.caption('No sandbox orders in the app.')
         for row in rows:
             snap = row['snapshot']
+            if row.get('synthetic_recipient'):st.caption('Synthetic recipient · technical sandbox test only; real customer matching is not approved by this test.')
             st.dataframe([{'Order': 'SANDBOX · '+row['id'][:8], 'Source': row['source_snapshot']['order_reference'],
                 'Customer': snap['recipient']['name'], 'Product': snap['product'],
                 'Edition': f"{snap['number']:03}/{snap['total']}", 'Status': row['status']}], hide_index=True)
             st.info(row['message'])
-            if not (row['source_snapshot'].get('production_evidence') or {}).get('print_ready'):
+            if row.get('document'):
+                st.link_button('Open sandbox certificate / packing slip PDF',row['document']['url'])
+            if not row.get('print_approval') and not (row['source_snapshot'].get('production_evidence') or {}).get('print_ready'):
                 st.warning('This export has no production approval. It can be tested in sandbox; live preparation still requires approval.')
             with st.expander('Sandbox customer and QA · '+row['id'][:8]):
                 st.json(snap['recipient'])
                 st.caption('QA passes only with evidence; missing certificate/packing slip checks remain for review.')
                 for field, label in prep.CHECKS.items():
                     st.caption(('✓ ' if row['checks'].get(field) else 'Review required · ') + label)
+                if 'production_approval' in row['checks']:
+                    st.caption(('✓ ' if row['checks']['production_approval'] else 'Review required · ')+'Production print approval')
             if row.get('order_id'):
                 from prodigi_client import identifier
                 st.link_button('Open sandbox draft', 'https://sandbox-beta-dashboard.pwinty.com/orders/'
@@ -52,6 +59,9 @@ def render(selected, user):
             if row.get('sandbox_unpaid_verified') and row.get('artwork_readback_verified'):
                 st.success('Exact artwork read back from the sandbox. Draft remains unpaid and unsubmitted.')
             receipt = row.get('browser') or {}
+            if receipt.get('verified'):
+                if st.button('Check all sandbox QA again',key='sandbox-all-qa-'+row['id'],disabled=row['status']=='Checking QA'):
+                    sandbox.recheck(user,row['id']);st.rerun()
             if receipt.get('started') and not receipt.get('verified'):
                 if st.button('Recheck saved sandbox artwork', key='sandbox-recheck-'+row['id']):
                     try:
@@ -62,7 +72,7 @@ def render(selected, user):
                     else:
                         st.rerun()
             if st.button('Remove sandbox row from app', key='sandbox-remove-'+row['id'],
-                         disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading')):
+                         disabled=row['status'] in ('Queued','Uploading','Creating sandbox draft','Browser uploading','Checking QA')):
                 try:
                     sandbox.remove(user, row['id'])
                 except Exception as error:

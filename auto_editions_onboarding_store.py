@@ -80,7 +80,7 @@ class Queue:
             self.enqueue(row['shopify_product_gid'],row['dropbox_file_id'],actor,newly_linked=False)
         return len(rows)
 
-    def claim(self, actor):
+    def claim(self, actor, pipeline=None):
         token = str(uuid.uuid4())
         from auto_editions_recovery import ordered_scope
         sales=json.dumps(ordered_scope())
@@ -111,8 +111,12 @@ class Queue:
             cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
             from worker_health import control
             if control(cur)['paused']:return None
+            from auto_editions_pipeline import claim_exclusion
+            exclude=claim_exclusion(cur,pipeline,actor)
+            if exclude is False:return None
             cur.execute("""SELECT product_gid FROM auto_edition_onboarding q WHERE lease_until>now()
-                AND (status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing') LIMIT 1""")
+                AND (%s::text IS NULL OR product_gid<>%s)
+                AND (status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing') LIMIT 1""",(exclude,exclude))
             if cur.fetchone():return None
             cur.execute("""SELECT * FROM auto_edition_onboarding q WHERE lease_until<now()
                 AND to_jsonb(q)->'replacement'->>'stage'='Preparing'
@@ -196,14 +200,29 @@ class Queue:
                 AND event='claimed' AND detail->>'lease'=%s""",(pid,actor,token))
             if not cur.fetchone():raise PermissionError('Preparation lease belongs to another operator.')
             # Never resurrect a superseded lease or compete with another processor.
-            cur.execute("""SELECT 1 FROM auto_edition_onboarding WHERE lease_until>now()
+            cur.execute("""SELECT product_gid,lease_token FROM auto_edition_onboarding WHERE lease_until>now()
                 AND product_gid<>%s AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing')""",(pid,))
-            if cur.fetchone():raise ValueError('Another preparation owns the processor lease.')
-            cur.execute("""UPDATE auto_edition_onboarding SET updated_at=now(),reason=%s,
+            others=cur.fetchall()
+            if others:
+                from auto_editions_pipeline import durable_upload
+                if len(others)>1 or not (durable_upload(cur,pid,token,actor) or
+                        durable_upload(cur,others[0]['product_gid'],others[0]['lease_token'],actor)):
+                    raise ValueError('Another preparation owns the processor lease.')
+            cur.execute("""UPDATE auto_edition_onboarding SET updated_at=now(),reason=CASE WHEN %s='Uploading' AND reason IN ('Validating','Publishing') THEN reason ELSE %s END,
                 lease_until=now()+interval '45 minutes'
                 WHERE product_gid=%s AND lease_token=%s
-                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing') RETURNING product_gid""",(stage,pid,token))
+                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing') RETURNING product_gid""",(stage,stage,pid,token))
             if not cur.fetchone():raise ValueError('Preparation lease was superseded or completed.')
+
+    def import_progress(self,pid,token,stage):
+        """Display-only server checkpoint for the current lease; never renew/revive it."""
+        if stage not in ('Validating','Publishing'):raise ValueError('Unsupported import stage.')
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""UPDATE auto_edition_onboarding SET reason=%s,updated_at=now()
+                WHERE product_gid=%s AND lease_token=%s AND lease_until>now()
+                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing')
+                RETURNING product_gid""",(stage,pid,token))
+            return bool(cur.fetchone())
 
     def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None, metrics=None, diagnostic=None):
         if status not in ('Preparing','Needs PSD Repair','Blocked','Cloud Ready'):

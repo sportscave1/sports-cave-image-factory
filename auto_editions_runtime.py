@@ -95,10 +95,13 @@ def run_one(jobs,resolver=job_for):
 
 
 def _loop():
-    last_cleanup=0
+    last_cleanup=0;last_orders=0
     while enabled():
         try:
             _,jobs=stores()
+            # Drain already accepted packets before optional diagnosis/provider
+            # work. A passive repair must not strand a completed bulk upload.
+            from companion_package_api import run_one as run_package
             if time.monotonic()-last_cleanup>60:
                 expired=jobs.expired()
                 if expired:
@@ -107,14 +110,27 @@ def _loop():
                         assets.discard_cache(row['id'],row['result']['output'])
                         jobs.forget_expired_output(row['id'])
                 last_cleanup=time.monotonic()
-            from companion_package_api import run_one as run_package
-            from auto_editions_repair import run_one as run_repair
-            try:run_repair(jobs.connect)
+            if time.monotonic()-last_orders>15:
+                try:
+                    from orders_auto_jpg import admit
+                    admit(jobs.connect)
+                    from orders_automatic import admit as admit_fulfilment
+                    admit_fulfilment()
+                    from prodigi_submission import kick
+                    kick()
+                except Exception:LOG.warning('ORDERS automatic JPG admission temporarily unavailable')
+                last_orders=time.monotonic()
+            if run_package():continue
+            # Numbered customer JPGs precede background preparation/acceptance.
+            # An unrelated catalogue backlog must not starve paid order artwork.
+            if run_one(jobs):continue
+            from auto_editions_repair import run_one as run_repair,admit as admit_repairs
+            try:
+                admit_repairs(jobs.connect)
+                run_repair(jobs.connect)
             except Exception:LOG.warning('AUTO_EDITIONS repair diagnosis temporarily unavailable')
             from companion_acceptance import run_one as run_acceptance
             if run_acceptance():continue
-            if run_package():continue
-            if run_one(jobs):continue
         except Exception:
             LOG.warning('AUTO_EDITIONS queue temporarily unavailable')
         _wake.wait(15);_wake.clear()
@@ -174,7 +190,7 @@ def download_links(rows, *, read_connection=None):
                 # Opening performs current permission/allocation and exact saved
                 # revision checks. Listing Orders must not serially query Dropbox
                 # once for every archived row before the table becomes usable.
-                links[key]='/auto-editions/open?allocation_id='+key+'&job_id='+row['id']+'#Open'
+                links[key]='/api/auto-editions/file?allocation_id='+key+'&job_id='+row['id']+'&inline=1#Open JPG'
             elif row['status'] in ('Queued','Generating'):links[key]='/auto-editions/download?allocation_id='+key+'#Generating'
             elif row['status']=='Blocked':links[key]='/auto-editions/download?allocation_id='+key+'#Retry'
         return links
@@ -183,4 +199,4 @@ def download_links(rows, *, read_connection=None):
 
 
 def link_label(url):
-    return {'Repair':'Repair','Repairing':'Repairing','Retry Open':'Retry Open','Open':'Open','View':'Open','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')
+    return {'Repair':'Repair','Repairing':'Repairing','Retry Open':'Retry Open','Open':'Open JPG','Open JPG':'Open JPG','View':'Open JPG','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')

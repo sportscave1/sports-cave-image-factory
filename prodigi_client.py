@@ -1,10 +1,17 @@
-"""Restricted Prodigi v5 adapter: read existing orders and edit draft artwork only.
+"""Restricted Prodigi v5 adapter for existing orders and audited cancellations.
 
-Deliberately has no create, submit, resume, payment or fulfilment operation.
+No create or resume operation. Submission has a separate owner-activated gate;
+duplicate cancellation requires the server consolidation workflow and readback.
 """
 import os
 import re
 import requests
+import time
+from datetime import datetime,timezone
+from email.utils import parsedate_to_datetime
+from threading import BoundedSemaphore
+
+_READ_SLOTS=BoundedSemaphore(2)
 from urllib.parse import urlencode
 
 
@@ -17,6 +24,14 @@ def identifier(value):
     if not re.fullmatch(r'[A-Za-z0-9-]{1,100}', value):
         raise ProdigiError('A verified Prodigi order/item ID is required.')
     return value
+
+
+def read_retry_delay(response,attempt=0):
+    raw=(getattr(response,'headers',{}) or {}).get('Retry-After','')
+    try:return max(0,float(raw))
+    except (TypeError,ValueError):
+        try:return max(0,(parsedate_to_datetime(raw)-datetime.now(timezone.utc)).total_seconds())
+        except (TypeError,ValueError,OverflowError):return 1*(2**attempt)
 
 
 class Client:
@@ -47,6 +62,9 @@ class Client:
                    or (method == 'GET' and path.startswith('/orders?merchantReference=') and listing)
                    or (method == 'GET' and path == '/assets?limit=100' and listing)
                    or (method == 'GET' and re.fullmatch(r'/assets/[A-Za-z0-9-]{1,100}', path))
+                   or (method == 'GET' and re.fullmatch(r'/catalogue/variants/[A-Za-z0-9-]{1,100}', path))
+                   or (method == 'POST' and re.fullmatch(r'/assets/[A-Za-z0-9-]{1,100}/validate', path)
+                       and isinstance(body,dict) and set(body)=={'catalogueVariantId','printArea'} and body['printArea']=='default')
                    or (method == 'PATCH' and re.fullmatch(r'/orders/[A-Za-z0-9-]{1,100}/items/[A-Za-z0-9-]{1,100}', path)))
         if not allowed:
             raise ProdigiError('Only existing order reads and draft artwork edits are supported.')
@@ -55,15 +73,27 @@ class Client:
         if method == 'PATCH' and any(os.getenv(flag, '').lower() != 'true' for flag in
                 ('SPORTS_CAVE_PRODIGI_PREPARE', 'SPORTS_CAVE_PRODIGI_DRAFT_EDIT_ACCEPTED')):
             raise ProdigiError('Artwork writes are disabled pending imported-order acceptance.')
-        try:
-            response = self.transport.request(method, 'https://api.prodigi.com/v5' + path,
-                headers={'X-API-Key': self.key, 'Content-Type': 'application/json'},
-                json=body, timeout=(5, 20), allow_redirects=False)
-        except requests.RequestException:
-            raise ProdigiError('Prodigi did not acknowledge the request. Reconcile the same item before retrying.') from None
+        attempts=3 if method=='GET' else 1
+        for attempt in range(attempts):
+            try:
+                def send():
+                    return self.transport.request(method, 'https://api.prodigi.com/v5' + path,
+                        headers={'X-API-Key': self.key, 'Content-Type': 'application/json'},
+                        json=body, timeout=(5, 20), allow_redirects=False)
+                if method=='GET':
+                    with _READ_SLOTS:response=send()
+                else:response=send()
+            except requests.RequestException:
+                raise ProdigiError('Prodigi did not acknowledge the request. Reconcile the same item before retrying.') from None
+            if method!='GET' or response.status_code!=429 or attempt==attempts-1:break
+            delay=read_retry_delay(response,attempt)
+            if delay>15:break # Do not disregard a longer supplier cooldown or exceed the action deadline.
+            time.sleep(delay)
         if response.status_code not in (200, 201):
             # Provider bodies can contain addresses, signed URLs and credentials.
-            raise ProdigiError(f'Prodigi returned HTTP {response.status_code}; no replacement order was created.')
+            error=ProdigiError(f'Prodigi returned HTTP {response.status_code}; no replacement order was created.')
+            if method=='GET' and response.status_code==429:error.retry_after=read_retry_delay(response,attempt)
+            raise error
         envelope = response.json()
         data = envelope.get('data')
         if listing:
@@ -78,14 +108,74 @@ class Client:
     def order(self, order_id):
         return self.request('GET', '/orders/' + identifier(order_id))
 
+    def submit(self,order_id):
+        from prodigi_submission import setting
+        if self.mode!='live' or not setting().get('enabled'):
+            raise ProdigiError('Automatic submission has not been activated by an owner.')
+        try:
+            response=self.transport.request('POST','https://api.prodigi.com/v5/orders/'+identifier(order_id)+':submit',
+                headers={'X-API-Key':self.key,'Content-Type':'application/json'},
+                json={},timeout=(5,20),allow_redirects=False)
+        except requests.RequestException:
+            raise ProdigiError('Submit acknowledgement uncertain. Read back the same order; never repeat Submit.') from None
+        if response.status_code not in (200,201,202):
+            raise ProdigiError(f'Submit returned HTTP {response.status_code}. Review the same order without retrying Submit.')
+        # Even a successful HTTP acknowledgement is not confirmed submission.
+        return None
+
     def find(self, reference):
         return self.request('GET', '/orders?' + urlencode({'merchantReference': reference, 'limit': 100}), listing=True)
+
+    def cancel_unpaid_duplicate(self,order_id):
+        """Only the server's committed consolidation intent may call this once."""
+        from prodigi_consolidation import unpaid,supported
+        if self.mode!='live' or not supported():raise ProdigiError('Consolidation cancellation is not active.')
+        order=self.order(order_id)
+        if str(order.get('id'))!=str(order_id):raise ProdigiError('Supplier cancellation readback returned a different order.')
+        unpaid(order,source=True)
+        try:
+            response=self.transport.request('POST','https://api.prodigi.com/v5/orders/'+identifier(order_id)+':cancel',
+                headers={'X-API-Key':self.key,'Content-Type':'application/json'},json={},timeout=(5,20),allow_redirects=False)
+        except requests.RequestException:
+            raise ProdigiError('Cancellation acknowledgement uncertain. Read back without repeating cancellation.') from None
+        if response.status_code not in (200,202):raise ProdigiError('Supplier cancellation was not acknowledged; read back the original order.')
 
     def assets(self):
         return self.request('GET','/assets?limit=100',listing=True)
 
     def asset(self, asset_id):
         return self.request('GET','/assets/'+identifier(asset_id))
+
+    def catalogue(self,sku):
+        return self.request('GET','/catalogue/variants/'+identifier(sku))
+
+    def validate_asset(self,asset_id,sku):
+        return self.request('POST','/assets/'+identifier(asset_id)+'/validate',
+            {'catalogueVariantId':identifier(sku),'printArea':'default'})
+
+    def packing_slip(self,order_id,url):
+        """Only the exact certificate capability, on an unpaid editable draft."""
+        if not re.fullmatch(r'https://sports-cave-image-factory\.onrender\.com/api/prodigi-document/[A-Za-z0-9_-]{43}',url):
+            raise ProdigiError('A verified certificate document is required.')
+        if self.mode=='live' and (os.getenv('SPORTS_CAVE_PRODIGI_FULL_QA_ACCEPTED','').lower()!='true' or
+                os.getenv('SPORTS_CAVE_PRODIGI_FULL_QA_ENABLED','true').lower()!='true'):
+            raise ProdigiError('Live document attachment is disabled pending sandbox acceptance.')
+        order=self.order(order_id)
+        if order.get('status')!='draft' or 'update' not in order.get('allowedActions',[]) or order.get('charges'):
+            raise ProdigiError('Packing slips require an unpaid editable draft.')
+        old=(order.get('packingSlip') or {}).get('url')
+        if old and old!=url:raise ProdigiError('An existing packing slip requires preservation and review.')
+        # The custom packing slip IS this unit's certificate, as in Fulfilment.
+        # No item, product, customer, shipping, payment or submit field is sent.
+        try:
+            response=self.transport.request('PATCH','https://api.prodigi.com/v5/orders/'+identifier(order_id),
+                headers={'X-API-Key':self.key,'Content-Type':'application/json'},
+                json={'packingSlip':{'url':url}},timeout=(5,20),allow_redirects=False)
+        except requests.RequestException:
+            raise ProdigiError('Packing-slip acknowledgement uncertain. Recheck the same draft; do not upload again.') from None
+        if response.status_code!=200:
+            raise ProdigiError(f'Packing-slip attachment returned HTTP {response.status_code}; review this draft.')
+        return response.json().get('data') or {}
 
     def artwork(self, order_id, item_id, url, md5):
         # No arbitrary paths or request payloads from a browser/worker.

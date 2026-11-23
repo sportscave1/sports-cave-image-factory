@@ -285,10 +285,17 @@
     const body = last?.matches('h4') ? last.nextElementSibling : last;
     const text = body?.innerText || '';
     const generating = Boolean(document.querySelector('[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label="Stop response"], button[aria-label="Stop"]'));
-    const clean = text.replace(/[*`]/g, '');
-    const marker = !generating && clean.match(ad ? /(?:^|\n)\s*SC_AD_BLOCKED:\s*([^\n]+)/ : design ? /(?:^|\n)\s*SC_DESIGN_BLOCKED:\s*([^\n]+)/ : /(?:^|\n)\s*SC_UPLOAD_BLOCKED:\s*([A-Z_]+)/);
     const alert = !generating && [...document.querySelectorAll('[role="alert"]')].find(node =>
       node.getClientRects?.().length && /something went wrong|network error|failed to|unable to|error generating|conversation not found|try again/i.test(node.innerText || ''));
+    const alertText = alert?.innerText || '';
+    // Re-read the live DOM and visible alerts on every observation. Only the
+    // unchanged text analysis/hash is reused, never a generation or ownership read.
+    const memo = projectProgress.memo;
+    if (memo && memo.text === text && memo.generating === generating &&
+        memo.alertText === alertText && memo.href === location.href) return {...memo.result};
+    projectProgress.memo = null;
+    const clean = text.replace(/[*`]/g, '');
+    const marker = !generating && clean.match(ad ? /(?:^|\n)\s*SC_AD_BLOCKED:\s*([^\n]+)/ : design ? /(?:^|\n)\s*SC_DESIGN_BLOCKED:\s*([^\n]+)/ : /(?:^|\n)\s*SC_UPLOAD_BLOCKED:\s*([A-Z_]+)/);
     // A completed response can report a tool rejection without emitting our
     // status marker. Preserve that concrete blocker instead of an idle timeout.
     const moderationBlocked = !design && !ad && !generating &&
@@ -305,15 +312,28 @@
       : design || ad ? marker[1] : 'ChatGPT reported an upload failure: ' + marker[1]) :
       designBlocked ? 'Design stopped before delivery: ' + clean.trim() :
       moderationBlocked ? 'ChatGPT reported an upload failure: MODERATION' :
-      alert ? 'ChatGPT error: ' + alert.innerText : '';
+      alert ? 'ChatGPT error: ' + alertText : '';
     let activity = 0;
     for (let i = 0; i < text.length; i++) activity = ((activity << 5) - activity + text.charCodeAt(i)) | 0;
-    return {blocked:Boolean(reason), reason:reason.slice(0,1600), generating,
+    const result = {blocked:Boolean(reason), reason:reason.slice(0,1600), generating,
       finished:!generating && Boolean(text.trim()), activity:String(activity), chat_url:location.href};
+    // At most one response, bounded independently of conversation history.
+    if (text.length <= 1024 * 1024 && alertText.length <= 1600)
+      projectProgress.memo = {text, generating, alertText, href:location.href, result};
+    return {...result};
   }
   function watchDesignResponse() {
     if (!design || typeof setInterval !== 'function') return;
+    watchDesignResponse.stop?.();
     let previous = '', notified = '';
+    let expiry;
+    const stop = () => {
+      clearInterval(timer);
+      if (typeof clearTimeout === 'function') clearTimeout(expiry);
+      globalThis.removeEventListener?.('pagehide', leave);
+      if (watchDesignResponse.stop === stop) delete watchDesignResponse.stop;
+    };
+    const leave = event => {if (!event.persisted) {projectProgress.memo = null;stop();}};
     const timer = setInterval(() => {
       if (!conversation.test(location.href)) return;
       const progress = projectProgress();
@@ -326,27 +346,41 @@
           if (runtime?.id && typeof runtime.sendMessage === 'function') {
             notified = signature;
             Promise.resolve(runtime.sendMessage({type:'project:design-progress'})).then(result => {
-              if (typeof result?.accepted === 'boolean') clearInterval(timer);
+              if (typeof result?.accepted === 'boolean') stop();
               if (!result?.accepted) notified = '';
             }, () => {notified = '';});
-          } else clearInterval(timer);
+          } else stop();
         } catch { notified = ''; }
       }
       previous = signature;
     }, 1500);
     timer?.unref?.();
-    const expiry = setTimeout(() => clearInterval(timer), 2 * 60 * 60 * 1000);
+    expiry = setTimeout(stop, 2 * 60 * 60 * 1000);
     expiry?.unref?.();
+    watchDesignResponse.stop = stop;
+    globalThis.addEventListener?.('pagehide', leave);
   }
   function watchStaffResponse() {
+    watchStaffResponse.stop?.();
+    let expiry;
+    const stop = () => {
+      clearInterval(timer);
+      if (typeof clearTimeout === 'function') clearTimeout(expiry);
+      globalThis.removeEventListener?.('pagehide', leave);
+      if (watchStaffResponse.stop === stop) delete watchStaffResponse.stop;
+    };
+    const leave = event => {if (!event.persisted) {projectProgress.memo = null;stop();}};
     const timer = setInterval(() => {
       if (!conversation.test(location.href)) return;
       const status = projectProgress().reason.match(/ChatGPT reported an upload failure: ([A-Z_]+)/);
       if (!status) return;
-      clearInterval(timer);
+      stop();
       void chrome.runtime.sendMessage({type:'project:blocked', code:status[1]}).catch(() => {});
     }, 3500);
-    setTimeout(() => clearInterval(timer), 2 * 60 * 60 * 1000);
+    expiry = setTimeout(stop, 2 * 60 * 60 * 1000);
+    expiry?.unref?.();
+    watchStaffResponse.stop = stop;
+    globalThis.addEventListener?.('pagehide', leave);
   }
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (sender.id !== chrome.runtime.id) return;

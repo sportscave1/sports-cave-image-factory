@@ -1,0 +1,9 @@
+# Orders fragment-context failure — 22 November 2026
+
+The live screenshot shows a pending table selection/feed event being consumed while `selection_workspace`, although decorated with `st.fragment`, was executing as part of a full app render. Streamlit permits `rerun(scope='fragment')` only during a fragment-scoped rerun. The unconditional call therefore raised a layout-context exception and produced the page error beneath an otherwise rendered table. Earlier component tests mocked `st.rerun`, so they did not exercise this execution rule.
+
+The table now requests a fragment acknowledgement only when the current Streamlit run has a fragment queue. During full app rendering it saves the authoritative cached feed snapshot and selection and continues rendering normally. The browser has already applied its row delta/selection. No full-page fallback rerun, external API calls, supplier actions or broad exception suppression are added. Actual fragment events keep the existing fast fragment-only acknowledgement.
+
+Real Streamlit AppTest cases execute a pending feed and a pending selection inside a decorated fragment during full app runs. They verify no exception panel, continued page rendering, adopted authoritative rows and preserved selection on the next render. Separate coverage retains the actual-fragment branch; the existing browser tests cover DOM identity, scroll, selection, drawer preservation and lazy full-resolution preview.
+
+This UI error is separate from the supplier editor transition described in `ORDERS_EMPTY_EDITOR_ROOT_CAUSE_20261122.md`. Companion 1.7.39 already provides individual product QA followed by final shared shipping/tax/inserts checks and guarded recovery of the old unused QA receipts. The current patch does not require another extension version or change any supplier countdown setting.

@@ -218,18 +218,21 @@ def test_preparation_checks_actual_icc_bytes_and_preserves_original(tmp_path,mon
         monkeypatch.setenv('AUTO_EDITIONS_COLOUR_POLICIES_FILE',str(policy_file))
     output=tmp_path/'output'
     def photoshop(script):
+        if '"preflight_only": true' in script:
+            (output/'preflight.json').write_text('{}')
+            return 'AUTO_EDITIONS_PREFLIGHT'
         manifest=package(output)
         for n in (1,2):
             with ae.compose(manifest,output,n) as image:image.save(output/f'reference-{n}.png')
         shutil.copyfile(output/'reference-1.png',output/'original.png')
         names=[p.name for p in output.glob('*.png')];name=profile_info(profile)['description']
-        report={**manifest,'source_inspection':{'document':{'profile':name,'profile_state':'tagged'}},'export_profiles':{n:name for n in names}}
+        report={**manifest,'source_dimensions':[200,100],'source_inspection':{'document':{'profile':name,'profile_state':'tagged'}},'export_profiles':{n:name for n in names}}
         (output/'preparation.json').write_text(json.dumps(report))
         witness=bytearray(profile)
         if conflict:witness[84:100]=b'3'*16
         psd(output/'profile-witness.psd',bytes(witness),width=1,height=1)
         return 'AUTO_EDITIONS_PREPARED:2'
-    with patch('scripts.photoshop_dispatch.run',side_effect=photoshop):
+    with patch('scripts.photoshop_dispatch.run',side_effect=photoshop),patch('auto_editions_preflight.validate',return_value=None):
         if conflict:
             with pytest.raises(ColourReview,match='different ICC profile'):
                 prepare(original,output,identity,number_layer='number',plaque_layer='plaque',total=2,reference_number=1)
@@ -251,3 +254,19 @@ def test_staged_copy_must_match_source_before_photoshop_opens_it(tmp_path):
         with pytest.raises(ValueError,match='before Photoshop'):
             prepare(original,tmp_path/'output',identity,number_layer='number',plaque_layer='plaque',total=2,reference_number=1)
         photoshop.assert_not_called()
+
+
+def test_owner_default_covers_future_sources_without_overriding_exact_approvals(tmp_path):
+    from auto_editions_colour_review import registry
+    policies=registry()
+    default=next(p for p in policies if (p.get('scope') or {}).get('kind')=='owner_default')
+    fresh=ae.source_identity(PID,dict(id='id:future',rev='f123',content_hash='d'*64))
+    profile,evidence=resolve(fresh,policies,default_group=default['group'])
+    assert profile_info(profile)['description']=='sRGB IEC61966-2.1'
+    assert evidence['scope']['kind']=='owner_default'
+    original=psd(tmp_path/'untagged.psd');before=original.read_bytes()
+    proof=stage_profile(original,tmp_path/'assigned.psd',profile)
+    assert original.read_bytes()==before and proof['pixels_converted'] is False
+    exact=approved(fresh)
+    _,selected=resolve(fresh,[default,exact],default_group=default['group'])
+    assert selected['approval_hash']==exact['approval_hash']

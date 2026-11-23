@@ -14,6 +14,7 @@ def broken(store):
     sql.execute("ALTER TABLE auto_edition_onboarding ADD COLUMN IF NOT EXISTS replacement jsonb; ALTER TABLE auto_edition_onboarding ADD COLUMN IF NOT EXISTS reset_cancellation jsonb")
     sql.execute(Path('supabase/migrations/20261017001547_auto_editions_technical_completion.sql').read_text())
     register(store);tick(store,[asset()])
+    sql.execute("CREATE TABLE edition_orders(id int,shopify_product_gid text,status text,allocation_valid boolean,identity_enforced boolean,invalidated_at timestamptz)")
     sql.execute("UPDATE auto_edition_onboarding SET status='Needs PSD Repair',reason='Exactly one visible, editable edition-number layer is required.' WHERE product_gid=%s",(PID,))
     return d,sql
 
@@ -117,3 +118,69 @@ def test_newly_uploaded_package_waits_for_technical_seed_instead_of_codex(broken
     with patch.object(repair,'snapshot',return_value=row),patch('auto_editions_technical.Technical.seed') as seed:
         repair.run_one(d.connect);seed.assert_not_called()
     assert repair.claim(d.connect) is not None
+
+
+def test_backlog_admission_is_bounded_idempotent_and_respects_leases(broken):
+    d,sql=broken
+    sql.execute("UPDATE auto_edition_onboarding SET priority=10,lease_until=now()-interval '1 minute'")
+    assert repair.admit(d.connect)==1
+    assert repair.admit(d.connect)==0
+    assert len([r for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==repair.EVENT])==1
+
+
+def test_repair_enqueues_all_valid_orders_and_isolates_blocked_unit(broken):
+    from types import SimpleNamespace
+    d,sql=broken
+    sql.execute("INSERT INTO edition_orders SELECT n,%s,'assigned',true,true,NULL FROM generate_series(1,3) n",(PID,))
+    repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready'")
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Waiting',jpg_ready=[1,3],jpg_preparation_hash='old-package')
+    calls=[]
+    def resolver(i):
+        if i==2:raise ValueError('Variant needs review')
+        return dict(id=str(i),identity=dict(source=dict(product_gid=PID))),None
+    def enqueue(job,actor):
+        calls.append(job['id']);return dict(status='Ready')
+    with patch('auto_editions_runtime.job_for',side_effect=resolver),patch('auto_editions_runtime.stores',return_value=(None,SimpleNamespace(enqueue=enqueue))):
+        repair.run_one(d.connect)
+    assert calls==['1','3']
+    with d.connect() as c,c.cursor() as cur:detail=repair.latest(cur,PID)['detail']
+    assert detail['state']=='Needs help' and detail['jpg_ready']==[1,3] and '2' in detail['jpg_blocked']
+
+
+def test_preparing_product_is_never_claimed_for_codex(broken):
+    d,sql=broken;repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Codex queued',prompt='scoped source repair')
+    sql.execute("UPDATE auto_edition_onboarding SET status='Awaiting preparation',reason='Approved colour interpretation'")
+    assert repair.claim(d.connect) is None
+    repair.run_one(d.connect)
+    with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
+
+
+def test_failed_handoff_cannot_stop_a_resumed_native_queue(broken):
+    d,sql=broken;repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    with d.connect() as c,c.cursor() as cur:record=repair.latest(cur,PID)
+    repair.checkpoint(d.connect,record,'Codex queued',prompt='scoped source repair')
+    receipt=repair.claim(d.connect)
+    sql.execute("UPDATE auto_edition_onboarding SET status='Awaiting preparation'")
+    repair.returned(d.connect,PID,receipt['request_id'],receipt['handoff_token'],False)
+    with d.connect() as c,c.cursor() as cur:assert repair.latest(cur,PID)['detail']['state']=='Waiting'
+
+
+def test_ready_preparation_reaches_order_jpgs_before_older_passive_repairs(broken):
+    d,sql=broken
+    # A full catalogue of older repair monitors must not delay a newly ready PSD.
+    sql.execute("""INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail,created_at)
+      SELECT 'gid://shopify/Product/'||n,'fixture','edition_repair_request',
+        jsonb_build_object('state','Codex queued','product_gid','gid://shopify/Product/'||n,
+          'file_id','id:old','request_id','old-'||n),now()-interval '1 hour'
+      FROM generate_series(1,60) n""")
+    requested=repair.request(d.connect,PID,'admin',str(uuid.uuid4()))
+    sql.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready' WHERE product_gid=%s",(PID,))
+    with patch.object(repair,'order_jpgs') as generate:
+        assert repair.run_one(d.connect)
+    assert generate.call_count==1
+    assert generate.call_args.args[1]['detail']['request_id']==requested['request_id']
+    assert generate.call_args.args[2]==PID

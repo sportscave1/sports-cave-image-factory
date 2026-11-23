@@ -6,6 +6,28 @@ import orders_page as orders
 
 
 class CompactOrdersTests(unittest.TestCase):
+    def test_bulk_selection_only_loads_one_stably_identified_detail_panel(self):
+        rows=[{'edition_order_id':i,'order':f'#SC{i}'} for i in range(1,51)]
+        before=deepcopy(rows);seen=[]
+        def choose(label,options,**kwargs):seen.extend(options);return 'allocation:50'
+        with patch.object(orders,'st',SimpleNamespace(selectbox=choose)):
+            assert orders._selected_detail_rows(rows)==[rows[-1]]
+        assert len(seen)==50 and rows==before
+        assert orders._selected_detail_rows([rows[0]])==[rows[0]]
+
+    def test_jpg_status_deadline_keeps_the_order_visible_without_claiming_repair(self):
+        from concurrent.futures import Future
+        from supabase_backend import DatabaseReadError
+        future=Future();future.set_exception(DatabaseReadError('deadline exceeded',{}))
+        warnings=[];rows=[{'edition_order_id':952,'order':'#SC3522'}]
+        with patch.object(orders,'st',SimpleNamespace(warning=warnings.append)), \
+             patch.object(orders._ORDERS_LOAD_EXECUTOR,'submit',return_value=future), \
+             patch.object(orders.psd_directory,'page_directory',return_value={}):
+            resources=orders._order_display_resources(rows)
+        assert resources==({}, {'952':'Status unavailable'}) and len(warnings)==1
+        display=orders._display_rows(rows,resources=resources)
+        assert display[0]['print_jpg']=='Status unavailable'
+
     def test_initial_layout_waits_for_client_instead_of_exposing_wrong_actions(self):
         class WaitingForClient(Exception): pass
         fake=SimpleNamespace(__name__='streamlit',session_state={},caption=lambda *a:None,

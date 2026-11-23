@@ -1,3 +1,4 @@
+from ads_prompt_language import prompt_language
 from sports_categories import sport_category_options, normalize_sport_state, sport_family
 import ads_ie_legacy_description as ie_legacy_description
 import ads_ie_copy as ie_copy
@@ -6826,6 +6827,7 @@ def _configure_refresh_copy(result, workflow):
             st.session_state.pop(key, None)
 
 
+@prompt_language
 def build_instant_experience_winner_refinement_prompt(product_name, category, country, product_url, context, *, product_metadata=None, campaign_moment=None):
     prompt = ads_refresh_generation.build_prompt(
         sys.modules[__name__], product_name, category, country, "Instant Experience", product_url, context,
@@ -8094,6 +8096,7 @@ def build_instant_experience_shared_setup(product_name, category, product_url):
 - Do not introduce collection-page routing in this workflow."""
 
 
+@prompt_language
 def build_standard_instant_experience_prompt(
     product_name, category, country, campaign_type, product_url="", *,
     specific_pattern=False, campaign_moment=None, product_metadata=None,
@@ -8461,6 +8464,7 @@ def build_visual_variation_token():
     return secrets.token_hex(6)
 
 
+@prompt_language
 def build_ads_prompt(
     product_name,
     category,
