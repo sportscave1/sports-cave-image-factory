@@ -32,10 +32,21 @@ class RouteIsolationTests(unittest.TestCase):
                          st=SimpleNamespace(rerun=lambda: None))
         for name in (n.id for n in ast.walk(node) if isinstance(n, ast.Name)):
             if name.startswith("get_") and name != "get_current_page": namespace[name] = lambda: page
-            if name.startswith("render_") and name != "render_selected_page": namespace[name] = lambda *a, **kw: calls.append("render")
+            if name.startswith(("render_", "_render_")) and name != "render_selected_page": namespace[name] = lambda *a, **kw: calls.append("render")
         exec(compile(ast.Module(body=[node], type_ignores=[]), "app.py", "exec"), namespace)
-        modules = {name: page for name in ("image_protection_ui", "wall_preview_inbox", "reviews_page", "crm_page")}
-        modules["social_media_ui"] = SimpleNamespace(inject_styles=lambda: None)
+        # Stub every direct renderer import, including newer standalone pages.
+        # Layout helpers are presentation work, not destination dispatches.
+        imports = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Import):
+                imports.update(alias.name for alias in child.names)
+            elif isinstance(child, ast.ImportFrom) and child.module:
+                imports.add(child.module)
+        modules = {name: page for name in imports if name not in ("types", "page_presentation")}
+        modules["page_presentation"] = SimpleNamespace(
+            inject_compact_page=lambda *a, **kw: None,
+            inject_page_spacing=lambda *a, **kw: None,
+        )
         with patch.dict("sys.modules", modules):
             for route in [p["route"] for p in os_accounts.PAGE_REGISTRY] + ["Settings", "Marketing Factory"]:
                 with self.subTest(route=route):

@@ -20,7 +20,7 @@ def test_two_designs_rotate_in_one_card_without_changing_other_panels():
     html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
     errors = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel='msedge',headless=True)
+        browser = p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page = browser.new_page(viewport={'width':1600,'height':600})
             page.clock.install()
@@ -70,7 +70,7 @@ def test_two_designs_rotate_in_one_card_without_changing_other_panels():
             browser.close()
 
 
-def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
+def test_four_cards_search_overlay_and_responsive_layout(tmp_path):
     source = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf8')
     payload = dict(online=True, jobs=[dict(id='upload',title='Collector Tribute',stage=2,
         label='Generating mockups',percent=34,detail='',updated_at='fixture')], queues=dict(
@@ -79,6 +79,8 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
             state='running',label='Generating · time-based estimate',percent=45,estimated=True)]),
         ads=dict(enabled=True,online=True,waiting=0,jobs=[dict(id='ad',title='Broadway Joe',
             state='running',label='Waiting for ad copy and three covers',percent=40)])))
+    payload['queues']['editions'] = dict(enabled=True,online=True,waiting=2,jobs=[dict(
+        id='edition',title='Edition artwork',state='running',label='Photoshop',percent=0)])
     config = dict(appName='Sports Cave OS',appSubtitle='Operations System',filesEnabled=True,
         uploadScope='fixture-admin',staffUploadProgress=True,currentRouteKey='ads',revision='fixture',
         searchIndex=[dict(group='Pages',title='Ads',subtitle='New Ads',route_key='ads',aliases=[],keywords=[])],
@@ -88,7 +90,7 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
     html = html.replace('</body>', '<main id="fixture-content" style="padding:180px 24px;background:#faf8f2;min-height:80vh">Synthetic Ads page</main></body>')
     writes, errors = [], []
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel='msedge',headless=True)
+        browser = p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page = browser.new_page(viewport={'width':1600,'height':600})
             page.on('pageerror',lambda error: errors.append(str(error)))
@@ -109,12 +111,12 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
             page.goto('http://fixture.test/')
             expect(page.locator('#sc-os-ads-title')).to_have_text('Broadway Joe')
             expect(page.locator('#sc-os-global-search')).to_be_hidden()
-            cards = ['#sc-os-design-card','#sc-os-upload-card','#sc-os-ads-card']
+            cards = ['#sc-os-design-card','#sc-os-upload-card','#sc-os-ads-card','#sc-os-editions-card']
             for width in (1600,1280,1024,820,600,390):
                 page.set_viewport_size({'width':width,'height':700})
                 boxes = [page.locator(selector).bounding_box() for selector in cards]
                 assert all(box and box['width'] > 75 and box['x'] >= 0 and box['x']+box['width'] <= width+1 for box in boxes), (width,boxes)
-                assert all(boxes[i]['x']+boxes[i]['width'] <= boxes[i+1]['x']+1 for i in range(2)), (width,boxes)
+                assert all(a['x']+a['width'] <= b['x']+1 or b['x']+b['width'] <= a['x']+1 or a['y']+a['height'] <= b['y']+1 or b['y']+b['height'] <= a['y']+1 for i,a in enumerate(boxes) for b in boxes[i+1:]), (width,boxes)
                 assert page.evaluate('document.documentElement.scrollWidth') <= width
                 # Search floats above the document without resizing the header or cards.
                 before = page.locator('#sc-os-companion-status').bounding_box()
@@ -125,6 +127,32 @@ def test_three_cards_search_overlay_and_responsive_layout(tmp_path):
                 expect(page.locator('#sc-os-global-search')).to_be_hidden()
                 expect(page.get_by_role('button',name='Open search',exact=True)).to_be_focused()
             page.set_viewport_size({'width':1600,'height':600})
+            files = page.locator('#sc-os-files').bounding_box()
+            actions = page.locator('.sc-os-topbar-actions').bounding_box()
+            design = page.locator('#sc-os-design-card').bounding_box()
+            assert files['x']+files['width'] <= actions['x']+1
+            assert actions['x']+actions['width'] <= design['x']+1
+            for ident,label in [('mobile-search','Search'),('daily-planner','Schedule'),('notifications','Notifications')]:
+                button = page.locator('#sc-os-'+ident)
+                button.evaluate("el=>el.title='Sports Cave browser v2: %7Bfixture%7D'")
+                button.hover()
+                assert button.evaluate("el=>{const b=el.getBoundingClientRect();return document.elementFromPoint(b.x+b.width/2,b.y+b.height/2).closest('[title]').title}") == label
+            assert page.locator('#sc-os-repairs,#sc-os-profile,#sc-os-settings').count() == 0
+            expect(page.locator('#sc-os-editions-meter')).not_to_have_attribute('value')
+            page.locator('#sc-os-editions-status > summary').click()
+            expect(page.get_by_role('link',name='Open Edition Ops',exact=True)).to_have_attribute('href','/?page=edition_ops')
+            page.get_by_role('button',name='Close Auto Editions status',exact=True).click()
+            payload['queues']['editions']['online'] = False
+            page.evaluate("document.dispatchEvent(new CustomEvent('sc-design-edit-queued'))")
+            expect(page.locator('#sc-os-editions-stage')).to_contain_text('companion offline')
+            payload['queues']['editions'].update(jobs=[],unavailable=True,waiting=0)
+            page.evaluate("document.dispatchEvent(new CustomEvent('sc-design-edit-queued'))")
+            expect(page.locator('#sc-os-editions-stage')).to_have_text('Status unavailable · retrying')
+            expect(page.locator('#sc-os-editions-status')).to_have_attribute('data-stale','true')
+            payload['queues']['editions'].update(online=True,unavailable=False,jobs=[dict(id='edition',title='Edition artwork',state='complete',label='Preparation saved',percent=100)])
+            page.evaluate("document.dispatchEvent(new CustomEvent('sc-design-edit-queued'))")
+            expect(page.locator('#sc-os-editions-meter')).to_have_attribute('value','100')
+            expect(page.locator('#sc-os-editions-status')).to_have_attribute('data-stale','false')
             page.keyboard.press('Control+k')
             expect(page.locator('#sc-os-global-search')).to_be_focused()
             page.locator('#fixture-content').click()
@@ -157,7 +185,7 @@ def test_publish_receipt_immediately_opens_exact_status_and_refreshes_without_re
     payload = dict(online=True, jobs=[old], queues=dict(upload=dict(enabled=True,display=True,waiting=0)))
     html = source.replace('__SPORTS_CAVE_TOP_BAR_CONFIG__',json.dumps(config))
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel='msedge',headless=True)
+        browser = p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page = browser.new_page(viewport={'width':1600,'height':700})
             errors = []
@@ -213,7 +241,7 @@ def test_design_defer_and_cancel_controls_follow_the_next_job_without_enqueuing(
     payload=dict(online=True,jobs=[],queues=dict(upload=dict(enabled=True,waiting=0,display=True),design=dict(enabled=True,waiting=1,jobs=[first,second])))
     writes=[]
     with sync_playwright() as p:
-        browser=p.chromium.launch(channel='msedge',headless=True)
+        browser=p.chromium.launch(channel=os.environ.get('STATUS_TEST_BROWSER_CHANNEL', 'msedge') or None,headless=True)
         try:
             page=browser.new_page(viewport={'width':1200,'height':750})
             def respond(route):

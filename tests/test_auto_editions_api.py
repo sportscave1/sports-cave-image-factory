@@ -106,7 +106,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'start_worker') as worker:
             response=await api.view(request(query='allocation_id=42&job_id='+'a'*64))
             self.assertEqual(response.status_code,307)
-            self.assertIn('/?page=orders&workspace=files&edition_allocation=42',response.headers['location'])
+            self.assertEqual('/api/auto-editions/file?allocation_id=42&job_id='+'a'*64+'&inline=1',response.headers['location'])
             worker.assert_not_called()
 
     async def test_missing_archive_never_returns_an_open_location(self):

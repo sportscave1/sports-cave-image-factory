@@ -14,16 +14,27 @@ SCENE_FIELDS = (
     "collector_detail", "collector_detail_family",
 )
 
+NEUTRAL_WALL_RULES = (
+    "SPORTS CAVE NEUTRAL WALL COLOURS V1: Wall surfaces must use restrained neutral colours only: "
+    "charcoal, graphite, smoky grey, greige, taupe, mushroom, neutral brown, warm off-white, sand, "
+    "sandstone or weathered stone. No blue, navy, green, olive, red, bright, saturated or team-coloured walls, "
+    "even when those colours appear in the artwork. Keep the original artwork, frame and printed colours exact. "
+    "This wall-colour rule takes precedence over sport/team colour matching or source/reference wall colours in new images. "
+    "Vary wall textures and materials within this neutral palette; preserve the assigned room, camera, lighting and ad layout. "
+    "Repeat this neutral wall palette in every standalone image brief."
+)
+
 # Colour and construction are authored together, not independently randomised.
 ROOM_STYLE = (
     "Sports Cave premium sports collector / man cave feel with subtle rugged character. "
-    "Automatic walls use only charcoal, graphite, smoky grey, deep navy, midnight blue, heritage green, "
-    "muted olive, earthy taupe or weathered stone, in compatible shades of matte painted brick, textured "
+    "Automatic walls use only charcoal, graphite, smoky grey, greige, mushroom, neutral brown, sand, "
+    "sandstone, warm off-white, earthy taupe or weathered stone, in compatible shades of matte painted brick, textured "
     "plaster, concrete, natural stone or aged timber. Keep each scene's existing composition; give the "
     "resolved homes different colour families and wall finishes, mixing dark, mid-tone and lighter earthy "
     "shades. Rotate compatible combinations through the available history on fresh generations/refreshes; "
     "never assign a colour permanently to an ad slot. Keep the edition clearly visible through tonal "
-    "separation and coherent light. No excessive props, artificial grunge or three identical dark rooms."
+    "separation and coherent light. No excessive props, artificial grunge or three identical dark rooms. "
+    + NEUTRAL_WALL_RULES
 )
 WALLS = (
     ("weathered stone", "weathered stone", "light", "stone", "matte painted brick"),
@@ -36,15 +47,15 @@ WALLS = (
     ("light smoky grey", "smoky grey", "light", "grey", "matte painted brick"),
     ("graphite", "graphite and charcoal", "dark", "grey", "aged timber"),
     ("charcoal", "graphite and charcoal", "dark", "grey", "matte painted brick"),
-    ("muted olive", "muted olive", "mid", "olive", "textured plaster"),
+    ("warm mushroom", "mushroom", "mid", "mushroom", "textured plaster"),
     ("weathered stone", "weathered stone", "light", "stone", "aged timber"),
-    ("deep navy", "deep navy and midnight blue", "dark", "blue", "matte painted brick"),
-    ("midnight blue", "deep navy and midnight blue", "dark", "blue", "textured plaster"),
-    ("deep heritage green", "heritage green", "dark", "forest", "natural stone"),
-    ("muted heritage green", "heritage green", "mid", "forest", "textured plaster"),
+    ("deep neutral brown", "neutral brown", "dark", "brown", "matte painted brick"),
+    ("dark neutral brown", "neutral brown", "dark", "brown", "textured plaster"),
+    ("deep weathered stone", "weathered stone", "dark", "stone", "natural stone"),
+    ("warm sandstone", "sandstone", "mid", "sandstone", "textured plaster"),
     ("weathered stone", "weathered stone", "light", "stone", "textured plaster"),
     ("light earthy taupe", "earthy taupe", "light", "taupe", "matte painted brick"),
-    ("muted olive", "muted olive", "mid", "olive", "aged timber"),
+    ("warm mushroom", "mushroom", "mid", "mushroom", "aged timber"),
     ("pale weathered stone", "weathered stone", "light", "stone", "natural stone"),
 )
 

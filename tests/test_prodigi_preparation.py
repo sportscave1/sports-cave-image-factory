@@ -238,6 +238,10 @@ def test_normal_dashboard_link_and_companion_login_isolation():
     from upload_companion_page import extension_package
     with zipfile.ZipFile(io.BytesIO(extension_package())) as archive:
         assert 'orders-queue.js' in archive.namelist()
+        assert 'orders-wake.js' in archive.namelist()
+        import re
+        imports=re.findall(r"importScripts\('([^']+)'\)",archive.read('worker.js').decode())
+        assert set(imports)<=set(archive.namelist())
 
 
 def test_artwork_transfer_verifies_archived_bytes_before_issuing_durable_link(monkeypatch):
@@ -273,6 +277,8 @@ def test_desktop_route_requires_pairing_and_accepts_no_external_instructions(mon
     monkeypatch.setattr(api,'desktop',lambda token:user_calls.append(token))
     monkeypatch.setattr(queue,'tick',lambda:queue_calls.append(True))
     monkeypatch.setattr('prodigi_sandbox.tick',lambda:None)
+    monkeypatch.setattr('orders_automatic.kick',lambda:None)
+    monkeypatch.setattr('prodigi_submission.kick',lambda:None)
     with TestClient(app) as client:
         assert client.post('/tick',json={}).status_code==403
         assert not user_calls and not queue_calls
@@ -295,6 +301,7 @@ def test_preparation_ui_retains_manual_qa_and_has_no_production_action(monkeypat
     monkeypatch.setenv('SPORTS_CAVE_PRODIGI_PREPARE','true')
     saved=value();saved.update(status='Needs QA',message='Fixture uploaded; manual QA required.')
     monkeypatch.setattr(queue,'read',lambda _:saved)
+    monkeypatch.setattr(queue,'request_failure',lambda _:None)
     script="""
 from prodigi_preparation_ui import render
 render({'edition_order_id': '1'}, {'id':'fixture','role':'admin'}, answers={})
@@ -361,7 +368,7 @@ def test_automatic_matching_runs_in_companion_and_missing_product_is_diagnosed(s
     queued=queue.request({'id':'fixture'},1)
     assert queued['order_id']=='' and queued['status']=='Queued'
     result=queue.tick()
-    assert result['status']=='Needs review' and 'No Prodigi product' in result['message']
+    assert result['status']=='Awaiting product selection'
     assert queue.read(1)['order_id']=='99' and not p.writes
     assert queue.request({'id':'fixture'},1)['order_id']=='99'
 
@@ -402,3 +409,50 @@ def test_qa_requires_every_question_packing_slip_and_download_readback(store,mon
     queue.complete_qa({'id':'fixture'},1,answers,True)
     assert queue.read(1)['status']=='Ready for manual payment'
     assert p.data['status']=='draft' and len(p.writes)==1
+
+
+def test_order_shipping_address_reads_identity_bound_nested_rest_and_camel_case():
+    address=dict(name='Synthetic Customer',address1='1 Fixture Road',address2='',city='Fixture',province='Michigan',zip='48000',country_code='US',province_code='MI')
+    expected=queue.shopify_recipient(dict(raw_payload=dict(id=123,shipping_address=address)), 'gid://shopify/Order/123')
+    assert expected['name']=='Synthetic Customer' and expected['address']['countryCode']=='US'
+    assert expected['state_aliases']==['Michigan','MI']
+    direct=dict(address,countryCodeV2='US',provinceCode='MI')
+    assert queue.shopify_recipient(dict(shippingAddress=direct),'123')==expected
+    with pytest.raises(ValueError,match='different'):queue.shopify_recipient(dict(raw_payload=dict(id=124,shipping_address=address)),'123')
+    with pytest.raises(ValueError,match='unidentified'):queue.shopify_recipient(dict(raw_payload=dict(shipping_address=address)),'123')
+    with pytest.raises(ValueError,match='complete'):queue.shopify_recipient(dict(customer_raw=dict(default_address=address)),'123')
+
+
+def test_empty_recipient_recovery_preserves_verified_artwork_and_rejects_other_changes():
+    old=snapshot();old['recipient']=dict(name=None,address=dict(line1=None,countryCode=None))
+    fresh=deepcopy(old);fresh['recipient']=queue.shopify_recipient(dict(shipping_address=dict(name='Synthetic Customer',address1='1 Fixture Road',city='Fixture',province='Michigan',zip='48000',country_code='US')),'123')
+    value=dict(allocation_id=1,snapshot=old,fingerprint=queue.digest(old),browser=dict(verified=True),history=[])
+    changed=deepcopy(fresh);changed['mapping']['prodigi_code']='DIFFERENT'
+    with pytest.raises(ValueError,match='changed'):queue.restore_missing_recipient(deepcopy(value),lambda _:changed)
+    assert queue.restore_missing_recipient(value,lambda _:fresh)
+    assert value['snapshot']==fresh and value['fingerprint']==queue.digest(fresh) and value['browser']['verified']
+    assert value['history'][-1]['event']=='missing_shopify_recipient_recovered'
+    assert not queue.restore_missing_recipient(value,lambda _:pytest.fail('Never replace a populated address'))
+
+
+def test_shipping_display_suffix_is_not_an_artwork_or_address_change():
+    a=snapshot();a['recipient']={'address':{'line1':'1 Fixture Street'}}
+    b=deepcopy(a);b['shipping']='Standard | Synthetic Customer | Fixture'
+    assert queue.same_source(a,b)
+    v=value();v.update(snapshot=a,fingerprint=queue.digest(a))
+    assert queue.source_matches(v,b)
+    for key,changed in [('shipping','Express'),('job_id','b'*64),('number',99),
+                        ('mapping',{'prodigi_code':'GLOBAL-CFP-A1'}),
+                        ('recipient',{'address':{'line1':'2 Different Street'}}),
+                        ('output',{'sha256':'b'*64,'bytes':100})]:
+        bad=deepcopy(b);bad[key]=changed
+        assert not queue.source_matches(v,bad),key
+    v['fingerprint']='tampered'
+    assert not queue.source_matches(v,b)
+
+
+def test_shipping_suffix_refresh_does_not_stop_supplier_matching():
+    v=value();v['snapshot']['shipping']='Standard | Synthetic Customer | Fixture'
+    v['fingerprint']=queue.digest(v['snapshot']);v['browser_requested']=True
+    result=queue.run(v,Provider(),lambda _:snapshot(),lambda _:pytest.fail('No API write'),lambda _:None)
+    assert result['status']=='Awaiting browser upload'

@@ -202,7 +202,9 @@ def migration_sql_is_allowed(path, sql):
 
 
 def migration_files(only=None):
-    paths = sorted(path for path in MIGRATIONS_DIR.glob("*.sql") if path.is_file())
+    # Retired social planner: preserve migration history without recreating removed tables.
+    paths = sorted(path for path in MIGRATIONS_DIR.glob("*.sql")
+                   if path.is_file() and path.name != "20260728_social_media_hub.sql")
     if not only:
         return paths
     clean_name = Path(str(only)).name

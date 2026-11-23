@@ -1,3 +1,4 @@
+from ads_prompt_language import prompt_language
 import sports_cave_physical_realism as physical_realism
 """Creative Refresh generation context; production schemas remain owned by ads_page."""
 from sports_categories import sport_family
@@ -93,6 +94,7 @@ def ie_refresh_standalone_brief(ads, product, *, style):
                         shared, IE_FINAL_PRODUCT_REALISM_GATE))
 
 
+@prompt_language
 def build_prompt(ads, product, category, country, campaign_type, url, context,
                  *, campaign_moment=None, product_metadata=None):
     winner = ads.normalize_creative_refresh_context(context)
@@ -259,6 +261,7 @@ def carousel_identity_issue(product, url, source):
     return ''
 
 
+@prompt_language
 def build_carousel_refresh_prompt(ads, product, category, country, url, winner,
                                   *, campaign_moment=None, product_metadata=None):
     source = winner.get('source_winner') or {}

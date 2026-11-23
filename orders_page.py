@@ -82,7 +82,7 @@ REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 ORDER_SYNC_BACKFILL_KEY = "orders_sync_backfill_latest_paid"
 ORDERS_SYNC_TIMEOUT_SECONDS = 90
 ORDERS_SUPABASE_LIVE_MARKER_KEY = "orders_supabase_live_visibility_marker"
-ORDERS_SUPABASE_LIVE_CHECK_SECONDS = 30
+ORDERS_SUPABASE_LIVE_CHECK_SECONDS = 5
 SEARCH_KEY = "orders_search_text"
 LOADED_QUERY_KEY = "orders_loaded_query"
 SHOW_ALL_KEY = "orders_show_all_rows"
@@ -839,6 +839,8 @@ def _orders_supabase_visibility_marker():
 
 
 def _check_orders_supabase_live_refresh():
+    if st.session_state.get('orders-grid-feed-active'):
+        return
     if st.session_state.get('current_page', 'Orders') != 'Orders':
         return
     if _certificate_action_in_progress() or st.session_state.get(LOAD_FUTURE_KEY) is not None:
@@ -857,7 +859,8 @@ def _check_orders_supabase_live_refresh():
     except Exception as error:
         print(f"ORDERS SYNC: orders_page_live_refresh_check_failed status=failed error={error}", flush=True)
         return
-    if (st.session_state.get("current_page") != page
+    if (st.session_state.get('orders-grid-feed-active')
+            or st.session_state.get("current_page") != page
             or dict(st.session_state.get("sports_cave_current_user") or {}) != user
             or st.session_state.get(LOAD_GENERATION_KEY) != generation
             or st.session_state.get(LOAD_FUTURE_KEY) is not None
@@ -884,6 +887,10 @@ def _check_orders_supabase_live_refresh():
 
 
 def _render_orders_supabase_live_refresh():
+    # The account-authenticated table feed owns live row updates. Keep the old
+    # marker path for fallback/non-component views without refreshing this page.
+    if st.session_state.get('orders-grid-feed-active'):
+        return
     fragment = getattr(st, "fragment", None)
     if callable(fragment):
         # Read-only marker I/O must not hold up the completed Orders page.
@@ -1670,6 +1677,11 @@ def _selected_rows_from_state(rows):
     if st.session_state.get('orders-narrow-view'):
         selected_ids = set(st.session_state.get('orders-mobile-selection') or [])
         return [_normalise_row(row) for row in rows if _mobile_unit_id(row) in selected_ids]
+    if 'orders-grid-selected-ids' in st.session_state:
+        from orders_prodigi_grid import row_identity
+        selected_ids=set(st.session_state['orders-grid-selected-ids'])
+        normalised=[_normalise_row(row) for row in rows]
+        return [row for row in normalised if row_identity(row) in selected_ids]
     selected = []
     for index in _selected_indices_from_state():
         if 0 <= index < len(rows):
@@ -2072,14 +2084,19 @@ def _render_ledger_diagnostics():
 def _order_display_resources(rows):
     """Overlap independent stored link reads; keep Streamlit calls on its thread."""
     from orders_display_reads import download_links
+    from supabase_backend import DatabaseReadError
     links = _ORDERS_LOAD_EXECUTOR.submit(download_links, rows or [])
     mapping = psd_directory.page_directory(st)
     try:
-        cloud_links = links.result()
-    except ReadQueueFull:
-        # A loaded page must keep accurate link states even under queue pressure.
-        # This still uses the same bounded database pool and read watchdog.
-        cloud_links = download_links(rows or [])
+        try:
+            cloud_links = links.result()
+        except ReadQueueFull:
+            # Keep the same bounded database pool and read watchdog.
+            cloud_links = download_links(rows or [])
+    except DatabaseReadError:
+        st.warning('Edition JPG status is temporarily unavailable. Refresh to check it again.')
+        cloud_links = {str(row.get('edition_order_id') or row.get('id')):'Status unavailable'
+            for row in rows or [] if row.get('edition_order_id') or row.get('id')}
     return mapping, cloud_links
 
 
@@ -2089,6 +2106,8 @@ def _display_rows(rows, *, normalised=False, resources=None):
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
+        if row.get('source_kind') == 'framed_certificate':
+            display_row['file'] = (row.get('certificate_pdf_url') or '') + '#Certificate'
         display_row["print_jpg"] = print_jpg.state(row, psd_mapping.get(psd_directory.product_id(row)))['label']
         import edition_test
         if edition_test.eligible(row,psd_mapping.get(psd_directory.product_id(row))):display_row['print_jpg']='/edition-jpg-download#Download JPG'
@@ -2788,58 +2807,41 @@ def _render_admin_panel(rows):
         _render_missing_data_diagnostics(rows)
 
 
-def _render_orders_table(rows):
+def _selected_detail_rows(rows):
+    """Keep bulk selection intact while loading one focused unit's controls."""
+    if len(rows)<=1:return rows
+    from orders_prodigi_grid import row_identity
+    by_id={row_identity(row):row for row in rows}
+    def label(identity):
+        row=by_id[identity]
+        return f"{row.get('order')} · {row.get('edition')} · {row.get('product')}"
+    chosen=st.selectbox('Review selected edition',list(by_id),format_func=label,key='orders-selected-detail')
+    return [by_id.get(chosen,rows[0])]
+
+
+def _render_orders_table(rows,selection_guard=None):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
-    if st.session_state.get('orders-narrow-view'):
-        _render_mobile_orders(rows)
-        return
-    _render_inline_prodigi_actions(rows)
-    import auto_editions_runtime
     resources = _order_display_resources(rows)
-    selected_print_rows = _selected_rows_from_state(rows)
-    if selected_print_rows:
-        mapping, cloud_links = resources
-        with st.expander("Selected unit details / Print JPG", expanded=True):
-            for selected in selected_print_rows:
-                status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
-                st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
-                st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
-                allocation_id=str(selected.get('edition_order_id') or '')
-                from prodigi_preparation_ui import render as render_prodigi_preparation
-                render_prodigi_preparation(selected, st.session_state.get('sports_cave_current_user') or {}, compact=True)
-                if allocation_id in cloud_links:
-                    if cloud_links[allocation_id].startswith('/auto-editions/'):
-                        with st.container(horizontal=True):
-                            st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
-                            _render_send_artwork(selected, 'selected')
-                    else:
-                        st.caption('Edition JPG: '+cloud_links[allocation_id])
-                elif edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
-                    with st.container(horizontal=True):
-                        st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
-                        _render_send_artwork(selected, 'selected')
-                else:
-                    st.caption(f"Print JPG — {status['label']}: {status['reason']}")
-                if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
-                    st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
-    with st.container(border=False, key="orders-table"):
-        st.dataframe(
-            _display_table_payload(rows, normalised=True, resources=resources),
-            hide_index=True,
-            use_container_width=True,
-            height=min(760, max(420, 28 * (len(rows) + 1))),
-            column_order=VISIBLE_COLUMNS,
-            column_config=_column_config(),
-            selection_mode="multi-row",
-            on_select="rerun",
-            row_height=28,
-            key=GRID_KEY,
-        )
-        _render_order_copy_click_handler()
-        psd_directory.render_missing_link_guard(st)
+    display_rows = _display_rows(rows,normalised=True,resources=resources)
+    import orders_prodigi_grid as grid
+    actor=st.session_state.get('sports_cave_current_user') or {}
+    statuses=grid.read_statuses(rows,actor)
+    @st.fragment
+    def selection_workspace():
+        if selection_guard and not selection_guard():return
+        _render_orders_selection_workspace(rows,resources,display_rows,statuses)
+    selection_workspace()
     _perf_log("render table", start, rows=len(rows))
-    print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+
+
+def _render_orders_selection_workspace(rows,resources,display_rows,statuses):
+    # All daily review lives in the lightweight table/drawer component.
+    with st.container(border=False, key="orders-table"):
+        from orders_prodigi_grid import render
+        render(rows,display_rows,grid_key=GRID_KEY,
+            selected=_selected_rows_from_state(rows),actor=st.session_state.get('sports_cave_current_user') or {},statuses=statuses)
+        psd_directory.render_missing_link_guard(st)
 
 
 def _mobile_unit_id(row):
@@ -2852,6 +2854,9 @@ def _render_send_artwork(row, placement):
     allocation=str(row.get('edition_order_id') or '')
     if not queue.enabled() or not allocation.isdigit() or not os_accounts.is_admin(actor):
         return
+    if str(row.get('prodigi','')).strip().lower()=='complete':
+        st.caption('Complete')
+        return
     if st.button('Send to Prodigi',key='orders-send-'+placement+'-'+allocation,
                  help='Queues the exact numbered JPG for the existing draft. Payment and production stay manual.'):
         try:
@@ -2859,7 +2864,8 @@ def _render_send_artwork(row, placement):
         except Exception as error:
             st.error(str(error) if isinstance(error,ValueError) else 'Could not queue artwork. Open Fulfilment for review.')
         else:
-            st.success(value['message'])
+            if value.get('status') in ('Needs QA','Needs review'):st.warning(value['message'])
+            else:st.success(value['message'])
 
 
 def _mobile_toggle(key, unit):
@@ -2888,16 +2894,23 @@ def _render_mobile_orders(rows):
             fulfilment = row.get('prodigi')
             if fulfilment in {'Refunded', 'Refund Pending'}:
                 fulfilment = f':red[{fulfilment}]'
-            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {fulfilment}")
+            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Certificate: {fulfilment}")
+            certificate=row.get('certificate_pdf_url') or row.get('shopify_file_url')
+            if fulfilment=='Complete' and str(row.get('edition_order_id') or '').isdigit():
+                certificate='/api/orders/certificate?allocation_id='+str(row['edition_order_id'])
+            if fulfilment=='Complete' and certificate and str(certificate).startswith(('https://','/api/orders/certificate?')):
+                st.link_button('Complete · Open certificate',certificate)
             link = psd_directory.link(row, mapping)
             if link: st.link_button('Open PSD', link + '#Open PSD')
             else: st.caption('PSD: Not linked')
             status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
             allocation_id=str(row.get('edition_order_id') or '')
             if allocation_id in cloud_links:
-                if cloud_links[allocation_id].startswith('/auto-editions/'):
+                if cloud_links[allocation_id].startswith(('/auto-editions/','/api/auto-editions/file')):
                     with st.container(horizontal=True):
-                        st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                        st.link_button(('Open JPG' if auto_editions_runtime.link_label(cloud_links[allocation_id])=='Open' else auto_editions_runtime.link_label(cloud_links[allocation_id])),cloud_links[allocation_id])
+                        if '/api/auto-editions/file?' in cloud_links[allocation_id]:
+                            st.link_button('Download JPG',cloud_links[allocation_id].replace('&inline=1','').split('#')[0])
                         _render_send_artwork(row,'mobile')
                 else:
                     st.caption('Edition JPG: '+cloud_links[allocation_id])
@@ -2928,15 +2941,14 @@ def _responsive_orders_mode():
 def _render_orders_search_form():
     if hasattr(st, "form") and hasattr(st, "form_submit_button"):
         with st.form("orders-search-form", clear_on_submit=False, border=False):
-            search_cols = st.columns([6, 1, 1], vertical_alignment="center")
+            search_cols = st.columns([8, 1], vertical_alignment="center")
             query = search_cols[0].text_input(
                 "Search orders",
                 key=SEARCH_KEY,
                 label_visibility="collapsed",
                 placeholder="Order, customer, product, variant, edition",
             )
-            search_cols[1].caption("Latest 75")
-            with search_cols[2]:
+            with search_cols[1]:
                 submitted = st.form_submit_button("Search", use_container_width=True)
         return str(query or "").strip(), bool(submitted)
 
@@ -2964,7 +2976,7 @@ def _render_orders_load_failure(query):
         st.rerun()
 
 
-def _render_orders_data_area():
+def _render_orders_data_area(selection_guard=None):
     prep_started = time.perf_counter()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
@@ -3001,12 +3013,10 @@ def _render_orders_data_area():
     # those orders so a quantity-2 line can never lose its second allocation here.
     visible_rows = rows
 
-    _responsive_orders_mode()
-    _render_top_actions(visible_rows, None)
-    from prodigi_sandbox_ui import render as render_prodigi_sandbox
-    render_prodigi_sandbox(_selected_rows_from_state(visible_rows), st.session_state.get('sports_cave_current_user') or {})
-
-    _render_orders_table(visible_rows)
+    if st.session_state.get('orders-prodigi-feedback'):
+        st.warning(st.session_state.pop('orders-prodigi-feedback'))
+    if selection_guard is None:_render_orders_table(visible_rows)
+    else:_render_orders_table(visible_rows,selection_guard=selection_guard)
 
 
 def _render_orders_loading_fragment():
@@ -3031,7 +3041,7 @@ def _render_orders_styles():
         st.html((Path(__file__).parent / "orders_page.css").read_text(encoding="utf-8"))
 
 
-def render_page():
+def render_page(selection_guard=None):
     page_started = time.perf_counter()
     _ensure_state()
     print("PERF Orders page entry", flush=True)
@@ -3066,6 +3076,6 @@ def render_page():
         elif not st.session_state.get(SNAPSHOT_LOADED_KEY):
             _load_snapshot_once("")
 
-    _render_orders_data_area()
+    _render_orders_data_area(selection_guard=selection_guard)
     _render_orders_supabase_live_refresh()
     _perf_log("total page load", page_started, rows=len(st.session_state.get(ROWS_KEY) or []))

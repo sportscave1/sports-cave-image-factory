@@ -113,6 +113,10 @@ class Jobs:
 
     def read_bound(self,job_id,allocation_id):
         """One current statement snapshot; caller still checks the full identity."""
+        import certificate_frame_fulfilment as frames
+        if frames.is_unit(allocation_id):
+            unit,_=frames.unit(allocation_id,self.connect)
+            return self.read(job_id),unit
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('''SELECT to_jsonb(j) AS job,to_jsonb(e) AS unit
                 FROM public.auto_edition_jobs j CROSS JOIN public.edition_orders e

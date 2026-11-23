@@ -413,6 +413,17 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
     if pipeline_state in ("processed", "duplicate") and not payload.get('checkout_token'):
         from crm_webhooks import forward_paid_order
         background_tasks.add_task(forward_paid_order, payload, webhook_id, triggered_at)
+    # Certificate fulfilment is durable before acknowledgement, including retries
+    # after the normal paid-order receipt was already consumed. Artwork is unchanged.
+    if pipeline_state in ("processed", "duplicate") and any(
+        any(p.get('name') == '_sports_cave_frame_request' for p in line.get('properties') or [] if isinstance(p, dict))
+        for line in payload.get('line_items') or []):
+        try:
+            import collector_vault
+            await run_in_threadpool(collector_vault.process_framed_order_paid, payload)
+        except Exception as error:
+            _webhook_log('certificate_fulfilment_retry', webhook_id=webhook_id, error_type=type(error).__name__)
+            return Response('Certificate fulfilment persistence failed; retry this webhook.', status_code=503)
     if pipeline_state == "duplicate":
         _webhook_log("webhook_duplicate_skipped", status="completed", webhook_id=webhook_id, topic=topic)
         return {

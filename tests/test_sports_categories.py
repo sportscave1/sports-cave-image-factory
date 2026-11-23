@@ -70,13 +70,12 @@ class SportRegistryTests(unittest.TestCase):
         self.assertEqual(sports.detect_sport_in_text('Horse Racing Wall Art'), 'Horse Racing')
 
     def test_all_providers_share_registry(self):
-        import ads_page, db, meta_posting_service, social_media_creator
-        import social_media_reels_studio_page as reels
+        import ads_page, db, meta_posting_service
         import sports_cave_dashboard, seo_blog_workflow, app, crm_logic
         expected = set(sports.CANONICAL_SPORT_CATEGORIES)
         for values in (ads_page.CATEGORY_OPTIONS, db.SPORT_CATEGORIES,
-                       meta_posting_service.SPORT_OPTIONS, social_media_creator.SPORT_OPTIONS,
-                       reels.SPORT_CATEGORY_OPTIONS, sports_cave_dashboard.DESIGN_IDEA_SPORTS,
+                       meta_posting_service.SPORT_OPTIONS,
+                       sports_cave_dashboard.DESIGN_IDEA_SPORTS,
                        seo_blog_workflow.SPORT_OPTIONS, app.SPORT_OPTIONS, crm_logic.SPORTS):
             self.assertTrue(expected <= set(values))
         import ads_creative_refresh
@@ -183,12 +182,6 @@ class SportRegistryTests(unittest.TestCase):
         self.assertTrue(crm_logic.matches(crm_logic.rule('interest', 'MLB', 'contains'), facts))
         self.assertTrue(crm_logic.matches(crm_logic.rule('interest', 'NRL', 'contains'), facts))
 
-    def test_reels_new_disciplines_and_legacy_detection(self):
-        import social_media_reels_studio_page as reels
-        self.assertEqual(reels.detect_sport_category('peter-brock-v8-supercars'), 'V8 Supercars')
-        self.assertEqual(reels.detect_sport_category('brady-super-bowl-football'), 'NFL')
-        self.assertEqual(reels.detect_sport_category('jordan-basketball'), 'NBA')
-        self.assertEqual(reels.detect_sport_category('motogp-racing'), 'MotoGP')
 
     def test_seo_editorial_custom_values_preserved(self):
         import seo_blog_workflow as blog
@@ -214,18 +207,18 @@ class SportWidgetTests(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
         script = '''
 import streamlit as st
-import ads_page, ads_creative_refresh, meta_posting_service, social_media_creator
+import ads_page, ads_creative_refresh, meta_posting_service
 from sports_categories import normalize_sport_state
 providers = {'New Ads': ads_page.CATEGORY_OPTIONS,
              'Creative Refresh': ads_creative_refresh.ads_page.CATEGORY_OPTIONS,
              'Posting': meta_posting_service.SPORT_OPTIONS,
-             'Social': social_media_creator.SPORT_OPTIONS}
+}
 for label, options in providers.items():
     normalize_sport_state(st.session_state, label, 'Other')
     st.selectbox(label, options, key=label)
 '''
         app = AppTest.from_string(script)
-        for key in ('New Ads', 'Creative Refresh', 'Posting', 'Social'):
+        for key in ('New Ads', 'Creative Refresh', 'Posting'):
             app.session_state[key] = 'NRL'
         app.run(timeout=30)
         self.assertFalse(app.exception)

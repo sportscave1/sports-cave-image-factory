@@ -32,7 +32,7 @@ def test_queued_cancel_then_exact_normal_reset(design,tmp_path):
     assert discover(design)['stage']=='Queued'
     work=d.queue.claim('host')
     complete(design,work['lease_token'],tmp_path)
-    assert status.batch(d.connect,[PID])['rows'][0]['status']=='Review'
+    assert status.batch(d.connect,[PID])['rows'][0]['status']=='Repair'
     assert protected(sql)==before
 
 

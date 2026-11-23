@@ -2,11 +2,12 @@ import json
 import logging
 import os
 import uuid
+from fastapi.encoders import jsonable_encoder
 from urllib.parse import quote
 
 import requests
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import RedirectResponse, JSONResponse, Response, StreamingResponse
 
 import collector_vault
 from services import r2_storage
@@ -45,7 +46,7 @@ def _json(payload, status_code=200, *, request_id="", error_code=""):
     ).strip()
     if revision:
         headers["X-Sports-Cave-Revision"] = revision[:12]
-    return JSONResponse(payload, status_code=status_code, headers=headers)
+    return JSONResponse(jsonable_encoder(payload), status_code=status_code, headers=headers)
 
 
 def _request_id():
@@ -59,6 +60,10 @@ def _error_response(error, operation, *, request_id=""):
         getattr(error, "error_code", "")
         or "internal_server_error"
     )
+    if isinstance(error, collector_vault.CollectorVaultAuthenticationError):
+        # These verifier messages are fixed strings: no tokens, claims, secrets,
+        # or customer identifiers. Keep the public response generic.
+        LOGGER.warning("Collector Vault authentication rejected reason=%s request_id=%s", str(error), request_id)
     LOGGER.error(
         (
             "Collector Vault request failed operation=%s error_type=%s "
@@ -182,6 +187,7 @@ async def collector_vault_frame_request(request: Request):
             frame_variant_id=body.get("frame_variant_id"),
             idempotency_key=body.get("idempotency_key"),
             allow_repeat=bool(body.get("allow_repeat")),
+            country=body.get("country"),
         )
         return _json({"ok": True, **result})
     except Exception as error:
@@ -252,6 +258,9 @@ async def collector_vault_asset(request: Request):
         return await collector_vault_options(request)
     try:
         asset = collector_vault.resolve_asset_token(request.query_params.get("token"))
+        frame = request.query_params.get("frame")
+        if frame and (frame not in ("black", "oak", "white") or asset.get("kind") != "preview"):
+            raise collector_vault.CollectorVaultError("Invalid certificate frame preview.")
         headers = {
             **_cors_headers(),
             "Cache-Control": "private, max-age=300" if asset.get("kind") == "preview" else "no-store",
@@ -270,6 +279,18 @@ async def collector_vault_asset(request: Request):
             raise collector_vault.CollectorVaultNotFoundError("Certificate asset is unavailable.")
         upstream = requests.get(source_url, stream=True, timeout=(8, 60))
         upstream.raise_for_status()
+        if frame:
+            from collector_collection_offers import render_certificate_frame
+            content = bytearray()
+            try:
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    content.extend(chunk)
+                    if len(content) > 12 * 1024 * 1024:
+                        raise collector_vault.CollectorVaultError("Certificate preview is too large.")
+            finally:
+                upstream.close()
+            return Response(render_certificate_frame(content, frame), media_type="image/webp",
+                            headers={**_cors_headers(), "Cache-Control": "private, max-age=300"})
         content_length = upstream.headers.get("Content-Length")
         if content_length:
             headers["Content-Length"] = content_length
@@ -282,7 +303,53 @@ async def collector_vault_asset(request: Request):
         return _error_response(error, "asset")
 
 
+async def collector_vault_recommendations(request: Request):
+    if request.method == "OPTIONS":
+        return await collector_vault_options(request)
+    try:
+        session = _session(request)
+        from collector_collection_offers import recommendations
+        from starlette.concurrency import run_in_threadpool
+        products = await run_in_threadpool(recommendations, session["shopify_customer_id"],
+            country=request.query_params.get("country"), seed_product_id=request.query_params.get("product_id"))
+        return _json({"ok": True, "products": products})
+    except Exception as error:
+        return _error_response(error, "recommendations")
+
+
+async def collector_vault_cart_launch(request: Request):
+    """Apply Shopify's account return country before the existing cart/drawer bridge."""
+    try:
+        token=str(request.query_params.get("sc_certificate_cart") or "")
+        payload=collector_vault._verify_signed_token(token, expected_purpose="frame_cart")
+        country=str(payload.get("country") or "AU")
+        if not collector_vault.re.fullmatch(r"[A-Z]{2}",country):
+            raise collector_vault.CollectorVaultError("Invalid cart country.")
+        # Match Shopify's customer-account return link. A cross-site localization
+        # POST can retain the browser's previous market; country on the top-level
+        # storefront GET applies the market before the existing cart bridge runs.
+        destination=("https://www.sportscaveshop.com/?country=" + country
+                     + "&sc_certificate_cart=" + quote(token, safe=""))
+        return RedirectResponse(destination, status_code=303, headers={
+            "Cache-Control":"no-store", "Referrer-Policy":"no-referrer"})
+    except Exception as error:
+        return _error_response(error,"cart_launch")
+
+
+async def collector_vault_cart_handoff(request: Request):
+    if request.method == "OPTIONS":
+        return await collector_vault_options(request)
+    try:
+        body = await _json_body(request)
+        return _json({"ok": True, **collector_vault.frame_cart_handoff(body.get("token"))})
+    except Exception as error:
+        return _error_response(error, "cart_handoff")
+
+
 COLLECTOR_VAULT_ROUTES = (
+    ("/api/collector-vault/frame/launch", collector_vault_cart_launch, ("GET",)),
+    ("/api/collector-vault/frame/cart-handoff", collector_vault_cart_handoff, ("POST", "OPTIONS")),
+    ("/api/collector-vault/recommendations", collector_vault_recommendations, ("GET", "OPTIONS")),
     ("/api/collector-vault/bootstrap", collector_vault_bootstrap, ("GET", "OPTIONS")),
     ("/api/collector-vault/events", collector_vault_event, ("POST", "OPTIONS")),
     ("/api/collector-vault/frame/request", collector_vault_frame_request, ("POST", "OPTIONS")),

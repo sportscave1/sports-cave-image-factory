@@ -21,6 +21,7 @@ from PIL import Image, UnidentifiedImageError
 
 import shopify_sync
 import supabase_backend
+from collector_collection_offers import FRAME_SKUS, frame_variants
 from services import r2_storage
 
 
@@ -756,8 +757,8 @@ def _frame_product_state(product, configured_product_id, configured_variant_id):
         return "framed_product_unavailable"
     if not str(product.get("onlineStoreUrl") or "").strip():
         return "framed_product_not_published"
-    if not _frame_product_image(product):
-        return "framed_product_image_missing"
+    # Account offers render the owner's signed certificate in the frame template;
+    # a generic public product image is optional.
     price = (selected.get("contextualPricing") or {}).get("price") or {}
     if (
         not selected.get("availableForSale")
@@ -865,6 +866,7 @@ def get_frame_product(*, force=False):
                 "ProductVariant",
                 selected_variant.get("id"),
             ),
+            "variants": frame_variants(product),
             "sku": str(selected_variant.get("sku") or ""),
             "status": str(product.get("status") or "").strip().upper(),
             "published": bool(str(product.get("onlineStoreUrl") or "").strip()),
@@ -1125,7 +1127,7 @@ def _reviewed_keys(owner_hash):
             }
 
 
-def review_prompt(rows, shopify_customer_id):
+def review_prompt(rows, shopify_customer_id, *, allow_purchased=False):
     if not rows or not _judgeme_configured():
         return None
     try:
@@ -1133,14 +1135,14 @@ def review_prompt(rows, shopify_customer_id):
     except Exception as error:
         _log_optional_feature_unavailable("reviews", error)
         return None
-    statuses = delivery_statuses(
+    statuses = {} if allow_purchased else delivery_statuses(
         [row.get("shopify_order_id") for row in rows],
         shopify_customer_id,
     )
     for row in rows:
         order_id = _canonical_gid("Order", row.get("shopify_order_id"))
         product_id = _canonical_gid("Product", row.get("shopify_product_id"))
-        if not order_id or not product_id or not statuses.get(order_id):
+        if not order_id or not product_id or (not allow_purchased and not statuses.get(order_id)):
             continue
         if (order_id, product_id) in reviewed:
             continue
@@ -1162,6 +1164,7 @@ def review_prompt(rows, shopify_customer_id):
                 "customer_hash": customer_hash(shopify_customer_id),
                 "shopify_order_id": order_id,
                 "shopify_product_id": product_id,
+                "allow_purchased": bool(allow_purchased),
             },
             ttl_seconds=REVIEW_REFERENCE_TTL_SECONDS,
         )
@@ -1224,6 +1227,7 @@ def build_vault_payload(shopify_customer_id):
                 "image": frame_product.get("image"),
                 "inclusions": list(frame_product.get("inclusions") or [])[:3],
                 "variant_id": frame_product.get("variant_id") or "",
+                "variants": frame_product.get("variants") or [],
                 "contextual_price": dict(
                     frame_product.get("contextual_price") or {}
                 ),
@@ -1235,7 +1239,7 @@ def build_vault_payload(shopify_customer_id):
             include_secure_assets=secure_assets_available,
         ),
         "review_prompt": (
-            review_prompt(rows, shopify_customer_id)
+            review_prompt(rows, shopify_customer_id, allow_purchased=True)
             if secure_assets_available
             else None
         ),
@@ -1272,11 +1276,14 @@ def create_frame_request(
     frame_variant_id,
     idempotency_key,
     allow_repeat=False,
+    country=None,
 ):
     row = _resolve_certificate_reference(certificate_reference, shopify_customer_id)
     frame_product = get_frame_product(force=True)
     requested_variant = _canonical_gid("ProductVariant", frame_variant_id)
-    if not frame_product.get("available") or requested_variant != frame_product.get("variant_id"):
+    allowed_variants = {v["variant_id"] for v in frame_product.get("variants", [])}
+    allowed_variants.add(frame_product.get("variant_id"))
+    if not frame_product.get("available") or requested_variant not in allowed_variants:
         raise CollectorVaultUnavailableError("The framed certificate is currently unavailable.")
     owner_hash = customer_hash(shopify_customer_id)
     key = _safe_idempotency_key(idempotency_key)
@@ -1290,15 +1297,16 @@ def create_frame_request(
                     FROM collector_frame_requests
                     WHERE customer_hash=%s
                       AND certificate_row_id=%s
+                      AND frame_variant_id=%s
                       AND status IN ('pending', 'cart_created', 'ordered')
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
-                    (owner_hash, int(row.get("certificate_row_id") or 0)),
+                    (owner_hash, int(row.get("certificate_row_id") or 0), requested_variant),
                 )
                 existing = cur.fetchone()
                 if existing:
-                    return dict(existing)
+                    return frame_cart_response(dict(existing), row, requested_variant, country)
             cur.execute(
                 """
                 INSERT INTO collector_frame_requests (
@@ -1343,7 +1351,53 @@ def create_frame_request(
         certificate_row_id=row.get("certificate_row_id"),
         event_key=f"frame-request:{created.get('request_reference')}",
     )
-    return dict(created)
+    return frame_cart_response(dict(created), row, requested_variant, country)
+
+
+def frame_cart_response(result, certificate, variant_id, country=None):
+    """Scoped storefront handoff; no customer identity or permanent asset links."""
+    reference = str(result.get("request_reference") or "")
+    if not _UUID.match(reference):
+        raise CollectorVaultError("Frame request reference is invalid.")
+    token = _signed_token({"purpose": "frame_cart", "request_reference": reference,
+                           "variant_id": variant_id, "destination": "checkout", "country": country if re.fullmatch(r"[A-Z]{2}", str(country or "")) else _frame_product_country()}, ttl_seconds=30 * 60)
+    result["request_reference"] = reference
+    result["cart_handoff_url"] = "https://sports-cave-image-factory.onrender.com/api/collector-vault/frame/launch?sc_certificate_cart=" + token
+    return result
+
+
+def frame_cart_handoff(token):
+    payload = _verify_signed_token(token, expected_purpose="frame_cart")
+    reference = str(payload.get("request_reference") or "")
+    if not _UUID.match(reference):
+        raise CollectorVaultError("Frame request reference is invalid.")
+    with supabase_backend.connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM collector_frame_requests WHERE request_reference=%s", (reference,))
+        request = cur.fetchone()
+    if not request or request.get("status") not in ("pending", "cart_created") or request.get("frame_variant_id") != payload.get("variant_id"):
+        raise CollectorVaultAuthorizationError("This cart handoff is unavailable.")
+    asset_token = _signed_token({"purpose": "asset", "kind": "preview",
+                                 "certificate_row_id": request["certificate_row_id"],
+                                 "customer_hash": request["customer_hash"]}, ttl_seconds=ASSET_TOKEN_TTL_SECONDS)
+    color = next((color.lower() for sku, color in FRAME_SKUS.items()
+                  if sku == _frame_variant_sku(request["frame_variant_id"])), "black")
+    preview = f"https://sports-cave-image-factory.onrender.com{API_BASE_PATH}/asset?token={asset_token}&frame={color}"
+    return {"country_code": payload.get("country") or _frame_product_country(),
+            "destination": "checkout" if payload.get("destination") == "checkout" else "drawer",
+            "variant_id": str(request["frame_variant_id"]).rsplit("/", 1)[-1],
+            "request_reference": reference, "quantity": 1,
+            "properties": {"_sports_cave_frame_request": reference,
+                           "_sports_cave_certificate_preview": preview,
+                           "Certificate": str(request.get("artwork_title") or "Collector certificate"),
+                           "Edition": f"#{int(request['edition_number']):03d} of {int(request['edition_limit'])}"}}
+
+
+def _frame_variant_sku(variant_id):
+    product = get_frame_product(force=True)
+    color = next((item["color"] for item in product.get("variants", []) if item["variant_id"] == variant_id), None)
+    if not product.get("available") or not color:
+        raise CollectorVaultUnavailableError("The selected frame is unavailable.")
+    return next(sku for sku, name in FRAME_SKUS.items() if name == color)
 
 
 def _safe_checkout_url(value):
@@ -1422,11 +1476,15 @@ def process_framed_order_paid(order_payload):
     configured_variant_id = _configured_frame_variant_id()
     if not configured_variant_id:
         return {"updated": 0}
-    request_references = {
-        _line_item_properties(line_item).get("_sports_cave_frame_request", "")
+    matched_lines = [
+        line_item
         for line_item in (payload.get("line_items") or [])
-        if _line_item_variant_id(line_item) == configured_variant_id
-    }
+        if _line_item_variant_id(line_item) == configured_variant_id or (
+            _canonical_gid("Product", line_item.get("product_id")) == _configured_frame_product_id()
+            and line_item.get("sku") in FRAME_SKUS
+        )
+    ]
+    request_references = {_line_item_properties(line).get("_sports_cave_frame_request", "") for line in matched_lines}
     request_references = {value for value in request_references if _UUID.match(str(value or ""))}
     if not request_references:
         return {"updated": 0}
@@ -1447,7 +1505,9 @@ def process_framed_order_paid(order_payload):
                     updated_at=now()
                 WHERE request_reference = ANY(%s)
                   AND shopify_customer_id = ANY(%s)
-                  AND frame_variant_id=%s
+                  AND (request_reference::text, frame_variant_id) IN (
+                    SELECT * FROM unnest(%s::text[], %s::text[])
+                  )
                   AND status <> 'ordered'
                 RETURNING request_reference, customer_hash
                 """,
@@ -1456,7 +1516,8 @@ def process_framed_order_paid(order_payload):
                     str(payload.get("name") or "").strip(),
                     list(request_references),
                     customer_id_candidates(customer_id),
-                    configured_variant_id,
+                    [_line_item_properties(line).get("_sports_cave_frame_request", "") for line in matched_lines],
+                    [_line_item_variant_id(line) for line in matched_lines],
                 ),
             )
             updated = cur.fetchall() or []
@@ -1467,6 +1528,8 @@ def process_framed_order_paid(order_payload):
             row.get("customer_hash"),
             event_key=f"frame-order:{order_id}:{row.get('request_reference')}",
         )
+    from certificate_frame_fulfilment import ingest_paid
+    ingest_paid(payload, supabase_backend.connect)
     return {"updated": len(updated), "request_references": [str(row.get("request_reference")) for row in updated]}
 
 
@@ -1546,8 +1609,8 @@ def _resolve_review_reference(reference, shopify_customer_id):
         raise CollectorVaultAuthorizationError("Review order does not match the certificate.")
     if _canonical_gid("Product", row.get("shopify_product_id")) != payload.get("shopify_product_id"):
         raise CollectorVaultAuthorizationError("Review product does not match the certificate.")
-    statuses = delivery_statuses([row.get("shopify_order_id")], shopify_customer_id, force=True)
-    if not statuses.get(_canonical_gid("Order", row.get("shopify_order_id"))):
+    statuses = {} if payload.get("allow_purchased") is True else delivery_statuses([row.get("shopify_order_id")], shopify_customer_id, force=True)
+    if payload.get("allow_purchased") is not True and not statuses.get(_canonical_gid("Order", row.get("shopify_order_id"))):
         raise CollectorVaultAuthorizationError("Reviews are available after confirmed delivery.")
     return row
 

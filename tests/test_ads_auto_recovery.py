@@ -172,6 +172,11 @@ def test_completion_repair_keeps_collected_files_and_one_send_permit(monkeypatch
     ('FAILED', False, 0, True, False),
     ('AD_CREATED', False, 31, False, True),
     ('AD_CREATED', False, 1, False, False),
+    ('AD_CREATED', False, 3, False, True),
+    ('AD_CREATED', 'expired', 1, False, True),
+    ('AD_CREATED', 'expired', 1, True, False),
+    ('VALIDATING', False, 1, False, False),
+    ('VALIDATING', False, 3, False, True),
     ('AD_CREATED', True, 31, False, False),
     ('AD_CREATED', 'expired', 31, False, True),
     ('AD_CREATED', False, 31, True, False),
@@ -187,7 +192,21 @@ def test_real_sql_retry_fences_active_pending_and_terminal_jobs(store, monkeypat
     @contextmanager
     def connect():
         with store() as conn:
-            yield SimpleNamespace(cursor=conn.cursor, commit=lambda: None)
+            @contextmanager
+            def cursor():
+                from psycopg._queries import PostgresQuery
+                from psycopg.adapt import Transformer
+                with conn.cursor() as cur:
+                    class DriverCursor:
+                        def execute(self, sql, params=None):
+                            # Use production psycopg placeholder/adaptation rules
+                            # before the isolated SQL transport substitutes values.
+                            PostgresQuery(Transformer()).convert(sql, params)
+                            return cur.execute(sql, params)
+                        def fetchone(self):
+                            return cur.fetchone()
+                    yield DriverCursor()
+            yield SimpleNamespace(cursor=cursor, commit=lambda: None)
     backend = SimpleNamespace(connect=connect, ensure_ads_schema=lambda: None)
     monkeypatch.setattr(SupabasePostingStore, '_backend', lambda _: backend)
     posting = SupabasePostingStore(); request = request_for(submission_id=str(uuid4()))

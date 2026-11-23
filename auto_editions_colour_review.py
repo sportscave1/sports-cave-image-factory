@@ -16,6 +16,8 @@ def registry():
     # Bundled records are shown for review even on an app without the worker's
     # configured registry. Displaying them does not activate a default or retry.
     names=[Path(__file__).parent/'config/auto_editions/icc-policies-20261017.json']
+    owner_default=Path(__file__).parent/'config/auto_editions/owner-srgb-default.json'
+    if owner_default.exists():names.append(owner_default)
     if os.getenv('AUTO_EDITIONS_COLOUR_POLICIES_FILE'):names.append(Path(os.environ['AUTO_EDITIONS_COLOUR_POLICIES_FILE']))
     values=[]
     for p in names:

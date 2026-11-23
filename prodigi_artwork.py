@@ -29,6 +29,8 @@ def issue(snapshot, *, sandbox_test_id=None):
     if sandbox_test_id:
         import uuid
         value['sandbox_test_id'] = str(uuid.UUID(sandbox_test_id))
+    elif snapshot.get('draft_preparation'):
+        value['draft_preparation']=True
     with connect() as conn, conn.cursor() as cur:
         cur.execute('INSERT INTO app_settings(key,value,updated_at) VALUES(%s,%s::jsonb,now())',
                     (PREFIX + hashlib.sha256(token.encode()).hexdigest(), json.dumps(value)))
@@ -50,6 +52,16 @@ def bound(token):
     if datetime.fromisoformat(value['expires_at']) <= datetime.now(timezone.utc):
         raise ValueError('Unavailable')
     sandbox = value.get('sandbox_test_id')
+    draft=False
+    if value.get('draft_preparation'):
+        from prodigi_full_qa import live_enabled
+        if not live_enabled():raise ValueError('Unavailable')
+        with connect() as conn,conn.cursor() as cur:
+            cur.execute('SELECT value FROM app_settings WHERE key=%s',('prodigi_prepare:'+str(value['allocation_id']),));r=cur.fetchone()
+        request=r['value'] if r else {};snap=request.get('snapshot') or {}
+        draft=bool(request.get('browser_requested') and not request.get('hidden') and snap.get('draft_preparation') and
+            snap.get('job_id')==value['job_id'] and snap.get('output')==value['output'])
+        if not draft:raise ValueError('Unavailable')
     if sandbox:
         with connect() as conn, conn.cursor() as cur:
             cur.execute('SELECT value FROM app_settings WHERE key=%s', ('prodigi_sandbox_test:'+sandbox,))
@@ -62,7 +74,7 @@ def bound(token):
             raise ValueError('Unavailable')
     record, unit = Jobs(connect).read_bound(value['job_id'], value['allocation_id'])
     if (not record or record['status'] != 'Ready' or not same_allocation(unit, record['payload']['identity'])
-            or (not sandbox and record['result'].get('test_only') is not False) or record['result'].get('retained') is not True
+            or (not sandbox and not draft and record['result'].get('test_only') is not False) or record['result'].get('retained') is not True
             or record['result']['output'] != value['output']):
         raise ValueError('Unavailable')
     return value

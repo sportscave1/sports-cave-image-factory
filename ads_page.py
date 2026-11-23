@@ -1,3 +1,4 @@
+from ads_prompt_language import prompt_language
 from sports_categories import sport_category_options, normalize_sport_state, sport_family
 import ads_ie_legacy_description as ie_legacy_description
 import ads_ie_copy as ie_copy
@@ -767,8 +768,8 @@ IE_ADVANCED_VISUAL_OPTION_SETS = {
         "Graphite",
         "Soft Greige",
         "Walnut Brown",
-        "Deep Navy",
-        "Muted Olive",
+        "Smoky Grey",
+        "Warm Mushroom",
         "Stone Beige",
     ),
     "wall_material": (
@@ -2816,19 +2817,19 @@ def build_carousel_final_square_format_check():
 
 
 CAROUSEL_NOSTALGIC_WALL_TONES = {
-    "cricket": ("muted heritage pavilion green", "historic pavilions and quiet clubhouse interiors"),
-    "australian rules": ("muted heritage oval green", "traditional oval grounds and aged clubrooms"),
-    "rugby union": ("muted deep clubroom green", "traditional rugby clubhouses"),
-    "rugby league": ("muted heritage navy", "established rugby league clubrooms"),
-    "football": ("muted stadium tunnel green", "older stadium tunnels and terrace-era grounds"),
+    "cricket": ("muted pavilion sandstone", "historic pavilions and quiet clubhouse interiors"),
+    "australian rules": ("muted clubhouse taupe", "traditional oval grounds and aged clubrooms"),
+    "rugby union": ("deep clubroom charcoal", "traditional rugby clubhouses"),
+    "rugby league": ("muted heritage graphite", "established rugby league clubrooms"),
+    "football": ("muted stadium concrete grey", "older stadium tunnels and terrace-era grounds"),
     "nba": ("muted vintage hardwood tan", "historic basketball courts and warm retro arenas"),
     "nfl": ("muted aged leather tan", "heritage locker rooms and traditional football equipment"),
-    "baseball": ("muted classic ballpark green", "historic ballpark walls and grandstands"),
-    "motorsport": ("muted petrol blue", "heritage racing workshops and older pit-lane surfaces"),
-    "ice hockey": ("muted rink blue-grey", "historic ice arenas and cool rink-side architecture"),
-    "tennis": ("muted clay terracotta", "traditional clay courts and tournament heritage"),
-    "golf": ("muted clubhouse olive", "traditional clubhouses and mature golf-course landscapes"),
-    "combat": ("muted vintage gym burgundy", "historic boxing gyms and aged training halls"),
+    "baseball": ("muted classic ballpark stone", "historic ballpark walls and grandstands"),
+    "motorsport": ("muted workshop graphite", "heritage racing workshops and older pit-lane surfaces"),
+    "ice hockey": ("muted rink smoky grey", "historic ice arenas and cool rink-side architecture"),
+    "tennis": ("muted warm sandstone", "traditional clay courts and tournament heritage"),
+    "golf": ("muted clubhouse mushroom", "traditional clubhouses and mature golf-course landscapes"),
+    "combat": ("muted vintage gym neutral brown", "historic boxing gyms and aged training halls"),
     "horse racing": ("muted warm clubhouse cream", "historic racecourse pavilions and grandstands"),
     "other": ("muted gallery taupe", "restrained collector galleries and warm painted walls"),
 }
@@ -3705,7 +3706,7 @@ INSTANT_EXPERIENCE_WALL_PALETTES_V4 = {
         ("fine seamless mineral plaster", "dark mushroom"),
     ),
     "heritage": (
-        ("fine seamless mineral plaster", "muted olive-grey"),
+        ("fine seamless mineral plaster", "muted mushroom-grey"),
         ("smooth seamless stone-toned render", "antique-stone taupe"),
         ("subtle seamless limewash", "warm greige limewash"),
     ),
@@ -6826,6 +6827,7 @@ def _configure_refresh_copy(result, workflow):
             st.session_state.pop(key, None)
 
 
+@prompt_language
 def build_instant_experience_winner_refinement_prompt(product_name, category, country, product_url, context, *, product_metadata=None, campaign_moment=None):
     prompt = ads_refresh_generation.build_prompt(
         sys.modules[__name__], product_name, category, country, "Instant Experience", product_url, context,
@@ -8094,6 +8096,7 @@ def build_instant_experience_shared_setup(product_name, category, product_url):
 - Do not introduce collection-page routing in this workflow."""
 
 
+@prompt_language
 def build_standard_instant_experience_prompt(
     product_name, category, country, campaign_type, product_url="", *,
     specific_pattern=False, campaign_moment=None, product_metadata=None,
@@ -8461,6 +8464,7 @@ def build_visual_variation_token():
     return secrets.token_hex(6)
 
 
+@prompt_language
 def build_ads_prompt(
     product_name,
     category,

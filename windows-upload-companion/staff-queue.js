@@ -21,6 +21,7 @@ let staffTickRunning = false;
 
 async function pairStaffQueue(token) {
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return {paired:false};
+  if(await staffRead(staffDeviceKey)!==token)await staffWrite('ordersNotificationCursor','');
   await staffWrite(staffDeviceKey, token);
   await ensureStaffAlarm();
   await ensureOrdersAlarm();

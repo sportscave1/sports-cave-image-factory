@@ -126,7 +126,8 @@ def test_private_fast_png_preserves_released_pixels_profile_and_alpha(tmp_path,r
     source=real_psd(tmp_path/'source.psd',colour=colour,width=64,height=32,rle=rle)
     before=source.read_bytes();released=types.ModuleType('released_artwork');released.__file__=candidate.__file__
     root=Path(candidate.__file__).parent
-    exec(compile(subprocess.check_output(['git','show','58569c66:product_upload_artwork.py'],cwd=root),released.__file__,'exec'),released.__dict__)
+    from tests.status_phase1_history import artwork_baseline
+    exec(compile(artwork_baseline(root),released.__file__,'exec'),released.__dict__)
     profile=ImageCms.createProfile('sRGB')
     with patch('PIL.ImageCms.createProfile',return_value=profile):
         released.decode(source,tmp_path/'before.png',{},None)

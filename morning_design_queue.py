@@ -89,9 +89,10 @@ def _job_prompt(key, title, recommendation, *, primary_market=""):
         'Keep this exact field even if the final title changes. Do not put it in the artwork. '
         'Save only to Design Studio Review; do not publish a product. '
         'Report Review delivery and artwork quality separately. Mark unresolved identity or other visual '
-        'concerns needs_attention in the matching JSON even if delivery succeeds. After completing '
-        'independent work, end your response with SC_DESIGN_BLOCKED: followed by the exact incomplete '
-        'required workflow checkpoint, if one remains. Omit the marker for visual concerns alone.\n')
+        'concerns needs_attention in the matching JSON even if delivery succeeds. Source resolution, '
+        'photographic review and collector-art permission are handled in manual review after delivery; '
+        'continue the complete design flow without a confirmation or approval pause. Report actual '
+        'technical failures accurately and preserve completed work.\n')
 
 
 def _waiting_refresh_prompt(job):
@@ -125,7 +126,13 @@ def _waiting_prompt(job):
     """Upgrade only unclaimed snapshots, keeping the saved brief and job ID."""
     prompt = job['prompt']
     if job.get('section') == 'edit':
-        return prompt  # The selected-revision Edit prompt is already complete.
+        from design_execution_flow import CONTINUOUS_DESIGN_FLOW
+        from design_review_prompt import EDIT_EXECUTION_RULES
+        if CONTINUOUS_DESIGN_FLOW not in prompt:
+            prompt = CONTINUOUS_DESIGN_FLOW + prompt
+        if EDIT_EXECUTION_RULES not in prompt:
+            prompt = EDIT_EXECUTION_RULES + prompt
+        return prompt
     if prompt.startswith('SPORTS CAVE EXISTING DESIGN REFRESH\n'):
         return _waiting_refresh_prompt(job)
     if '\n\n**Start the authorised new-design job**\n\n' in prompt:
@@ -135,13 +142,14 @@ def _waiting_prompt(job):
         from design_collector_assets import NEW_BADGE_LAYOUT
         from design_collector_background import NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND
         from home_morning_brief_actions import REVIEW_SAVE_NAMING
+        from design_execution_flow import CONTINUOUS_DESIGN_FLOW
         from design_photographic_composition import STORY_FIRST_CROP, GENERATE_PHOTOGRAPHIC_UNIT, FINAL_PHOTOGRAPHIC_REVIEW
         from design_subject_authenticity import CREATE_DESIGN_AUTHENTICITY_CHECK
         from design_motorsport import (
             MOTORSPORT_JSON, MOTORSPORT_ARTWORK, MOTORSPORT_PLACEMENT,
             MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK,
         )
-        if all(rule in prompt for rule in (NEW_DESIGN_TITLE_GUIDANCE, POSTER_IMAGE_SELECTION, PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES, REVIEW_SAVE_NAMING,
+        if all(rule in prompt for rule in (CONTINUOUS_DESIGN_FLOW, NEW_DESIGN_TITLE_GUIDANCE, POSTER_IMAGE_SELECTION, PURPOSEFUL_ABSTRACT, COMPLEMENTARY_IMAGES, REVIEW_SAVE_NAMING,
                                           STORY_FIRST_CROP, GENERATE_PHOTOGRAPHIC_UNIT, FINAL_PHOTOGRAPHIC_REVIEW,
                                           COMPLETE_COMPOSITION, CREATIVE_REVIEW, REVIEW_RELATIONSHIPS, NEW_BADGE_LAYOUT,
                                           NEW_BACKGROUND_RESEARCH, NEW_COLLECTOR_BACKGROUND, CREATE_DESIGN_AUTHENTICITY_CHECK,
@@ -149,7 +157,10 @@ def _waiting_prompt(job):
                                           MOTORSPORT_INTEGRATION, MOTORSPORT_FINISH_CHECK)):
             return prompt
         _, _, body = prompt.partition('\n\n**Start the authorised new-design job**\n\n')
-        _, _, body = body.partition('\n\n')  # Existing workflow introduction.
+        if '**CONTINUOUS DESIGN FLOW — NEW, EDIT AND REFRESH**' in body:
+            _, _, body = body.partition('Display references/artwork and continue without pausing for approval.\n\n')
+        else:
+            _, _, body = body.partition('\n\n')  # Legacy workflow introduction.
         brief, found, _ = body.partition('\n\n**1. Research the story, sources and master**')
         if found:
             upgraded = _job_prompt(_output_key(job), job['title'], brief)
@@ -405,13 +416,14 @@ def verify_outputs(jobs):
 
 
 def tick(token, events, capacity=1):
+    from companion_poll_transaction import connection
     # Accept older two-slot clients so existing work can report and finish.
     # Admission is always one design, regardless of the advertised capacity.
     if type(capacity) is not int or capacity not in (1, 2):
         raise ValueError('Choose one or two design slots.')
     if not isinstance(events, list) or len(events) > 2 or any(not isinstance(e, dict) for e in events):
         raise ValueError('Send at most two existing design reports.')
-    with connect() as conn, conn.cursor() as cur:
+    with connection(connect) as conn, conn.cursor() as cur:
         # Same singleton lock as Product Uploads serializes all desktop claims.
         cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
@@ -425,7 +437,7 @@ def tick(token, events, capacity=1):
         verified = poll_outputs(active)
     except Exception:
         verified = {}  # Connectivity failure is not proof of completion or failure.
-    with connect() as conn, conn.cursor() as cur:
+    with connection(connect) as conn, conn.cursor() as cur:
         cur.execute('''SELECT actor_id FROM product_upload_desktop
             WHERE singleton AND token_hash=%s FOR UPDATE''', (digest(token),))
         if not cur.fetchone():

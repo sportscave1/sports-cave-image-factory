@@ -15,6 +15,11 @@ from auto_editions_jobs import Jobs
 
 @pytest.fixture
 def database():
+    if os.environ.get('STATUS_PHASE1_ISOLATED_POSTGRES') == '1':
+        from tests.status_phase1_postgres import disposable_database
+        with disposable_database() as fixture:
+            yield fixture
+        return
     module=os.environ.get('AUTO_EDITIONS_TEST_PGLITE')
     if not module or not Path(module).is_file():
         pytest.skip('Set AUTO_EDITIONS_TEST_PGLITE to the installed PGlite dist/index.js')

@@ -100,6 +100,11 @@ def test_private_schema_real_transactions_lost_ack_and_safe_cleanup(database,tmp
         return metadata(path),SimpleNamespace(iter_content=lambda **kw:iter([content]),close=lambda:None)
     monkeypatch.setattr(integration,'get_metadata_if_exists',lambda token,path:metadata(path))
     monkeypatch.setattr(integration,'upload_local_file',upload)
+    def private_uploader(token):
+        def publish(destination,path):return upload(token,destination,path)
+        publish.metrics=dict(provider_calls=0,reconciliation_reads=0,recovered_assets=0,retry_cycles=0,rate_limits=0)
+        return publish
+    monkeypatch.setattr(integration,'immutable_asset_uploader',private_uploader)
     monkeypatch.setattr(integration,'get_file_response',response)
     monkeypatch.setattr(integration,'list_folder_page',lambda token,path,**kw:{'entries':[metadata(p) for p in files if p.rsplit('/',1)[0]==path],'has_more':False})
     assert acceptance.service().run_one(acceptance.process)

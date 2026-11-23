@@ -231,12 +231,15 @@ class DropboxAssets:
                 existing_files[name]=item
             complete=page.get('has_more') is False;listing_requests=1
         self.timings['prepared_listing_seconds']=round(time.monotonic()-listing_start,6)
+        factory=getattr(self.integration,'immutable_asset_uploader',None)
+        uploader=factory(self.token) if callable(factory) and (not complete or len(existing_files)<len(assets)) else None
         def publish(pair):
             asset,path=pair
             destination=self.path(digest,asset['name'])
             lookup=not complete and asset['name'] not in existing_files
             existing=existing_files.get(asset['name']) if not lookup else self.integration.get_metadata_if_exists(self.token,destination)
-            metadata=existing or self.integration.upload_local_file(self.token,destination,path,conflict='cancel')
+            metadata=existing or (uploader(destination,path) if uploader else
+                                  self.integration.upload_local_file(self.token,destination,path,conflict='cancel'))
             if (not metadata or not metadata.get('id') or not metadata.get('rev')
                     or metadata.get('content_hash')!=ae.file_hash(path,dropbox=True)
                     or metadata.get('size')!=path.stat().st_size):
@@ -250,6 +253,12 @@ class DropboxAssets:
         self.timings.update(prepared_metadata_requests=listing_requests+sum(r[1] for r in results),
                             prepared_upload_requests=sum(not r[3] for r in results),
                             prepared_upload_bytes=sum(r[2] for r in results),prepared_reused_assets=sum(r[3] for r in results))
+        # Direct SDK calls; SDK's bounded internal retries are excluded. Reset
+        # these fields even on a fully reused publication of the same instance.
+        metrics=uploader.metrics if uploader else dict(provider_calls=0,reconciliation_reads=0,
+                                                       recovered_assets=0,retry_cycles=0,rate_limits=0)
+        self.timings.update({'prepared_'+key:value for key,value in metrics.items()})
+        self.timings['prepared_metadata_requests']+=metrics['reconciliation_reads']
         return dict(preparation_hash=digest,assets=[r[0] for r in results])
 
     def discard_cache(self,job_id,output):
@@ -269,6 +278,9 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
     service. Rendering and reference checks share a process-wide memory lock.
     Temporary disk is scratch only; inputs and results use persistent storage.
     """
+    if job.get('source_kind')=='framed_certificate':
+        from certificate_frame_fulfilment import execute as execute_certificate
+        return execute_certificate(job,assets)
     started=time.monotonic();timings={}
     manifest = ae.validate_manifest(job['manifest'])
     if ae.fingerprint(manifest) != job['preparation_hash']:

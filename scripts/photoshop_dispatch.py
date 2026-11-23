@@ -118,6 +118,25 @@ def run(script):
     finally:
         ole.CoUninitialize()
 
+def restore_photoshop_window(user=None):
+    """ExtendScript bringToFront does not reliably undo native minimization."""
+    user=user or c.WinDLL('user32')
+    user.GetClassNameW.argtypes=[c.c_void_p,c.c_wchar_p,c.c_int]
+    user.IsWindowVisible.argtypes=[c.c_void_p]
+    user.IsIconic.argtypes=[c.c_void_p]
+    user.ShowWindow.argtypes=[c.c_void_p,c.c_int]
+    callback=c.WINFUNCTYPE(c.c_bool,c.c_void_p,c.c_void_p)
+    restored=[]
+    def visit(window,_):
+        name=c.create_unicode_buffer(256)
+        user.GetClassNameW(window,name,len(name))
+        if name.value=='Photoshop' and user.IsWindowVisible(window) and user.IsIconic(window):
+            user.ShowWindow(window,9) # SW_RESTORE; preserve open documents.
+            restored.append(window)
+        return True
+    user.EnumWindows(callback(visit),0)
+    return len(restored)
+
 
 def _run(ole, auto, script):
     auto.SysAllocString.argtypes=[c.c_wchar_p];auto.SysAllocString.restype=c.c_void_p
@@ -125,6 +144,7 @@ def _run(ole, auto, script):
     cls=GUID();iid=GUID();null=GUID();ole.CLSIDFromProgID(photoshop_registration(),c.byref(cls));ole.CLSIDFromString('{00020400-0000-0000-C000-000000000046}',c.byref(iid))
     dispatch=c.c_void_p()
     activate_photoshop(lambda: ole.CoCreateInstance(c.byref(cls),None,4,c.byref(iid),c.byref(dispatch)))
+    restore_photoshop_window()
     table=c.cast(dispatch,c.POINTER(c.POINTER(c.c_void_p))).contents
     getids=c.WINFUNCTYPE(c.c_int32,c.c_void_p,c.POINTER(GUID),c.POINTER(c.c_wchar_p),c.c_uint,c.c_uint,c.POINTER(c.c_int32))(table[5])
     invoke=c.WINFUNCTYPE(c.c_int32,c.c_void_p,c.c_int32,c.POINTER(GUID),c.c_uint,c.c_ushort,c.POINTER(Params),c.POINTER(Variant),c.POINTER(ExceptionInfo),c.POINTER(c.c_uint))(table[6])

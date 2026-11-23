@@ -137,8 +137,10 @@ def collection_features_match(actual_features):
     """Accept Meta-normalised supersets while enforcing required semantics."""
     actual_features = dict(actual_features or {})
     return all(
-        str((actual_features.get(name) or {}).get("enroll_status") or "").upper()
-        == expected
+        # Meta can omit an ineligible optional CTA enhancement. All explicit
+        # values and required artwork-protection settings remain exact checks.
+        (name == "enhance_cta" and name not in actual_features)
+        or str((actual_features.get(name) or {}).get("enroll_status") or "").upper() == expected
         for name, expected in REQUIRED_COLLECTION_FEATURES.items()
     )
 
@@ -248,6 +250,7 @@ def verify_template_copy_readback(
         "copied_status": str(copied_ad.get("status") or ""),
         "copied_configured_status": str(copied_ad.get("configured_status") or ""),
         "copied_effective_status": str(copied_ad.get("effective_status") or ""),
+        "unavailable_requested_enhancements": ["enhance_cta"] if "enhance_cta" not in actual_features else [],
         "checks": checks,
     }
     failed = [name for name, passed in checks.items() if not passed]

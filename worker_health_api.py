@@ -78,6 +78,33 @@ async def pause(request):
     except Exception as error:return failure(error)
 
 
+async def companion_controls(request):
+    """Small on-demand read: no job scan, provider calls or health-index rebuild."""
+    try:
+        await actor(request)
+        def read():
+            from companion_read_connection import read_connection
+            from companion_transfer_control import evidence
+            with read_connection(store().connect) as conn, conn.cursor() as cur:
+                paused=worker_health.control(cur)
+                cur.execute("""SELECT instance_id,payload->'transfer_control' AS effective,
+                    extract(epoch FROM now()-seen_at) AS age_seconds,
+                    (SELECT detail FROM auto_edition_onboarding_audit a
+                     WHERE a.product_gid='companion-transfer:'||h.instance_id
+                       AND a.event='transfer_settings_requested' ORDER BY a.id DESC LIMIT 1) AS requested
+                    FROM auto_edition_worker_heartbeats h WHERE component='Companion'
+                    ORDER BY seen_at DESC,instance_id LIMIT 1""")
+                row=cur.fetchone()
+                transfer=None
+                if row:
+                    transfer=dict(instance=row['instance_id'],age_seconds=float(row['age_seconds']),
+                                  effective=evidence(row['effective']) if row['effective'] else None,
+                                  requested=row['requested'])
+                return dict(control=paused,transfer_control=transfer)
+        return JSONResponse(await run_in_threadpool(read),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
 async def logs(request):
     try:
         await actor(request)
@@ -140,6 +167,6 @@ async def details(request):
 
 
 ROUTES=(('/worker-health',page,('GET',)),('/api/worker-health',snapshot,('GET',)),
-        ('/api/worker-health/control',pause,('POST',)),('/api/worker-health/diagnostics',logs,('GET',)),
+        ('/api/worker-health/control',pause,('POST',)),('/api/worker-health/companion-controls',companion_controls,('GET',)),('/api/worker-health/diagnostics',logs,('GET',)),
         ('/api/worker-health/jobs',jobs,('GET',)),('/api/worker-health/updates',updates,('POST',)),
         ('/api/worker-health/search',search,('GET',)),('/api/worker-health/enqueue',enqueue,('POST',)),('/api/worker-health/details',details,('GET',)))

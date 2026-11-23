@@ -181,6 +181,12 @@ async def import_archive(archive,setup,revalidate,started,timings,expected=None)
     timings['package_bytes']=size
     if not timings.get('resumable_protocol'):timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
     ctx=setup['context']
+    async def progress(stage):
+        if ctx.get('automatic'):
+            from auto_editions_onboarding_api import queue
+            try:await run_in_threadpool(queue().import_progress,ctx['product_gid'],ctx['lease_token'],stage)
+            except Exception:__import__('logging').getLogger(__name__).warning('preparation_progress_unavailable stage=%s',stage)
+    await progress('Validating')
     manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'],resumable=bool(timings.get('resumable_protocol')))
     from auto_editions_preparation_geometry import for_context,matches
     if for_context(manifest['source_dimensions'],ctx)['references'] and not matches(manifest,ctx):
@@ -190,6 +196,7 @@ async def import_archive(archive,setup,revalidate,started,timings,expected=None)
         raise ValueError('Reset requires an updated companion and a fresh Photoshop preparation.')
     timings['validation_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
     assets=runtime.storage()
+    await progress('Publishing')
     receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
     timings['dropbox_upload_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
     timings.update({k:v for k,v in getattr(assets,'timings',{}).items() if k.startswith('prepared_')})

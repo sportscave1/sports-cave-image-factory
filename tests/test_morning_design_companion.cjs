@@ -25,7 +25,12 @@ function fixture(records = new Map()) {
         if(message.type==='project:progress')return progress;
         if(message.type==='project:cancel'){if(allowStop)progress={...progress,generating:false};return {stopped:true};}
         const sender={url:tabs.get(id).url,frameId:0,tab:{id}};
-        const permission=await new Promise(resolve=>listeners[0]({type:'project:permit',id:message.id},sender,resolve));
+        const permission=await new Promise((resolve,reject)=>{
+          for(const listener of listeners) {
+            if(listener({type:'project:permit',id:message.id},sender,resolve)===true)return;
+          }
+          reject(new Error('No listener accepted the project permit request'));
+        });
         assert.equal(permission.ok,true);
         sent.push(message);
         return {sent:true};

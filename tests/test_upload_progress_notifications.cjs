@@ -4,6 +4,12 @@ class Element {
   constructor() {this.children=[];this.dataset={};this.style={};this.events={};this.classList={toggle(){}};}
   focus() {this.focused=true;}
   append(...items) {for(const item of items){item.parent=this;this.children.push(item);}}
+  insertBefore(item,before) {
+    if(item.parent)item.parent.children=item.parent.children.filter(child=>child!==item);
+    item.parent=this;
+    const index=this.children.indexOf(before);
+    this.children.splice(index<0?this.children.length:index,0,item);
+  }
   replaceChildren(...items) {this.children=[];this.append(...items);}
   contains(item) {return item === this || this.children.some(child=>child.contains(item));}
   setAttribute(k,v) {this[k]=v;}
@@ -23,6 +29,7 @@ const context={state, timers:new Set(), URLSearchParams, icon:name=>name,
  root:{querySelector:id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},classList:{toggle(){}}},
  listenerController:new AbortController(), listenerOptions:{}, later:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
  parentWindow:{AbortController,
+ setInterval:()=>({kind:'interval'}),
  setTimeout:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},
  clearTimeout:timer=>{const i=timers.indexOf(timer);if(i>=0)timers.splice(i,1);},
  addEventListener:(event,callback)=>windowEvents[event]=callback,
@@ -133,7 +140,11 @@ install();
  const postingId='8a8925ad-9a54-4243-9948-62889bd5c1ca';
  payload.jobs[0].ad={label:'Creating the Meta campaign',posting_id:postingId};
  await context.refresh();
- assert.match(nodes.get('#sc-os-staff-upload-stage').textContent,/Published and PSD mapped.*Creating the Meta campaign/);
+ assert.match(nodes.get('#sc-os-staff-upload-stage').textContent,/Published and PSD mapped/);
+ assert.ok(!nodes.get('#sc-os-staff-upload-stage').textContent.includes('Creating the Meta campaign'),
+   'ad progress does not change the verified upload completion summary');
+ assert.ok(nodes.get('#sc-os-staff-upload-list').children[0].children.some(
+   child=>child.textContent==='Ad · Creating the Meta campaign'), 'ad detail stays available in the upload history');
  assert.equal(nodes.get('#sc-os-staff-upload-meter').value,100);
  assert.equal(nodes.get('#sc-os-staff-upload-list').children[0].children.find(child=>child.textContent==='See in Posting').href,
               '/?page=ads_posting&meta_posting_job='+postingId);
@@ -174,7 +185,7 @@ install();
  assert.equal(nodes.get('#sc-os-ads-list').children[0],originalRow,'unchanged snapshots retain DOM and handlers');
  disconnected=true;await context.refresh();
  assert.equal(nodes.get('#sc-os-design-status').dataset.stale,'true');
- assert.equal(nodes.get('#sc-os-design-stage').textContent,'Status unavailable · retrying');
+ assert.equal(nodes.get('#sc-os-design-stage').textContent,'Status delayed · retrying');
  disconnected=false;await context.refresh();
  assert.equal(nodes.get('#sc-os-design-status').dataset.stale,'false');
  assert.equal(nodes.get('#sc-os-design-title').textContent,'Design in progress');

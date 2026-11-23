@@ -61,7 +61,8 @@ def preparation_watchdog(row,stage,controller,now=None):
 def health_payload():
     import hashlib
     from auto_editions_preflight import preparation_code_hash
-    active=next((r for r in list(JOBS.values()) if r.get('status')=='Working'),None)
+    active_rows=[r for r in list(JOBS.values()) if r.get('status')=='Working']
+    active=next((r for r in active_rows if r.get('phase')!='Uploading'),None) or next(iter(active_rows),None)
     retained=next((r for r in list(JOBS.values()) if r.get('checkpoint_pending') or r.get('status')=='Recovering'),{})
     row=active or retained;stage=row.get('phase','Unknown')
     if stage not in ('Claimed','Photoshop','Preparing','Uploading','Verifying','Review'):stage='Recovery' if retained else 'Unknown'
@@ -78,7 +79,7 @@ def health_payload():
     if row.get('diagnostic') or HOST_LAST_DIAGNOSTIC:result['diagnostic']=row.get('diagnostic') or HOST_LAST_DIAGNOSTIC
     result['transfer_control']=transfer_controller().snapshot()
     byte_count=result['transfer_control']['transfer'].get('transport_bytes')
-    if active and byte_count is not None and row.get('_last_transfer_bytes')!=byte_count:
+    if active and stage=='Uploading' and byte_count is not None and row.get('_last_transfer_bytes')!=byte_count:
         row['_last_transfer_bytes']=byte_count;row['last_progress_at']=time.time()
         result['last_progress_at']=row['last_progress_at']
     return result
@@ -204,6 +205,16 @@ def sync_colour_configuration(config):
     os.environ['AUTO_EDITIONS_UNTAGGED_RGB_DEFAULT']=value['default_group']
 
 
+def reconcile_retained_checkpoint(row):
+    """A durable failure ACK must release the same idle in-memory checkpoint."""
+    current=JOBS.get(row['folder'].name)
+    if (current is not None and current.get('context')==row.get('context')
+            and not current.get('workers',0) and not row.get('checkpoint_pending')
+            and row.get('status')=='Blocked'):
+        current.update(status='Blocked',checkpoint_pending=False,error=row.get('error',''),
+                       checkpoint_reported=bool(row.get('checkpoint_reported')))
+
+
 def recover_retained(config):
     # No grants/secrets in journals. Reissue only the same host-owned lease.
     # Rotate the bounded read window: retained completed history must never hide
@@ -243,7 +254,9 @@ def recover_retained(config):
             response=getattr(error,'response',None)
             if response is not None and response.status_code in (400,403,409):
                 data.update(status='Blocked',checkpoint_pending=False,error='Lease or source changed; package retained for review.')
-                atomic_json(file,data);continue
+                atomic_json(file,data)
+                reconcile_retained_checkpoint(dict(data,folder=file.parent))
+                continue
             raise
         if result.get('completed'):
             if result['completed']['source']!=ctx['source']:raise ValueError('Completed source changed.')
@@ -253,7 +266,7 @@ def recover_retained(config):
             finish_upload(row,result['completed'],time.monotonic());journal(row);return True
         if data.get('checkpoint_pending'):
             row=dict(data,grant=result['grant'],folder=file.parent)
-            report_failure(row);return True
+            report_failure(row);reconcile_retained_checkpoint(row);return True
         start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0),upload_protocol=max(data.get('upload_protocol',0),result.get('upload_protocol',0)),upload_max_bytes=result.get('upload_max_bytes'))
         return True
     return False
@@ -275,17 +288,34 @@ def host_loop():
             active=[r for r in list(JOBS.values()) if r['status']=='Working']
             state='Companion Connected'
             if active:
-                row=active[0];stage=row.get('phase','Preparing')
-                if cancellation_check(row,config=config):
-                    state='Cancelling'
-                    if not row.get('workers',0) and not (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
-                        cancellation_check(row,stopped=True,config=config)
-                    HOST_BUSY.clear();HOST_STOP.wait(delay);continue
-                # A stuck COM call keeps its processor lock. Never steal it or renew forever.
-                preparation_watchdog(row,stage,transfer_controller())
-                state=stage
-                host_request(config,'/api/auto-editions/onboarding/heartbeat',
-                    dict(product_gid=row['context']['product_gid'],lease_token=row['context']['lease_token'],stage=stage,transfer_ticket=row.get('grant',{}).get('ticket')))
+                for row in active:
+                    stage=row.get('phase','Preparing')
+                    if cancellation_check(row,config=config):
+                        state='Cancelling'
+                        if not row.get('workers',0) and not (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
+                            cancellation_check(row,stopped=True,config=config)
+                        continue
+                    # Each lease gets its own heartbeat/watchdog. Never renew
+                    # only the first upload while the native job expires.
+                    preparation_watchdog(row,stage,transfer_controller())
+                    state=stage
+                    host_request(config,'/api/auto-editions/onboarding/heartbeat',
+                        dict(product_gid=row['context']['product_gid'],lease_token=row['context']['lease_token'],stage=stage,transfer_ticket=row.get('grant',{}).get('ticket')))
+                from edition_pipeline import admission
+                peer=admission(list(JOBS.values()),HOST_FILE.parent,
+                    paused=transfer_controller().snapshot()['settings']['paused'],
+                    processor_locked=(Path.home()/'Documents/SportsCavePrintJobs/processor.lock').exists())
+                if peer:
+                    # Server independently verifies this exact host's durable
+                    # upload; it still honours global pause and the two-job cap.
+                    sync_colour_configuration(config)
+                    data=host_request(config,'/api/auto-editions/onboarding/claim',dict(pipeline={
+                        k:peer['context'][k] for k in ('product_gid','lease_token')}))
+                    if data.get('grant'):
+                        start(data['grant'],initial_context=data.get('context'),package_transport=data.get('package_transport',0),
+                              upload_protocol=data.get('upload_protocol',0),upload_max_bytes=data.get('upload_max_bytes'),pipeline=True)
+                        state='Preparing + uploading'
+                delay=5
             elif (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
                 state='Recovering'
                 host_request(config,'/api/auto-editions/onboarding/heartbeat',{})
@@ -304,7 +334,8 @@ def host_loop():
                     from edition_repair_local import poll as repair_poll
                     repair_poll(config,host_request)
                 except Exception:
-                    pass # Retain the durable repair outbox for next poll.
+                    import edition_repair_local
+                    edition_repair_local.LAST_STATUS={'state':'Unavailable','reason':'Repair handoff needs reconnection; the durable request is retained.'}
                 claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):
@@ -320,7 +351,8 @@ def host_loop():
             failures=0
             HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
-                companion_pid=os.getpid(),version='unattended-recovery-v1'))
+                companion_pid=os.getpid(),version='unattended-recovery-v1',
+                repair_handoff=dict(__import__('edition_repair_local').LAST_STATUS)))
         except Exception as error:
             failures=min(failures+1,5);delay=min(30*2**(failures-1),300)
             HOST_FAILURES=failures;HOST_RETRY_AT=time.time()+delay
@@ -352,7 +384,7 @@ def context(grant):
     return transfer.get(grant,'/api/auto-editions/context?'+urlencode({'ticket':grant['ticket']}))
 
 
-def start(grant,resume_folder=None,initial_context=None,package_transport=0,upload_protocol=0,upload_max_bytes=None):
+def start(grant,resume_folder=None,initial_context=None,package_transport=0,upload_protocol=0,upload_max_bytes=None,pipeline=False):
     verified=initial_context or context(grant)
     with LOCK:
         for key,row in list(JOBS.items()):
@@ -362,7 +394,15 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0,uplo
         for key,row in list(JOBS.items()):
             if row['context'].get('automatic') and row['status'] in ('Prepared','Blocked','Cancelled'):
                 JOBS.pop(key,None)
-        if any(row['status']=='Working' for row in JOBS.values()):raise ValueError('A preparation is already running.')
+        if any(row['status']=='Working' for row in JOBS.values()):
+            from edition_pipeline import released_upload
+            peers=[r for r in JOBS.values() if r['status']=='Working']
+            # Claim admission already reserved disk/RAM. If resources change
+            # after the server issues the lease, keep this bounded second job;
+            # native_budget waits for its peer rather than abandoning the lease.
+            peer=peers[0] if pipeline and len(peers)==1 and released_upload(peers[0]) else None
+            if not peer or not verified.get('automatic') or upload_protocol!=1 or resume_folder:
+                raise ValueError('A preparation is already running.')
         if len(JOBS)>=8:raise ValueError('Too many preparation sessions. Retry later.')
         key=resume_folder.name if resume_folder else secrets.token_hex(24)
         folder=Path.home()/'Documents'/'SportsCaveAutoEditions'/key
@@ -374,6 +414,7 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0,uplo
                        package_transport=1 if type(package_transport) is int and package_transport==1 else 0,
                        upload_protocol=1 if type(upload_protocol) is int and upload_protocol==1 else 0,
                        upload_max_bytes=upload_max_bytes)
+        if pipeline:JOBS[key]['pipeline']=True
         if (folder/'upload-session.json').exists():JOBS[key]['upload_protocol']=1 # Never downgrade a partial session.
         JOBS[key]['generation']=json.loads((folder/'job-state.json').read_text()).get('generation') if resume_folder else __import__('companion_package_identity').generation()
         if resume_folder:JOBS[key]['recovery_failures']=json.loads((folder/'job-state.json').read_text()).get('recovery_failures',0)
@@ -391,6 +432,7 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0,uplo
                 journal(JOBS[key]);report_failure(JOBS[key])
                 raise
         if package:
+            JOBS[key]['native_released']=True
             JOBS[key]['reused_package']=str(package)
             timing_file=package.parent/'preparation-timing.json'
             if timing_file.exists() and not timing_file.is_symlink():
@@ -487,7 +529,7 @@ def find_reusable_package(ctx,generation=None,*,max_bytes=None):
     return None
 
 
-def reconnect(row):
+def reconnect(row,*,checkpoint_only=False):
     from device_trust import protect
     import requests
     config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
@@ -501,8 +543,9 @@ def reconnect(row):
         if data['completed'].get('source')!=ctx['source']:raise ValueError('Completed source changed.')
         return data['completed']
     row['grant']=data['grant']
-    if row.get('upload_protocol')==1 and data.get('upload_protocol')!=1:raise ValueError('Resumable backend compatibility is required; legacy replay refused.')
-    row['upload_protocol']=data.get('upload_protocol',row.get('upload_protocol',0))
+    downgraded=row.get('upload_protocol')==1 and data.get('upload_protocol')!=1
+    if downgraded and not checkpoint_only:raise ValueError('Resumable backend compatibility is required; legacy replay refused.')
+    if not downgraded:row['upload_protocol']=data.get('upload_protocol',row.get('upload_protocol',0))
     row['upload_max_bytes']=data.get('upload_max_bytes')
     if context(row['grant'])!=ctx:raise ValueError('Preparation identity changed.')
 
@@ -533,6 +576,18 @@ def record_transfer(row, trace):
     except OSError:pass
 
 
+def transient_upload_error(error):
+    """Both HTTP clients participate in upload/reconnect; keep outages recoverable."""
+    import requests
+    from urllib.error import HTTPError, URLError
+    if isinstance(error, HTTPError):
+        return error.code in (408,429) or 500 <= error.code < 600
+    if isinstance(error, requests.RequestException):
+        response=getattr(error,'response',None)
+        return response is None or response.status_code in (408,429) or 500 <= response.status_code < 600
+    return isinstance(error,(URLError,TimeoutError,ConnectionError))
+
+
 @cancellable
 def upload_prepared(key,archive):
     """Retry transfer after deploy without repeating Photoshop or source download."""
@@ -542,6 +597,21 @@ def upload_prepared(key,archive):
     row['phase']='Uploading';journal(row)
     row.setdefault('timings',{}).update(package_bytes=archive.stat().st_size,upload_attempts=0)
     try:
+        # A retained packet may already have been committed before a response
+        # was lost. Reconcile its exact owned lease before sending any bytes.
+        if row['context'].get('automatic') and row.get('reused_package'):
+            completed=reconnect(row)
+            if isinstance(completed,dict) and completed.get('preparation_hash'):
+                finish_upload(row,completed,started)
+                return
+        if row.get('reused_package') and row.get('upload_protocol')==1:
+            from companion_package_repack import verify_provenance
+            verify_provenance(archive,__import__('companion_package_identity').generation())
+        if row.get('reused_package') and row.get('package_transport')==1 and archive.parent!=row['folder']:
+            from companion_package_repack import compact_retained
+            archive,metrics=compact_retained(archive,row['folder']/'prepared.zip',row['context'],
+                row.get('generation'),package_budget(row))
+            row['timings'].update(metrics,package_bytes=archive.stat().st_size)
         for attempt in range(3):
             try:
                 boundary(row)
@@ -581,10 +651,8 @@ def upload_prepared(key,archive):
                 except OSError:pass
                 finish_upload(row,result,started)
                 return
-            except requests.RequestException as error:
-                response=getattr(error,'response',None)
-                status=response.status_code if response is not None else None
-                if status is not None and status not in (408,429) and status<500:raise
+            except Exception as error:
+                if not transient_upload_error(error):raise
                 if attempt==2 or not row['context'].get('automatic'):raise
                 # Bounded, cancellation-aware backoff. A reconnect can recover
                 # an already accepted upload before any bytes are sent again.
@@ -599,7 +667,7 @@ def upload_prepared(key,archive):
     except Cancelled:raise
     except Exception as error:
         response=getattr(error,'response',None)
-        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code in (408,429) or response.status_code>=500)
+        transient=transient_upload_error(error)
         detail=failure_detail(row,'Uploading',error)
         code=' HTTP '+str(response.status_code) if response is not None else ''
         if transient:row['diagnostic']=safe_diagnostic('upload/checkpoint failed','Uploading')
@@ -653,13 +721,25 @@ def processor_lease():
     return OwnedProcessorLease(lease,owner)
 
 
+def wait_pipeline_budget(row):
+    if not row.get('pipeline'):return
+    from edition_pipeline import native_budget
+    started=time.monotonic();checks=0
+    while not native_budget(list(JOBS.values()),row,HOST_FILE.parent):
+        if row.get('cancel_requested'):raise Cancelled()
+        if checks%5==0:boundary(row)
+        if HOST_STOP.wait(1):raise Cancelled()
+        checks+=1
+    row.setdefault('timings',{})['overlap_resource_wait_seconds']=round(time.monotonic()-started,6)
+
+
 def report_failure(row):
     if row.get('cancel_requested') or row.get('status')=='Cancelled':return
     if not row['context'].get('automatic') or row.get('status')!='Blocked' or row.get('checkpoint_reported'):return
     row['checkpoint_pending']=True; journal(row)
     try:
         import requests
-        completed=reconnect(row)
+        completed=reconnect(row,checkpoint_only=True)
         if completed:
             finish_upload(row,completed,time.monotonic())
             return
@@ -729,8 +809,14 @@ def inspect(key):
         row['phase']='Photoshop';journal(row)
         from auto_editions_colour_source import inspect_psd,ColourReview
         colour=inspect_psd(source)
+        from auto_editions_psd_repair import prune_history
+        repaired=folder/('inspection-source-'+secrets.token_hex(6)+'.psd')
+        # Never reuse an unfenced candidate from another inspection attempt.
+        proof=prune_history(source,repaired)
+        if proof:atomic_json(folder/'psd-repair.json',proof)
+        inspection_source=repaired if repaired.exists() else source
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
-                     entries=[dict(work_path=str(source),product_gid=row['context']['source']['product_gid'],
+                     entries=[dict(work_path=str(inspection_source),product_gid=row['context']['source']['product_gid'],
                                    dropbox_file_id=meta['id'],dropbox_revision=meta['rev'])],
                      smart_object_depth=0,smart_object_limit=0)
         inspector=(transfer.ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
@@ -739,6 +825,7 @@ def inspect(key):
         row['timings']['inspection_reused']=inspection is not None
         boundary(row)
         if inspection is None:
+            wait_pipeline_budget(row)
             lease=processor_lease()
             script='var SC_PSD_INSPECT_REQUEST = '+json.dumps(request)+';\n'+inspector
             boundary(row)
@@ -873,6 +960,8 @@ def prepare_worker(key,roles,scale=1):
         row=JOBS[key];ctx=context(row['grant'])
         row['phase']='Preparing';journal(row)
         if ctx!=row['context']:raise ValueError('Preparation identity changed.')
+        # Recheck after PSD retrieval and inspection; capacity may have changed.
+        wait_pipeline_budget(row)
         lease=processor_lease()
         output=row['folder']/'prepared'
         if output.exists():output=row['folder']/('prepared-recovery-'+secrets.token_hex(6))
@@ -908,6 +997,8 @@ def prepare_worker(key,roles,scale=1):
         lease.unlink(missing_ok=True);lease=None
         from companion_package_identity import generation
         atomic_json(archive.parent/'package-identity.json',dict(generation=generation(),preparation_hash=__import__('auto_editions').fingerprint(manifest),sha256=__import__('auto_editions').file_hash(archive)))
+        row['native_released']=True
+        HOST_WAKE.set()
         upload_prepared(key,archive)
     except Cancelled:raise
     except Exception as error:

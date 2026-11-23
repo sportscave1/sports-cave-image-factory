@@ -2,7 +2,7 @@
 /// <reference types="@shopify/ui-extensions/customer-account.page.render" />
 import "@shopify/ui-extensions/preact";
 import {render} from "preact";
-import {useEffect, useState} from "preact/hooks";
+import {useEffect, useRef, useState} from "preact/hooks";
 import {useApi} from "@shopify/ui-extensions/customer-account/preact";
 
 import {
@@ -11,7 +11,10 @@ import {
 } from "./legacy-certificate-utils.js";
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
 import {loadCollectionOrders} from "./collection-order-pages.js";
+import {accountCountry, compactTitle, pairedProducts, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
+import {AccountReview} from "./AccountReview.jsx";
 import {formatFramePrice, frameCartInput} from "./vault-utils.js";
+import {createFrameOfferLoader} from "./frame-offer-loader.js";
 
 export const COLLECTOR_VAULT_REDESIGN_ENABLED = false;
 
@@ -70,7 +73,20 @@ function Extension() {
   const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [selectedCertificate, setSelectedCertificate] = useState(null);
+  const [activeKey, setActiveKey] = useState("");
   const apiBaseUrl = configuredApiBaseUrl(api);
+  const frameLoader = useRef(null);
+  if (!frameLoader.current || frameLoader.current.api !== api || frameLoader.current.base !== apiBaseUrl) {
+    frameLoader.current = {api, base: apiBaseUrl, loader: createFrameOfferLoader({
+      bootstrap: () => vaultRequest(api, apiBaseUrl, "/api/collector-vault/bootstrap"),
+      prices: async (product, country) => {
+        const result = /** @type {any} */ (await api.query(FRAME_PRICE_QUERY, {variables: {id: product.product_id, country}}));
+        if (result.errors?.length) throw new Error("Frame prices unavailable");
+        return marketFrames(product, result.data?.product);
+      },
+    })};
+  }
+  const offerLoader = frameLoader.current.loader;
 
   useEffect(() => {
     let mounted = true;
@@ -105,15 +121,51 @@ function Extension() {
   }, [retryKey]);
 
   const firstCertificate = certificates[0] || null;
+  const activeCertificate = certificates.find(item => item.key === activeKey) || firstCertificate;
+  const country = useCountry(api);
+  const [reviewPrompt, setReviewPrompt] = useState(null);
+  const [vaultData, setVaultData] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    setVaultData(null);
+    offerLoader.bootstrap()
+      .then((payload) => {
+        if (!active) return;
+        setVaultData(payload);
+        setReviewPrompt(payload.review_prompt || null);
+      }).catch(() => {}); // Existing assets remain usable if offers are unavailable.
+    return () => { active = false; };
+  }, [retryKey, offerLoader]);
+
+  useEffect(() => {
+    // Prepare country-specific prices before the popup is opened; deduplicated
+    // with its request if a customer opens it before warming has finished.
+    offerLoader.context(country).catch(() => {});
+  }, [country, offerLoader, retryKey]);
+
+  useEffect(() => {
+    if (status !== "ready" || !vaultData) return;
+    const payload = vaultData;
+        setCertificates((items) => items.map((certificate) => {
+          const owned = matchingFrameCertificate(payload.certificates, certificate);
+          const preview = vaultAssetUrl(apiBaseUrl, owned?.preview_url);
+          return {...certificate,
+            frame_preview_url: preview ? `${preview}&frame=black` : "",
+            certificate_preview_image_url: certificate.certificate_preview_image_url || preview,
+            certificate_print_jpg_url: certificate.certificate_print_jpg_url || vaultAssetUrl(apiBaseUrl, owned?.print_url),
+          };
+        }));
+  }, [status, vaultData, apiBaseUrl]);
 
   return (
-    <s-page>
+    <s-query-container>
       <s-grid
-        gridTemplateColumns="minmax(0, 1200px)"
+        gridTemplateColumns="minmax(0, 1fr)"
         justifyContent="center"
         inlineSize="100%"
       >
-        <s-stack gap="large">
+        <s-stack gap="base">
           {status === "loading" ? <LoadingState /> : null}
           {status === "error" ? (
             <ErrorState
@@ -122,16 +174,21 @@ function Extension() {
             />
           ) : null}
           {status === "ready" ? (
-            <ReviewBanner certificate={firstCertificate} />
+            <AccountReview certificate={firstCertificate} prompt={reviewPrompt} request={(path, options) => vaultRequest(api, apiBaseUrl, path, options)} />
           ) : null}
           {status === "ready" && certificates.length === 0 ? (
             <EmptyState />
           ) : null}
           {status === "ready" && certificates.length > 0 ? (
-            <CertificateGallery
+            <CollectionShowcase
               certificates={certificates}
-              onOpen={setSelectedCertificate}
+              activeCertificate={activeCertificate}
+              onSelect={setActiveKey}
+              onOpen={(certificate, framingOnly = false) => setSelectedCertificate({...certificate, framingOnly})}
             />
+          ) : null}
+          {status === "ready" && certificates.length > 0 ? (
+            <CollectionUpsells key={`${country}-${activeCertificate?.shopify_product_id || activeCertificate?.key}`} api={api} apiBaseUrl={apiBaseUrl} country={country} certificate={activeCertificate} />
           ) : null}
         </s-stack>
       </s-grid>
@@ -139,91 +196,11 @@ function Extension() {
         certificate={selectedCertificate}
         api={api}
         apiBaseUrl={apiBaseUrl}
+        country={country}
+        offerLoader={offerLoader}
         onClose={() => setSelectedCertificate(null)}
       />
-    </s-page>
-  );
-}
-
-function ReviewBanner({certificate}) {
-  const thumbnailUrl = certificate?.purchased_image_url
-    || certificate?.certificate_preview_image_url;
-  const thumbnailAlt = certificate?.purchased_image_url
-    ? certificate.purchased_image_alt
-    : `Certificate preview for ${
-      certificate?.product_title || "Sports Cave certificate"
-    }`;
-  const hasThumbnail = Boolean(thumbnailUrl);
-
-  return (
-    <s-box
-      padding="base"
-      border="base"
-      borderRadius="base"
-      background="subdued"
-    >
-      <s-grid
-        gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 420px), 1fr))"
-        gap="base"
-        alignItems="center"
-      >
-        <s-grid
-          gridTemplateColumns={hasThumbnail
-            ? "96px minmax(0, 1fr)"
-            : "minmax(0, 1fr)"}
-          gap="base"
-          alignItems="center"
-        >
-          {hasThumbnail ? (
-            <s-box
-              background="base"
-              border="base"
-              borderRadius="small"
-              overflow="hidden"
-            >
-              <s-image
-                src={thumbnailUrl}
-                alt={thumbnailAlt}
-                aspectRatio="1/1"
-                objectFit="contain"
-                loading="lazy"
-                sizes="96px"
-              ></s-image>
-            </s-box>
-          ) : null}
-          <s-stack gap="small-400">
-            <s-heading>How does it look in your space?</s-heading>
-            <s-text color="subdued">
-              Share a quick review and help another fan see the real thing.
-            </s-text>
-            <s-box accessibilityVisibility="hidden">
-              <s-stack direction="inline" gap="small-200">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <s-icon
-                    key={star}
-                    type="star"
-                    tone="warning"
-                  ></s-icon>
-                ))}
-              </s-stack>
-            </s-box>
-          </s-stack>
-        </s-grid>
-        <s-stack
-          direction="inline"
-          justifyContent="end"
-          alignItems="center"
-        >
-          <s-link
-            href={REVIEWS_PAGE_URL}
-            target="_blank"
-            accessibilityLabel="Leave a review on Sports Cave"
-          >
-            Leave a Review
-          </s-link>
-        </s-stack>
-      </s-grid>
-    </s-box>
+    </s-query-container>
   );
 }
 
@@ -305,8 +282,8 @@ function ErrorState({message, onRetry}) {
 function CertificateGallery({certificates, onOpen}) {
   return (
     <s-grid
-      gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 320px), 1fr))"
-      gap="base"
+      gridTemplateColumns="@container (inline-size > 750px) 1fr 1fr, 1fr"
+      gap="large"
       alignItems="stretch"
     >
       {certificates.map((certificate) => (
@@ -320,6 +297,61 @@ function CertificateGallery({certificates, onOpen}) {
   );
 }
 
+function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen}) {
+  if (!activeCertificate) return null;
+  const active = activeCertificate;
+  const edition = item => editionLabel(item.edition_display).replace(/^Edition #/, "");
+  const preview = active.certificate_preview_image_url;
+  return <s-stack gap="large-200">
+    <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 0.8fr) minmax(0, 1.2fr)', 'minmax(0, 1fr)'" gap="large-200" alignItems="start">
+      <s-stack gap="large">
+        <s-stack gap="small-400">
+          <s-heading>My Collection</s-heading>
+          <s-text type="emphasis">{certificates.length} numbered {certificates.length === 1 ? "edition" : "editions"}</s-text>
+        </s-stack>
+        <s-box display="@container (inline-size > 850px) auto, none">
+          <s-stack gap="small-200">
+            {certificates.map(item => <s-clickable key={item.key} onClick={() => onSelect(item.key)}
+              accessibilityLabel={`${compactTitle(item.product_title)}, ${item.variant_title}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
+              border={item.key === active.key ? "large" : "none"} background={item.key === active.key ? "subdued" : "transparent"}
+              borderRadius="large" padding="small" minBlockSize="80px">
+              <s-grid gridTemplateColumns="88px minmax(0, 1fr) auto" gap="base" alignItems="center">
+                {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : <s-box minBlockSize="66px" />}
+                <s-stack gap="small-400"><s-text type="strong">{compactTitle(item.product_title)}</s-text><s-text color="subdued">{item.variant_title}</s-text></s-stack>
+                <s-text>{edition(item)} ›</s-text>
+              </s-grid>
+            </s-clickable>)}
+          </s-stack>
+        </s-box>
+        <s-box display="@container (inline-size > 850px) none, auto">
+          <s-stack gap="base">
+            <s-select label="Choose your edition" value={active.key} onChange={event => onSelect((/** @type {HTMLSelectElement} */ (event.currentTarget)).value)}>
+              {certificates.map(item => <s-option key={item.key} value={item.key}>{compactTitle(item.product_title)} · {edition(item)} · {item.variant_title}</s-option>)}
+            </s-select>
+            <s-box padding="small" border="large" borderRadius="large" background="subdued">
+              <s-grid gridTemplateColumns="80px minmax(0, 1fr)" gap="base" alignItems="center">
+                {active.purchased_image_url ? <s-image src={active.purchased_image_url} alt={active.purchased_image_alt || active.product_title} aspectRatio="4/3" objectFit="contain" loading="eager" /> : null}
+                <s-stack gap="small-400"><s-text type="strong">{compactTitle(active.product_title)}</s-text><s-text color="subdued">{active.variant_title}</s-text><s-text>{edition(active)}</s-text></s-stack>
+              </s-grid>
+            </s-box>
+          </s-stack>
+        </s-box>
+      </s-stack>
+      <s-stack gap="large">
+        {preview ? <s-image src={preview} alt={`Certificate of authenticity for ${active.product_title}, edition ${edition(active)}`} aspectRatio="1.415" objectFit="contain" loading="eager" sizes="(min-width: 850px) 60vw, 100vw" /> : <CertificatePreview certificate={{...active, frame_preview_url: ""}} eager />}
+        <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr auto 1fr, 1fr" gap="base" alignItems="center">
+          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : <s-badge>Certificate processing</s-badge>}
+          {active.certificate_pdf_url ? <s-link href={active.certificate_pdf_url} target="_blank">Download PDF</s-link> : null}
+          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active, true)}>Frame certificate</s-button> : null}
+        </s-grid>
+        {active.certificate_print_jpg_url ? <s-link href={active.certificate_print_jpg_url} target="_blank">Free print download</s-link> : null}
+        {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} alt="" loading="eager" /></s-box> : null}
+      </s-stack>
+    </s-grid>
+    <s-divider />
+  </s-stack>;
+}
+
 function CertificateCard({certificate, onOpen}) {
   const hasPdf = Boolean(certificate.certificate_pdf_url);
   const hasPrint = Boolean(certificate.certificate_print_jpg_url);
@@ -327,7 +359,7 @@ function CertificateCard({certificate, onOpen}) {
 
   return (
     <s-box
-      padding="base"
+      padding="small"
       border="base"
       borderRadius="base"
       background="subdued"
@@ -335,7 +367,7 @@ function CertificateCard({certificate, onOpen}) {
     >
       <s-grid
         gridTemplateRows="auto minmax(0, 1fr) auto"
-        gap="base"
+        gap="small"
         blockSize="100%"
       >
         {hasPdf ? (
@@ -353,7 +385,7 @@ function CertificateCard({certificate, onOpen}) {
         )}
 
         <s-stack gap="small-400">
-          <s-heading>{title}</s-heading>
+          <s-text type="strong">{title}</s-text>
           {certificate.variant_title ? (
             <s-text color="subdued">{certificate.variant_title}</s-text>
           ) : null}
@@ -369,55 +401,29 @@ function CertificateCard({certificate, onOpen}) {
           ) : null}
         </s-stack>
 
-        <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 140px), 1fr))"
-          gap="small"
-          alignItems="stretch"
-        >
-          {hasPdf ? (
-            <s-button
-              variant="primary"
-              command="--show"
-              commandFor="certificate-viewer"
-              onClick={() => onOpen(certificate)}
-            >
-              View Certificate
-            </s-button>
-          ) : null}
-          {hasPdf ? (
-            <s-button
-              href={certificate.certificate_pdf_url}
-              target="_blank"
-              variant="secondary"
-            >
-              Download PDF
-            </s-button>
-          ) : null}
-          {hasPrint ? (
-            <s-button
-              href={certificate.certificate_print_jpg_url}
-              target="_blank"
-              variant="secondary"
-            >
-              Download Print
-            </s-button>
-          ) : null}
-          {!hasPdf ? (
-            <s-badge tone="neutral">Certificate processing</s-badge>
-          ) : null}
-        </s-grid>
+        <s-stack gap="small-200">
+          {hasPdf ? <s-grid gridTemplateColumns="1fr"><s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer"
+            onClick={() => onOpen(certificate,true)}>Get certificate framed</s-button></s-grid> : null}
+          <s-grid gridTemplateColumns="1fr 1fr" alignItems="center" gap="small">
+            {hasPdf ? <s-clickable command="--show" commandFor="certificate-viewer" padding="small-200" minBlockSize="44px" accessibilityLabel="View certificate"
+              onClick={() => onOpen(certificate)}><s-text>View certificate</s-text></s-clickable> : null}
+            {hasPrint ? <s-link href={certificate.certificate_print_jpg_url} target="_blank">Free print download</s-link> : null}
+          </s-grid>
+          {!hasPdf ? <s-badge tone="neutral">Certificate processing</s-badge> : null}
+        </s-stack>
       </s-grid>
     </s-box>
   );
 }
 
-function CertificatePreview({certificate, eager = false}) {
+function CertificatePreview({certificate, eager = false, previewUrl = ""}) {
   const title = certificate.product_title || "Sports Cave artwork";
   const hasDownload = Boolean(
     certificate.certificate_pdf_url
       || certificate.certificate_print_jpg_url,
   );
-  if (certificate.certificate_preview_image_url) {
+  const imageUrl = previewUrl || certificate.frame_preview_url || certificate.certificate_preview_image_url;
+  if (imageUrl) {
     return (
       <s-box
         background="base"
@@ -426,12 +432,12 @@ function CertificatePreview({certificate, eager = false}) {
         overflow="hidden"
       >
         <s-image
-          src={certificate.certificate_preview_image_url}
+          src={imageUrl}
           alt={`Certificate preview for ${title}`}
-          aspectRatio="16/9"
+          aspectRatio={eager ? (certificate.frame_preview_url || previewUrl ? "1/1" : "16/9") : "4/3"}
           objectFit="contain"
           loading={eager ? "eager" : "lazy"}
-          sizes="(min-width: 1100px) 33vw, (min-width: 700px) 50vw, 100vw"
+          sizes="(min-width: 750px) 50vw, 100vw"
         ></s-image>
       </s-box>
     );
@@ -457,28 +463,33 @@ function CertificatePreview({certificate, eager = false}) {
   );
 }
 
-function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
+function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, onClose}) {
   const modalId = "certificate-viewer";
   const title = certificate?.product_title || "Certificate";
+  const framingOnly = Boolean(certificate?.framingOnly);
   const [frameOffer, setFrameOffer] = useState({
     status: "idle",
     product: null,
-    certificateReference: "",
+    certificateReference: "", previewUrl: "",
   });
+  const [frameColor, setFrameColor] = useState("Black");
   const [checkoutState, setCheckoutState] = useState({
     status: "idle",
     message: "",
     checkoutUrl: "",
   });
+  const cartReady = checkoutState.status === "ready" && Boolean(checkoutState.checkoutUrl);
+  const selectedProduct = (frameOffer.product?.variants || []).find((v) => v.color === frameColor) || frameOffer.product;
 
   useEffect(() => {
     const controller = new AbortController();
     setCheckoutState({status: "idle", message: "", checkoutUrl: ""});
+    setFrameColor("Black");
     if (!certificate) {
       setFrameOffer({
         status: "idle",
         product: null,
-        certificateReference: "",
+        certificateReference: "", previewUrl: "",
       });
       return () => controller.abort();
     }
@@ -486,11 +497,11 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
     setFrameOffer({
       status: "loading",
       product: null,
-      certificateReference: "",
+      certificateReference: "", previewUrl: "",
     });
     async function loadFrameOffer() {
       try {
-        const payload = await vaultRequest(
+        const payload = offerLoader ? await offerLoader.context(country) : await vaultRequest(
           api,
           apiBaseUrl,
           "/api/collector-vault/bootstrap",
@@ -501,7 +512,13 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           payload.certificates,
           certificate,
         );
-        const product = payload.frame_product;
+        let product = payload.frame_product;
+        if (!offerLoader && product?.available) {
+          const prices=await api.query(FRAME_PRICE_QUERY,{variables:{id:product.product_id,country}});
+          if (prices.errors?.length) throw new Error('Frame prices unavailable');
+          product=marketFrames(product,prices.data?.product);
+        }
+        if (controller.signal.aborted) return;
         if (
           !ownedCertificate?.reference
           || !product?.available
@@ -510,13 +527,14 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           setFrameOffer({
             status: "unavailable",
             product: null,
-            certificateReference: "",
+            certificateReference: "", previewUrl: "",
           });
           return;
         }
         setFrameOffer({
           status: "ready",
           product,
+          previewUrl: vaultAssetUrl(apiBaseUrl, ownedCertificate.preview_url),
           certificateReference: ownedCertificate.reference,
         });
       } catch (error) {
@@ -524,13 +542,13 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
         setFrameOffer({
           status: "error",
           product: null,
-          certificateReference: "",
+          certificateReference: "", previewUrl: "",
         });
       }
     }
     loadFrameOffer();
     return () => controller.abort();
-  }, [api, apiBaseUrl, certificate?.key]);
+  }, [api, apiBaseUrl, certificate?.key, country, offerLoader]);
 
   const addFramedCertificate = async () => {
     if (
@@ -539,10 +557,10 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
     ) {
       return;
     }
-    const product = frameOffer.product;
+    const product = (frameOffer.product.variants || []).find((v) => v.color === frameColor) || frameOffer.product;
     setCheckoutState({
       status: "adding",
-      message: "Preparing secure checkout...",
+      message: "Adding your framed certificate...",
       checkoutUrl: "",
     });
     try {
@@ -555,8 +573,9 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           body: {
             certificate_reference: frameOffer.certificateReference,
             frame_variant_id: product.variant_id,
-            idempotency_key: frameIdempotencyKey(certificate),
+            idempotency_key: `${frameIdempotencyKey(certificate)}-${frameColor.toLowerCase()}`,
             allow_repeat: false,
+            country,
           },
         },
       );
@@ -571,17 +590,14 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
       if (request.checkout_url) {
         setCheckoutState({
           status: "ready",
-          message: "Your secure checkout is ready.",
-          checkoutUrl: request.checkout_url,
+          message: "Added to cart",
+          checkoutUrl: request.cart_handoff_url,
         });
         return;
       }
       const cartPayload = await api.query(CART_CREATE_MUTATION, {
         variables: {
-          input: frameCartInput(
-            product.variant_id,
-            String(request.request_reference),
-          ),
+          input: {...frameCartInput(product.variant_id, String(request.request_reference)), buyerIdentity:{countryCode:country}},
         },
       });
       const cartResult = cartPayload?.data?.cartCreate;
@@ -604,13 +620,13 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
       );
       setCheckoutState({
         status: "ready",
-        message: "Your secure checkout is ready.",
-        checkoutUrl: cartResult.cart.checkoutUrl,
+        message: "Added to cart",
+        checkoutUrl: request.cart_handoff_url,
       });
     } catch (_error) {
       setCheckoutState({
         status: "error",
-        message: "Framed checkout is temporarily unavailable.",
+        message: "Could not add your certificate. Please try again.",
         checkoutUrl: "",
       });
     }
@@ -619,51 +635,41 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
   return (
     <s-modal
       id={modalId}
-      heading={title}
+      heading={cartReady ? "Your framed certificate cart" : framingOnly ? "Frame your certificate" : title}
       accessibilityLabel={`Certificate viewer for ${title}`}
-      size="max"
-      padding="base"
+      size={framingOnly && !cartReady ? "max" : "large-100"}
+      padding="none"
       onAfterHide={onClose}
     >
+      <s-query-container>
       {certificate ? (
+        <s-grid gridTemplateColumns="minmax(0, 1200px)" justifyContent="center">
+        <s-box padding="@container (inline-size > 750px) large-200, none">
         <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 320px), 1fr))"
-          gap="large"
+          gridTemplateColumns={framingOnly ? "@container (inline-size > 750px) 'minmax(0, 1.25fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" : "1fr"}
+          gap="@container (inline-size > 750px) large-200, none"
           alignItems="start"
         >
-          <CertificatePreview certificate={certificate} eager />
-          <s-stack gap="large">
+          {framingOnly && frameOffer.previewUrl ? <FramedCertificatePreview certificate={certificate} previewUrl={frameOffer.previewUrl} color={frameColor} /> : <CertificatePreview certificate={certificate} previewUrl={!framingOnly
+              ? frameOffer.previewUrl || certificate.certificate_preview_image_url
+              : frameOffer.previewUrl
+                ? `${frameOffer.previewUrl}&frame=${frameColor.toLowerCase()}`
+                : certificate.frame_preview_url || certificate.certificate_preview_image_url
+          } eager />}
+          <s-box padding="@container (inline-size > 750px) none, base">
+          <s-stack gap="large-200">
             <s-stack gap="small-400">
-              <s-heading>{title}</s-heading>
-              {certificate.variant_title ? (
-                <s-text color="subdued">{certificate.variant_title}</s-text>
-              ) : null}
+              <s-heading>{compactTitle(title)}</s-heading>
               {certificate.edition_display ? (
-                <s-text type="strong">
-                  {editionLabel(certificate.edition_display)}
+                <s-text type="emphasis">
+                  {editionLabel(certificate.edition_display).replace("#", "")}
                 </s-text>
               ) : null}
-              {certificate.purchase_date_display ? (
-                <s-text color="subdued">
-                  Purchased {certificate.purchase_date_display}
-                </s-text>
-              ) : null}
+              {cartReady ? <s-badge tone="auto" icon="check">Added to cart</s-badge> : null}
+              {framingOnly ? <s-text>Your numbered certificate, professionally printed and framed.</s-text> : null}
+              {framingOnly ? <s-text color="subdued">Small · 21 × 30 cm</s-text> : null}
             </s-stack>
-            <s-grid
-              gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 170px), 1fr))"
-              gap="small"
-            >
-              {certificate.certificate_print_jpg_url ? (
-                <s-button
-                  href={certificate.certificate_print_jpg_url}
-                  target="_blank"
-                  variant="secondary"
-                >
-                  Download Print
-                </s-button>
-              ) : null}
-            </s-grid>
-            {frameOffer.status === "loading" ? (
+            {framingOnly && frameOffer.status === "loading" ? (
               <s-stack direction="inline" gap="small" alignItems="center">
                 <s-spinner
                   size="small"
@@ -674,101 +680,116 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
                 </s-text>
               </s-stack>
             ) : null}
-            {frameOffer.status === "ready" ? (
+            {cartReady ? (
+              <s-stack gap="large">
+                <s-box padding="base" background="subdued" borderRadius="large">
+                  <s-stack gap="base">
+                    <s-text type="strong">{frameColor} frame · Quantity 1</s-text>
+                    <s-text type="strong">{formatFramePrice(selectedProduct?.contextual_price, api.i18n.formatNumber)}</s-text>
+                    <s-text color="subdued">Shipping and taxes calculated at checkout.</s-text>
+                  </s-stack>
+                </s-box>
+                <s-text color="subdued">Your existing store cart items will be included at checkout.</s-text>
+                <s-grid gridTemplateColumns="1fr" gap="base">
+                  <s-button variant="primary" href={checkoutState.checkoutUrl}>Continue to cart</s-button>
+                  <s-button variant="secondary" command="--hide" commandFor={modalId}>Continue browsing My Collection</s-button>
+                </s-grid>
+              </s-stack>
+            ) : framingOnly && frameOffer.status === "ready" ? (
               <FramedCertificateOffer
                 product={frameOffer.product}
+                frameColor={frameColor}
+                onColorChange={(color) => {
+                  setFrameColor(color);
+                  setCheckoutState({status: "idle", message: "", checkoutUrl: ""});
+                }}
                 checkoutState={checkoutState}
                 onAdd={addFramedCertificate}
                 formatNumber={api.i18n.formatNumber}
               />
             ) : null}
+            {framingOnly && ["error", "unavailable"].includes(frameOffer.status) ? (
+              <s-text color="subdued">Framing is temporarily unavailable. Please try again shortly.</s-text>
+            ) : null}
           </s-stack>
+          </s-box>
+        </s-grid>
+        </s-box>
         </s-grid>
       ) : (
         <s-text color="subdued">Choose a certificate to view it.</s-text>
       )}
-      {certificate?.certificate_pdf_url ? (
-        <s-button
-          slot="primary-action"
-          href={certificate.certificate_pdf_url}
-          target="_blank"
-        >
-          Download Certificate
-        </s-button>
-      ) : null}
-      <s-button
-        slot={certificate?.certificate_pdf_url
-          ? "secondary-actions"
-          : "primary-action"}
-        command="--hide"
-        commandFor={modalId}
-      >
-        Close
-      </s-button>
+      </s-query-container>
     </s-modal>
   );
 }
 
+function FramedCertificatePreview({certificate, previewUrl, color}) {
+  return <s-box borderRadius="large" overflow="hidden">
+    {["Black", "Oak", "White"].map(frame => (
+      <s-box key={frame} display={frame === color ? "auto" : "none"} accessibilityVisibility={frame === color ? "visible" : "hidden"}>
+        <s-image src={`${previewUrl}&frame=${frame.toLowerCase()}`}
+          alt={`${frame} framed certificate for ${certificate.product_title || "your edition"}`}
+          aspectRatio="1/1" objectFit="contain" loading="eager"
+          sizes="(min-width: 750px) 660px, 100vw" />
+      </s-box>
+    ))}
+  </s-box>;
+}
+
 function FramedCertificateOffer({
   product,
+  frameColor,
+  onColorChange,
   checkoutState,
   onAdd,
   formatNumber,
 }) {
   const price = formatFramePrice(
-    product.contextual_price,
+    ((product.variants || []).find((v) => v.color === frameColor) || product).contextual_price,
     formatNumber,
   );
-  const inclusions = Array.isArray(product.inclusions)
-    ? product.inclusions.slice(0, 3)
-    : [];
 
   return (
-    <s-box
-      padding="base"
-      border="base"
-      borderRadius="base"
-      background="subdued"
-    >
-      <s-stack gap="base">
-        <s-heading>Display It Framed</s-heading>
-        {product.image?.url ? (
-          <s-image
-            src={product.image.url}
-            alt={product.image.alt_text || `${product.title} product image`}
-            aspectRatio="4/3"
-            objectFit="contain"
-            loading="lazy"
-            sizes="(min-width: 760px) 30vw, 100vw"
-          ></s-image>
-        ) : null}
-        <s-heading>{product.title}</s-heading>
-        {inclusions.length ? (
-          <s-stack gap="small-200">
-            {inclusions.map((inclusion) => (
-              <s-text key={inclusion}>{inclusion}</s-text>
-            ))}
-          </s-stack>
-        ) : null}
+    <s-box>
+      <s-stack gap="large">
+        <s-heading>Choose frame</s-heading>
+        <s-grid gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap="small">
+          {(product.variants?.length ? product.variants : [{color: "Black"}]).map((variant) => (
+            <s-clickable key={variant.color} border={frameColor === variant.color ? "large" : "base"}
+              borderRadius="large" overflow="hidden" disabled={checkoutState.status === "adding"}
+              accessibilityLabel={`${variant.color} frame${frameColor === variant.color ? ", selected" : ""}`}
+              onClick={() => onColorChange(variant.color)}>
+              <s-stack gap="none" alignItems="center">
+                <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
+                  alt={`${variant.color} frame detail`} aspectRatio="1/1" objectFit="cover" loading="eager" />
+                <s-box padding="small" minBlockSize="44px"><s-text type="strong">{frameColor === variant.color ? "✓ " : ""}{variant.color}</s-text></s-box>
+              </s-stack>
+            </s-clickable>
+          ))}
+        </s-grid>
         {checkoutState.checkoutUrl ? (
+          <s-stack gap="base">
+            <s-badge tone="auto" icon="check">Added to cart</s-badge>
           <s-button
             variant="primary"
             href={checkoutState.checkoutUrl}
-            target="_blank"
           >
-            Continue to Secure Checkout
+            Checkout now
           </s-button>
+          </s-stack>
         ) : checkoutState.status === "ordered" ? (
           <s-badge tone="neutral" icon="check">
             Framed certificate ordered
           </s-badge>
         ) : (
           <s-button
+            inlineSize="fill"
             variant="primary"
             onClick={onAdd}
             loading={checkoutState.status === "adding"}
           >
-            Add Framed Certificate — {price}
+            Add to cart · {price}
           </s-button>
         )}
         {checkoutState.message ? (
@@ -782,6 +803,84 @@ function FramedCertificateOffer({
       </s-stack>
     </s-box>
   );
+}
+
+function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
+  const [products, setProducts] = useState([]);
+  const [status, setStatus] = useState("loading");
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setStatus("loading");
+    async function load() {
+      try {
+        if (!certificate?.shopify_product_id) { setProducts([]); setStatus("empty"); return; }
+        const recommended = await vaultRequest(api, apiBaseUrl,
+          `/api/collector-vault/recommendations?country=${country}&product_id=${encodeURIComponent(certificate?.shopify_product_id || "")}`, {signal: controller.signal});
+        const ids = (recommended.products || []).slice(0, 8).map((p) => p.id);
+        if (!ids.length) {
+          if (!controller.signal.aborted) { setProducts([]); setStatus("empty"); }
+          return;
+        }
+        const result = await api.query(UPSELL_QUERY, {variables: {ids, country}});
+        if (result.errors?.length) throw new Error("Products unavailable");
+        // Preserve the smart rank even when Shopify returns nodes in another order.
+        const nodes = pairedProducts(ids, result.data?.nodes);
+        if (!controller.signal.aborted) { setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
+      } catch (_error) {
+        if (!controller.signal.aborted) setStatus("error");
+      }
+    }
+    load();
+    return () => controller.abort();
+  }, [api, apiBaseUrl, retry, country, certificate?.shopify_product_id]);
+  return <s-stack gap="base">
+    <s-heading>Pairs with your {compactTitle(certificate?.product_title || "selected")} edition</s-heading>
+    {status === "loading" ? <s-spinner accessibilityLabel="Finding your recommendations" /> : null}
+    {status === "error" ? <s-stack gap="small"><s-text>Recommendations are temporarily unavailable.</s-text>
+      <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
+    {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
+    <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr 1fr, 1fr" gap="large" alignItems="stretch">
+      {products.map(product => <s-link key={product.id} href={`https://www.sportscaveshop.com/products/${product.handle}?country=${country}`} target="_blank">
+        <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 1.2fr) minmax(0, 1fr)', '1fr'" gap="base" alignItems="center">
+          {product.featuredImage?.url ? <s-image src={product.featuredImage.url} alt={product.featuredImage.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : null}
+          <s-text type="strong">{compactTitle(product.title)}</s-text>
+        </s-grid>
+      </s-link>)}
+    </s-grid>
+  </s-stack>;
+}
+
+function UpsellProduct({product, api, onAdd}) {
+  const variants = product.variants.nodes.filter((v) => v.availableForSale);
+  const [variantId, setVariantId] = useState(variants[0]?.id || "");
+  const [cart, setCart] = useState({status: "idle", url: ""});
+  const variant = variants.find((v) => v.id === variantId);
+  const image = variant?.image || product.featuredImage;
+  const add = async () => {
+    if (!variant || cart.status === "adding") return;
+    setCart({status: "adding", url: ""});
+    try {
+      const url = await onAdd(variant.id);
+      setCart({status: "ready", url});
+    } catch (_error) { setCart({status: "error", url: ""}); }
+  };
+  return <s-box padding="small" border="base" borderRadius="base" background="subdued">
+    <s-stack gap="small">
+      {image?.url ? <s-image src={image.url} alt={image.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : null}
+      <s-text type="strong">{compactTitle(product.title)}</s-text>
+      <s-select label="Frame and size" value={variantId} disabled={cart.status === "adding"}
+        onChange={(event) => { setVariantId((/** @type {HTMLSelectElement} */ (event.currentTarget)).value); setCart({status: "idle", url: ""}); }}>
+        {variants.map((v) => <s-option key={v.id} value={v.id}>{v.title}</s-option>)}
+      </s-select>
+      {comparePrice(variant) ? <s-text color="subdued">RRP {formatFramePrice(comparePrice(variant), api.i18n.formatNumber)}</s-text> : null}
+      <s-grid gridTemplateColumns="1fr">
+      {cart.url ? <s-button inlineSize="fill" variant="primary" href={cart.url} target="_blank">Checkout · {formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-button>
+        : <s-button inlineSize="fill" variant="primary" onClick={add} loading={cart.status === "adding"} disabled={!variant}>Add to cart · {formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-button>}
+      </s-grid>
+      {cart.status === "error" ? <s-text>Could not create your cart. Please try again.</s-text> : null}
+    </s-stack>
+  </s-box>;
 }
 
 function editionLabel(value) {
@@ -799,6 +898,13 @@ function editionLabel(value) {
 function configuredApiBaseUrl(api) {
   const configured = String(api.settings?.value?.api_base_url || "").trim();
   return (configured || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+}
+
+function vaultAssetUrl(apiBaseUrl, value) {
+  const path = String(value || "");
+  return path.startsWith("/api/collector-vault/asset?token=")
+    ? `${apiBaseUrl}${path}`
+    : "";
 }
 
 function matchingFrameCertificate(items, certificate) {
@@ -861,4 +967,14 @@ async function vaultRequest(api, apiBaseUrl, path, options = {}) {
     new Error("The framed certificate request could not be authenticated."),
     {status: 401},
   );
+}
+
+function useCountry(api) {
+  const [country,setCountry]=useState(()=>accountCountry(api));
+  useEffect(()=> {
+    const signal=api.localization?.country;
+    setCountry(accountCountry(api));
+    return signal?.subscribe?.(()=>setCountry(accountCountry(api)));
+  },[api]);
+  return country;
 }

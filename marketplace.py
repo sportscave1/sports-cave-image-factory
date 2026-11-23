@@ -20,7 +20,7 @@ CONDITIONS = ('New / unused', 'Excellent', 'Good', 'Fair')
 SPORTS = ('NRL', 'AFL', 'Cricket', 'Basketball', 'Football', 'Motorsport', 'Other sports')
 PUBLIC_FIELDS = ('id', 'title', 'category', 'sport', 'team', 'condition', 'description',
                  'price_cents', 'shipping_cents', 'location', 'seller_name', 'seller_type',
-                 'provenance', 'photo_count', 'published_at', 'status')
+                 'provenance', 'photo_count', 'has_video', 'video_seconds', 'published_at', 'status')
 DEFAULT_SITE = {'release_id': 'marketplace-launch-1', 'headline': 'Great collections keep moving.',
                 'description': 'Buy and sell sporting memorabilia, jerseys and trading cards.',
                 'intake_open': True}
@@ -110,7 +110,7 @@ def submission(payload):
     row['shipping_cents'] = cents(payload.get('shipping'), shipping=True)
     if payload.get('consent') is not True:
         raise ValueError('Confirm you own the item and agree to the submission terms.')
-    row['consent_version'] = 'founding-intake-2026-11-20'
+    row['consent_version'] = 'recorded-media-2026-11-22'
     row['consented_at'] = now()
     return row
 

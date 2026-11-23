@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v7-order-status-recovery";
+  const CONTROLLER_VERSION = "companion-header-v12-orders-restart";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -988,6 +988,19 @@
     .sc-companion-details[data-state="complete"] summary {border-color:#71936d;color:#cef1c9;}
     .sc-companion-details[data-stale="true"] summary,#sc-os-staff-uploads[data-stale="true"] summary {border-style:dashed;}
     .sc-companion-popup {position:absolute;top:calc(100% + 6px);right:0;width:min(340px,calc(100vw - 20px));box-sizing:border-box;padding:12px;background:#191612;border:1px solid #63512d;border-radius:8px;color:#f8edcf;box-shadow:0 8px 24px #0004;max-height:55vh;overflow:auto;z-index:2;font-size:12px;}
+    #sc-edition-usage label {color:#f8edcf!important;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    #sc-edition-usage {color:#f8edcf!important;color-scheme:dark;}
+    #sc-edition-usage input {width:110px;}
+    #sc-edition-usage input,#sc-edition-usage select {color:#17130e!important;background:#fffaf0!important;border:1px solid #ad9564!important;}
+    #sc-edition-usage input::placeholder {color:#655b4c!important;opacity:1;}
+    #sc-edition-usage input:disabled {color:#6a6050!important;background:#ddd4c3!important;opacity:1;}
+    #sc-edition-usage button {color:#17130e!important;background:#f3dfae!important;border:1px solid #ad9564!important;}
+    #sc-edition-usage :focus-visible {outline:2px solid #f1ca6b;outline-offset:2px;}
+    #sc-edition-usage small,#sc-edition-message {color:#f0e6d0!important;}
+    #sc-edition-help {line-height:1.4;}
+    #sc-edition-usage input,#sc-edition-usage select,#sc-edition-usage button {font:12px Arial,sans-serif;padding:5px;border-radius:4px;}
+    #sc-edition-usage button:disabled {opacity:.5;}
+    #sc-edition-message {overflow-wrap:anywhere;}
     .sc-companion-popup article {padding:6px 0;overflow-wrap:anywhere;}
     .sc-companion-popup article+article {border-top:1px solid #63512d;padding-top:8px;}
     .sc-companion-popup p {margin:2px 0!important;font:11px/1.35 Arial,sans-serif!important;color:#d9cfb8!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
@@ -1041,6 +1054,41 @@
       #sc-os-companion-status {grid-row:3;gap:5px;}
       .sc-companion-details summary,#sc-os-staff-upload-summary {padding-inline:5px;}
     }
+
+    .sc-os-topbar-actions > .sc-os-topbar-icon-button {position:relative;}
+    .sc-os-tooltip-surface {position:absolute;inset:0;border-radius:inherit;z-index:2;}
+    @media(min-width:1101px) {
+      #${ROOT_ID},#${ROOT_ID}.sc-has-staff-upload {grid-template-columns:var(--sc-sidebar-width) auto auto auto minmax(0,1fr);}
+      #${ROOT_ID}.sc-has-posting,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:var(--sc-sidebar-width) auto auto auto 180px minmax(0,1fr);}
+      #${ROOT_ID} .sc-os-topbar-actions {grid-column:4;grid-row:1;}
+    }
+    @media(max-width:600px) {
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:236px!important;}
+      #${ROOT_ID}.sc-has-staff-upload,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:auto auto minmax(0,1fr);grid-template-rows:56px 48px 132px;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-brand {grid-column:1/-1;}
+      #${ROOT_ID}.sc-has-staff-upload #sc-os-files {grid-column:2;grid-row:2;}
+      #${ROOT_ID}.sc-has-staff-upload .sc-os-topbar-actions {grid-column:3;grid-row:2;justify-content:flex-end;}
+      #sc-os-companion-status {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+    }
+
+    /* Five compact desktop cards; mobile rotates one active queue locally. */
+    #${ROOT_ID} .sc-os-topbar-brand-copy {display:none;}
+    @media(min-width:1101px) {
+      #${ROOT_ID},#${ROOT_ID}.sc-has-staff-upload {grid-template-columns:54px auto auto auto minmax(0,1fr);column-gap:6px;}
+      #${ROOT_ID}.sc-has-posting,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-columns:54px auto auto auto 150px minmax(0,1fr);}
+      #${ROOT_ID} .sc-os-topbar-brand {padding-inline:4px;}
+      #${ROOT_ID} #sc-os-companion-status {gap:6px;}
+    }
+    @media(max-width:600px) {
+      body:has(#${ROOT_ID}.sc-has-staff-upload) {--sc-topbar-height:168px!important;}
+      #${ROOT_ID}.sc-has-staff-upload,#${ROOT_ID}.sc-has-staff-upload.sc-has-posting {grid-template-rows:56px 48px 64px;}
+      #${ROOT_ID} #sc-os-companion-status {display:flex;grid-template-columns:none;}
+      #sc-os-companion-status > .sc-companion-card:not(.sc-mobile-current) {display:none;}
+      #sc-os-companion-status > .sc-companion-card.sc-mobile-current:not([hidden]) {display:flex;flex:1;}
+      body:has(#${ROOT_ID}.sc-mobile-idle) {--sc-topbar-height:104px!important;}
+      #${ROOT_ID}.sc-mobile-idle.sc-has-staff-upload {grid-template-rows:56px 48px 0;}
+      #${ROOT_ID}.sc-mobile-idle #sc-os-companion-status {padding:0;}
+    }
   `;
 
   let style = doc.getElementById(STYLE_ID);
@@ -1066,6 +1114,15 @@
       <button id="sc-os-refresh" class="sc-os-topbar-icon-button" type="button" aria-label="Refresh" title="Refresh">${icon("refresh")}</button>
     </div>
     <button id="sc-os-files" class="sc-os-topbar-icon-button" type="button" aria-label="Open Files" ${config.filesEnabled ? "" : "hidden"}>${icon("folder")}<span>Files</span></button>
+    <div class="sc-os-topbar-actions">
+      <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" title="Search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}<span class="sc-os-tooltip-surface" title="Search" aria-hidden="true"></span></button>
+      <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
+      <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}<span class="sc-os-tooltip-surface" title="Schedule" aria-hidden="true"></span></button>
+      <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}<span class="sc-os-tooltip-surface" title="Notifications" aria-hidden="true"></span></button>
+      <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
+      <div id="sc-os-repairs-panel" class="sc-os-topbar-panel" aria-label="Repairs &amp; Improvements" hidden></div>
+      <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
+    </div>
     <div class="sc-os-topbar-search-wrap" role="dialog" aria-label="Search Sports Cave OS">
       <div class="sc-os-topbar-search-shell">
         ${icon("search")}
@@ -1105,18 +1162,28 @@
           <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-ads-close" type="button" aria-label="Close ads status">×</button><div id="sc-os-ads-list"></div><button id="sc-os-queue-ads" class="sc-os-queue-control" type="button" hidden></button><div id="sc-ad-message" role="status" aria-live="polite"></div><details id="sc-ad-quick" class="sc-ad-quick"><summary>Add to queue</summary><form id="sc-ad-form"><label>Product<input id="sc-ad-product" role="combobox" aria-autocomplete="list" aria-controls="sc-ad-products" aria-expanded="false" placeholder="Search products" required autocomplete="off"><div id="sc-ad-products" role="listbox" aria-label="Edition Ops products" hidden></div></label><label>Sport<select id="sc-ad-sport" required></select></label><label>Country<select id="sc-ad-country" required></select></label><label>Type<select id="sc-ad-type"><option>Instant Experience</option></select></label><button id="sc-ad-reload" type="button">Reload products</button><button id="sc-ad-submit" type="submit">Add to queue</button></form></details></div>
         </details>
       </div>
-    </div>
-    <div class="sc-os-topbar-actions">
-      <button id="sc-os-mobile-search" class="sc-os-topbar-icon-button sc-os-mobile-search" type="button" aria-label="Open search" aria-controls="sc-os-search-results" aria-expanded="false">${icon("search")}</button>
-      <button id="sc-os-planner-timer-pill" class="sc-os-planner-timer-pill" type="button" aria-label="Open active Daily Planner timer" hidden>${icon("planner")}<span class="sc-os-planner-pill-task"></span><span class="sc-os-planner-pill-state"></span><span class="sc-os-planner-pill-time"></span></button>
-      <button id="sc-os-daily-planner" class="sc-os-topbar-icon-button" type="button" aria-label="Open Daily Planner" title="Open Daily Planner">${icon("planner")}</button>
-      <button id="sc-os-notifications" class="sc-os-topbar-icon-button" type="button" aria-label="Open notifications" aria-controls="sc-os-notifications-panel" aria-expanded="false" title="Notifications">${icon("bell")}</button>
-      <button id="sc-os-repairs" class="sc-os-topbar-icon-button" type="button" aria-label="Repairs &amp; Improvements" aria-controls="sc-os-repairs-panel" aria-expanded="false" title="Repairs &amp; Improvements">${icon("hammer")}</button>
-      <button id="sc-os-profile" class="sc-os-topbar-icon-button" type="button" aria-label="Open Settings" title="Settings">${icon("user")}</button>
-      <button id="sc-os-settings" class="sc-os-topbar-icon-button" type="button" aria-label="Open settings" aria-controls="sc-os-settings-panel" aria-expanded="false" title="Settings">${icon("settings")}</button>
-      <div id="sc-os-notifications-panel" class="sc-os-topbar-panel" aria-label="Notifications" hidden></div>
-      <div id="sc-os-repairs-panel" class="sc-os-topbar-panel" aria-label="Repairs &amp; Improvements" hidden></div>
-      <div id="sc-os-settings-panel" class="sc-os-topbar-panel" aria-label="Settings" hidden></div>
+      <div id="sc-os-editions-card" class="sc-companion-card" hidden>
+        <details id="sc-os-editions-status" class="sc-companion-details">
+          <summary><span class="sc-companion-name">Auto Editions</span><span id="sc-os-editions-title" class="sc-companion-title"></span><span id="sc-os-editions-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-editions-meter" max="100" aria-label="Auto Editions checkpoint"></progress></summary>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-editions-close" type="button" aria-label="Close Auto Editions status">×</button><div id="sc-os-editions-freshness" role="status" style="color:#f0e6d0;font-size:11px;margin-bottom:8px">Waiting for status.</div><div id="sc-os-editions-list"></div>
+            <form id="sc-edition-usage" aria-label="Auto Editions usage" style="border-top:1px solid #63512d;margin-top:10px;padding-top:10px;display:grid;gap:8px">
+              <strong>Companion usage</strong>
+              <label>Transfer speed <select id="sc-edition-mode" disabled><option>Balanced</option><option>Background</option><option value="Maximum speed">Maximum (uncapped)</option><option>Manual</option></select></label>
+              <label>Upload cap (Mbps) <input id="sc-edition-upload" placeholder="Not used" aria-describedby="sc-edition-help" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Measured upload (Mbps) <input id="sc-edition-measured" placeholder="Not set" aria-describedby="sc-edition-help" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <label>Download cap (Mbps, optional) <input id="sc-edition-download" placeholder="Uncapped" aria-describedby="sc-edition-help" type="number" min="0.01" max="10000" step="any" disabled></label>
+              <div><button id="sc-edition-apply" type="submit" disabled>Apply usage</button> <button id="sc-edition-pause" type="button" disabled>Pause companion</button> <button id="sc-edition-refresh" type="button">Refresh</button></div>
+              <span id="sc-edition-message" role="status" aria-live="polite">Open to load current settings.</span>
+              <small id="sc-edition-help">Blank download cap means uncapped. Upload cap is used only in Manual mode; measured upload is used for Balanced/Background. Speed limits transfers. Balanced reserves headroom; Background uses less bandwidth. Pause stops new jobs after current work finishes safely.</small>
+            </form></div>
+        </details>
+      </div>
+      <div id="sc-os-orders-card" class="sc-companion-card" hidden>
+        <details id="sc-os-orders-status" class="sc-companion-details">
+          <summary><span class="sc-companion-name">Orders</span><span id="sc-os-orders-title" class="sc-companion-title"></span><span id="sc-os-orders-stage" class="sc-companion-stage" role="status"></span><progress id="sc-os-orders-meter" max="100" aria-label="Orders checkpoint"></progress></summary>
+          <div class="sc-companion-popup"><button class="sc-companion-close" id="sc-os-orders-close" type="button" aria-label="Close Orders status">×</button><div id="sc-os-orders-list"></div></div>
+        </details>
+      </div>
     </div>
     <div id="sc-os-order-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div id="sc-os-planner-toast-region" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -1214,7 +1281,7 @@
       queue, root.querySelector("#sc-os-queue-" + queue),
     ]));
     let queues = {};
-    const companionPanels = Object.fromEntries(["design", "ads"].map(name => [name, {
+    const companionPanels = Object.fromEntries(["design", "ads", "editions", "orders"].map(name => [name, {
       card:root.querySelector(`#sc-os-${name}-card`),
       panel:root.querySelector(`#sc-os-${name}-status`),
       title:root.querySelector(`#sc-os-${name}-title`),
@@ -1232,12 +1299,13 @@
       }
       const rotating = name === 'design' && running.length > 1;
       const job = (rotating ? running[designRotation % running.length] : running[0]) || jobs.find(item => item.state === 'waiting') || jobs[0];
-      const online = name === 'ads' ? control.online : status.online;
-      const idle = control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
+      const online = name === 'design' ? status.online : control.online;
+      const idle = control.unavailable ? 'Status unavailable · retrying' : control.enabled ? (online ? 'Ready' : 'Companion offline') : 'Queue paused';
       let label = job ? job.label : idle;
       if (rotating) label = `${running.length} working · ${designRotation % running.length + 1}/${running.length} · ${label}`;
       if (job?.state === 'waiting' && !control.enabled) label = 'Queued · paused';
-      if (job && ['waiting','running'].includes(job.state) && !online) label += ' · companion offline';
+      if (job && (name === 'editions' || ['waiting','running'].includes(job.state)) && !online) label += ' · companion offline';
+      if(name==='orders' && control.automation_enabled===false)label+=' · submit paused';
       if (control.waiting) label += ` · ${control.waiting} waiting`;
       const changed = elements.title.dataset.jobId && elements.title.dataset.jobId !== job?.id;
       elements.title.dataset.jobId = job?.id || '';
@@ -1245,8 +1313,9 @@
       elements.stage.textContent = label;
       elements.panel.title = '';
       elements.panel.dataset.state = job?.state || 'idle';
-      elements.panel.dataset.stale = 'false';
-      elements.meter.value = job?.percent || 0;
+      elements.panel.dataset.stale = String(Boolean(control.unavailable));
+      if (job?.state === 'running' && ['editions','orders'].includes(name)) elements.meter.removeAttribute('value');
+      else elements.meter.value = job?.percent || 0;
       elements.meter.setAttribute('aria-valuetext', job?.estimated ? `Estimated ${job.percent}% · ${label}` : label);
       if (rotating && changed && !parentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         elements.title.animate([{opacity:0},{opacity:1}], {duration:250});
@@ -1259,6 +1328,22 @@
       designRotation++;
       renderCompanionSummary('design', elements, control, lastCompanionStatus);
     }, 5000));
+    let mobileRotation=0;
+    const rotateMobileQueues = (advance=false) => {
+      if(doc.hidden || [...root.querySelectorAll('#sc-os-companion-status details')].some(item=>item.open))return;
+      const active=['design','upload','ads','editions','orders'].filter(name=>{
+        const control=queues[name],card=root.querySelector('#sc-os-'+name+'-card');
+        if(!card || card.hidden)return false;
+        if(control?.unavailable || control?.waiting)return true;
+        const jobs=name==='upload' ? lastCompanionStatus?.jobs : control?.jobs;
+        return (jobs||[]).some(job=>name==='upload' ? job.stage>=0 && job.stage<6 || job.stage===7 : ['running','waiting','pending','failed'].includes(job.state));
+      });
+      if(advance && active.length>1)mobileRotation++;
+      const shown=active[mobileRotation%active.length];
+      for(const card of root.querySelectorAll('#sc-os-companion-status > .sc-companion-card'))card.classList.toggle('sc-mobile-current',card.id==='sc-os-'+shown+'-card');
+      root.classList.toggle('sc-mobile-idle',active.length===0);
+    };
+    timers.add(parentWindow.setInterval(()=>rotateMobileQueues(true),5000));
     const companionFetch = async (url, options = {}) => {
       if(listenerController.signal.aborted)throw Error('This panel was closed. Reopen it to retry.');
       const controller = new parentWindow.AbortController();
@@ -1273,6 +1358,59 @@
       catch(error) { if(controller.signal.aborted && !listenerController.signal.aborted) throw Error('Request timed out. Please retry.'); throw error; }
       finally {parentWindow.clearTimeout(timeout);listenerController.signal.removeEventListener('abort',abort);}
     };
+    // On-demand, independent of the shared status poll; never rewrite a dirty form.
+    const usage = Object.fromEntries(['usage','mode','upload','measured','download','apply','pause','refresh','message'].map(key=>[key,root.querySelector('#sc-edition-'+key)]));
+    let usageData=null, usageBusy=false, usageDirty=false;
+    const usageMessage=text=>{usage.message.textContent=text;};
+    const usageSupported=()=>usageData?.transfer_control?.age_seconds<=150 && [1,2,3].includes(usageData?.transfer_control?.effective?.capability);
+    const usageDraw=()=>{
+      const transfer=usageData?.transfer_control, desired=transfer?.requested?.settings || transfer?.effective?.settings;
+      if(desired && !usageDirty){usage.mode.value=desired.mode;usage.upload.value=desired.manual_mbps??'';usage.measured.value=desired.sustainable_mbps??'';usage.download.value=desired.download_mbps??'';}
+      for(const key of ['mode','download','apply'])usage[key].disabled=usageBusy||!usageSupported();
+      usage.upload.disabled=usageBusy||!usageSupported()||usage.mode.value!=='Manual';
+      usage.upload.placeholder=usage.mode.value==='Manual'?'Enter Mbps':'Not used';
+      usage.measured.disabled=usageBusy||!usageSupported()||!['Balanced','Background'].includes(usage.mode.value);
+      usage.pause.disabled=usageBusy||!usageData;
+      usage.refresh.disabled=usageBusy;
+      usage.pause.textContent=usageData?.control?.paused?'Resume companion':'Pause companion';
+    };
+    const usageRead=async()=>{
+      if(usageBusy)return;
+      usageBusy=true;usageDraw();usageMessage('Loading current settings…');
+      try{
+        const response=await companionFetch('/api/worker-health/companion-controls',{credentials:'same-origin'}),data=await response.json();
+        if(!response.ok)throw Error(data.error||'Controls unavailable. Retry refresh.');
+        usageData=data;
+        const t=data.transfer_control, e=t?.effective, pending=t?.requested && t.requested.revision!==e?.revision;
+        usageMessage((data.control.paused?'Companion paused. ':'')+(!usageSupported()?'Companion offline or update required.':pending?'Usage requested; awaiting companion acknowledgement.':'Current: '+e.settings.mode+' · '+e.protection+(e.settings.paused?' · Transfers paused; resume in Worker Health.':'')));
+      }catch(error){usageData=null;usageMessage(error.message);}
+      finally{usageBusy=false;usageDraw();}
+    };
+    const usageWrite=async(body)=>{
+      if(usageBusy)return;
+      usageBusy=true;usageDraw();usageMessage('Saving…');
+      try{
+        const response=await companionFetch('/api/worker-health/control',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),data=await response.json();
+        if(!response.ok)throw Error(data.error||'Could not save. Refresh before retrying.');
+        if(data.requested){usageData.transfer_control.requested=data.requested;usageDirty=false;usageMessage('Usage saved; awaiting companion acknowledgement (next heartbeat).');}
+        else{usageData.control.paused=body.paused;usageMessage(data.state==='Pausing'?'Pausing: current work will finish safely.':body.paused?'Companion paused.':'Companion resumed.');}
+      }catch(error){usageMessage(error.message+' Refresh to check whether it was saved.');}
+      finally{usageBusy=false;usageDraw();}
+    };
+    usage.usage.addEventListener('input',()=>{usageDirty=true;usageDraw();},listenerOptions);
+    usage.usage.addEventListener('submit',event=>{
+      event.preventDefault();if(!usageSupported()||usageBusy)return;
+      const t=usageData.transfer_control, base=t.requested?.settings||t.effective.settings;
+      const value={...base,mode:usage.mode.value,download_mbps:usage.download.value===''?null:Number(usage.download.value)};
+      if(value.mode==='Manual')value.manual_mbps=usage.upload.value===''?null:Number(usage.upload.value);
+      if(['Balanced','Background'].includes(value.mode))value.sustainable_mbps=usage.measured.value===''?null:Number(usage.measured.value);
+      if(value.mode==='Manual'&&!value.manual_mbps){usageMessage('Enter an upload cap for Manual mode.');return;}
+      if(['Balanced','Background'].includes(value.mode)&&!value.sustainable_mbps){usageMessage('Enter a reliable measured upload rate before using this mode.');return;}
+      usageWrite({instance:t.instance,transfer_settings:value});
+    },listenerOptions);
+    usage.pause.addEventListener('click',()=>{if(usageData)usageWrite({paused:!usageData.control.paused});},listenerOptions);
+    usage.refresh.addEventListener('click',()=>usageRead(),listenerOptions);
+    companionPanels.editions.panel.addEventListener('toggle',()=>{if(companionPanels.editions.panel.open)usageRead();},listenerOptions);
     const adRows = new Map(), adControlReceipts = new Map();
     // A new controller must rebind buttons retained by Streamlit's parent shell.
     root.querySelector('#sc-os-ads-list').dataset.signature='';
@@ -1293,6 +1431,13 @@
         pendingAdActions.clear();deletedAdJobs.clear();adRows.clear();adControlReceipts.clear();adActionScope=state.config.uploadScope;
       }
       lastCompanionStatus = status;
+      const editionFreshness=root.querySelector('#sc-os-editions-freshness');
+      if(!status.queues?.editions) delete editionFreshness.dataset.checkedAt;
+      if(status.queues?.editions && status.display_state!=='stale' && !status.queues.editions.unavailable){
+        const checked=Date.parse(status.checked_at||'');
+        editionFreshness.dataset.checkedAt=Number.isFinite(checked)?new Date(checked).toLocaleTimeString():new Date().toLocaleTimeString();
+      }
+      editionFreshness.textContent='Last successful status: '+(editionFreshness.dataset.checkedAt||'not available')+(status.display_state==='stale'||status.queues?.editions?.unavailable?' · delayed, showing last known state':'');
       if(adQuickScope && adQuickScope!==state.config.uploadScope) {
         adProducts=[];adQuickScope='';adRequest='';quick.open=false;adProduct.value='';adMessage.textContent='';
         root.querySelector('#sc-ad-products').replaceChildren();
@@ -1319,6 +1464,11 @@
         // Keep unchanged ad buttons mounted so polling cannot swallow the click.
         if(name==='ads') {
           const signature=JSON.stringify([state.config.uploadScope,jobs.slice(0,10).map(({updated_at,...visible})=>visible),[...pendingAdActions]]);
+          if(elements.list.dataset.signature===signature)continue;
+          elements.list.dataset.signature=signature;
+        }
+        if(name==='orders') {
+          const signature=JSON.stringify(jobs.map(({updated_at,...visible})=>visible));
           if(elements.list.dataset.signature===signature)continue;
           elements.list.dataset.signature=signature;
         }
@@ -1352,6 +1502,16 @@
                 finally{pendingDesignActions.delete(item.id);button.disabled=false;}
               };actions.append(button);
             }designActions=actions;
+          }
+          if(name==='orders' && item.can_restart) {
+            const actions=doc.createElement('span');actions.className='sc-design-actions';
+            const restart=doc.createElement('button');restart.type='button';restart.textContent='Restart QA';
+            restart.onclick=async()=>{restart.disabled=true;try{
+              const response=await companionFetch('/api/orders-companion/restart',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({allocation_id:Number(item.id)})});
+              const result=await response.json();if(!response.ok)throw Error(result.error||'Restart failed');
+              detail.textContent='Restart queued';lastStaffStatus='';await refreshStaffProgress(false);
+            }catch(error){detail.textContent=error.message;}finally{restart.disabled=false;}};
+            actions.append(restart);designActions=actions;
           }
           if(name==='ads') {
             const actions=article._actions || doc.createElement('span');article._actions=actions;actions.className='sc-ad-actions';
@@ -1401,7 +1561,7 @@
           }else if(article._posting){article._posting.remove();article._posting=null;}
           return article;
         });
-        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href='/?page=upload_companion';queueLink.textContent='Open Companion Queues';
+        const queueLink=elements.queueLink || doc.createElement('a');elements.queueLink=queueLink;queueLink.href=name==='orders'?'/?page=orders':name==='editions'?'/?page=edition_ops':'/?page=upload_companion';queueLink.textContent=name==='orders'?'Open Orders':name==='editions'?'Open Edition Ops':'Open Companion Queues';
         if(name==='ads'){
           const retained=new Set(jobs.slice(0,10).map(item=>item.id));
           for(const id of adRows.keys())if(!retained.has(id))adRows.delete(id);
@@ -1730,6 +1890,7 @@
     doc.addEventListener('visibilitychange', () => {
       if (!doc.hidden && state.config.staffUploadProgress) void refreshStaffProgress();
     }, listenerOptions);
+    let staffValidator = null;
     const readStaffProgress = async () => {
       const scope = state.config.uploadScope;
       const revision = queueRevision;
@@ -1739,14 +1900,26 @@
       listenerController.signal.addEventListener('abort', abort, {once:true});
       const timeout = parentWindow.setTimeout(abort, 8000);
       try {
-        const response = await parentWindow.fetch("/api/staff-product-uploads/status?display=1" + (requestedUploadId ? "&job_id=" + encodeURIComponent(requestedUploadId) : ""), {
+        const statusUrl = "/api/staff-product-uploads/status?display=1" + (requestedUploadId ? "&job_id=" + encodeURIComponent(requestedUploadId) : "");
+        const validatorKey = JSON.stringify([scope,state.config.revision,statusUrl]);
+        const validator = lastStaffStatus && staffValidator?.key === validatorKey ? staffValidator : null;
+        const response = await parentWindow.fetch(statusUrl, {
           credentials:"same-origin", cache:"no-store", signal:controller.signal,
+          headers:validator ? {'If-None-Match':validator.tag} : {},
         });
         if (listenerController.signal.aborted) return;
+        if (response.status === 304) {
+          if (scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
+          if (!validator) throw new Error('Status unavailable');
+          staffFailures = 0;
+          return; // Same data AND freshness state; retain cadence, focus and DOM.
+        }
         if (!response.ok) throw new Error([401,403].includes(response.status) ? 'Session needs refreshing' : 'Companion status unavailable');
         const status = await response.json();
         if (listenerController.signal.aborted || scope !== state.config.uploadScope || !state.config.staffUploadProgress) return;
         if (status.display_state && !["ready", "stale"].includes(status.display_state)) throw new Error("Status refreshing");
+        const tag = response.headers?.get('ETag');
+        staffValidator = tag ? {key:validatorKey,tag} : null;
         const jobs = status.jobs || [];
         staffFailures = 0;
         const active = jobs.some(item => item.stage > 0 && item.stage < 6
@@ -1761,8 +1934,9 @@
         renderCompanions(status);
         staffProgress.hidden = !jobs.length && !queues.upload?.display && !pendingUploadReveal;
         root.querySelector('#sc-os-upload-card').hidden=staffProgress.hidden;
+        rotateMobileQueues();
         staffProgress.dataset.stale=String(status.display_state === 'stale');
-        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale');
+        for (const {panel} of Object.values(companionPanels)) panel.dataset.stale=String(status.display_state === 'stale' || (panel.id==='sc-os-editions-status' && queues.editions?.unavailable));
         renderQueueButtons();
         lastStaffStatus = revision === queueRevision && !pendingQueues.size ? serialized : '';
         if (pendingUploadReveal) {
@@ -1866,11 +2040,12 @@
         }));
       } catch (_error) {
         if (listenerController.signal.aborted || scope !== state.config.uploadScope) return;
+        staffValidator = null;
         lastStaffStatus='';
         for (const button of Object.values(queueButtons)) button.disabled=true;
         staffDelay = _error.message === 'Status refreshing' ? 1000 : Math.min(30000, 2000 * 2 ** Math.min(++staffFailures, 4));
         for (const {panel,stage} of Object.values(companionPanels)) {
-          panel.dataset.stale='true';stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
+          panel.dataset.stale='true';if(panel.id==='sc-os-editions-status'){const stamp=root.querySelector('#sc-os-editions-freshness');stamp.textContent='Status delayed · last successful update: '+(stamp.dataset.checkedAt||'not available')+' · showing last known state';}stage.textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
         }
         staffProgress.dataset.stale='true';
         root.querySelector('#sc-os-staff-upload-stage').textContent=_error.message === 'Session needs refreshing' ? 'Refresh your session to reconnect' : 'Status delayed · retrying';
@@ -2009,7 +2184,7 @@
     const repairsButton = root.querySelector("#sc-os-repairs");
     const repairsPanel = root.querySelector("#sc-os-repairs-panel");
     repairsPanel.hidden = true;
-    repairsButton.setAttribute("aria-expanded", "false");
+    repairsButton?.setAttribute("aria-expanded", "false");
     const profileButton = root.querySelector("#sc-os-profile");
     const settingsButton = root.querySelector("#sc-os-settings");
     const settingsPanel = root.querySelector("#sc-os-settings-panel");
@@ -3840,11 +4015,11 @@
       renderNotifications(await loadNotifications());
       notificationsPanel.querySelector("button")?.focus({preventScroll: true});
     }, listenerOptions);
-    repairsButton.addEventListener("click", openRepairPanel, listenerOptions);
-    profileButton.addEventListener("click", () => {
+    repairsButton?.addEventListener("click", openRepairPanel, listenerOptions);
+    profileButton?.addEventListener("click", () => {
       navigateDocument(routeUrl(state.config.accountsRouteKey, "", false));
     }, listenerOptions);
-    settingsButton.addEventListener("click", () => {
+    settingsButton?.addEventListener("click", () => {
       if (!openPanel("settings")) return;
       renderSettings();
       settingsPanel.querySelector("button")?.focus({preventScroll: true});

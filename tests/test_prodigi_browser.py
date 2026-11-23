@@ -16,6 +16,8 @@ KEY=sandbox.PREFIX+'00000000-0000-4000-8000-000000000001'
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_SANDBOX_ENABLED','true')
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_FULL_QA_ENABLED','false')
     monkeypatch.setattr(requests.sessions.Session,'request',lambda *a,**k:pytest.fail('Live network forbidden'))
 
 
@@ -69,6 +71,28 @@ def test_claim_save_permit_and_independent_source_verification(handoff,monkeypat
     assert len(provider.writes)==1 and provider.data['status']=='draft'
 
 
+def test_live_upload_completion_queues_dashboard_qa_in_the_same_verified_handoff(handoff,monkeypatch):
+    _,provider,value=handoff
+    import prodigi_full_qa as full
+    import prodigi_dashboard_qa as dashboard
+    _,resolver,link,_=browser.context(KEY)
+    provider.mode='live'
+    monkeypatch.setenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','true')
+    monkeypatch.setattr(browser,'context',lambda _:(provider,resolver,link,False))
+    monkeypatch.setattr(full,'enabled',lambda:True)
+    monkeypatch.setattr(full,'live_enabled',lambda:True)
+    monkeypatch.setattr(browser,'verify_file',lambda *_:True)
+    original=provider.order;reads=[]
+    def order(key):reads.append(key);return original(key)
+    provider.order=order
+    plan=browser.claim();browser.permit(KEY,plan['token'],plan['sha256'])
+    provider.artwork('99','88',render_url(),'a'*32)
+    assert browser.finish(KEY,plan['token'])['status']==dashboard.WAITING
+    assert reads==['99']*4 # claim, Save permit, and two independent post-Save reads.
+    assert sandbox.list_tests()[0]['browser']['verified'] is True
+    assert not sandbox.list_tests()[0].get('submission')
+
+
 @pytest.mark.parametrize('change',[
     lambda p:p.data.update(status='in_production'),
     lambda p:p.data['items'][0].update(sku='different'),
@@ -89,6 +113,16 @@ def test_after_save_price_calculation_does_not_hide_product_changes(handoff,monk
     monkeypatch.setattr(browser,'verify_file',lambda *_:True)
     assert browser.finish(KEY,plan['token'])['status']=='Needs review'
     assert not sandbox.list_tests()[0]['browser'].get('verified')
+
+
+def test_sibling_repricing_is_only_ignored_after_save_and_preserves_currency():
+    data={'items':[{'id':'target'},{'id':'sibling','unitPrice':{'amount':'45.00','currency':'USD'},
+        'lineTotal':{'amount':'45.00','currency':'USD'},'assets':[{'url':'saved-original'}]}]}
+    changed=deepcopy(data);changed['items'][1]['unitPrice']['amount']='45.34';changed['items'][1]['lineTotal']['amount']='45.34'
+    assert browser.business(data,'target')!=browser.business(changed,'target')
+    assert browser.business(data,'target',after_save=True)==browser.business(changed,'target',after_save=True)
+    changed['items'][1]['unitPrice']['currency']='AUD'
+    assert browser.business(data,'target',after_save=True)!=browser.business(changed,'target',after_save=True)
 
 
 def test_interrupted_upload_is_reviewed_without_another_browser_claim(handoff):
@@ -157,3 +191,52 @@ def test_one_click_send_queues_only_the_selected_allocation(monkeypatch):
     app=AppTest.from_string('import orders_page\norders_page._render_send_artwork({"edition_order_id":123},"test")').run()
     app.button(key='orders-send-test-123').click().run()
     assert not app.exception and calls==[123]
+
+
+def test_required_empty_slot_is_not_an_artwork_file_and_is_pinned_until_save(handoff):
+    _,provider,_=handoff
+    slot=dict(id='print-area-slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)
+    provider.data['items'][0]['assets']=[slot]
+    assert not browser.has_existing_artwork(provider.data['items'][0])
+    plan=browser.claim();assert plan and plan['sku']==provider.data['items'][0]['sku']
+    provider.data['items'][0]['assets'][0]['id']='another-slot'
+    with pytest.raises(ValueError,match='changed'):browser.permit(KEY,plan['token'],plan['sha256'])
+    provider.data['items'][0]['assets'][0]['id']='print-area-slot'
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+    assert not provider.writes
+
+
+@pytest.mark.parametrize('change',[
+    dict(url='https://fixture.invalid/existing.jpg'),dict(assetId='real-asset'),dict(status='Complete'),
+    dict(pageCount=1),dict(pageCount=False),dict(required=False),dict(printArea='back')])
+def test_unknown_or_real_assets_are_never_treated_as_empty_slots(change):
+    slot=dict(id='slot',printArea='default',status='NotYetDownloaded',pageCount=0,required=True)
+    slot.update(change)
+    assert browser.has_existing_artwork(dict(assets=[slot]))
+
+def test_updated_companion_can_pin_one_of_two_identical_product_rows(handoff):
+    _,provider,_=handoff
+    second=deepcopy(provider.data['items'][0]);second.update(id='89',merchantReference='other-line')
+    provider.data['items'].append(second)
+    plan=browser.claim(exact_item_supported=True)
+    assert plan['item_id']=='88' and plan['exact_item'] is True
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+
+def test_restart_before_save_retires_old_token_only_after_untouched_readback(handoff,monkeypatch):
+    _,provider,_=handoff;old=browser.claim()
+    browser.finish(KEY,old['token'],'readback')
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    assert browser.resume_unstarted({'id':'owner'},KEY)['status']==browser.WAITING
+    new=browser.claim();assert new['token']!=old['token']
+    assert browser.finish(KEY,old['token'])['status']=='Handoff unavailable'
+    assert not provider.writes
+
+@pytest.mark.parametrize('change',[
+    lambda p:p.data['items'][0].update(assets=[dict(url='https://fixture/art',printArea='default')]),
+    lambda p:p.data.update(recipient={'name':'Changed'}),
+])
+def test_restart_never_overwrites_artwork_or_business_changes(handoff,monkeypatch,change):
+    _,provider,_=handoff;old=browser.claim();browser.finish(KEY,old['token'])
+    monkeypatch.setattr(prep,'require_user',lambda _:None);change(provider)
+    with pytest.raises(ValueError,match='changed'):browser.resume_unstarted({'id':'owner'},KEY)
+    assert not provider.writes

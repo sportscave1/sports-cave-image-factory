@@ -1,0 +1,276 @@
+"""Offline reproductions of the live pagination and partial-connection failures."""
+import unittest
+from unittest.mock import Mock, patch
+
+from meta_social import CommunityError, MetaCommunity
+from social_community_feed import CommunityFeed
+from tests.community_fixtures import ADMIN, FakeCommunity
+from tests.test_meta_social import ENV, response
+from tests import test_meta_social as contracts
+
+
+class LiveApiRegressionTests(unittest.TestCase):
+    def test_ad_diagnostics_identify_missing_instagram_token_grants(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.return_value = response({"data": [{"permission": "ads_management", "status": "granted"}]})
+        hint = api.advertising_access_hint()
+        self.assertIn("instagram_basic", hint)
+        self.assertIn("instagram_manage_comments", hint)
+        self.assertNotIn("fixture-ads-token", hint)
+        self.assertEqual(http.request.call_count, 1)
+
+    def test_ad_diagnostics_verify_linked_account_separately_from_media(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        permissions = [{"permission": p, "status": "granted"} for p in (
+            "ads_read", "instagram_basic", "instagram_manage_comments", "pages_read_engagement")]
+        http.request.side_effect = [response({"data": permissions}), response({"id": "ig"})]
+        self.assertIn("individual advertising media are unavailable", api.advertising_access_hint())
+        self.assertTrue(all(call.args[0] == "GET" for call in http.request.call_args_list))
+
+    def test_disabled_instagram_message_access_has_an_actionable_subcode_hint(self):
+        http = Mock()
+        http.request.return_value = response({"error": {"code": 200, "error_subcode": 2534041}}, 403)
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=http)
+        with self.assertRaisesRegex(CommunityError, "enable Allow access to messages"):
+            api.conversations("Instagram")
+
+    def test_unconfigured_ad_connection_is_read_only_and_optional(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=http)
+        self.assertFalse(api.ad_comment_feed()["data"])
+        http.request.assert_not_called()
+
+    def test_ad_post_discovery_uses_separate_tokens_and_filters_foreign_owners(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"data": [
+            {"creative": {"effective_object_story_id": "page_1", "effective_instagram_media_id": "igpost"}},
+            {"creative": {"effective_object_story_id": "foreign_2", "effective_instagram_media_id": "foreignig"}},
+            {"creative": {"effective_object_story_id": "page_3"}},
+        ], "paging": {"next": "ignored", "cursors": {"after": "older-ads"}}}),
+            response({"id": "page_1", "from": {"id": "page"}, "comments": {"data": [{"id": "customer"}]}}),
+            response({"id": "page_3", "from": {"id": "foreign"}}),
+            response({"id": "igpost", "owner": {"id": "another-ig"}})]
+        result = api.ad_comment_feed(after="opaque-ads-cursor")
+        self.assertEqual([post["id"] for post in result["data"]], ["page_1"])
+        self.assertEqual(result["after"], "older-ads")
+        calls = http.request.call_args_list
+        self.assertEqual(calls[0].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
+        self.assertEqual(calls[0].kwargs["params"]["after"], "opaque-ads-cursor")
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all("ids" not in call.kwargs["params"] for call in calls))
+        self.assertTrue(all(call.args[0] == "GET" for call in calls))
+        self.assertTrue(all(call.kwargs["headers"]["Authorization"] == "Bearer fixture-page-token" for call in calls[1:3]))
+        self.assertEqual(calls[3].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
+        self.assertNotIn("foreign", repr([call.kwargs["params"] for call in calls]))
+
+    def test_opaque_long_cursors_survive_every_paginated_edge(self):
+        http = Mock()
+        http.request.return_value = response({"data": []})
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=http)
+        cursor = "opaque" * 240 + "=="
+        for platform in ("Facebook", "Instagram"):
+            api.comment_feed(platform, after=cursor)
+            self.assertEqual(http.request.call_args.kwargs["params"]["after"], cursor)
+        self.assertEqual(http.request.call_count, 2)
+
+    def test_unreadable_ad_post_does_not_discard_other_comments(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"data": [
+            {"creative": {"effective_object_story_id": "page_1"}},
+            {"creative": {"effective_object_story_id": "page_2"}}]}),
+            response({"error": {"code": 100}}, 400),
+            response({"id": "page_2", "from": {"id": "page"}, "comments": {"data": [{"id": "kept"}]}})]
+        result = api.ad_comment_feed()
+        self.assertEqual(result["data"][0]["comments"]["data"][0]["id"], "kept")
+        self.assertIn("1 advertising posts", result["errors"][0])
+
+    def test_instagram_ad_reply_uses_verified_user_token_without_retrying_a_write(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"error": {"code": 100}}, 400),
+            response({"id": "media", "owner": {"id": "ig"}}),
+            response({"data": [{"id": "comment"}]}), response({"id": "reply"})]
+        api.moderate("Instagram", "media", "comment", "reply", "Thanks")
+        calls = http.request.call_args_list
+        self.assertEqual(calls[-1].args[0], "POST")
+        self.assertEqual(calls[-1].kwargs["headers"]["Authorization"], "Bearer fixture-ads-token")
+        self.assertEqual(sum(call.args[0] == "POST" for call in calls), 1)
+
+    def test_instagram_user_token_fallback_still_requires_correct_post_owner(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"error": {"code": 100}}, 400),
+            response({"id": "media", "owner": {"id": "foreign"}})]
+        with self.assertRaisesRegex(CommunityError, "does not belong"):
+            api.moderate("Instagram", "media", "comment", "delete")
+        self.assertTrue(all(call.args[0] == "GET" for call in http.request.call_args_list))
+
+    def test_instagram_ad_read_omits_unsupported_carousel_metadata_and_foreign_actors(self):
+        http = Mock()
+        api = MetaCommunity(dict(ADMIN), env=dict(ENV, META_AD_ACCOUNT_ID="123", META_ACCESS_TOKEN="fixture-ads-token"), session=http)
+        http.request.side_effect = [response({"data": [
+            {"creative": {"effective_object_story_id": "page_1", "instagram_user_id": "ig", "effective_instagram_media_id": "igpost"}},
+            {"creative": {"effective_object_story_id": "page_2", "instagram_user_id": "other", "effective_instagram_media_id": "foreignig"}}]}),
+            response({"id": "page_1", "from": {"id": "page"}}), response({"id": "page_2", "from": {"id": "page"}}),
+            response({"id": "igpost", "owner": {"id": "ig"}, "comments": {"data": []}})]
+        result = api.ad_comment_feed()
+        self.assertEqual(len(result["data"]), 3)
+        self.assertFalse(result["errors"])
+        fields = http.request.call_args.kwargs["params"]["fields"]
+        self.assertNotIn("permalink", fields)
+        self.assertNotIn("caption", fields)
+        self.assertTrue(all("foreignig" not in call.args[1] for call in http.request.call_args_list))
+
+    def test_permission_diagnostic_keeps_codes_and_scope_names_but_no_provider_secrets(self):
+        http = Mock()
+        http.request.return_value = response({"error": {"code": 200, "error_subcode": 123,
+            "message": "Requires instagram_manage_messages; fixture-page-token https://private.invalid"}}, 400)
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=http)
+        with self.assertRaises(CommunityError) as caught:
+            api.conversations("Instagram")
+        message = str(caught.exception)
+        self.assertIn("200/123", message)
+        self.assertIn("instagram_manage_messages", message)
+        self.assertNotIn("fixture-page-token", message)
+        self.assertNotIn("private.invalid", message)
+
+    def test_connection_checks_preserve_available_features_when_instagram_messages_fail(self):
+        api = MetaCommunity(dict(ADMIN), env=ENV, session=Mock())
+        def conversations(platform):
+            if platform == "Instagram":
+                raise CommunityError("Meta rejected the request (Meta 200).")
+            return {"data": []}
+        with patch.object(api, "conversations", side_effect=conversations), patch.object(api, "comment_feed", return_value={"data": []}):
+            checks = api.connection_checks()
+        self.assertEqual(len(checks), 4)
+        self.assertEqual(sum(row["Status"] == "Available" for row in checks), 3)
+        self.assertEqual(checks[2]["Status"], "Needs attention")
+        api._session.request.assert_not_called()
+
+
+class HistoryRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.api = FakeCommunity(dict(ADMIN))
+        self.feed = CommunityFeed(self.api, {})
+
+    @staticmethod
+    def history(platform, after="", found_at=3):
+        if platform == "Instagram":
+            return {"data": [], "after": ""}
+        index = int(after or 0)
+        comments = [{"id": "older-comment", "message": "An older customer comment"}] if index == found_at else []
+        return {"data": [{"id": "post" + str(index), "comments": {"data": comments}}],
+                "after": str(index + 1) if index < 20 else ""}
+
+    def test_initial_search_passes_recent_empty_posts_and_finds_older_comments(self):
+        with patch.object(self.api, "comment_feed", side_effect=self.history) as read:
+            result = self.feed.comments()
+            self.assertEqual([row["id"] for row in result["items"]], ["older-comment"])
+            self.assertEqual(result["posts_scanned"], 4)
+            self.feed.comments()
+            self.assertEqual(read.call_count, 5)
+
+    def test_ad_comments_merge_with_page_and_instagram_comments_and_cache_reads(self):
+        ad_post = {"id": "dark-post", "platform": "Facebook", "advertising": True,
+                   "comments": {"data": [{"id": "ad-comment", "message": "What size?", "created_time": "2026-11-22T00:00:00Z"}]}}
+        with patch.object(self.api, "ad_comment_feed", create=True, return_value={"data": [ad_post], "after": "older-ads"}) as read:
+            first = self.feed.comments()
+            self.feed.comments()
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(len(first["items"]), 3)
+            self.assertEqual(first["more_ads"], "older-ads")
+            self.feed.more_comments(first)
+            self.feed.comments()
+            self.assertEqual(read.call_count, 2)
+            self.assertEqual(self.feed.state["ad_post_pages"], ["", "older-ads"])
+
+    def test_failed_ad_read_does_not_hide_page_comments(self):
+        with patch.object(self.api, "ad_comment_feed", create=True, side_effect=CommunityError("Ads permission unavailable")):
+            result = self.feed.comments()
+            self.assertEqual(len(result["items"]), 2)
+            self.assertIn("Advertising comments", result["errors"][0])
+
+    def test_empty_history_search_is_bounded_and_only_advances_on_request(self):
+        with patch.object(self.api, "comment_feed", side_effect=lambda p, after="": self.history(p, after, found_at=7)) as read:
+            first = self.feed.comments()
+            self.assertFalse(first["items"])
+            self.assertTrue(first["more_posts"]["Facebook"])
+            self.feed.comments()
+            self.assertEqual(read.call_count, 5)
+            self.feed.more_comments(first)
+            second = self.feed.comments()
+            self.assertEqual(second["items"][0]["id"], "older-comment")
+            self.assertEqual(read.call_count, 9)
+
+    def test_failed_older_page_keeps_comments_already_loaded(self):
+        def load(platform, after=""):
+            if after:
+                raise CommunityError("Meta error 100")
+            return self.history(platform, found_at=0)
+        with patch.object(self.api, "comment_feed", side_effect=load):
+            first = self.feed.comments()
+            self.feed.more_comments(first)
+            second = self.feed.comments()
+            self.assertEqual(second["items"][0]["id"], "older-comment")
+            self.assertTrue(second["errors"])
+
+
+class LiveUiRegressionTests(unittest.TestCase):
+    SCRIPT = contracts.CommunityUiTests.SCRIPT
+    setUp = contracts.CommunityUiTests.setUp
+    app = contracts.CommunityUiTests.app
+    button = contracts.CommunityUiTests.button
+
+    def test_unavailable_individual_ad_media_keeps_comments_usable_with_compact_details(self):
+        partial = {"data": [], "after": "", "errors": [
+            "Instagram: 3 advertising posts could not be read. The advertising token can read the linked Instagram account; "
+            "these individual advertising media are unavailable."]}
+        with patch.object(FakeCommunity, "ad_comment_feed", return_value=partial, create=True):
+            app = self.app()
+            app.segmented_control[0].set_value("Comments").run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.warning)
+        self.assertEqual(len(app.expander), 1)
+        self.assertTrue(any("3 Instagram advertising posts unavailable" in row.label for row in app.expander))
+        self.assertTrue(any("Love this edition" in row.value for row in app.markdown))
+
+    def test_pending_history_never_claims_no_comments_and_offers_search(self):
+        with patch.object(FakeCommunity, "comment_feed", side_effect=lambda p, after="": HistoryRegressionTests.history(p, after, found_at=7)):
+            app = self.app()
+            app.segmented_control[0].set_value("Comments").run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("so far" in item.value for item in app.info))
+            for _ in range(7):
+                self.button(app, "Load older comments").click().run()
+            self.assertTrue(any(str(button.key).startswith("comment-select-") for button in app.button))
+            self.assertFalse(app.exception)
+
+    def test_message_content_is_escaped_in_bubbles(self):
+        with patch.object(FakeCommunity, "messages", return_value={"data": [{"id": "m", "from": {"id": "person"},
+                "message": '<img src=x onerror="alert(1)">'}], "after": ""}):
+            app = self.app()
+        self.assertFalse(app.exception)
+        rendered = "\n".join(item.value for item in app.markdown)
+        self.assertIn("&lt;img", rendered)
+        self.assertNotIn('<img src=x', rendered)
+        self.assertEqual(len(app.chat_message), 0)
+
+    def test_connection_panel_displays_feature_results_without_a_false_success(self):
+        checks = [{"Channel": "Instagram", "Feature": "Messages", "Status": "Needs attention", "Details": "Meta 200"}]
+        with patch.object(FakeCommunity, "connection_checks", return_value=checks, create=True), patch.object(
+                FakeCommunity, "connection", side_effect=CommunityError("Wrong linked account")):
+            app = self.app()
+            app.segmented_control[0].set_value("Connection").run()
+            self.button(app, "Check Meta connection").click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(app.warning)
+        self.assertFalse(app.success)
+        self.assertEqual(app.dataframe[0].value["Status"].tolist(), ["Needs attention"])
+
+
+if __name__ == "__main__":
+    unittest.main()

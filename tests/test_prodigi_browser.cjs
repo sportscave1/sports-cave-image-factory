@@ -5,7 +5,61 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-browser.js'),'utf8');
-const {prodigiExactRow,prodigiControls}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiExactRow,prodigiControls,prodigiFilePicker}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiRemovePoint}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiResetControl}=require('../windows-upload-companion/prodigi-page.js');
+const {prodigiReadyProductCard}=require('../windows-upload-companion/prodigi-page.js');
+
+test('after a slow permit, a replaced catalogue card and reset colour settle before one Select',async()=>{
+ let step=0,colourWrites=0,clicks=0,pins=0;
+ const colour={value:'natural',options:[{textContent:'Black',value:'black'}],dispatchEvent(){colourWrites++;}};
+ const select={get disabled(){return step<4;},getAttribute:()=> 'select-product-with-data-button-GLOBAL-CFP-A1',
+   closest:()=>({querySelectorAll:()=>[colour]}),click(){clicks++;}};
+ const scope=()=>({querySelectorAll:()=>step<2?[]:[select]});
+ const wait=async check=>{for(step=0;step<8;step++){const result=check();if(result)return result;}throw Error('Never ready');};
+ const current=await prodigiReadyProductCard(scope,'GLOBAL-CFP-A1','Black',wait,()=>pins++);
+ assert.equal(step,4);assert.equal(colour.value,'black');assert.equal(colourWrites,1);assert.equal(clicks,0);
+ current.select.click();assert.equal(clicks,1);assert.equal(pins,5);
+});
+
+test('catalogue readiness never retries a changed order identity',async()=>{
+ let reads=0;await assert.rejects(prodigiReadyProductCard(()=>{reads++;},'GLOBAL-CFP-A1','Black',check=>check(),
+   ()=>{throw Error('Order changed');}),/Order changed/);assert.equal(reads,0);
+});
+
+test('Reset waits for the late SKU, image details and drawn control before any click',async()=>{
+ let step=0;const pixels=new Uint8ClampedArray(100*100*4);
+ const canvas={width:100,height:100,getBoundingClientRect:()=>({left:0,top:0,width:100,height:100}),getContext:()=>({getImageData:()=>({data:pixels})})};
+ const editor={textContent:'Image Editor',querySelectorAll:s=>s==='canvas[part="remove-canvas"]'?[canvas]:[]};
+ const wait=async check=>{for(step=0;step<6;step++){
+  editor.textContent=step<2?'Image Editor':step<3?'GLOBAL-CFP-A1':'GLOBAL-CFP-A1 Uploaded image:';
+  if(step===4)for(let y=30;y<42;y++)for(let x=40;x<52;x++)pixels[(y*100+x)*4+3]=255;
+  const found=check();if(found)return found;
+ }throw Error('Timeout');};
+ const result=await prodigiResetControl(()=>step?editor:null,'GLOBAL-CFP-A1',wait,e=>e.textContent,()=>true);
+ assert.equal(step,4);assert.equal(result.canvas,canvas);assert.deepEqual(result.point,{x:45.5,y:35.5});
+});
+
+test('Reset locates only the isolated rendered trash control, at its actual scale',()=>{
+ const width=100,height=100,data=new Uint8ClampedArray(width*height*4);
+ for(let y=40;y<52;y++)for(let x=12;x<24;x++)data[(y*width+x)*4+3]=255;
+ const canvas={width,height,getBoundingClientRect:()=>({left:100,top:50,width:200,height:300}),getContext:()=>({getImageData:()=>({data})})};
+ assert.deepEqual(prodigiRemovePoint(canvas),{x:135,y:186.5});
+ data.fill(0);assert.throws(()=>prodigiRemovePoint(canvas),/cannot be identified/);
+ data.fill(255);assert.throws(()=>prodigiRemovePoint(canvas),/cannot be identified/);
+ assert.throws(()=>prodigiRemovePoint({...canvas,width:10000,height:10000}),/unavailable/);
+ assert.throws(()=>prodigiRemovePoint({...canvas,getContext:()=>({getImageData(){throw Error('Tainted')}})}),/Tainted/);
+});
+
+test('remembered URL mode switches to file upload once and waits for its control',async()=>{
+  const events=[],input={type:'file'};let mode='url',renders=0;
+  const wait=async check=>{for(let n=0;n<4;n++){const result=check();if(result)return result;}throw Error('Not ready');};
+  const get=()=>mode==='file'&&++renders>=2?input:null;
+  const result=await prodigiFilePicker(get,async()=>events.push('options'),
+    ()=>({click(){events.push('file mode');mode='file';}}),wait);
+  assert.equal(result,input);assert.deepEqual(events,['options','file mode']);
+  assert.equal(await prodigiFilePicker(()=>input,()=>assert.fail('Already in file mode'),()=>null,wait),input);
+});
 
 test('placement controls include nested open shadow components within this editor only',()=>{
   const fit={id:'fit'},save={id:'save'},other={id:'other-editor'};
@@ -38,7 +92,7 @@ function setup(bytes='exact',saved=true) {
     calls.push({url,options});
     if(url===plan.artwork_url)return {ok:true,headers:{get:()=>null},arrayBuffer:async()=>new TextEncoder().encode(bytes).buffer};
     return{ok:true,json:async()=>({status:'Needs QA'})};
-  },crypto:webcrypto,Uint8Array,AbortSignal,URL,Date,setTimeout,btoa:s=>Buffer.from(s,'binary').toString('base64'),
+  },crypto:webcrypto,Uint8Array,AbortSignal,URL,Date,setTimeout,clearTimeout,btoa:s=>Buffer.from(s,'binary').toString('base64'),
     osOrigin:'https://sports-cave-image-factory.onrender.com'});
   vm.runInContext(source,context);
   return{context,calls,tabs,storage,listeners};
@@ -51,6 +105,17 @@ test('only exact pinned artwork and supplier order destinations are accepted',()
     context.plan={...plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
   }
 });
+
+test('artwork replacement requires an exact live full-Reset handoff',()=>{
+ const {context}=setup();context.plan={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
+  key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,replace_artwork:true};
+ assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ for(const change of [{exact_item:false},{item_id:''},{token:'invalid'},{key:'arbitrary'},{replace_artwork:'true'},
+  {environment:'sandbox',order_url:plan.order_url}]){
+  context.plan={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,replace_artwork:true,...change};
+  assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
+});
 test('the image library may add its own filters without changing the pinned order',()=>{
   const {context}=setup();context.expected=plan.order_url;
   context.address=plan.order_url+'?imageLibraryType=artwork%2Cbook&imageLibraryFileType=png%2Cjpg';
@@ -61,6 +126,16 @@ test('the image library may add its own filters without changing the pinned orde
     context.address=address;assert.equal(vm.runInContext('prodigiOrderAddress(address,expected)',context),false);
   }
 });
+
+test('certificate handoffs accept only scoped PDFs and reject crossed artwork plans',()=>{
+  const {context}=setup();const certificate={...plan,kind:'certificate',
+    artwork_url:plan.artwork_url.replace('prodigi-artwork','prodigi-document'),
+    filename:'SC-1-certificate-'+'a'.repeat(16)+'.pdf'};
+  context.plan=certificate;assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+  for(const change of [{artwork_url:plan.artwork_url},{filename:plan.filename},{kind:'other'}]) {
+    context.plan={...certificate,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+  }
+});
 test('worker uploads only verified bytes and opens the exact draft without activation',async()=>{
   const {context,calls,tabs,storage}=setup();context.plan=plan;
   const result=await vm.runInContext('prodigiBrowserRun(plan)',context);
@@ -68,6 +143,170 @@ test('worker uploads only verified bytes and opens the exact draft without activ
   assert.equal(tabs[0].url,plan.order_url);assert.equal(tabs[0].active,false);
   assert.equal(calls.length,2);assert(calls.every(c=>c.url.startsWith('https://sports-cave-image-factory.onrender.com/')));
   assert(!storage.ordersBrowserPending);
+});
+
+test('sleeping owned page is woken once before fresh QA, retaining the new-page fence',async()=>{
+ const {context,storage}=setup();const events=[];let awake=false,page='old';
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.setTimeout=(fn,ms)=>setTimeout(fn,ms===1500?5:ms);
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.deepEqual(JSON.parse(JSON.stringify(options)),{active:true,autoDiscardable:false});events.push('wake');awake=true;};
+ context.chrome.tabs.reload=async()=>{assert(awake);events.push('reload');page='new';};
+ context.chrome.tabs.sendMessage=async()=>awake?{ready:true,page_instance:page}:await new Promise(()=>{});
+ context.tab={id:9,url:plan.order_url,ordersReused:true};context.orderUrl=plan.order_url;
+ assert.equal(await vm.runInContext('prodigiWaitForPage(tab,true,3,orderUrl)',context),true);
+ assert.deepEqual(events,['wake','reload']);
+});
+
+test('sleep recovery never activates a user-navigated tab',async()=>{
+ const {context,storage}=setup();storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.setTimeout=(fn,ms)=>setTimeout(fn,ms===1500?5:ms);
+ context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/other/detail'});
+ context.chrome.tabs.update=()=>assert.fail('User tab must not be activated');
+ context.chrome.tabs.sendMessage=()=>new Promise(()=>{});
+ context.tab={id:9};context.orderUrl=plan.order_url;
+ await assert.rejects(vm.runInContext('prodigiWaitForPage(tab,false,1,orderUrl)',context),/changed before wake/);
+ context.tab.ordersReused=true;context.chrome.tabs.reload=()=>assert.fail('User navigation must not be reloaded');
+ await assert.rejects(vm.runInContext('prodigiWaitForPage(tab,true,1,orderUrl)',context),/changed before wake/);
+});
+
+test('slow upload wakes its exact owned tab once, without navigating or sending another file',async()=>{
+ const {context,storage}=setup();const events=[];let wake;
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.setTimeout=(fn,ms)=>{assert.equal(ms,30000);wake=fn;return 1;};
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url+'?imageLibraryType=artwork'});
+ context.chrome.tabs.update=async(id,options)=>events.push({id,options:JSON.parse(JSON.stringify(options))});
+ context.chrome.tabs.reload=()=>assert.fail('No reload during upload');
+ context.chrome.tabs.sendMessage=()=>assert.fail('No repeated upload');
+ context.plan=plan;vm.runInContext('var stopWake=prodigiUploadWake(plan,{id:9})',context);
+ wake();await new Promise(resolve=>setImmediate(resolve));
+ vm.runInContext('stopWake()',context);
+ assert.deepEqual(events,[{id:9,options:{active:true,autoDiscardable:false}}]);
+});
+
+test('finished upload cancels its delayed wake and a changed tab is never activated',async()=>{
+ const {context,storage}=setup();let wake,cancelled=0;
+ context.setTimeout=fn=>{wake=fn;return 7;};context.clearTimeout=id=>{assert.equal(id,7);cancelled++;};
+ context.plan=plan;vm.runInContext('prodigiUploadWake(plan,{id:9})()',context);assert.equal(cancelled,1);
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/other/detail'});
+ context.chrome.tabs.update=()=>assert.fail('User navigation must win');
+ vm.runInContext('prodigiUploadWake(plan,{id:9})',context);wake();await new Promise(resolve=>setImmediate(resolve));
+});
+
+test('ready probe releases its deadline on immediate response',async()=>{
+ const {context}=setup();let cleared=0;context.clearTimeout=id=>{cleared++;clearTimeout(id);};
+ assert.equal((await vm.runInContext('prodigiReadyProbe(9)',context)).ready,true);assert.equal(cleared,1);
+});
+
+test('upload and QA reuse only the worker-owned exact order tab',async()=>{
+ const {context,tabs,storage}=setup();context.plan=plan;
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ await vm.runInContext('prodigiWorkerTab(plan)',context);
+ await vm.runInContext('prodigiWorkerTab(plan)',context);
+ assert.equal(tabs.length,1);
+ context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/different/detail'});
+ await vm.runInContext('prodigiWorkerTab(plan)',context);
+ assert.equal(tabs.length,2); // User navigation is preserved; no tabs.update call.
+ context.chrome.tabs.get=async()=>{throw Error('Closed tab')};
+ await vm.runInContext('prodigiWorkerTab(plan)',context);
+ assert.equal(tabs.length,3);
+});
+
+test('blank product auto-opens an editor; fresh empty handoff reloads once then uploads and runs QA on the same tab',async()=>{
+ const {context,tabs,storage}=setup();const events=[];let editor=false,page='old',oldReady=true,reloads=0;
+ const live={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
+   key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true};
+ context.chrome.tabs.get=async id=>({id,url:live.order_url});
+ context.chrome.tabs.reload=async()=>{events.push('reload');editor=false;page='new-'+(++reloads);};
+ context.chrome.tabs.sendMessage=async(id,m)=>{
+   if(m.type==='prodigi:ready'){
+     // A reload callback can resolve before the old content script disappears.
+     if(page==='new-1'&&oldReady){oldReady=false;events.push('old-ready');return{ready:true,page_instance:'old'};}
+     return{ready:true,page_instance:page,busy:editor};
+   }
+   if(m.type==='prodigi:product'){events.push('variant');editor=true;return{stage:'product-readback'};}
+   if(m.type==='prodigi:upload'){assert(!editor);assert(!oldReady);events.push('upload');editor=true;return{saved:true,stage:'save'};}
+   if(m.type==='prodigi:qa'){assert(!editor);events.push('qa');return{evidence:{}};}
+   assert.fail('Unexpected message');
+ };
+ context.product={...live,kind:'product',key:'product:prodigi_prepare:1',sku:'GLOBAL-CFP-A2',colour:'Natural'};
+ await vm.runInContext('prodigiBrowserRun(product)',context);
+ context.upload={...live,selected_empty_product:true};
+ await vm.runInContext('prodigiBrowserRun(upload)',context);
+ context.qa={...live,kind:'qa',fresh_saved_order:true,sku:'GLOBAL-CFP-A2',colour:'Natural',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+ await vm.runInContext('prodigiBrowserRun(qa)',context);
+ assert.deepEqual(events,['variant','reload','old-ready','upload','reload','qa']);
+ assert.equal(tabs.length,1);assert(!storage.ordersBrowserPending);
+});
+
+test('an ordinary saved artwork handoff never reloads an unexpected editor',async()=>{
+ const {context}=setup();context.plan=plan;
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ await vm.runInContext('prodigiWorkerTab(plan)',context);
+ context.chrome.tabs.reload=()=>assert.fail('No empty product authority');
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+});
+
+test('explicit full Reset refreshes the owned stale editor before replacement upload',async()=>{
+ const {context,storage}=setup();let page='old',reloaded=0;
+ const url='https://dashboard.prodigi.com/orders/99/detail';storage.ordersWorkerTabs={[url]:9};
+ context.chrome.tabs.get=async id=>({id,url});
+ context.chrome.tabs.reload=async()=>{page='new';reloaded++;};
+ context.chrome.tabs.sendMessage=async(id,message)=>{
+  if(message.type==='prodigi:ready')return{ready:true,page_instance:page,busy:page==='old'};
+  assert.equal(message.type,'prodigi:upload');assert.equal(page,'new');return{saved:true,stage:'save'};
+ };
+ context.plan={...plan,environment:'live',order_url:url,key:'prodigi_prepare:1',token:'b'.repeat(43),replace_artwork:true,exact_item:true};
+ await vm.runInContext('prodigiBrowserRun(plan)',context);assert.equal(reloaded,1);
+});
+
+test('fresh saved-order QA removes only image-library filters on its owned exact tab',async()=>{
+ const {context,storage,calls}=setup();let page='old',navigations=0;
+ const url='https://dashboard.prodigi.com/orders/99/detail';
+ storage.ordersWorkerTabs={[url]:9};
+ context.chrome.tabs.get=async id=>({id,url:url+'?imageLibraryType=Uploads&imageLibraryFileType=Image'});
+ context.chrome.tabs.reload=()=>assert.fail('Reload would retain stale library filters');
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.deepEqual(JSON.parse(JSON.stringify(options)),{url});navigations++;page='new';};
+ context.chrome.tabs.sendMessage=async(id,message)=>{
+   if(message.type==='prodigi:ready')return {ready:true,page_instance:page};
+   assert.equal(message.type,'prodigi:qa');assert.equal(page,'new');return{evidence:{}};
+ };
+ context.plan={kind:'qa',fresh_saved_order:true,environment:'live',order_id:'99',item_id:'88',exact_item:true,
+   order_url:url,key:'prodigi_prepare:1',token:'b'.repeat(43),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Black',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+ assert.equal(navigations,1);assert.equal(calls.length,1);assert(calls[0].url.endsWith('/qa/finish'));
+});
+
+test('empty product editor authority rejects reset, sandbox and unscoped plans',()=>{
+ const {context}=setup();const live={...plan,environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',
+   key:'prodigi_prepare:1',token:'a'.repeat(43),exact_item:true,selected_empty_product:true};
+ context.plan=live;assert(vm.runInContext('prodigiPlanValid(plan)',context));
+ for(const change of [{exact_item:false},{replace_artwork:true},{kind:'certificate'},{selected_empty_product:'true'},
+   {environment:'sandbox'},{key:'other'},{item_id:''},{token:'invalid'}]){
+   context.plan={...live,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
+});
+
+test('read-only transport retries back off, while a Save permit is never retried',async()=>{
+ const {context,storage}=setup();let calls=0;const delays=[];
+ context.setTimeout=(fn,ms)=>{delays.push(ms);queueMicrotask(fn)};
+ context.fetch=async()=>({ok:++calls===3,status:503});
+ const result=await vm.runInContext("prodigiReadFetch('https://sports-cave-image-factory.onrender.com/readback',{})",context);
+ assert(result.ok);assert.equal(calls,3);assert.deepEqual(delays,[1000,2000]);assert.equal(storage.ordersRetry.attempt,2);
+ calls=0;context.plan=plan;context.fetch=async()=>{calls++;return{ok:false,status:503}};
+ await assert.rejects(vm.runInContext("prodigiReceipt(plan,'permit')",context),/could not be verified/);assert.equal(calls,1);
+});
+
+test('merge Add plans accept only scoped live product-selection handoffs',()=>{
+ const {context}=setup();const base={kind:'merge-add',environment:'live',order_id:'98',
+   order_url:'https://dashboard.prodigi.com/orders/98/detail',key:'merge:prodigi_merge:'+'a'.repeat(32),
+   token:'b'.repeat(43),sha256:'c'.repeat(64),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Natural'};
+ context.plan=base;assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ for(const change of [{key:'merge:arbitrary'},{environment:'sandbox'},{colour:'Oak'},
+   {sku:'GLOBAL-CFP-A2-BACKLOADER'},{order_url:'https://dashboard.prodigi.com/orders/other/detail'}]){
+   context.plan={...base,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
 });
 test('checksum mismatch never opens or uploads to a supplier tab',async()=>{
   const {context,tabs,calls}=setup('wrong');context.plan=plan;
@@ -79,4 +318,199 @@ test('uncertain Save is reconciled once without another upload',async()=>{
   const {context,tabs,calls}=setup('exact',false);context.plan=plan;
   await vm.runInContext('prodigiBrowserRun(plan)',context);
   assert.equal(tabs.length,1);assert.equal(calls.filter(c=>c.url.endsWith('/finish')).length,1);
+});
+
+
+test('dashboard QA opens only the pinned live order and never downloads artwork',async()=>{
+  const {context,calls,tabs}=setup();
+  context.plan={kind:'qa',environment:'live',order_id:'99',order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'prodigi_prepare:1',token:'b'.repeat(43),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'black',shipping_intent:'standard',branding_set:'SC EDITION BRANDING'};
+  assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+  await vm.runInContext('prodigiBrowserRun(plan)',context);
+  assert.equal(tabs.length,1);assert.equal(tabs[0].active,false);
+  assert.equal(calls.length,1);assert(calls[0].url.endsWith('/qa/finish'));
+  context.plan.order_url='https://dashboard.prodigi.com/orders/other/detail';
+  assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+});
+const {prodigiProductCard}=require('../windows-upload-companion/prodigi-page.js');
+test('catalogue selection uses exact SKU and canonical colour, excluding backloader',()=>{
+  const option={textContent:'Natural',value:'natural',disabled:false};
+  const colour={options:[option],value:'black'};
+  const target={getAttribute:()=> 'select-product-with-data-button-GLOBAL-CFP-A2',closest:()=>({querySelectorAll:()=>[colour]})};
+  const backloader={getAttribute:()=> 'select-product-with-data-button-GLOBAL-CFP-A2-BACKLOADER'};
+  const result=prodigiProductCard({querySelectorAll:()=>[backloader,target]},'GLOBAL-CFP-A2','Natural');
+  assert.equal(result.select,target);assert.equal(result.value,'natural');
+  assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[target]},'GLOBAL-CFP-A2','White'));
+  assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[target,target]},'GLOBAL-CFP-A2','Natural'));
+  assert.throws(()=>prodigiProductCard({querySelectorAll:()=>[backloader]},'GLOBAL-CFP-A2','Natural'));
+});
+
+test('batch QA plans require unique exact canonical items including the primary item',()=>{
+ const {context}=setup();const base={kind:'qa',environment:'live',order_id:'99',item_id:'88',exact_item:true,
+  order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'prodigi_prepare:1',token:'a'.repeat(43),reference:'fixture',
+  sku:'GLOBAL-CFP-A2',colour:'Natural',shipping_intent:'standard',branding_set:'SC EDITION BRANDING',
+  items:[{item_id:'88',sku:'GLOBAL-CFP-A2',colour:'Natural'},{item_id:'89',sku:'GLOBAL-FAP-A4',colour:''}]};
+ context.plan=base;assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ for(const change of [{items:[]},{exact_item:false},{items:[base.items[0],base.items[0]]},
+  {item_id:'other'},{items:[base.items[0],{...base.items[1],sku:'GLOBAL-CFP-A2-BACKLOADER'}]},
+  {items:[base.items[0],{...base.items[1],colour:'Black'}]}]){
+  context.plan={...base,...change};assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),false);
+ }
+});
+test('unframed catalogue selection has no colour option',()=>{
+ const target={getAttribute:()=> 'select-product-with-data-button-GLOBAL-FAP-A4',closest:()=>({querySelectorAll:()=>[]})};
+ assert.equal(prodigiProductCard({querySelectorAll:()=>[target]},'GLOBAL-FAP-A4','').select,target);
+});
+test('product repair opens only the pinned draft, without downloading artwork or submitting',async()=>{
+ const {context,calls,tabs}=setup();
+ context.plan={kind:'product',environment:'live',order_id:'99',item_id:'88',order_url:'https://dashboard.prodigi.com/orders/99/detail',key:'product:prodigi_prepare:1',token:'b'.repeat(43),sha256:'a'.repeat(64),reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Natural'};
+ assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+ assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
+ assert.equal(tabs.length,1);assert.equal(tabs[0].active,false);
+ for(const change of [{sku:'GLOBAL-CFP-A2-BACKLOADER'},{colour:'Oak'},{environment:'sandbox'},{key:'prodigi_prepare:1'}]){
+  context.changed={...context.plan,...change};assert.equal(vm.runInContext('prodigiPlanValid(changed)',context),false);
+ }
+});
+
+test('product Reset reloads its exact owned tab after extension reload invalidated the old receiver',async()=>{
+ const {context,storage,calls}=setup();let loaded=false;const events=[];
+ const url='https://dashboard.prodigi.com/orders/99/detail';storage.ordersWorkerTabs={[url]:9};
+ context.chrome.tabs.get=async id=>({id,url});
+ context.chrome.tabs.reload=async()=>{events.push('reload');loaded=true;};
+ context.chrome.tabs.sendMessage=async(id,message)=>{
+  if(!loaded)throw Error('Receiving end does not exist');
+  if(message.type==='prodigi:ready')return{ready:true,page_instance:'new-extension-context'};
+  assert.equal(message.type,'prodigi:product');events.push('select-product');return{stage:'product-readback'};
+ };
+ context.plan={kind:'product',environment:'live',order_id:'99',item_id:'88',order_url:url,key:'product:prodigi_prepare:1',token:'b'.repeat(43),sha256:'a'.repeat(64),reference:'fixture',sku:'GLOBAL-CFP-A1',colour:'Black'};
+ await vm.runInContext('prodigiBrowserRun(plan)',context);
+ assert.deepEqual(events,['reload','select-product']);assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
+});
+for(const withCatalogueTab of [true,false])test('blank-product page flow with catalogue tab '+withCatalogueTab+' selects only after permit',async()=>{
+ const listeners=[],events=[];let dialogOpen=false,selected=false,inputValue='';
+ const node=(value='')=>({innerText:value,textContent:value,isConnected:true,getClientRects:()=>[{}],querySelectorAll:()=>[],getAttribute:()=>null});
+ const control=(label,click)=>({...node(label),disabled:false,click});
+ const code=node('GLOBAL-CFP-A2'),frame=node('Natural');
+ const choose=control('Choose product',()=>{events.push('choose');dialogOpen=true;});choose.getAttribute=k=>k==='data-test'?'choose-product-button-88':null;choose.closest=()=>row;
+ const row={...node(),querySelector:()=>selected?{}:null,querySelectorAll:s=>s==='button'?(selected?[]:[choose]):s==='strong'?(selected?[frame]:[]):selected?[code,frame]:[]};
+ const colour={options:[{textContent:'Black',value:'black'},{textContent:'Natural',value:'natural'}],value:'black',dispatchEvent:()=>events.push('colour')};
+ const select=control('Select',()=>{events.push('select');assert.equal(colour.value,'natural');selected=true;dialogOpen=false;});
+ const card={querySelectorAll:()=>[colour]};select.closest=()=>card;select.getAttribute=k=>k==='data-test'?'select-product-with-data-button-GLOBAL-CFP-A2':null;
+ const catalogue=control('Catalogue',()=>{});catalogue.getAttribute=k=>k==='aria-selected'?'true':null;
+ class Input {dispatchEvent(){events.push('search:'+inputValue);}}
+ Object.defineProperty(Input.prototype,'value',{get(){return inputValue;},set(v){inputValue=v;}});
+ const input=new Input();
+ const picker={...node(),querySelector:s=>s==='input[type="search"]'?input:null,querySelectorAll:s=>s==='h1,h2'?[node('Select product')]:s==='button'?(withCatalogueTab?[catalogue,select]:[select]):s==='button[data-test]'?[select]:[]};
+ const document={readyState:'complete',querySelector:s=>s==='main'?node('fixture'):null,querySelectorAll:s=>s==='button[data-test]'?[choose]:s==='h1'?[node('99')]:s==='strong'?[]:s==='[role="dialog"]'?(dialogOpen?[picker]:[]):s==='table tbody tr'?[row]:[]};
+ const chrome={runtime:{id:'same',onMessage:{addListener:f=>listeners.push(f)},sendMessage:async m=>{events.push('permit');assert(selected===false);assert.equal(m.type,'prodigi:permit');return{permitted:true};}}};
+ const ctx=vm.createContext({document,chrome,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},URL,Date,setTimeout,HTMLInputElement:Input,Event:class{constructor(type){this.type=type;}}});
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-page.js'),'utf8'),ctx);
+ const result=await new Promise(resolve=>listeners[0]({type:'prodigi:product',plan:{environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',order_id:'99',item_id:'88',reference:'fixture',sku:'GLOBAL-CFP-A2',colour:'Natural',sha256:'a'.repeat(64)}},{id:'same'},resolve));
+ assert.equal(result.stage,'product-readback');assert.deepEqual(events,['choose','search:GLOBAL-CFP-A2','colour','permit','select']);
+});
+const {prodigiPinnedRow}=require('../windows-upload-companion/prodigi-page.js');
+for(const permitted of [true,false])test('paused order Add another item selects its exact variant only after permit '+permitted,async()=>{
+ const listeners=[],events=[];let open=false;
+ const node=(value='')=>({innerText:value,textContent:value,isConnected:true,getClientRects:()=>[{}],querySelectorAll:()=>[],getAttribute:()=>null});
+ const button=(label,click)=>({...node(label),disabled:false,click});
+ const add=button('Add another item',()=>{events.push('open-picker');open=true;});
+ const option={textContent:'Natural',value:'natural',disabled:false};
+ const colour={options:[option],value:'black',dispatchEvent(){events.push('colour')}};
+ const select=button('Select',()=>{events.push('select');open=false;});
+ select.getAttribute=()=> 'select-product-with-data-button-GLOBAL-CFP-A2';select.closest=()=>({querySelectorAll:()=>[colour]});
+ class Input{set value(v){this.v=v}get value(){return this.v}dispatchEvent(){events.push('search:'+this.v)}}
+ const search=new Input(),heading=node('Select product');
+ const picker={...node('Select product'),querySelector:s=>s==='input[type="search"]'?search:null,
+  querySelectorAll:s=>s==='h1,h2'?[heading]:s==='button'||s==='button[data-test]'?[select]:[]};
+ const document={querySelector:s=>s==='main'?node('original-reference'):null,
+  querySelectorAll:s=>s==='button'?[add]:s==='h1'?[node('98')]:s==='[role="dialog"]'?(open?[picker]:[]):[]};
+ const chrome={runtime:{id:'same',onMessage:{addListener:f=>listeners.push(f)},sendMessage:async()=>{events.push('permit');return{permitted,order_id:'98',operation:'add-item'}}}};
+ const ctx=vm.createContext({document,chrome,location:{href:'https://dashboard.prodigi.com/orders/98/detail'},URL,Date,setTimeout,HTMLInputElement:Input,Event:class{}});
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-page.js'),'utf8'),ctx);
+ const result=await new Promise(resolve=>listeners[0]({type:'prodigi:merge-add',plan:{environment:'live',order_url:'https://dashboard.prodigi.com/orders/98/detail',order_id:'98',reference:'original-reference',sku:'GLOBAL-CFP-A2',colour:'Natural',sha256:'a'.repeat(64)}},{id:'same'},resolve));
+ assert.equal(result.stage,permitted?'product-readback':'product-select');
+ assert.deepEqual(events,permitted?['open-picker','search:GLOBAL-CFP-A2','colour','permit','select']:['open-picker','search:GLOBAL-CFP-A2','colour','permit']);
+});
+test('identical SKU and frame rows are distinguished by immutable item ID',()=>{
+ const row=id=>({querySelector:s=>s==='[data-test="line-item-preview-'+id+'"]'?{}:null,querySelectorAll:s=>s==='strong'?[{textContent:'Black'}]:[{textContent:'GLOBAL-CFP-A2'}]});
+ const one=row('88'),two=row('89'),plan={sku:'GLOBAL-CFP-A2',colour:'black',item_id:'89',exact_item:true};
+ assert.equal(prodigiPinnedRow([one,two],plan),two);
+ assert.equal(prodigiPinnedRow([one],plan),null);
+ assert.throws(()=>prodigiPinnedRow([one,two],{...plan,exact_item:false}));
+});
+
+const {prodigiIndefiniteHold}=require('../windows-upload-companion/prodigi-page.js');
+test('an old indefinite-hold history entry never overrides a live finite countdown',()=>{
+ const scope={querySelectorAll:s=>s==='h1,h2,h3'?[{label:'23h until production'}]:[]};
+ const text=e=>e===scope?'Order paused indefinitely (history)':e.label;
+ assert.equal(prodigiIndefiniteHold(scope,text,()=>true),false);
+ scope.querySelectorAll=()=>[];assert.equal(prodigiIndefiniteHold(scope,text,()=>true),true);
+});
+for(const alreadyHeld of [false,true])test('duplicate hold is source-scoped and never changes an existing indefinite hold '+alreadyHeld,async()=>{
+ const listeners=[],events=[];let held=alreadyHeld;
+ const node=value=>({innerText:value,textContent:value,isConnected:true,getClientRects:()=>[{}],querySelectorAll:()=>[],getAttribute:()=>null});
+ const pause={...node('Pause indefinitely'),click(){events.push('hold-source');held=true;}};
+ const main={get innerText(){return 'reference-source '+(held?'Paused indefinitely':'Paused')},get textContent(){return this.innerText},
+  querySelectorAll:s=>s==='h1,h2,h3'?[node(held?'Paused indefinitely':'23h until production')]:s==='button'?(held?[]:[pause]):[]};
+ const document={querySelector:s=>s==='main'?main:null,querySelectorAll:s=>s==='h1'?[node('99')]:s==='button'?(held?[]:[pause]):[]};
+ const chrome={runtime:{id:'same',onMessage:{addListener:f=>listeners.push(f)},sendMessage:async()=>{events.push('permit-source');return{permitted:true,order_id:'99',operation:'hold-duplicate'}}}};
+ const ctx=vm.createContext({document,chrome,location:{href:'https://dashboard.prodigi.com/orders/99/detail'},URL,Date,setTimeout});
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../windows-upload-companion/prodigi-page.js'),'utf8'),ctx);
+ const result=await new Promise(resolve=>listeners[0]({type:'prodigi:merge-hold',plan:{environment:'live',order_url:'https://dashboard.prodigi.com/orders/99/detail',order_id:'99',reference:'reference-source',sha256:'a'.repeat(64)}},{id:'same'},resolve));
+ assert.equal(result.stage,'merge-hold-confirmed');assert.deepEqual(events,alreadyHeld?['permit-source']:['permit-source','hold-source']);
+});
+
+
+for(const missing of [false,true])test('owned responsive Loading or missing receiver is woken once '+missing,async()=>{
+ const {context,storage}=setup();let awake=false,wakes=0;
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url});
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.equal(options.active,true);awake=true;wakes++;};
+ context.chrome.tabs.sendMessage=async()=>{if(awake)return{ready:true,page_instance:'same'};if(missing)throw Error('Receiving end does not exist');return{ready:false,page_instance:'same'}};
+ context.tab={id:9};context.orderUrl=plan.order_url;
+ context.setTimeout=(fn,ms)=>setTimeout(fn,ms===1000?0:ms);
+ assert.equal(await vm.runInContext('prodigiWaitForPage(tab,false,5,orderUrl)',context),true);
+ assert.equal(wakes,1);
+});
+
+test('QA connection failure preserves stage and original cause in finish receipt',async()=>{
+ const {context,calls}=setup();context.qaPlan={...plan,kind:'qa'};
+ await vm.runInContext("prodigiReceipt(qaPlan,'finish','open','Receiving end does not exist')",context);
+ const body=JSON.parse(calls[0].options.body);
+ assert.equal(body.error,'QA open: Receiving end does not exist');
+ assert(calls[0].url.endsWith('/qa/finish'));
+});
+
+
+
+test('one fresh owned context recovers a stalled authorised saved-order QA tab',async()=>{
+ const {context,storage,tabs}=setup();const url='https://dashboard.prodigi.com/orders/99/detail';
+ storage.ordersWorkerTabs={[url]:9};context.chrome.tabs.get=async id=>({id,url});
+ context.chrome.tabs.create=async options=>{tabs.push(options);return{id:10,url:options.url}};
+ vm.runInContext('prodigiWaitForPage=async tab=>tab.id===10',context);
+ context.qaPlan={kind:'qa',fresh_saved_order:true,order_url:url};context.oldTab={id:9,url,ordersReused:true};
+ const result=await vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context);
+ assert.equal(result.id,10);assert.equal(tabs.length,1);assert.equal(tabs[0].url,url);assert.equal(tabs[0].active,true);
+ assert.equal(storage.ordersWorkerTabs[url],10);
+});
+
+
+test('fresh-context fallback never abandons an ordinary unsaved editor',async()=>{
+ const {context}=setup();context.oldTab={id:9,ordersReused:true};context.ordinary={order_url:plan.order_url};
+ context.chrome.tabs.create=()=>assert.fail('No authority to replace ordinary context');
+ vm.runInContext('prodigiWaitForPage=async()=>false',context);
+ assert.equal(await vm.runInContext('prodigiReadyOwnedPage(ordinary,oldTab,false,3)',context),null);
+});
+
+
+test('fresh-context fallback blocks changed ownership and cannot create a tab loop',async()=>{
+ const {context,storage,tabs}=setup();const url='https://dashboard.prodigi.com/orders/99/detail';
+ storage.ordersWorkerTabs={[url]:9};context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/other/detail'});
+ context.chrome.tabs.create=()=>assert.fail('Changed user tab is preserved');
+ vm.runInContext('prodigiWaitForPage=async()=>false',context);
+ context.qaPlan={kind:'qa',fresh_saved_order:true,order_url:url};context.oldTab={id:9,ordersReused:true};
+ await assert.rejects(vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context),/changed before fresh-page/);
+ context.oldTab.ordersReused=false;
+ assert.equal(await vm.runInContext('prodigiReadyOwnedPage(qaPlan,oldTab,true,3)',context),null);
+ assert.equal(tabs.length,0);
 });

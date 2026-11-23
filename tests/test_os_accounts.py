@@ -2473,7 +2473,6 @@ class AccountAccessTests(unittest.TestCase):
                 "app.py",
                 "os_pages.py",
                 "design_studio_page.py",
-                "social_media_reels_studio_page.py",
             )
         }
 
@@ -2490,7 +2489,6 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("if not prompt_editing_allowed():", app_prompt_button)
         self.assertIn("return False", app_prompt_button)
         self.assertIn("if can_edit_prompts:", sources["design_studio_page.py"])
-        self.assertIn("editing_enabled = bool(can_edit_prompts)", sources["social_media_reels_studio_page.py"])
 
     def test_product_upload_prompt_edit_buttons_follow_account_permission(self):
         def render_for(user):

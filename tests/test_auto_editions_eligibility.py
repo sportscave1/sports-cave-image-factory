@@ -64,7 +64,7 @@ def test_listing_and_generation_share_policy_and_archive_master_fence(database,t
     rows=[dict(edition_order_id=43,shopify_product_gid=unit['shopify_product_gid'],shopify_variant_id='new'),
           dict(edition_order_id=44,shopify_product_gid='gid://shopify/Product/999',shopify_variant_id='new')]
     with patch.object(runtime,'enabled',return_value=True),patch.object(runtime,'stores',return_value=(registry,jobs)):
-        assert runtime.download_links(rows)=={'43':'/auto-editions/open?allocation_id=43&job_id='+'a'*64+'#Open'}
+        assert runtime.download_links(rows)=={'43':'/api/auto-editions/file?allocation_id=43&job_id='+'a'*64+'&inline=1#Open JPG'}
         jobs.summaries.return_value['43']['preparation_hash']='b'*64
         assert runtime.download_links(rows)['43'].endswith('#Download JPG')
         sql.execute("UPDATE product_psd_mappings SET dropbox_file_id='id:changed'")

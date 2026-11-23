@@ -9,7 +9,7 @@ def extension_package():
     source = Path(__file__).parent / 'windows-upload-companion'
     archive = BytesIO()
     with ZipFile(archive, 'w', compression=ZIP_DEFLATED) as bundle:
-        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js', 'orders-queue.js', 'prodigi-browser.js', 'prodigi-page.js'):
+        for filename in ('manifest.json', 'message-deadline.js', 'os-bridge.js', 'queue-wake.js', 'worker.js', 'composer.js', 'staff-queue.js', 'design-queue.js', 'ad-queue.js', 'ad-artifacts.js', 'ad-downloads.js', 'ad-library.js', 'ad-repair.js', 'orders-queue.js', 'orders-progress.js', 'orders-wake.js', 'prodigi-browser.js', 'prodigi-wait.js', 'prodigi-page.js', 'prodigi-dashboard-qa.js', 'inbox-queue.js', 'inbox-page.js'):
             bundle.write(source / filename, filename)
     return archive.getvalue()
 
@@ -142,6 +142,9 @@ def render_page(user):
         with st.expander('This browser · companion version'):
             from product_upload_gallery import render as render_browser_connection
             render_browser_connection(key='companion-browser-connection', mode='companion-health')
+        with st.expander('Inbox Companion'):
+            from inbox_companion_ui import controls as inbox_controls
+            inbox_controls(user)
         designs, uploads, ads, orders, seo = st.tabs(['Design queue', 'Upload queue', 'Ads queue', 'Orders queue', 'SEO queue'],
                                         key='companion-queue-tabs', on_change='rerun')
         if designs.open:

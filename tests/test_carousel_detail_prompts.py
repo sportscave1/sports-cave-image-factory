@@ -54,7 +54,7 @@ class CarouselDetailPromptTests(unittest.TestCase):
                 with self.subTest(alias=alias):
                     self.assertEqual(resolve(canonical), resolve(alias))
         self.assertNotEqual(resolve("Cricket"), resolve("Basketball"))
-        self.assertIn("pavilion green", resolve("Cricket"))
+        self.assertIn("pavilion sandstone", resolve("Cricket"))
         self.assertIn("hardwood tan", resolve("Basketball"))
         for unknown in (None, "", "unmapped sport", "Select category"):
             self.assertEqual(resolve(unknown), resolve("Other"))

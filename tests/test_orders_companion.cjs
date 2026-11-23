@@ -55,3 +55,30 @@ test('overlapping alarms do not create overlapping requests',async()=>{
   finish({ok:false});
   await first;
 });
+
+
+test('successful stages continue immediately, stop on review, and never overlap',async()=>{
+  const calls=[],stages=['Awaiting browser upload','Awaiting dashboard QA','Waiting for order','Needs review'];
+  const {scope}=context('fixture',async(url,options)=>{
+    calls.push(options);return {ok:true,json:async()=>({enabled:true,browser:{key:'pinned'},job:{allocation_id:1}})};
+  });
+  scope.prodigiBrowserRun=async()=>({status:stages.shift()});
+  await vm.runInContext('ordersQueueTick()',scope);
+  assert.equal(calls.length,4);
+  assert.equal(calls[0].headers['X-Sports-Cave-Orders-Sequential'],'1');
+});
+
+test('a continuously successful queue yields after six stages',async()=>{
+  let calls=0;
+  const {scope}=context('fixture',async()=>{calls++;return {ok:true,json:async()=>({enabled:true,browser:{key:'pinned'},job:{allocation_id:1}})}});
+  scope.prodigiBrowserRun=async()=>({status:'Waiting for order'});
+  await vm.runInContext('ordersQueueTick()',scope);
+  assert.equal(calls,6);
+});
+
+test('ready work schedules one immediate continuation after a bounded batch',async()=>{
+ const {scope}=context('fixture',async()=>({ok:true,json:async()=>({enabled:true,browser:{key:'pinned',order_id:'99'}})}));
+ const timers=[];scope.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length};
+ scope.prodigiBrowserRun=async()=>({status:'Waiting for order'});
+ await vm.runInContext('ordersQueueTick()',scope);assert.equal(timers.length,1);assert.equal(timers[0].ms,100);
+});

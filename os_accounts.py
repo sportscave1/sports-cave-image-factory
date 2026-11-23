@@ -70,14 +70,6 @@ PAGE_REGISTRY = (
      "label": "Wall Preview Inbox", "worker_assignable": False,
      "parent_key": seo_workspace.SEO_PAGE_KEYS[analytics_navigation.WEBSITE_OVERVIEW_ROUTE], "navigation_child": True},
     {
-        "key": social_media.AI_REELS_PAGE_KEY,
-        "route": social_media.AI_REELS_ROUTE,
-        "label": social_media.AI_REELS_ROUTE,
-        "worker_assignable": False,
-        "parent_key": social_media.SOCIAL_MEDIA_PAGE_KEY,
-        "navigation_child": True,
-    },
-    {
         "key": "product_uploads",
         "route": "Product Uploads",
         "label": "Product Uploads",
@@ -242,12 +234,14 @@ PAGE_ALIASES = {
     "Settings": "Accounts & Access",
     "Marketing Factory": "Ads",
     "Dropbox": "Files",
-    social_media.LEGACY_REELS_ROUTE: social_media.AI_REELS_ROUTE,
+    social_media.LEGACY_REELS_ROUTE: social_media.SOCIAL_MEDIA_ROUTE,
+    social_media.AI_REELS_ROUTE: social_media.SOCIAL_MEDIA_ROUTE,
     **seo_workspace.SEO_LEGACY_ROUTE_REDIRECTS,
 }
 PAGE_KEY_ALIASES = {
     "dropbox": "files",
     social_media.LEGACY_REELS_PAGE_KEY: social_media.SOCIAL_MEDIA_PAGE_KEY,
+    social_media.AI_REELS_PAGE_KEY: social_media.SOCIAL_MEDIA_PAGE_KEY,
     "seo_store_analytics": analytics_navigation.ANALYTICS_PAGE_KEY,
     "store_analytics": analytics_navigation.ANALYTICS_PAGE_KEY,
     "seo_keyword_research_mapping": seo_workspace.SEO_PAGE_KEYS[seo_workspace.SEO_MAPPING_ROUTE],
@@ -448,7 +442,6 @@ def can_access_page(user, route_or_key):
         return is_admin(user)
     if page and page["key"] in {
         social_media.SOCIAL_MEDIA_PAGE_KEY,
-        social_media.AI_REELS_PAGE_KEY,
         social_media.WALL_PREVIEW_PAGE_KEY,
     }:
         if is_admin(user):

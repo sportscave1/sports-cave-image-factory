@@ -6,6 +6,7 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 import uuid
+import pytest
 
 sys.path.insert(0,str(Path(__file__).parents[1]/'scripts/studio'))
 import edition_repair_local as local
@@ -18,7 +19,8 @@ def setup(monkeypatch,tmp_path):
     import device_trust
     monkeypatch.setattr(device_trust,'protect',lambda value,decrypt=False:value)
 
-def test_local_handoff_is_once_and_acknowledged_only_after_result(monkeypatch,tmp_path):
+@pytest.mark.parametrize('legacy_ok',[False,True])
+def test_local_handoff_is_once_and_acknowledged_only_after_result(monkeypatch,tmp_path,legacy_ok):
     setup(monkeypatch,tmp_path)
     entry=dict(request_id=str(uuid.uuid4()),product_gid='gid://shopify/Product/1',prompt='Inspect this exact PSD.',handoff_token=str(uuid.uuid4()))
     host=Mock(return_value={'repair':entry});launch=Mock()
@@ -27,7 +29,7 @@ def test_local_handoff_is_once_and_acknowledged_only_after_result(monkeypatch,tm
     assert local.poll({},host)
     assert host.call_count==1 and launch.call_count==1
     file=next(local.OUTBOX.glob('*.dpapi'))
-    local.atomic(file.with_suffix('.result.json'),dict(ok=False))
+    local.atomic(file.with_suffix('.result.json'),dict(ok=legacy_ok))
     assert local.poll({},host)
     assert host.call_args.args[1].endswith('repair-result')
     assert host.call_args.args[2]['ok'] is False
@@ -37,15 +39,48 @@ def test_executor_uses_pinned_chat_stdin_and_existing_permissions(monkeypatch,tm
     setup(monkeypatch,tmp_path)
     state=tmp_path/'state.dpapi';target=json.loads(local.TARGET.read_text())
     state.write_text(json.dumps(dict(target=target,repair=dict(prompt='exact scoped repair'),executable='C:/trusted/codex.exe')))
-    execute=Mock(return_value=SimpleNamespace(returncode=0))
+    def finish(*args,**kwargs):
+        local.atomic(state.with_suffix('.final.json'),dict(outcome='queued',message='Native queue acknowledged.'))
+        return SimpleNamespace(returncode=0)
+    execute=Mock(side_effect=finish)
     monkeypatch.setattr(local.subprocess,'run',execute)
     local.execute(state)
     command=execute.call_args.args[0]
-    assert command==['C:/trusted/codex.exe','exec','resume','--json',target['thread_id'],'-']
-    assert execute.call_args.kwargs['input']==b'exact scoped repair'
-    assert json.loads(state.with_suffix('.result.json').read_text())==dict(ok=True)
+    assert command[:3]==['C:/trusted/codex.exe','exec','--json']
+    assert command[3:]==['--output-schema',str(local.ROOT/'config/auto_editions/repair-result.schema.json'),
+        '--output-last-message',str(state.with_suffix('.final.json')),'-']
+    assert execute.call_args.kwargs['cwd']==target['cwd']
+    assert execute.call_args.kwargs['input'].startswith(b'exact scoped repair')
+    assert json.loads(state.with_suffix('.result.json').read_text())==dict(ok=True,message='Native queue acknowledged.')
+
+
+def test_normal_exit_with_blocked_or_missing_result_is_failure(tmp_path):
+    path=tmp_path/'final.json'
+    assert local.outcome(path,0)['ok'] is False
+    local.atomic(path,dict(outcome='blocked',message='Local repair tools are unavailable.'))
+    assert local.outcome(path,0)==dict(ok=False,message='Local repair tools are unavailable.')
+    local.atomic(path,dict(outcome='completed',message='JPG Ready was verified.'))
+    assert local.outcome(path,1)['ok'] is False
+    assert local.outcome(path,0)['ok'] is True
 
 def test_unconfigured_companion_does_not_claim(monkeypatch,tmp_path):
     monkeypatch.setattr(local,'TARGET',tmp_path/'missing.json');host=Mock()
     assert local.poll({},host) is False
+    host.assert_not_called()
+
+
+def test_background_path_falls_back_to_registered_desktop_package(monkeypatch,tmp_path):
+    setup(monkeypatch,tmp_path)
+    monkeypatch.setattr(local.shutil,'which',lambda _:None)
+    binary=tmp_path/'app/resources/codex.exe';binary.parent.mkdir(parents=True);binary.write_bytes(b'synthetic')
+    monkeypatch.setattr(local.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=0,stdout=json.dumps(str(tmp_path))))
+    assert local.executable()==str(binary)
+
+
+def test_missing_executable_is_visible_without_claim(monkeypatch,tmp_path):
+    setup(monkeypatch,tmp_path)
+    monkeypatch.setattr(local,'executable',lambda:None)
+    host=Mock()
+    assert not local.poll({},host)
+    assert local.LAST_STATUS['state']=='Unavailable'
     host.assert_not_called()

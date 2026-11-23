@@ -1,4 +1,5 @@
 """Google Demand Gen Beta contracts. No Google or Meta publishing calls live here."""
+from ads_prompt_language import prompt_language
 from sports_categories import normalize_sport_category
 
 import csv
@@ -81,6 +82,7 @@ def product_metadata(selection, category):
             **ads.instant_experience_product_metadata_from_selection(selection, category=category)}
 
 
+@prompt_language
 def build_google_prompt(product_name, category, country, product_url, *, campaign_moment=None,
                         product_metadata=None):
     import ads_page as ads

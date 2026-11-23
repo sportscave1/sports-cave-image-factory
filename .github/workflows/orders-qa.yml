@@ -1,0 +1,30 @@
+name: Orders QA release gate
+on:
+  pull_request:
+    paths: ['inbox_companion*.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
+  push:
+    branches: [main]
+    paths: ['inbox_companion*.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt pytest
+      - run: npm install --prefix "$RUNNER_TEMP/orders-db" --no-save --package-lock=false @electric-sql/pglite@0.5.17
+      - run: python scripts/check_orders_release.py --pglite "$RUNNER_TEMP/orders-db/node_modules/@electric-sql/pglite/dist/index.js" --evidence "$RUNNER_TEMP/orders-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: orders-qa-evidence
+          path: ${{ runner.temp }}/orders-evidence/

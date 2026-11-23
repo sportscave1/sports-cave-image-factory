@@ -333,7 +333,10 @@ def header_queue_status():
             (SELECT count(*) FROM product_upload_staff_jobs WHERE stage=0) AS upload_waiting,
             (SELECT value FROM app_settings WHERE key=%s) AS upload_enabled''', (CONTROL_KEY,))
         row = cur.fetchone()
+    from auto_editions_header import snapshot
     return enrich_queues({
+        'editions': snapshot(connect),
+        'orders': __import__('orders_companion_header').snapshot(connect),
         'design': dict(waiting=row['design_waiting'], enabled=bool(row['design_enabled'])),
         'upload': dict(waiting=row['upload_waiting'], enabled=row['upload_enabled'] is not False),
     })
@@ -346,7 +349,8 @@ def can_control_queues(user):
 
 def desktop_tick(token):
     # Updating the singleton row serializes claims even across server processes.
-    with connect() as conn, conn.cursor() as cur:
+    from companion_poll_transaction import connection
+    with connection(connect) as conn, conn.cursor() as cur:
         cur.execute('''UPDATE product_upload_desktop SET seen_at=now()
             WHERE singleton AND token_hash=%s RETURNING actor_id''', (digest(token),))
         device = cur.fetchone()
@@ -505,7 +509,8 @@ async def status_route(request):
                 # Omit unknown counts rather than manufacturing a zero.
                 upload.setdefault('waiting', None)
                 queues['upload'] = upload
-            return JSONResponse(result, headers=HEADERS)
+            from companion_status_payload import response
+            return response(result, user, request, HEADERS)
         result = await run_in_threadpool(list_jobs, None if can_control_queues(user) else user['id'])
         if can_control_queues(user):
             result['queues'] = await run_in_threadpool(header_queue_status)

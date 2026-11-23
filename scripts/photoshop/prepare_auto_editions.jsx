@@ -69,9 +69,17 @@ var SCAutoEditionsPreparation = (function () {
                 if (l.typename === "LayerSet") named(l, name, found);
             }
         }
-        function visibleRole(container, name) {
+        function visibleRole(container, name, expected) {
             var matches = [];
             named(container, name, matches);
+            if(expected){
+                var exact=[];
+                for(var j=0;j<matches.length;j++)if(matches[j].id===expected.layer_id)exact.push(matches[j]);
+                if(exact.length!==1 || expected.name!==name || exact[0].parent!==container || !exact[0].visible
+                    || SCPSDInspector.encode(box(exact[0]))!==SCPSDInspector.encode(expected.bounds_px))
+                    throw Error("reviewed_role_identity_changed");
+                return exact[0];
+            }
             if (matches.length === 1) return matches[0];
             // Retain hidden same-name layers in the PSD. The live role must
             // still be unique and top-level, as in the Python preflight.
@@ -119,8 +127,8 @@ var SCAutoEditionsPreparation = (function () {
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }
             if (doc.mode !== DocumentMode.RGB || doc.bitsPerChannel !== BitsPerChannelType.EIGHT)
                 throw Error("colour_conversion_requires_approval");
-            layer = visibleRole(doc, r.number_layer_name);
-            plaque = visibleRole(doc, r.plaque_layer_name);
+            layer = visibleRole(doc, r.number_layer_name, r.reviewed_roles && r.reviewed_roles.number);
+            plaque = visibleRole(doc, r.plaque_layer_name, r.reviewed_roles && r.reviewed_roles.plaque);
             if (layer.kind !== LayerKind.TEXT || !layer.visible || layer.allLocked || !plaque.visible)
                 throw Error("uneditable_or_hidden_role");
             if (layer.parent !== doc || plaque.parent !== doc)
@@ -149,7 +157,10 @@ var SCAutoEditionsPreparation = (function () {
                     if(doc.layers[v].visible && doc.layers[v]!==hidden)bottom=doc.layers[v];
                 }
                 var candidate = null;
-                if(scale!==1 && bottom && bottom!==layer && bottom!==plaque && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
+                // An integrated footer/plaque can also be the bottom artwork.
+                // Python verifies this isolated canvas is fully opaque and
+                // requires unchanged native composite pixels after promotion.
+                if(scale!==1 && bottom && bottom!==layer && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
                     candidate={layer_id:bottom.id,name:bottom.name};
                     try {
                         for(var hide=0;hide<doc.layers.length;hide++)if(doc.layers[hide]!==bottom)doc.layers[hide].visible=false;
@@ -165,7 +176,7 @@ var SCAutoEditionsPreparation = (function () {
             if(r.opaque_resize_layer) {
                 var bg=[], approved=r.opaque_resize_layer;
                 named(doc,approved.name,bg);
-                if(bg.length!==1 || bg[0].id!==approved.layer_id || bg[0]===layer || bg[0]===plaque || !bg[0].visible)
+                if(bg.length!==1 || bg[0].id!==approved.layer_id || bg[0]===layer || !bg[0].visible)
                     throw Error("resize_background_identity_changed");
                 // Only Python-verified opaque native pixels, on the disposable
                 // staged document. No fill colour and no source PSD writes.

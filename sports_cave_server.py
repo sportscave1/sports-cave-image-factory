@@ -19,6 +19,7 @@ from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 from support_email_events import EVENTS_PATH, email_events
 from support_email_completion import PATH as EMAIL_READY_PATH, read_ready
 from support_email_idle import IdleLifecycle
+from inbox_companion_api import ROUTES as INBOX_COMPANION_ROUTES
 from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
 from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
 from wall_preview_analytics_api import ROUTES as WALL_PREVIEW_ANALYTICS_ROUTES
@@ -40,6 +41,7 @@ from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
 from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
 from prodigi_preparation_api import ROUTES as PRODIGI_PREPARATION_ROUTES
 from marketplace_api import ROUTES as MARKETPLACE_ROUTES
+from marketplace_notifications import NotificationLifecycle
 
 
 
@@ -75,6 +77,7 @@ routes = [
         *WALL_PREVIEW_CRM_ROUTES,
         *STOREFRONT_PROTECTION_ROUTES,
         *AUTH_COOKIE_CLEANUP_ROUTES,
+        *INBOX_COMPANION_ROUTES,
     )
 ]
 routes.extend(app_branding.public_branding_routes())
@@ -137,7 +140,7 @@ class _WallPreviewAccessLogFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
 from auto_editions_bulk_runtime import ReviewLifecycle
-streamlit_app = ReviewLifecycle(App("app.py", routes=routes))
+streamlit_app = NotificationLifecycle(ReviewLifecycle(App("app.py", routes=routes)))
 app = ConstantTimeHealthMiddleware(
     IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app)))
 )
@@ -173,6 +176,8 @@ if __name__ == "__main__":
         warm_renderer()
         from auto_editions_runtime import start_worker
         start_worker()
+        from prodigi_status_sync import start_worker as start_order_tracking
+        start_order_tracking()
         from database_read_pool import warm_application_reads
         warm_application_reads()
     uvicorn.run(
