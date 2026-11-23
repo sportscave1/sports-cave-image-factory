@@ -8,7 +8,7 @@ test('existing theme reads native reviews, includes video and preserves bounded 
   try {
     const page=await browser.newPage({viewport:{width:320,height:740}}),requests=[],errors=[];
     page.on('pageerror',e=>errors.push(e.message));
-    const origin='https://sports-cave-os-webhooks.onrender.com';
+    const origin='https://sports-cave-image-factory.onrender.com';
     const media=id=>origin+'/reviews/media/'+id+'?size=';
     const rows=[{id:'fixture-photo',reviewer_name:'Photo fixture',rating:5,title:'Photo fixture',body:'Synthetic image review',verified_purchase:false,media:[{kind:'image',url:media('aaaa')+'1280',thumbnail_url:media('aaaa')+'320',poster_url:media('aaaa')+'1280'}]},
       {id:'fixture-video',reviewer_name:'Video fixture',rating:4,title:'Video fixture',body:'Synthetic video review',verified_purchase:false,media:[{kind:'video',url:media('bbbb')+'original',thumbnail_url:media('bbbb')+'320',poster_url:media('bbbb')+'1280'}]},

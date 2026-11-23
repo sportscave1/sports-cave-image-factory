@@ -5,7 +5,7 @@ class NativeReviewMethods {
     if (!owner.nativeRequest || owner.nativeUntil < Date.now()) {
       owner.nativeUntil = Date.now() + 30000;
       owner.nativeRequest = (async () => {
-        const endpoint = 'https://sports-cave-os-webhooks.onrender.com/reviews/public';
+        const endpoint = 'https://sports-cave-image-factory.onrender.com/reviews/public';
         const rows = [], seen = new Set();
         let offset = 0, summary;
         for (let page = 0; page < 250; page++) {

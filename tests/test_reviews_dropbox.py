@@ -15,6 +15,17 @@ from tests.test_reviews_migration import photo,OWNED,REF
 from tests.test_crm import ADMIN
 
 class DropboxMediaTests(unittest.TestCase):
+    def test_paid_os_routes_keep_other_pages_and_secure_collection_base(self):
+        from reviews_routing import PublicReviews,public_base,PUBLIC_ORIGIN
+        fallback=FastAPI()
+        @fallback.get('/fixture-health')
+        def health():return {'ok':True}
+        with patch('reviews_http.ReviewsStore') as store,TestClient(PublicReviews(fallback)) as client:
+            store.return_value.settings.return_value={'enabled':False}
+            self.assertEqual(client.get('/fixture-health').json(),{'ok':True})
+            self.assertEqual(client.get('/reviews/public').status_code,404)
+        self.assertEqual(public_base({'RENDER':'true','CRM_PUBLIC_BASE_URL':'https://fixture.example'}),PUBLIC_ORIGIN)
+        self.assertEqual(public_base({'CRM_PUBLIC_BASE_URL':'https://fixture.example'}),'https://fixture.example')
     def test_original_is_saved_before_display_copies_and_webp_is_small(self):
         data=photo();calls=[];storage=Mock()
         storage.put.side_effect=lambda name,body:(calls.append((name,body)) or {**REF,'size':len(body),'sha256':hashlib.sha256(body).hexdigest()})
@@ -76,7 +87,8 @@ class DropboxHttpTests(unittest.TestCase):
         from reviews_http import router
         r=self.insert();storage={'provider':'dropbox','video_format':'mp4','original':REF,'posters':{'320':{**REF,'width':320,'height':180},'1280':{**REF,'width':1280,'height':720}}}
         m=self.store.q("INSERT INTO sc_review_media(review_id,kind,source_url,object_key,sha256,size_bytes,status,approved,storage) VALUES(%s,'video','fixture','id:reviewfixture',%s,100,'COPIED',true,%s::jsonb) RETURNING id",(r['id'],'f'*64,json.dumps(storage)),True)
-        self.store.save_settings(ADMIN,{'enabled':True});app=FastAPI();app.include_router(router)
+        from reviews_routing import PublicReviews
+        self.store.save_settings(ADMIN,{'enabled':True});app=PublicReviews(FastAPI())
         def open_source(ref,start=0,end=None):
             stream=Mock();stream.iter_chunks.side_effect=lambda:iter([b'x'*(end-start+1)]);return stream
         with patch('reviews_http.ReviewsStore',return_value=self.store),patch('reviews_dropbox.ReviewDropboxStorage.open',side_effect=open_source) as fetch,TestClient(app) as client:
