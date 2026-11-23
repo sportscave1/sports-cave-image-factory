@@ -23,11 +23,13 @@ export function attachPurchasedArtwork(certificates, orders, customer) {
       ) {
         continue;
       }
-      const artwork = artworkFromLineItem(
-        matchPurchasedLineItem(record, lineItems),
-      );
+      const lineItem = matchPurchasedLineItem(record, lineItems);
+      const artwork = artworkFromLineItem(lineItem);
       if (artwork) {
-        artworkByCertificateKey.set(certificate.key, artwork);
+        artworkByCertificateKey.set(certificate.key, {...artwork,
+          shopify_product_id: lineItem.productId || certificate.shopify_product_id,
+          shopify_variant_id: lineItem.variantId || certificate.shopify_variant_id,
+        });
       }
     }
   }

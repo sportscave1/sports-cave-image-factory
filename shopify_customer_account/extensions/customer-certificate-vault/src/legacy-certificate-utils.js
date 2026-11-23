@@ -49,6 +49,8 @@ export function normalizeCertificate(record, order, customer) {
     product_title: stringValue(record.product_title),
     product_handle: stringValue(record.product_handle),
     variant_title: stringValue(record.variant_title),
+    shopify_product_id: stringValue(record.shopify_product_id || record.product_id),
+    shopify_variant_id: stringValue(record.shopify_variant_id || record.variant_id),
     edition_display: editionDisplay(record),
     certificate_id: certificateId,
     shopify_order_name: orderName,

@@ -7,12 +7,18 @@ export function accountCountry(api) {
 export function compactTitle(title) {
   return String(title || '').replace(/\bwall\s+art\b/gi, '').replace(/\s+/g, ' ').replace(/\s+[–—-]\s*$/, '').trim();
 }
+export function pairedProducts(ids, nodes) {
+  const byId = new Map((nodes || []).filter(Boolean).map(product => [product.id, product]));
+  return [...new Set(ids)].map(id => byId.get(id))
+    .filter(product => product?.handle && product.variants?.nodes?.some(variant => variant.availableForSale))
+    .slice(0, 2);
+}
 export function comparePrice(variant) {
   const price=variant?.price, compare=variant?.compareAtPrice;
   return price && compare && price.currencyCode===compare.currencyCode && Number(compare.amount)>Number(price.amount) ? compare : null;
 }
 export const UPSELL_QUERY = `query CollectionUpsellVariants($ids: [ID!]!, $country: CountryCode!) @inContext(country: $country) {
-  nodes(ids: $ids) { ... on Product { id title featuredImage { url altText }
+  nodes(ids: $ids) { ... on Product { id title handle featuredImage { url altText }
     variants(first: 100) { nodes { id title availableForSale selectedOptions { name value }
       price { amount currencyCode } compareAtPrice { amount currencyCode } image { url altText } } }
   } }

@@ -4,8 +4,8 @@ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const ts=require('../shopify_customer_account/node_modules/typescript');
 const source=fs.readFileSync(path.join(__dirname,'../shopify_customer_account/extensions/customer-certificate-vault/src/MySportsCaveCollection.jsx'),'utf8');
 const commerceModule={exports:{}};
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../shopify_customer_account/extensions/customer-certificate-vault/src/account-commerce.js'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:commerceModule.exports,module:commerceModule});
-const compiled=ts.transpileModule(source+'\nexport {CertificateViewer,CertificateGallery,CollectionUpsells,FramedCertificatePreview,FramedCertificateOffer};',{
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../shopify_customer_account/extensions/customer-certificate-vault/src/account-commerce.js'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:commerceModule.exports,module:commerceModule});
+const compiled=ts.transpileModule(source+'\nexport {CertificateViewer,CertificateGallery,CollectionUpsells,CollectionShowcase,FramedCertificatePreview,FramedCertificateOffer};',{
  compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,jsxFactory:'h'},fileName:'collection.jsx',
 }).outputText;
 function fixture({existing=false,failure=false}={}){
@@ -56,4 +56,21 @@ test('all three certificate previews remain mounted and eagerly load for colour 
  assert.deepEqual(Array.from(boxes,b=>b.props.accessibilityVisibility),['hidden','visible','hidden']);
  for(const box of boxes){assert.equal(box.children[0].props.loading,'eager');assert.equal(box.children[0].props.objectFit,'contain');}
  assert.match(boxes[1].children[0].props.src,/frame=oak$/);
+});
+
+test('showcase uses raw certificate and preserves original downloads; selection follows the purchased variant',()=>{
+ const f=fixture();const items=[{key:'black',product_title:'Edition – Athlete',variant_title:'Black / M',edition_display:'#027 / 100',purchased_image_url:'https://fixture.test/black.jpg',certificate_preview_image_url:'https://fixture.test/raw.png',frame_preview_url:'https://fixture.test/framed.webp',certificate_pdf_url:'https://fixture.test/original.pdf'}, {key:'oak',product_title:'Edition – Athlete',variant_title:'Oak / M',edition_display:'#028 / 100',purchased_image_url:'https://fixture.test/oak.jpg',certificate_preview_image_url:'https://fixture.test/raw2.png'}];
+ let selected;const tree=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[0],onSelect:key=>selected=key,onOpen:()=>{}});
+ assert.equal(find(tree,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/raw.png').props.objectFit,'contain');
+ assert.equal(find(tree,n=>n.type==='s-link'&&n.children.includes('Download PDF')).props.href,'https://fixture.test/original.pdf');
+ const choice=find(tree,n=>n.type==='s-clickable'&&n.props.accessibilityLabel.includes('Oak / M'));choice.props.onClick();assert.equal(selected,'oak');
+ const second=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[1],onSelect:()=>{},onOpen:()=>{}});
+ assert.ok(find(second,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/oak.jpg'));
+ assert.ok(find(second,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/raw2.png'));
+ assert.ok(find(tree,n=>n.type==='s-box'&&n.props.display==='none'&&n.props.accessibilityVisibility==='hidden'));
+});
+test('paired products keep the smart order and return only two published available editions',()=>{
+ const product=(id,available=true)=>({id,handle:id,variants:{nodes:[{availableForSale:available}]}});
+ const result=commerceModule.exports.pairedProducts(['1','2','3','4','5'],[product('5'),product('3'),product('1',false),null,product('4')]);
+ assert.deepEqual(Array.from(result,p=>p.id),['3','4']);
 });

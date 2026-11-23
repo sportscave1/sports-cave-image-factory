@@ -309,7 +309,10 @@ async def collector_vault_recommendations(request: Request):
     try:
         session = _session(request)
         from collector_collection_offers import recommendations
-        return _json({"ok": True, "products": recommendations(session["shopify_customer_id"], country=request.query_params.get("country"))})
+        from starlette.concurrency import run_in_threadpool
+        products = await run_in_threadpool(recommendations, session["shopify_customer_id"],
+            country=request.query_params.get("country"), seed_product_id=request.query_params.get("product_id"))
+        return _json({"ok": True, "products": products})
     except Exception as error:
         return _error_response(error, "recommendations")
 

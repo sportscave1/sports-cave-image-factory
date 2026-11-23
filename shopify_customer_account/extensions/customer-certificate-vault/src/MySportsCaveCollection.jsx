@@ -11,7 +11,7 @@ import {
 } from "./legacy-certificate-utils.js";
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
 import {loadCollectionOrders} from "./collection-order-pages.js";
-import {accountCountry, compactTitle, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
+import {accountCountry, compactTitle, pairedProducts, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
 import {AccountReview} from "./AccountReview.jsx";
 import {formatFramePrice, frameCartInput} from "./vault-utils.js";
 import {createFrameOfferLoader} from "./frame-offer-loader.js";
@@ -73,6 +73,7 @@ function Extension() {
   const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [selectedCertificate, setSelectedCertificate] = useState(null);
+  const [activeKey, setActiveKey] = useState("");
   const apiBaseUrl = configuredApiBaseUrl(api);
   const frameLoader = useRef(null);
   if (!frameLoader.current || frameLoader.current.api !== api || frameLoader.current.base !== apiBaseUrl) {
@@ -120,6 +121,7 @@ function Extension() {
   }, [retryKey]);
 
   const firstCertificate = certificates[0] || null;
+  const activeCertificate = certificates.find(item => item.key === activeKey) || firstCertificate;
   const country = useCountry(api);
   const [reviewPrompt, setReviewPrompt] = useState(null);
   const [vaultData, setVaultData] = useState(null);
@@ -178,13 +180,15 @@ function Extension() {
             <EmptyState />
           ) : null}
           {status === "ready" && certificates.length > 0 ? (
-            <CertificateGallery
+            <CollectionShowcase
               certificates={certificates}
+              activeCertificate={activeCertificate}
+              onSelect={setActiveKey}
               onOpen={(certificate, framingOnly = false) => setSelectedCertificate({...certificate, framingOnly})}
             />
           ) : null}
           {status === "ready" && certificates.length > 0 ? (
-            <CollectionUpsells api={api} apiBaseUrl={apiBaseUrl} country={country} />
+            <CollectionUpsells key={`${country}-${activeCertificate?.shopify_product_id || activeCertificate?.key}`} api={api} apiBaseUrl={apiBaseUrl} country={country} certificate={activeCertificate} />
           ) : null}
         </s-stack>
       </s-grid>
@@ -291,6 +295,61 @@ function CertificateGallery({certificates, onOpen}) {
       ))}
     </s-grid>
   );
+}
+
+function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen}) {
+  if (!activeCertificate) return null;
+  const active = activeCertificate;
+  const edition = item => editionLabel(item.edition_display).replace(/^Edition #/, "");
+  const preview = active.certificate_preview_image_url;
+  return <s-stack gap="large-200">
+    <s-grid gridTemplateColumns="@container (inline-size > 850px) minmax(0, 0.8fr) minmax(0, 1.2fr), minmax(0, 1fr)" gap="large-200" alignItems="start">
+      <s-stack gap="large">
+        <s-stack gap="small-400">
+          <s-heading>My Collection</s-heading>
+          <s-text type="emphasis">{certificates.length} numbered {certificates.length === 1 ? "edition" : "editions"}</s-text>
+        </s-stack>
+        <s-box display="@container (inline-size > 850px) auto, none">
+          <s-stack gap="small-200">
+            {certificates.map(item => <s-clickable key={item.key} onClick={() => onSelect(item.key)}
+              accessibilityLabel={`${compactTitle(item.product_title)}, ${item.variant_title}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
+              border={item.key === active.key ? "large" : "none"} background={item.key === active.key ? "subdued" : "transparent"}
+              borderRadius="large" padding="small" minBlockSize="80px">
+              <s-grid gridTemplateColumns="88px minmax(0, 1fr) auto" gap="base" alignItems="center">
+                {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : <s-box minBlockSize="66px" />}
+                <s-stack gap="small-400"><s-text type="strong">{compactTitle(item.product_title)}</s-text><s-text color="subdued">{item.variant_title}</s-text></s-stack>
+                <s-text>{edition(item)} ›</s-text>
+              </s-grid>
+            </s-clickable>)}
+          </s-stack>
+        </s-box>
+        <s-box display="@container (inline-size > 850px) none, auto">
+          <s-stack gap="base">
+            <s-select label="Choose your edition" value={active.key} onChange={event => onSelect((/** @type {HTMLSelectElement} */ (event.currentTarget)).value)}>
+              {certificates.map(item => <s-option key={item.key} value={item.key}>{compactTitle(item.product_title)} · {edition(item)} · {item.variant_title}</s-option>)}
+            </s-select>
+            <s-box padding="small" border="large" borderRadius="large" background="subdued">
+              <s-grid gridTemplateColumns="80px minmax(0, 1fr)" gap="base" alignItems="center">
+                {active.purchased_image_url ? <s-image src={active.purchased_image_url} alt={active.purchased_image_alt || active.product_title} aspectRatio="4/3" objectFit="contain" loading="eager" /> : null}
+                <s-stack gap="small-400"><s-text type="strong">{compactTitle(active.product_title)}</s-text><s-text color="subdued">{active.variant_title}</s-text><s-text>{edition(active)}</s-text></s-stack>
+              </s-grid>
+            </s-box>
+          </s-stack>
+        </s-box>
+      </s-stack>
+      <s-stack gap="large">
+        {preview ? <s-image src={preview} alt={`Certificate of authenticity for ${active.product_title}, edition ${edition(active)}`} aspectRatio="1.415" objectFit="contain" loading="eager" sizes="(min-width: 850px) 60vw, 100vw" /> : <CertificatePreview certificate={{...active, frame_preview_url: ""}} eager />}
+        <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr auto 1fr, 1fr" gap="base" alignItems="center">
+          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : <s-badge>Certificate processing</s-badge>}
+          {active.certificate_pdf_url ? <s-link href={active.certificate_pdf_url} target="_blank">Download PDF</s-link> : null}
+          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active, true)}>Frame certificate</s-button> : null}
+        </s-grid>
+        {active.certificate_print_jpg_url ? <s-link href={active.certificate_print_jpg_url} target="_blank">Free print download</s-link> : null}
+        {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} alt="" loading="eager" /></s-box> : null}
+      </s-stack>
+    </s-grid>
+    <s-divider />
+  </s-stack>;
 }
 
 function CertificateCard({certificate, onOpen}) {
@@ -743,26 +802,7 @@ function FramedCertificateOffer({
   );
 }
 
-function CollectionUpsells({api, apiBaseUrl, country}) {
-  const sharedCart = useRef(null);
-  const cartQueue = useRef(Promise.resolve());
-  useEffect(() => { sharedCart.current=null; }, [country]);
-  const addToCollectionCart = (variantId) => {
-    const operation = cartQueue.current.then(async () => {
-      const lines = [{merchandiseId: variantId, quantity: 1}];
-      const result = sharedCart.current
-        ? await api.query(`mutation CollectionCartAdd($cartId: ID!, $lines: [CartLineInput!]!) {
-            cartLinesAdd(cartId: $cartId, lines: $lines) { cart { id checkoutUrl } userErrors { field message } }
-          }`, {variables: {cartId: sharedCart.current.id, lines}})
-        : await api.query(CART_CREATE_MUTATION, {variables: {input: {lines,buyerIdentity:{countryCode:country}}}});
-      const created = result.data?.cartLinesAdd || result.data?.cartCreate;
-      if (result.errors?.length || created?.userErrors?.length || !created?.cart?.checkoutUrl) throw new Error("Cart unavailable");
-      sharedCart.current = created.cart;
-      return created.cart.checkoutUrl;
-    });
-    cartQueue.current = operation.catch(() => {});
-    return operation;
-  };
+function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
   const [products, setProducts] = useState([]);
   const [status, setStatus] = useState("loading");
   const [retry, setRetry] = useState(0);
@@ -771,8 +811,9 @@ function CollectionUpsells({api, apiBaseUrl, country}) {
     setStatus("loading");
     async function load() {
       try {
+        if (!certificate?.shopify_product_id) { setProducts([]); setStatus("empty"); return; }
         const recommended = await vaultRequest(api, apiBaseUrl,
-          `/api/collector-vault/recommendations?country=${country}`, {signal: controller.signal});
+          `/api/collector-vault/recommendations?country=${country}&product_id=${encodeURIComponent(certificate?.shopify_product_id || "")}`, {signal: controller.signal});
         const ids = (recommended.products || []).slice(0, 8).map((p) => p.id);
         if (!ids.length) {
           if (!controller.signal.aborted) { setProducts([]); setStatus("empty"); }
@@ -780,7 +821,8 @@ function CollectionUpsells({api, apiBaseUrl, country}) {
         }
         const result = await api.query(UPSELL_QUERY, {variables: {ids, country}});
         if (result.errors?.length) throw new Error("Products unavailable");
-        const nodes = (result.data?.nodes || []).filter((p) => p?.variants?.nodes?.some((v) => v.availableForSale)).slice(0, 4);
+        // Preserve the smart rank even when Shopify returns nodes in another order.
+        const nodes = pairedProducts(ids, result.data?.nodes);
         if (!controller.signal.aborted) { setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
       } catch (_error) {
         if (!controller.signal.aborted) setStatus("error");
@@ -788,16 +830,20 @@ function CollectionUpsells({api, apiBaseUrl, country}) {
     }
     load();
     return () => controller.abort();
-  }, [api, apiBaseUrl, retry, country]);
+  }, [api, apiBaseUrl, retry, country, certificate?.shopify_product_id]);
   return <s-stack gap="base">
-    <s-heading>Build your collection</s-heading>
-    <s-text color="subdued">Selected for you · choose your frame and size.</s-text>
+    <s-heading>Pairs with your {compactTitle(certificate?.product_title || "selected")} edition</s-heading>
     {status === "loading" ? <s-spinner accessibilityLabel="Finding your recommendations" /> : null}
     {status === "error" ? <s-stack gap="small"><s-text>Recommendations are temporarily unavailable.</s-text>
       <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
     {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
-    <s-grid gridTemplateColumns="@container (inline-size > 750px) 1fr 1fr, 1fr" gap="large" alignItems="stretch">
-      {products.map((product) => <UpsellProduct key={`${country}-${product.id}`} product={product} api={api} onAdd={addToCollectionCart} />)}
+    <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr 1fr, 1fr" gap="large" alignItems="stretch">
+      {products.map(product => <s-link key={product.id} href={`https://www.sportscaveshop.com/products/${product.handle}?country=${country}`} target="_blank">
+        <s-grid gridTemplateColumns="@container (inline-size > 850px) minmax(0, 1.2fr) minmax(0, 1fr), 1fr" gap="base" alignItems="center">
+          {product.featuredImage?.url ? <s-image src={product.featuredImage.url} alt={product.featuredImage.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : null}
+          <s-text type="strong">{compactTitle(product.title)}</s-text>
+        </s-grid>
+      </s-link>)}
     </s-grid>
   </s-stack>;
 }

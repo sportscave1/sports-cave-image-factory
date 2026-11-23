@@ -40,7 +40,7 @@ def render_certificate_frame(content, color):
                 canvas.close()
 
 
-def recommendations(customer_id, country=None):
+def recommendations(customer_id, country=None, seed_product_id=None):
     from crm_smart_catalogue import histories, lines
     from crm_smart_candidates import memberships, collection_products, balanced
     from crm_catalogue import Catalogue, product_id, product_issues, edition_available
@@ -68,14 +68,35 @@ def recommendations(customer_id, country=None):
             owned.add(identity)
     if not owned:
         return []
+    seed = product_id(seed_product_id) if seed_product_id else None
+    if seed_product_id and (not seed or seed not in owned):
+        from collector_vault import CollectorVaultError
+        raise CollectorVaultError("Choose an owned edition for recommendations.")
     shop = bounded(Shopify(), seconds=12)
-    groups = [collection_products(shop, collection) for collection in memberships(shop, sorted(owned))]
+    groups = [collection_products(shop, collection["id"] if isinstance(collection, dict) else collection)
+              for collection in memberships(shop, [seed] if seed else sorted(owned))]
     candidates = list(dict.fromkeys(identity for group in groups for identity in group if identity not in owned))[:120]
     country = country or next((order.get("_country") for order in orders if order.get("_country")), "AU")
     market = {"GB": "UK"}.get(country, country)
     if market not in ("AU", "US", "UK", "CA", "NZ"):
         market = "Global"
     catalogue = Catalogue(shop, connect=supabase_backend.connect)
+    if seed:
+        # Same explicit subject/team/event/league/sport signals as the live
+        # storefront. Never infer an athlete from a title or cross customers.
+        tags = {}
+        identities = [seed, *candidates]
+        query = "query AccountEditionAffinity($ids:[ID!]!) { nodes(ids:$ids) { ... on Product { id tags } } }"
+        for start in range(0, len(identities), 25):
+            nodes = shop.query(query, {"ids": identities[start:start+25]}, "account edition affinity", 300).get("nodes") or []
+            tags.update({node["id"]: node.get("tags") or [] for node in nodes if node})
+        try:
+            from website_recommendation_analytics import _ranking_snapshot
+            signals = (_ranking_snapshot() or {}).get(country, {})
+        except Exception:
+            signals = {}
+        from collector_collection_ranking import rank_candidates
+        candidates = rank_candidates(seed, candidates, tags, signals)
     eligible = {}
     for start in range(0, len(candidates), 20):
         for product in catalogue.resolve(candidates[start:start + 20], market, allow_missing=True):
@@ -87,6 +108,6 @@ def recommendations(customer_id, country=None):
     # ranking and balancing as Smart catalogue. The authenticated account client
     # performs Storefront publication/variant/price checks using its native token,
     # so this endpoint never needs a separate server Storefront credential.
-    chosen = balanced(groups, eligible, 8)
+    chosen = [eligible[identity] for identity in candidates if identity in eligible][:8] if seed else balanced(groups, eligible, 8)
     logging.getLogger(__name__).info("Account recommendations candidates=%s eligible=%s returned=%s", len(candidates), len(eligible), len(chosen))
     return chosen
