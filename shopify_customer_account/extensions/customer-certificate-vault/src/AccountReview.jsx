@@ -83,17 +83,21 @@ export function AccountReview({prompt, certificate, request}) {
   };
 
   return (
-    <s-box padding="base" border="base" borderRadius="large" background="subdued">
-      <s-grid gridTemplateColumns="@container (inline-size > 650px) '104px minmax(0, 1fr)', '64px minmax(0, 1fr)'" gap="base" alignItems="center">
-        <s-box><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url}
-          alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="4/3" objectFit="contain" loading="eager" /></s-box>
-        <s-grid gridTemplateColumns="@container (inline-size > 650px) 'minmax(0, 1fr) auto', '1fr'" gap="base" alignItems="center">
-        <s-stack gap="small-400">
-          <s-text type="strong">{submitted ? "Thank you for your review" : "How does it look in your space?"}</s-text>
-          <StarRating rating={rating} onChange={chooseRating} modalId={modalId} />
-        </s-stack>
-        <s-button command="--show" commandFor={modalId} onClick={()=>chooseRating(rating || 5)}>Leave a review</s-button>
-        </s-grid>
+    <s-box padding="none" border="base" borderRadius="large" overflow="hidden" background="subdued">
+      <s-grid gridTemplateColumns="@container (inline-size > 650px) '144px minmax(0, 1fr)', '76px minmax(0, 1fr)'" gap="small" alignItems="center">
+        <s-box>
+          <s-box display="@container (inline-size > 650px) auto, none"><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="1.5" objectFit="cover" loading="eager" /></s-box>
+          <s-box display="@container (inline-size > 650px) none, auto"><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="0.75" objectFit="cover" loading="eager" /></s-box>
+        </s-box>
+        <s-box padding="small">
+          <s-grid gridTemplateColumns="@container (inline-size > 650px) 'minmax(0, 1fr) 164px', 'minmax(0, 1fr) 88px'" gap="small" alignItems="center">
+            <s-stack gap="small-400">
+              <s-text type="strong">{submitted ? "Thank you for your review" : "How does it look in your space?"}</s-text>
+              <StarRating rating={rating || 5} onChange={chooseRating} modalId={modalId} compact />
+            </s-stack>
+            <s-button inlineSize="fill" variant="primary" command="--show" commandFor={modalId} onClick={()=>chooseRating(rating || 5)}>Leave a review</s-button>
+          </s-grid>
+        </s-box>
       </s-grid>
       <s-modal
         ref={modalRef}
@@ -104,7 +108,7 @@ export function AccountReview({prompt, certificate, request}) {
       >
         <s-stack gap="small">
           {!prompt ? <s-banner tone="info">Reviews are available for delivered editions. Your review options will appear here when ready.</s-banner> : null}
-          <s-text color="subdued">Your review is sent to Judge.me, just like the store reviews page.</s-text>
+          <s-text color="subdued">Your review is sent to Judge.me for publishing under our review settings.</s-text>
           <StarRating rating={rating} onChange={chooseRating} />
           <s-text-field
             label="Review title (optional)"
@@ -164,7 +168,7 @@ export function AccountReview({prompt, certificate, request}) {
   );
 }
 
-function StarRating({rating, onChange, modalId = ""}) {
+function StarRating({rating, onChange, modalId = "", compact = false}) {
   return (
     <s-stack direction="inline" gap="none" alignItems="center">
       {[1, 2, 3, 4, 5].map((value) => (
@@ -175,12 +179,13 @@ function StarRating({rating, onChange, modalId = ""}) {
           command={modalId ? "--show" : undefined}
           commandFor={modalId || undefined}
           padding="small-400"
-          minBlockSize="36px"
-          minInlineSize="36px"
+          minBlockSize={compact ? "28px" : "36px"}
+          minInlineSize={compact ? "24px" : "36px"}
         >
           <s-icon
             type={value <= rating ? "star-filled" : "star"}
             tone="warning"
+            size={compact ? "large" : "base"}
           ></s-icon>
         </s-clickable>
       ))}

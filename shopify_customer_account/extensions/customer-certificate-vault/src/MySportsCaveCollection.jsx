@@ -11,7 +11,7 @@ import {
 } from "./legacy-certificate-utils.js";
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
 import {loadCollectionOrders} from "./collection-order-pages.js";
-import {accountCountry, compactTitle, pairedProducts, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
+import {accountCountry, compactTitle, compactVariant, pairedProducts, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
 import {AccountReview} from "./AccountReview.jsx";
 import {formatFramePrice, frameCartInput} from "./vault-utils.js";
 import {createFrameOfferLoader} from "./frame-offer-loader.js";
@@ -154,6 +154,7 @@ function Extension() {
             frame_preview_url: preview ? `${preview}&frame=black` : "",
             certificate_preview_image_url: certificate.certificate_preview_image_url || preview,
             certificate_print_jpg_url: certificate.certificate_print_jpg_url || vaultAssetUrl(apiBaseUrl, owned?.print_url),
+            certificate_download_url: vaultAssetUrl(apiBaseUrl, owned?.print_url),
           };
         }));
   }, [status, vaultData, apiBaseUrl]);
@@ -300,51 +301,42 @@ function CertificateGallery({certificates, onOpen}) {
 function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen}) {
   if (!activeCertificate) return null;
   const active = activeCertificate;
+  const index = Math.max(0, certificates.findIndex(item => item.key === active.key));
+  const browse = offset => onSelect(certificates[(index + offset + certificates.length) % certificates.length].key);
   const edition = item => editionLabel(item.edition_display).replace(/^Edition #/, "");
+  const count = `${certificates.length} numbered ${certificates.length === 1 ? "edition" : "editions"}`;
   const preview = active.certificate_preview_image_url;
-  return <s-stack gap="large-200">
-    <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 0.8fr) minmax(0, 1.2fr)', 'minmax(0, 1fr)'" gap="large-200" alignItems="start">
-      <s-stack gap="large">
-        <s-stack gap="small-400">
-          <s-heading>My Collection</s-heading>
-          <s-text type="emphasis">{certificates.length} numbered {certificates.length === 1 ? "edition" : "editions"}</s-text>
-        </s-stack>
-        <s-box display="@container (inline-size > 850px) auto, none">
-          <s-stack gap="small-200">
-            {certificates.map(item => <s-clickable key={item.key} onClick={() => onSelect(item.key)}
-              accessibilityLabel={`${compactTitle(item.product_title)}, ${item.variant_title}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
-              border={item.key === active.key ? "large" : "none"} background={item.key === active.key ? "subdued" : "transparent"}
-              borderRadius="large" padding="small" minBlockSize="80px">
-              <s-grid gridTemplateColumns="88px minmax(0, 1fr) auto" gap="base" alignItems="center">
-                {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : <s-box minBlockSize="66px" />}
-                <s-stack gap="small-400"><s-text type="strong">{compactTitle(item.product_title)}</s-text><s-text color="subdued">{item.variant_title}</s-text></s-stack>
-                <s-text>{edition(item)} ›</s-text>
-              </s-grid>
-            </s-clickable>)}
-          </s-stack>
-        </s-box>
+  const card = (item, mobile = false) => <s-grid gridTemplateColumns={mobile ? "56px minmax(0, 1fr)" : "80px minmax(0, 1fr) auto"} gap="small" alignItems="center">
+    {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit="cover" loading="eager" /> : <s-box minBlockSize="48px" />}
+    <s-stack gap="small-400"><s-text type="strong">{compactTitle(item.product_title)}</s-text><s-text color="subdued">{compactVariant(item.variant_title)}</s-text>{mobile ? <s-text>{edition(item)}</s-text> : null}</s-stack>
+    {!mobile ? <s-text>{edition(item)} ›</s-text> : null}
+  </s-grid>;
+  return <s-stack gap="base">
+    <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 0.7fr) minmax(0, 1.3fr)', 'minmax(0, 1fr)'" gap="base" alignItems="start">
+      <s-stack gap="base">
+        <s-box display="@container (inline-size > 850px) auto, none"><s-stack gap="small-400"><s-heading>My Collection</s-heading><s-text type="emphasis">{count}</s-text></s-stack></s-box>
+        <s-box display="@container (inline-size > 850px) none, auto"><s-heading>{count}</s-heading></s-box>
+        <s-box display="@container (inline-size > 850px) auto, none"><s-stack gap="small-400">
+          {certificates.map(item => <s-clickable key={item.key} onClick={() => onSelect(item.key)}
+            accessibilityLabel={`${compactTitle(item.product_title)}, ${compactVariant(item.variant_title)}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
+            border={item.key === active.key ? "large" : "none"} background={item.key === active.key ? "subdued" : "transparent"}
+            borderRadius="large" padding="small" minBlockSize="72px">{card(item)}</s-clickable>)}
+        </s-stack></s-box>
         <s-box display="@container (inline-size > 850px) none, auto">
-          <s-stack gap="base">
-            <s-select label="Choose your edition" value={active.key} onChange={event => onSelect((/** @type {HTMLSelectElement} */ (event.currentTarget)).value)}>
-              {certificates.map(item => <s-option key={item.key} value={item.key}>{compactTitle(item.product_title)} · {edition(item)} · {item.variant_title}</s-option>)}
-            </s-select>
-            <s-box padding="small" border="large" borderRadius="large" background="subdued">
-              <s-grid gridTemplateColumns="80px minmax(0, 1fr)" gap="base" alignItems="center">
-                {active.purchased_image_url ? <s-image src={active.purchased_image_url} alt={active.purchased_image_alt || active.product_title} aspectRatio="4/3" objectFit="contain" loading="eager" /> : null}
-                <s-stack gap="small-400"><s-text type="strong">{compactTitle(active.product_title)}</s-text><s-text color="subdued">{active.variant_title}</s-text><s-text>{edition(active)}</s-text></s-stack>
-              </s-grid>
-            </s-box>
-          </s-stack>
+          <s-grid gridTemplateColumns="44px minmax(0, 1fr) 44px" gap="small-400" alignItems="center">
+            <s-clickable accessibilityLabel="Previous edition" onClick={() => browse(-1)} disabled={certificates.length < 2} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-left" size="large" /></s-clickable>
+            <s-box border="base" borderRadius="large" padding="small" background="subdued" accessibilityLabel={`Edition ${index + 1} of ${certificates.length}`}>{card(active, true)}</s-box>
+            <s-clickable accessibilityLabel="Next edition" onClick={() => browse(1)} disabled={certificates.length < 2} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-right" size="large" /></s-clickable>
+          </s-grid>
         </s-box>
       </s-stack>
-      <s-stack gap="large">
-        {preview ? <s-image src={preview} alt={`Certificate of authenticity for ${active.product_title}, edition ${edition(active)}`} aspectRatio="1.415" objectFit="contain" loading="eager" sizes="(min-width: 850px) 60vw, 100vw" /> : <CertificatePreview certificate={{...active, frame_preview_url: ""}} eager />}
-        <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr auto 1fr, 1fr" gap="base" alignItems="center">
-          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : <s-badge>Certificate processing</s-badge>}
-          {active.certificate_pdf_url ? <s-link href={active.certificate_pdf_url} target="_blank">Download PDF</s-link> : null}
-          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active, true)}>Frame certificate</s-button> : null}
+      <s-stack gap="small">
+        {preview ? <s-image src={preview} alt={`Certificate of authenticity for ${active.product_title}, edition ${edition(active)}`} aspectRatio="1.415" objectFit="contain" loading="eager" sizes="(min-width: 850px) 70vw, 100vw" /> : <CertificatePreview certificate={{...active, frame_preview_url: ""}} eager />}
+        <s-grid gridTemplateColumns="minmax(0, 1.1fr) minmax(0, 1fr)" gap="small" alignItems="center">
+          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active, true)}>Frame certificate</s-button> : <s-badge>Certificate processing</s-badge>}
+          {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : null}
         </s-grid>
-        {active.certificate_print_jpg_url ? <s-link href={active.certificate_print_jpg_url} target="_blank">Free print download</s-link> : null}
+        {active.certificate_download_url ? <s-link href={active.certificate_download_url} target="auto">Download certificate</s-link> : null}
         {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} alt="" loading="eager" /></s-box> : null}
       </s-stack>
     </s-grid>
@@ -840,9 +832,9 @@ function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
     {status === "error" ? <s-stack gap="small"><s-text>Recommendations are temporarily unavailable.</s-text>
       <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
     {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
-    <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr 1fr, 1fr" gap="large" alignItems="stretch">
+    <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large" alignItems="stretch">
       {products.map(product => <s-link key={product.id} href={`https://www.sportscaveshop.com/products/${product.handle}?country=${country}`} target="_blank">
-        <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 1.2fr) minmax(0, 1fr)', '1fr'" gap="base" alignItems="center">
+        <s-grid gridTemplateColumns="@container (inline-size > 850px) '152px minmax(0, 1fr)', '1fr'" gap="base" alignItems="center">
           {product.featuredImage?.url ? <s-image src={product.featuredImage.url} alt={product.featuredImage.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : null}
           <s-text type="strong">{compactTitle(product.title)}</s-text>
         </s-grid>

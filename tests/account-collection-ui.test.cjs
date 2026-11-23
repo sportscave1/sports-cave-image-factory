@@ -61,10 +61,10 @@ test('all three certificate previews remain mounted and eagerly load for colour 
 });
 
 test('showcase uses raw certificate and preserves original downloads; selection follows the purchased variant',()=>{
- const f=fixture();const items=[{key:'black',product_title:'Edition � Athlete',variant_title:'Black / M',edition_display:'#027 / 100',purchased_image_url:'https://fixture.test/black.jpg',certificate_preview_image_url:'https://fixture.test/raw.png',frame_preview_url:'https://fixture.test/framed.webp',certificate_pdf_url:'https://fixture.test/original.pdf'}, {key:'oak',product_title:'Edition � Athlete',variant_title:'Oak / M',edition_display:'#028 / 100',purchased_image_url:'https://fixture.test/oak.jpg',certificate_preview_image_url:'https://fixture.test/raw2.png'}];
+ const f=fixture();const items=[{key:'black',product_title:'Edition – Athlete',variant_title:'Black / M',edition_display:'#027 / 100',purchased_image_url:'https://fixture.test/black.jpg',certificate_preview_image_url:'https://fixture.test/raw.png',frame_preview_url:'https://fixture.test/framed.webp',certificate_pdf_url:'https://fixture.test/original.pdf',certificate_download_url:'https://fixture.test/asset?token=print'}, {key:'oak',product_title:'Edition – Athlete',variant_title:'Oak / M',edition_display:'#028 / 100',purchased_image_url:'https://fixture.test/oak.jpg',certificate_preview_image_url:'https://fixture.test/raw2.png'}];
  let selected;const tree=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[0],onSelect:key=>selected=key,onOpen:()=>{}});
  assert.equal(find(tree,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/raw.png').props.objectFit,'contain');
- assert.equal(find(tree,n=>n.type==='s-link'&&n.children.includes('Download PDF')).props.href,'https://fixture.test/original.pdf');
+ assert.equal(find(tree,n=>n.type==='s-link'&&n.children.includes('Download certificate')).props.href,'https://fixture.test/asset?token=print');
  const choice=find(tree,n=>n.type==='s-clickable'&&n.props.accessibilityLabel.includes('Oak / M'));choice.props.onClick();assert.equal(selected,'oak');
  const second=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[1],onSelect:()=>{},onOpen:()=>{}});
  assert.ok(find(second,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/oak.jpg'));
@@ -84,4 +84,16 @@ test('native responsive grid expressions escape reserved CSS punctuation',()=>{
   const value=match[1];if(value.includes('minmax(')) assert.match(value,/\) '[^']+', '[^']+'$/);
  }
  }
+});
+
+test('mobile edition carousel wraps with dedicated non-overlay arrow columns and no dropdown',()=>{
+ const f=fixture();const items=[{key:'one',product_title:'One',variant_title:'Black / M - 30 x 45 cm',edition_display:'#001 / 100'},{key:'two',product_title:'Two',variant_title:'Oak / XL - 62 x 87 cm',edition_display:'#002 / 100'}];let selected;
+ const tree=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[0],onSelect:key=>selected=key,onOpen:()=>{}});
+ assert.equal(find(tree,n=>n.type==='s-select'),null);
+ assert.ok(find(tree,n=>n.type==='s-grid'&&n.props.gridTemplateColumns==='44px minmax(0, 1fr) 44px'));
+ find(tree,n=>n.props.accessibilityLabel==='Next edition').props.onClick();assert.equal(selected,'two');
+ find(tree,n=>n.props.accessibilityLabel==='Previous edition').props.onClick();assert.equal(selected,'two');
+});
+test('display variants omit measurements while preserving frame and size labels',()=>{
+ for(const [input,want] of [['Black / S- 21 × 30 cm (8.3 × 11.8 in)','Black / S'],['Oak / XL - 62 x 87 cm','Oak / XL'],['Unframed / M - 30 x 45 cm','Unframed / M'],['White / L','White / L']])assert.equal(commerceModule.exports.compactVariant(input),want);
 });

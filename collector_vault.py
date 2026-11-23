@@ -406,6 +406,9 @@ def _asset_reference(row, kind):
         key = ""
         url = str(row.get("certificate_print_jpg_url") or "").strip()
         mime_type = "image/jpeg"
+        if not url:
+            original = _asset_reference(row, "pdf")
+            return {**original, "render_print": True} if original else {}
     else:
         bucket = str(row.get("certificate_r2_bucket") or "").strip()
         key = str(row.get("certificate_r2_key") or "").strip()

@@ -35,3 +35,11 @@ export function marketFrames(product, data) {
   if (!priced.length) throw new Error('No available frame for this country');
   return {...product,variants:priced,variant_id:priced[0].variant_id,contextual_price:priced[0].contextual_price};
 }
+
+// Display labels only: order/fulfilment variant identifiers are unchanged.
+export function compactVariant(value) {
+  return String(value || '').split('/').map(part => part
+    .replace(/\b(XL|XS|XXL|S|M|L)\b\s*[-–—]?\s*\d.*$/i, '$1')
+    .replace(/\s*[-–—]?\s*\d+(?:[.,]\d+)?\s*[×x]\s*\d.*$/i, '')
+    .trim()).filter(Boolean).join(' / ');
+}

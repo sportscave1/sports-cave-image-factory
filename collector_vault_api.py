@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 import requests
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import RedirectResponse, JSONResponse, Response, StreamingResponse
 
 import collector_vault
@@ -277,8 +278,23 @@ async def collector_vault_asset(request: Request):
             source_url = asset.get("url")
         if not source_url:
             raise collector_vault.CollectorVaultNotFoundError("Certificate asset is unavailable.")
-        upstream = requests.get(source_url, stream=True, timeout=(8, 60))
+        upstream = await run_in_threadpool(requests.get, source_url, stream=True, timeout=(8, 60))
         upstream.raise_for_status()
+        if asset.get("kind") == "print" and asset.get("render_print"):
+            from collector_certificate_print import MAX_SOURCE_BYTES, render_print_jpg
+            def read_original():
+                content = bytearray()
+                try:
+                    for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                        content.extend(chunk)
+                        if len(content) > MAX_SOURCE_BYTES:
+                            raise collector_vault.CollectorVaultError("Certificate source is too large.")
+                finally:
+                    upstream.close()
+                return bytes(content)
+            content = await run_in_threadpool(read_original)
+            image = await run_in_threadpool(render_print_jpg, content)
+            return Response(image, media_type="image/jpeg", headers=headers)
         if frame:
             from collector_collection_offers import render_certificate_frame
             content = bytearray()
