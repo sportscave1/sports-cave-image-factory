@@ -18,7 +18,7 @@ def prepare(folder):
                     for k in removed:del blocks[k]
                     if isinstance(node.get('block_order'),list):node['block_order']=[k for k in node['block_order'] if k not in removed]
                 for k,v in list(node.items()):
-                    if isinstance(v,str):node[k]=v.replace('shop.metafields.judgeme.all_reviews_count','209')
+                    if isinstance(v,str):node[k]=v.replace('shop.metafields.judgeme.all_reviews_count','209').replace("'#scx-reviews-anchor',","'sc-customer-reviews', '#scx-reviews-anchor',")
                     else:walk(v)
             elif isinstance(node,list):
                 for v in node:walk(v)
@@ -26,7 +26,7 @@ def prepare(folder):
         if json.dumps(data)!=before:
             path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');changed.append(str(path.relative_to(folder)).replace('\\','/'))
     for path in folder.glob('snippets/*.liquid'):
-        text=path.read_text(encoding='utf-8');new=text.replace('shop.metafields.judgeme.all_reviews_count','209')
+        text=path.read_text(encoding='utf-8');new=text.replace('shop.metafields.judgeme.all_reviews_count','209').replace("'#scx-reviews-anchor',","'sc-customer-reviews', '#scx-reviews-anchor',")
         if new!=text:path.write_text(new,encoding='utf-8');changed.append(str(path.relative_to(folder)).replace('\\','/'))
     path=folder/'assets/sc-customer-reviews.js';text=path.read_text(encoding='utf-8')
     # Keep all original card, gallery, histogram, dialog and responsive styling.

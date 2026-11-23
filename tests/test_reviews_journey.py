@@ -72,6 +72,12 @@ class JourneyTests(unittest.TestCase):
             old=issue()
         with self.assertRaises(ValueError):verify(old)
 
+    def test_storefront_uses_its_dedicated_secret_without_crm_mail_configuration(self):
+        with patch.dict(os.environ,{'REVIEWS_FORM_SECRET':'dedicated-synthetic-review-key-'+'x'*32},clear=True):
+            token=issue();self.assertEqual(verify(token),'')
+        with patch.dict(os.environ,{'REVIEWS_FORM_SECRET':'different-synthetic-review-key-'+'x'*32},clear=True):
+            with self.assertRaises(ValueError):verify(token)
+
     @patch.dict(os.environ,SECRET)
     def test_public_form_and_post_boundary(self):
         from reviews_http import router

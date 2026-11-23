@@ -8,7 +8,7 @@ import time
 from reviews_model import normalize,product_gid
 
 def secret():
-    value=os.environ.get('CRM_UNSUBSCRIBE_SECRET','')
+    value=os.environ.get('REVIEWS_FORM_SECRET') or os.environ.get('CRM_UNSUBSCRIBE_SECRET','')
     if len(value)<32:raise ValueError('Review collection is unavailable.')
     return value.encode()
 
