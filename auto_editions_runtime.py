@@ -40,6 +40,8 @@ def context(allocation_id):
 def job_for(allocation_id):
     from concurrent.futures import ThreadPoolExecutor
     registry,_=stores()
+    import certificate_frame_fulfilment as frames
+    if frames.is_unit(allocation_id):return frames.job_for(allocation_id,registry.connect),storage()
     # Independent authenticated reads may overlap; all identity/approval checks
     # still complete before a job can be enqueued or an output accepted.
     with ThreadPoolExecutor(max_workers=2,thread_name_prefix='edition-identity') as pool:
@@ -193,6 +195,8 @@ def download_links(rows, *, read_connection=None):
                 links[key]='/api/auto-editions/file?allocation_id='+key+'&job_id='+row['id']+'&inline=1#Open JPG'
             elif row['status'] in ('Queued','Generating'):links[key]='/auto-editions/download?allocation_id='+key+'#Generating'
             elif row['status']=='Blocked':links[key]='/auto-editions/download?allocation_id='+key+'#Retry'
+        import certificate_frame_fulfilment as frames
+        links.update(frames.download_links(rows,jobs))
         return links
     except Exception:
         return {} # Existing V4 availability remains intact if V6 storage is down.

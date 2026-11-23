@@ -38,7 +38,7 @@ class CollectionOffersTests(unittest.TestCase):
         connection = MagicMock()
         cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
         cursor.fetchall.return_value = []
-        with patch.dict(os.environ, _frame_environment(), clear=True), patch.object(collector_vault.supabase_backend, "connect", return_value=connection):
+        with patch.dict(os.environ, _frame_environment(), clear=True), patch.object(collector_vault.supabase_backend, "connect", return_value=connection), patch("certificate_frame_fulfilment.ingest_paid", return_value=0):
             collector_vault.process_framed_order_paid(payload)
         sql, params = cursor.execute.call_args.args
         self.assertIn("request_reference::text, frame_variant_id", sql)

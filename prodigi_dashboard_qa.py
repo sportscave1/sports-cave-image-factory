@@ -334,6 +334,9 @@ def permit(key,token,evidence):
 
 
 def identity_proof(snapshot):
+    if snapshot.get('source_kind')=='framed_certificate':
+        from certificate_frame_fulfilment import identity_proof as certificate_proof
+        return certificate_proof(snapshot)
     import auto_editions_runtime as runtime
     job,_=runtime.job_for(snapshot['allocation_id'])
     registry,_=runtime.stores();preparation=registry.read(job['preparation_hash']) or {}

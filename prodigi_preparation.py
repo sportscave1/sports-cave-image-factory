@@ -126,6 +126,8 @@ class MissingJPG(ValueError):
 
 def resolve(allocation_id, *, allow_sandbox=False):
     """Read the authoritative allocation, existing QA mapping and production JPG."""
+    import certificate_frame_fulfilment as frames
+    if frames.is_unit(allocation_id):return frames.resolve(allocation_id,connect)
     import auto_editions_runtime as runtime
     from auto_editions_api import same_allocation
     import os_pages

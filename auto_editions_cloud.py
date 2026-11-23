@@ -278,6 +278,9 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
     service. Rendering and reference checks share a process-wide memory lock.
     Temporary disk is scratch only; inputs and results use persistent storage.
     """
+    if job.get('source_kind')=='framed_certificate':
+        from certificate_frame_fulfilment import execute as execute_certificate
+        return execute_certificate(job,assets)
     started=time.monotonic();timings={}
     manifest = ae.validate_manifest(job['manifest'])
     if ae.fingerprint(manifest) != job['preparation_hash']:

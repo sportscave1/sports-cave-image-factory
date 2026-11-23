@@ -149,7 +149,7 @@ function Extension() {
           {status === "ready" && certificates.length > 0 ? (
             <CertificateGallery
               certificates={certificates}
-              onOpen={setSelectedCertificate}
+              onOpen={(certificate, framingOnly = false) => setSelectedCertificate({...certificate, framingOnly})}
             />
           ) : null}
           {status === "ready" && certificates.length > 0 ? (
@@ -410,7 +410,7 @@ function CertificateCard({certificate, onOpen}) {
             <s-button
               command="--show"
               commandFor="certificate-viewer"
-              onClick={() => onOpen(certificate)}
+              onClick={() => onOpen(certificate, true)}
               variant="secondary"
             >
               Get Certificate Framed
@@ -484,6 +484,7 @@ function CertificatePreview({certificate, eager = false, previewUrl}) {
 function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
   const modalId = "certificate-viewer";
   const title = certificate?.product_title || "Certificate";
+  const framingOnly = Boolean(certificate?.framingOnly);
   const [frameOffer, setFrameOffer] = useState({
     status: "idle",
     product: null,
@@ -569,7 +570,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
     const product = (frameOffer.product.variants || []).find((v) => v.color === frameColor) || frameOffer.product;
     setCheckoutState({
       status: "adding",
-      message: "Preparing secure checkout...",
+      message: "Adding your framed certificate...",
       checkoutUrl: "",
     });
     try {
@@ -598,8 +599,8 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
       if (request.checkout_url) {
         setCheckoutState({
           status: "ready",
-          message: "Your secure checkout is ready.",
-          checkoutUrl: request.checkout_url,
+          message: "Added to cart",
+          checkoutUrl: request.cart_handoff_url,
         });
         return;
       }
@@ -631,13 +632,13 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
       );
       setCheckoutState({
         status: "ready",
-        message: "Your secure checkout is ready.",
-        checkoutUrl: cartResult.cart.checkoutUrl,
+        message: "Added to cart",
+        checkoutUrl: request.cart_handoff_url,
       });
     } catch (_error) {
       setCheckoutState({
         status: "error",
-        message: "Framed checkout is temporarily unavailable.",
+        message: "Could not add your certificate. Please try again.",
         checkoutUrl: "",
       });
     }
@@ -646,9 +647,9 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
   return (
     <s-modal
       id={modalId}
-      heading={title}
+      heading={framingOnly ? "Get your certificate framed" : title}
       accessibilityLabel={`Certificate viewer for ${title}`}
-      size="max"
+      size="large"
       padding="base"
       onAfterHide={onClose}
     >
@@ -658,7 +659,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           gap="large"
           alignItems="start"
         >
-          <CertificatePreview certificate={certificate} previewUrl={frameColor === "Unframed"
+          <CertificatePreview certificate={certificate} previewUrl={!framingOnly
               ? frameOffer.previewUrl || certificate.certificate_preview_image_url
               : frameOffer.previewUrl
                 ? `${frameOffer.previewUrl}&frame=${frameColor.toLowerCase()}`
@@ -667,35 +668,15 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           <s-stack gap="large">
             <s-stack gap="small-400">
               <s-heading>{title}</s-heading>
-              {certificate.variant_title ? (
-                <s-text color="subdued">{certificate.variant_title}</s-text>
-              ) : null}
               {certificate.edition_display ? (
                 <s-text type="strong">
                   {editionLabel(certificate.edition_display)}
                 </s-text>
               ) : null}
-              {certificate.purchase_date_display ? (
-                <s-text color="subdued">
-                  Purchased {certificate.purchase_date_display}
-                </s-text>
-              ) : null}
+              {framingOnly ? <s-text>Your numbered certificate, professionally printed and framed.</s-text> : null}
+              {framingOnly ? <s-text color="subdued">Small · 21 × 30 cm (8.3 × 11.8 in)</s-text> : null}
             </s-stack>
-            <s-grid
-              gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 170px), 1fr))"
-              gap="small"
-            >
-              {certificate.certificate_print_jpg_url ? (
-                <s-button
-                  href={certificate.certificate_print_jpg_url}
-                  target="_blank"
-                  variant="secondary"
-                >
-                  Download Print
-                </s-button>
-              ) : null}
-            </s-grid>
-            {frameOffer.status === "loading" ? (
+            {framingOnly && frameOffer.status === "loading" ? (
               <s-stack direction="inline" gap="small" alignItems="center">
                 <s-spinner
                   size="small"
@@ -706,7 +687,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
                 </s-text>
               </s-stack>
             ) : null}
-            {frameOffer.status === "ready" ? (
+            {framingOnly && frameOffer.status === "ready" ? (
               <FramedCertificateOffer
                 product={frameOffer.product}
                 frameColor={frameColor}
@@ -719,26 +700,14 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
                 formatNumber={api.i18n.formatNumber}
               />
             ) : null}
-            {["error", "unavailable"].includes(frameOffer.status) ? (
-              <s-text color="subdued">Framing is temporarily unavailable. Your certificate downloads remain available.</s-text>
+            {framingOnly && ["error", "unavailable"].includes(frameOffer.status) ? (
+              <s-text color="subdued">Framing is temporarily unavailable. Please try again shortly.</s-text>
             ) : null}
           </s-stack>
         </s-grid>
       ) : (
         <s-text color="subdued">Choose a certificate to view it.</s-text>
       )}
-      {certificate?.certificate_pdf_url ? (
-        <s-button slot="secondary-actions" href={certificate.certificate_pdf_url} target="_blank">
-          View full certificate
-        </s-button>
-      ) : null}
-      <s-button
-        slot="primary-action"
-        command="--hide"
-        commandFor={modalId}
-      >
-        Close
-      </s-button>
     </s-modal>
   );
 }
@@ -757,34 +726,33 @@ function FramedCertificateOffer({
   );
 
   return (
-    <s-box
-      padding="base"
-      border="base"
-      borderRadius="base"
-      background="subdued"
-    >
-      <s-stack gap="base">
-        <s-heading>Display your numbered certificate</s-heading>
-        <s-select label="Certificate frame" value={frameColor}
-          disabled={checkoutState.status === "adding"}
-          onChange={(event) => onColorChange(event.currentTarget.value)}>
+    <s-box>
+      <s-stack gap="large">
+        <s-heading>Choose frame</s-heading>
+        <s-grid gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap="small">
           {(product.variants?.length ? product.variants : [{color: "Black"}]).map((variant) => (
-            <s-option key={variant.color} value={variant.color}>{variant.color}</s-option>
+            <s-clickable key={variant.color} border={frameColor === variant.color ? "large" : "base"}
+              borderRadius="base" disabled={checkoutState.status === "adding"}
+              accessibilityLabel={`${variant.color} frame${frameColor === variant.color ? ", selected" : ""}`}
+              onClick={() => onColorChange(variant.color)}>
+              <s-stack gap="small" alignItems="center">
+                <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
+                  alt={`${variant.color} frame detail`} aspectRatio="1/1" objectFit="cover" />
+                <s-text type="strong">{frameColor === variant.color ? "✓ " : ""}{variant.color}</s-text>
+              </s-stack>
+            </s-clickable>
           ))}
-          <s-option value="Unframed">Unframed — free print download</s-option>
-        </s-select>
-        <s-heading>{product.title}</s-heading>
-        <s-text color="subdued">Your exact numbered certificate, professionally printed in A4 landscape and installed in your selected frame. Artwork is not included.</s-text>
-        {frameColor === "Unframed" ? (
-          <s-text>Use Download Print above for your free unframed certificate.</s-text>
-        ) : checkoutState.checkoutUrl ? (
+        </s-grid>
+        {checkoutState.checkoutUrl ? (
+          <s-stack gap="base">
+            <s-badge tone="success" icon="check">Added to cart</s-badge>
           <s-button
             variant="primary"
             href={checkoutState.checkoutUrl}
-            target="_blank"
           >
-            Continue to Secure Checkout
+            Checkout now
           </s-button>
+          </s-stack>
         ) : checkoutState.status === "ordered" ? (
           <s-badge tone="neutral" icon="check">
             Framed certificate ordered
@@ -795,7 +763,7 @@ function FramedCertificateOffer({
             onClick={onAdd}
             loading={checkoutState.status === "adding"}
           >
-            Add Framed Certificate — {price}
+            Add framed certificate to cart · {price}
           </s-button>
         )}
         {checkoutState.message ? (

@@ -1304,7 +1304,7 @@ def create_frame_request(
                 )
                 existing = cur.fetchone()
                 if existing:
-                    return dict(existing)
+                    return frame_cart_response(dict(existing), row, requested_variant)
             cur.execute(
                 """
                 INSERT INTO collector_frame_requests (
@@ -1349,7 +1349,51 @@ def create_frame_request(
         certificate_row_id=row.get("certificate_row_id"),
         event_key=f"frame-request:{created.get('request_reference')}",
     )
-    return dict(created)
+    return frame_cart_response(dict(created), row, requested_variant)
+
+
+def frame_cart_response(result, certificate, variant_id):
+    """Scoped storefront handoff; no customer identity or permanent asset links."""
+    reference = str(result.get("request_reference") or "")
+    if not _UUID.match(reference):
+        raise CollectorVaultError("Frame request reference is invalid.")
+    token = _signed_token({"purpose": "frame_cart", "request_reference": reference,
+                           "variant_id": variant_id}, ttl_seconds=30 * 60)
+    result["request_reference"] = reference
+    result["cart_handoff_url"] = "https://www.sportscaveshop.com/?sc_certificate_cart=" + token
+    return result
+
+
+def frame_cart_handoff(token):
+    payload = _verify_signed_token(token, expected_purpose="frame_cart")
+    reference = str(payload.get("request_reference") or "")
+    if not _UUID.match(reference):
+        raise CollectorVaultError("Frame request reference is invalid.")
+    with supabase_backend.connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM collector_frame_requests WHERE request_reference=%s", (reference,))
+        request = cur.fetchone()
+    if not request or request.get("status") not in ("pending", "cart_created") or request.get("frame_variant_id") != payload.get("variant_id"):
+        raise CollectorVaultAuthorizationError("This cart handoff is unavailable.")
+    asset_token = _signed_token({"purpose": "asset", "kind": "preview",
+                                 "certificate_row_id": request["certificate_row_id"],
+                                 "customer_hash": request["customer_hash"]}, ttl_seconds=ASSET_TOKEN_TTL_SECONDS)
+    color = next((color.lower() for sku, color in FRAME_SKUS.items()
+                  if sku == _frame_variant_sku(request["frame_variant_id"])), "black")
+    preview = f"https://sports-cave-image-factory.onrender.com{API_BASE_PATH}/asset?token={asset_token}&frame={color}"
+    return {"variant_id": str(request["frame_variant_id"]).rsplit("/", 1)[-1],
+            "request_reference": reference, "quantity": 1,
+            "properties": {"_sports_cave_frame_request": reference,
+                           "_sports_cave_certificate_preview": preview,
+                           "Certificate": str(request.get("artwork_title") or "Collector certificate"),
+                           "Edition": f"#{int(request['edition_number']):03d} of {int(request['edition_limit'])}"}}
+
+
+def _frame_variant_sku(variant_id):
+    product = get_frame_product(force=True)
+    color = next((item["color"] for item in product.get("variants", []) if item["variant_id"] == variant_id), None)
+    if not product.get("available") or not color:
+        raise CollectorVaultUnavailableError("The selected frame is unavailable.")
+    return next(sku for sku, name in FRAME_SKUS.items() if name == color)
 
 
 def _safe_checkout_url(value):
@@ -1480,6 +1524,8 @@ def process_framed_order_paid(order_payload):
             row.get("customer_hash"),
             event_key=f"frame-order:{order_id}:{row.get('request_reference')}",
         )
+    from certificate_frame_fulfilment import ingest_paid
+    ingest_paid(payload, supabase_backend.connect)
     return {"updated": len(updated), "request_references": [str(row.get("request_reference")) for row in updated]}
 
 
