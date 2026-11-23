@@ -38,11 +38,8 @@ def validate(flow, *, draft=False):
     if flow.get('timing_version',1) not in (1,2) or (flow.get('timing_version')==2 and 'abandonment_seconds' in flow):
         raise ValueError('Use the single Delay setting for this flow.')
     if 'review_request' in flow:
-        from reviews_model import product_gid
-        from crm_tracking import public_https
-        request=flow['review_request']
-        if flow['trigger']!='fulfilled' or not isinstance(request,dict) or set(request)!={'product_id','base_url'} or not product_gid(request['product_id']) or not public_https(request['base_url']):
-            raise ValueError('Review requests require an exact product and fulfilment trigger.')
+        from reviews_journey import validate_request
+        validate_request(flow['review_request'],flow['trigger'])
     if type(flow.get('abandonment_seconds',3600)) is not int or not 60<=flow.get('abandonment_seconds',3600)<=7*86400:
         raise ValueError('Abandonment qualification must be between one minute and seven days.')
     if flow['trigger'] not in TRIGGERS: raise ValueError('Choose a supported trigger.')
@@ -69,11 +66,15 @@ def validate(flow, *, draft=False):
     if not isinstance(flow['emails'],list) or (not draft and not flow['emails']): raise ValueError('Add an email.')
     seen=set()
     for step in flow['emails']:
-        if not isinstance(step,dict) or set(step)-{'step_id','delay_seconds','document','name','enabled','anchor','requires_fulfilment'} or not {'step_id','delay_seconds','document'}.issubset(step): raise ValueError('Invalid email step.')
+        if not isinstance(step,dict) or set(step)-{'step_id','delay_seconds','document','name','enabled','anchor','requires_fulfilment','review_request'} or not {'step_id','delay_seconds','document'}.issubset(step): raise ValueError('Invalid email step.')
+        if step.get('review_request'):
+            from reviews_journey import validate_request
+            validate_request(step['review_request'],flow['trigger'])
+            if step.get('anchor')!='fulfilment' or not step.get('requires_fulfilment'):raise ValueError('Order review requests must follow verified fulfilment.')
         if 'requires_fulfilment' in step and (not flow.get('lifecycle_version') or flow['trigger']!='post_purchase' or type(step['requires_fulfilment']) is not bool):
             raise ValueError('Fulfilment eligibility requires a Post Purchase lifecycle step.')
         if flow.get('lifecycle_version'):
-            allowed={'welcome':('subscription',),'post_purchase':('payment','delivery'),'win_back':('last_purchase',)}[flow['trigger']]
+            allowed={'welcome':('subscription',),'post_purchase':('payment','delivery','fulfilment'),'win_back':('last_purchase',)}[flow['trigger']]
             if step.get('anchor') not in allowed:raise ValueError('Choose a verified timing event for this flow.')
         elif 'anchor' in step:raise ValueError('Event anchors require a lifecycle flow.')
         if type(step.get('enabled',True)) is not bool:raise ValueError('Invalid email enabled state.')

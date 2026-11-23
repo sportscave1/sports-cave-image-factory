@@ -161,6 +161,8 @@ class ReviewsStore(Store):
             conn.execute('INSERT INTO sc_review_audit(review_id,actor,action) VALUES(%s,%s,%s)',(identity,actor(user),'mapping' if mapped else 'reply' if reply is not None else status))
         from reviews_public_cache import CACHE
         CACHE.invalidate()
+        from reviews_rewards import register
+        register(self,identity)
     def enqueue_import(self,user,source,label,items,invalid=0):
         require(user)
         if source not in ('csv','judgeme') or len(items)>10000:raise ValueError('Import at most 10,000 reviews per file.')

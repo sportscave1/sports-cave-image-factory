@@ -241,7 +241,7 @@ def collection(store,user,navigate):
         left,right=st.columns(2)
         image=left.number_input('Photo reward (%)',1,50,value['image_percent'])
         video=right.number_input('Video reward (%)',1,50,value['video_percent'])
-        st.caption('One reward per verified native review, after media approval, regardless of star rating. Imported reviews do not earn rewards. Codes are customer-specific, single-use, expire after 30 days and cannot combine with other discounts. Delivery honours existing email consent and suppression.')
+        st.caption('One reward per verified order, after media approval, regardless of star rating. Imported reviews do not earn rewards. Codes are customer-specific, single-use, expire after 30 days and cannot combine with other discounts. Delivery honours existing email consent and suppression.')
         import os
         st.caption('Automatic delivery: '+('release gate enabled' if os.getenv('REVIEW_REWARDS_DELIVERY_ENABLED','').lower()=='true' else 'off · requires release configuration'))
         if st.form_submit_button('Save reward settings'):
@@ -250,6 +250,7 @@ def collection(store,user,navigate):
     rewards,_=load(('rewards',),lambda:store.q('SELECT review_id,media_kind,percent,status,error_code,created_at FROM sc_review_rewards ORDER BY created_at DESC LIMIT 50'))
     if rewards:st.dataframe(rewards,hide_index=True,row_height=TABLE_ROW_HEIGHT)
     else:st.caption('No reward submissions yet.')
+    st.info('Post Checkout review requests are saved as draft edits. Judge.me remains active during testing. Online orders: 14 days after fulfilment, then eligible products at 5-day intervals (maximum 3). POS: 7 days, then 5-day intervals. No reminder emails.')
     request_automation(store,user,navigate)
     with st.expander('Launch report · what is still required'):
         st.markdown('''1. Release the reviewed changes and database migration through the existing OS release process.
