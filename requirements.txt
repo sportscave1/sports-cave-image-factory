@@ -30,3 +30,5 @@ python-dateutil @ https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792
 
 # Used only by the isolated background email-thumbnail renderer.
 playwright==1.63.0
+
+pypdfium2==5.15.2

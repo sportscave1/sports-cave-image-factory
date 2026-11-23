@@ -35,6 +35,9 @@ def validate_current_artwork(snapshot):
 
 
 def approve(snapshot,provider,asset_id):
+    if snapshot.get('source_kind')=='framed_certificate':
+        from certificate_frame_fulfilment import approve as approve_certificate
+        return approve_certificate(snapshot,provider,asset_id)
     import auto_editions_runtime as runtime
     import auto_editions as ae
     from PIL import Image,ImageCms,JpegImagePlugin
@@ -90,6 +93,9 @@ def approval_matches(approval,snapshot):
 
 
 def evidence_matches(approval,snapshot):
+    if snapshot.get('source_kind')=='framed_certificate':
+        from certificate_frame_fulfilment import evidence_matches as certificate_matches
+        return certificate_matches(approval,snapshot)
     return bool(approval and approval.get('policy')==POLICY and
         approval.get('job_id')==snapshot['job_id'] and approval.get('sha256')==snapshot['output']['sha256'] and
         approval.get('sku')==snapshot['mapping']['prodigi_code'] and approval.get('dimensions')==snapshot['dimensions'] and

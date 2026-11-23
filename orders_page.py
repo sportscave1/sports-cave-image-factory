@@ -2106,6 +2106,8 @@ def _display_rows(rows, *, normalised=False, resources=None):
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
+        if row.get('source_kind') == 'framed_certificate':
+            display_row['file'] = (row.get('certificate_pdf_url') or '') + '#Certificate'
         display_row["print_jpg"] = print_jpg.state(row, psd_mapping.get(psd_directory.product_id(row)))['label']
         import edition_test
         if edition_test.eligible(row,psd_mapping.get(psd_directory.product_id(row))):display_row['print_jpg']='/edition-jpg-download#Download JPG'

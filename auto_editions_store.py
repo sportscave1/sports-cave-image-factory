@@ -8,6 +8,8 @@ class Preparations:
     def __init__(self,connect):self.connect=connect
 
     def unit(self,allocation_id):
+        import certificate_frame_fulfilment as frames
+        if frames.is_unit(allocation_id):return frames.unit(allocation_id,self.connect)
         if type(allocation_id) is not int or allocation_id<=0:raise ValueError('Select an allocated order unit.')
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('SELECT * FROM public.edition_orders WHERE id=%s',(allocation_id,))

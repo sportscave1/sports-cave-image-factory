@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import uuid
+from fastapi.encoders import jsonable_encoder
 from urllib.parse import quote
 
 import requests
@@ -45,7 +46,7 @@ def _json(payload, status_code=200, *, request_id="", error_code=""):
     ).strip()
     if revision:
         headers["X-Sports-Cave-Revision"] = revision[:12]
-    return JSONResponse(payload, status_code=status_code, headers=headers)
+    return JSONResponse(jsonable_encoder(payload), status_code=status_code, headers=headers)
 
 
 def _request_id():
@@ -312,7 +313,18 @@ async def collector_vault_recommendations(request: Request):
         return _error_response(error, "recommendations")
 
 
+async def collector_vault_cart_handoff(request: Request):
+    if request.method == "OPTIONS":
+        return await collector_vault_options(request)
+    try:
+        body = await _json_body(request)
+        return _json({"ok": True, **collector_vault.frame_cart_handoff(body.get("token"))})
+    except Exception as error:
+        return _error_response(error, "cart_handoff")
+
+
 COLLECTOR_VAULT_ROUTES = (
+    ("/api/collector-vault/frame/cart-handoff", collector_vault_cart_handoff, ("POST", "OPTIONS")),
     ("/api/collector-vault/recommendations", collector_vault_recommendations, ("GET", "OPTIONS")),
     ("/api/collector-vault/bootstrap", collector_vault_bootstrap, ("GET", "OPTIONS")),
     ("/api/collector-vault/events", collector_vault_event, ("POST", "OPTIONS")),

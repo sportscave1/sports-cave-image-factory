@@ -6,6 +6,14 @@ from starlette.responses import RedirectResponse
 
 def url(allocation):
     import prodigi_preparation as prep,certificate_engine
+    import certificate_frame_fulfilment as frames
+    if frames.is_unit(allocation):
+        import collector_vault as vault
+        _,certificate,_,request=frames._read(allocation,prep.connect)
+        certificate.update(order_customer_id=request['shopify_customer_id'])
+        link=vault._certificate_public_row(certificate).get('pdf_url')
+        if not link:raise ValueError('The original certificate PDF is unavailable.')
+        return link
     with prep.connect() as c,c.cursor() as q:
         q.execute('SELECT * FROM edition_orders WHERE id=%s',(allocation,))
         unit=q.fetchone()

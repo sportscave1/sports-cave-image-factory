@@ -48,13 +48,16 @@ def admit(limit=3):
     import order_allocator,order_refunds
     actor=owner(authorisation)
     if not actor:return 0
+    import certificate_frame_fulfilment as frames
+    frame_count=frames.admit(actor,prep.connect,limit)
     payload=order_allocator.load_hybrid_orders_snapshot(limit=75,search='') or {}
     candidates=[r for r in payload.get('rows',[]) if str(r.get('edition_order_id') or '').isdigit()
+        and r.get('source_kind')!='framed_certificate'
         and r.get('allocation_valid') is not False and r.get('identity_enforced') is not False
         and str(r.get('prodigi_status') or '').strip().lower() not in ('complete','submitted')
         and not r.get('invalidated_at') and not r.get('cancelled_at') and not order_refunds.blocked(r)]
     keys=[prefix+str(r['edition_order_id']) for r in candidates for prefix in (prep.PREFIX,prep.FAILURE_PREFIX)]
-    if not keys:return 0
+    if not keys:return frame_count
     with prep.connect() as c,c.cursor() as q:
         q.execute("""SELECT id FROM edition_orders e WHERE id=ANY(%s) AND status='assigned'
             AND allocation_valid=true AND identity_enforced=true AND invalidated_at IS NULL
@@ -72,4 +75,4 @@ def admit(limit=3):
         except (ValueError,PermissionError):pass # request records the exact failure; no automatic reset.
         count+=1
         if count>=limit:break
-    return count
+    return count+frame_count

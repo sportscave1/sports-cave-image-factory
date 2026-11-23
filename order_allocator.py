@@ -1912,6 +1912,9 @@ def load_hybrid_orders_snapshot(limit=50, search=""):
     list_elapsed = time.perf_counter() - started
     convert_started = time.perf_counter()
     rows = _snapshot_rows_from_supabase_order_rows(raw_rows)
+    if hasattr(backend, 'connect'):
+        import certificate_frame_fulfilment as frames
+        rows = frames.merge_rows(rows, backend.connect, search=str(search or ''))
     print(f"PERF Orders row conversion {time.perf_counter() - convert_started:.3f}s rows={len(rows)}", flush=True)
     last_synced = max(
         (_safe_iso(row.get("synced_at")) for row in raw_rows if row.get("synced_at")),
