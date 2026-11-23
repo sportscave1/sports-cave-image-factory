@@ -59,6 +59,10 @@ def _error_response(error, operation, *, request_id=""):
         getattr(error, "error_code", "")
         or "internal_server_error"
     )
+    if isinstance(error, collector_vault.CollectorVaultAuthenticationError):
+        # These verifier messages are fixed strings: no tokens, claims, secrets,
+        # or customer identifiers. Keep the public response generic.
+        LOGGER.warning("Collector Vault authentication rejected reason=%s request_id=%s", str(error), request_id)
     LOGGER.error(
         (
             "Collector Vault request failed operation=%s error_type=%s "
