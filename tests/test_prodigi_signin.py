@@ -106,6 +106,15 @@ def test_consumed_select_uses_readback_instead_of_retiring_the_permit(blank, mon
     assert product.claim() is None and not blank.writes
 
 
+def test_a_stale_consumed_readback_keeps_its_durable_wait_for_the_next_poll(blank, monkeypatch):
+    plan = product.claim(); product.permit(plan['key'], plan['token'], plan['sha256'])
+    wait = pause(plan, 'product')
+    monkeypatch.setattr(product, 'recheck', lambda *args: {'status': 'Handoff unavailable'})
+    assert resume(wait) == {'status': 'retry'}
+    assert signin.pending(USER, PAIR)['waits'] == [wait]
+    assert prep.read(1)['product_browser']['started'] is True and not blank.writes
+
+
 @pytest.mark.parametrize('consumed', [False, True])
 def test_qa_signin_rechecks_saved_artwork_and_shipping_before_fresh_full_qa(store, monkeypatch, consumed):
     value, snap, provider, _ = qa_fixture()

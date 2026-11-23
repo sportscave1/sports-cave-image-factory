@@ -176,6 +176,8 @@ def resume(user, pairing, data):
             return {'status': 'retired'}
     if consumed and kind in ('artwork', 'product'):
         result = browser.recheck(user, key) if kind == 'artwork' else __import__('prodigi_product_browser').recheck(user, key)
+        if not result or result.get('status') in (None, 'Handoff unavailable'):
+            return {'status': 'retry'}  # A stale readback is not an acknowledgement.
         with stages.edit(browser.LOCK) as cur:
             value = browser.read(cur, key)
             current = value.get('signin_wait') or {}
