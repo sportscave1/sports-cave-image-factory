@@ -367,7 +367,7 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
           {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : null}
         </s-grid>
         {active.certificate_download_url ? <s-link href={active.certificate_download_url} target="auto">Download printable certificate</s-link> : null}
-        {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} srcSet={`${active.frame_preview_url}&w=400 400w, ${active.frame_preview_url}&w=1000 1000w`} sizes="(min-width: 520px) 560px, 160px" alt="" loading="eager" /></s-box> : null}
+        {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} srcSet={`${active.frame_preview_url}&w=400 400w, ${active.frame_preview_url}&w=1000 1000w`} sizes="(min-width: 520px) 560px, min(100vw, 340px)" alt="" loading="eager" /></s-box> : null}
       </s-stack>
     </s-grid>
     <s-divider />
@@ -500,8 +500,6 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
     message: "",
     checkoutUrl: "",
   });
-  const cartReady = checkoutState.status === "ready" && Boolean(checkoutState.checkoutUrl);
-  const selectedProduct = (frameOffer.product?.variants || []).find((v) => v.color === frameColor) || frameOffer.product;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -610,11 +608,8 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
         return;
       }
       if (request.checkout_url) {
-        setCheckoutState({
-          status: "ready",
-          message: "Added to cart",
-          checkoutUrl: request.cart_handoff_url,
-        });
+        navigation.navigate(request.cart_handoff_url);
+        // Keep Add disabled while the host navigates to the storefront drawer.
         return;
       }
       const cartPayload = await api.query(CART_CREATE_MUTATION, {
@@ -640,11 +635,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
           },
         },
       );
-      setCheckoutState({
-        status: "ready",
-        message: "Added to cart",
-        checkoutUrl: request.cart_handoff_url,
-      });
+      navigation.navigate(request.cart_handoff_url);
     } catch (_error) {
       setCheckoutState({
         status: "error",
@@ -657,7 +648,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
   return (
     <s-modal
       id={modalId}
-      heading={cartReady ? "Your framed certificate cart" : framingOnly ? "Frame your certificate" : title}
+      heading={framingOnly ? "Frame your certificate" : title}
       accessibilityLabel={`Certificate viewer for ${title}`}
       size="large-100"
       padding="none"
@@ -687,8 +678,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                   {editionLabel(certificate.edition_display).replace("#", "")}
                 </s-text>
               ) : null}
-              {cartReady ? <s-badge tone="auto" icon="check">Added to cart</s-badge> : null}
-              {framingOnly ? <s-box display="@container (inline-size > 520px) auto, none"><s-text>Your numbered certificate, professionally printed and framed.</s-text></s-box> : null}
+              {framingOnly ? <s-text>Your numbered certificate, professionally printed and framed.</s-text> : null}
               {framingOnly ? <s-text color="subdued">Small · 21 × 30 cm</s-text> : null}
             </s-stack>
             {framingOnly && frameOffer.status === "loading" ? (
@@ -702,22 +692,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 </s-text>
               </s-stack>
             ) : null}
-            {cartReady ? (
-              <s-stack gap="large">
-                <s-box padding="base" background="subdued" borderRadius="large">
-                  <s-stack gap="base">
-                    <s-text type="strong">{frameColor} frame · Quantity 1</s-text>
-                    <s-text type="strong">{formatFramePrice(selectedProduct?.contextual_price, api.i18n.formatNumber)}</s-text>
-                    <s-text color="subdued">Shipping and taxes calculated at checkout.</s-text>
-                  </s-stack>
-                </s-box>
-                <s-text color="subdued">Your existing store cart items will be included at checkout.</s-text>
-                <s-grid gridTemplateColumns="1fr" gap="base">
-                  <s-button variant="primary" href={checkoutState.checkoutUrl}>Continue to cart</s-button>
-                  <s-button variant="secondary" command="--hide" commandFor={modalId}>Continue browsing My Collection</s-button>
-                </s-grid>
-              </s-stack>
-            ) : framingOnly && frameOffer.status === "ready" ? (
+            {framingOnly && frameOffer.status === "ready" ? (
               <FramedCertificateOffer
                 product={frameOffer.product}
                 frameColor={frameColor}
@@ -747,7 +722,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
 }
 
 function FramedCertificatePreview({certificate, previewUrl, color}) {
-  return <s-grid gridTemplateColumns="@container (inline-size > 520px) 'minmax(0, 1fr)', '160px'" justifyContent="center" alignItems="center">
+  return <s-grid gridTemplateColumns="@container (inline-size > 520px) 'minmax(0, 1fr)', 'min(100%, clamp(160px, calc(100dvh - 440px), 340px))'" justifyContent="center" alignItems="center">
     <s-box borderRadius="large" overflow="hidden">
     {["Black", "Oak", "White"].map(frame => (
       <s-box key={frame} display={frame === color ? "auto" : "none"} accessibilityVisibility={frame === color ? "visible" : "hidden"}>
@@ -755,7 +730,7 @@ function FramedCertificatePreview({certificate, previewUrl, color}) {
           srcSet={`${previewUrl}&frame=${frame.toLowerCase()}&w=400 400w, ${previewUrl}&frame=${frame.toLowerCase()}&w=1000 1000w`}
           alt={`${frame} framed certificate for ${certificate.product_title || "your edition"}`}
           aspectRatio="1/1" objectFit="contain" loading="eager"
-          sizes="(min-width: 520px) 560px, 160px" />
+          sizes="(min-width: 520px) 560px, min(100vw, 340px)" />
       </s-box>
     ))}
     </s-box>

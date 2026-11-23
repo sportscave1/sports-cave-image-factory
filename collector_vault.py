@@ -1374,7 +1374,7 @@ def frame_cart_response(result, certificate, variant_id, country=None):
     if not _UUID.match(reference):
         raise CollectorVaultError("Frame request reference is invalid.")
     token = _signed_token({"purpose": "frame_cart", "request_reference": reference,
-                           "variant_id": variant_id, "destination": "checkout", "country": country if re.fullmatch(r"[A-Z]{2}", str(country or "")) else _frame_product_country()}, ttl_seconds=30 * 60)
+                           "variant_id": variant_id, "destination": "drawer", "country": country if re.fullmatch(r"[A-Z]{2}", str(country or "")) else _frame_product_country()}, ttl_seconds=30 * 60)
     result["request_reference"] = reference
     result["cart_handoff_url"] = "https://sports-cave-image-factory.onrender.com/api/collector-vault/frame/launch?sc_certificate_cart=" + token
     return result
