@@ -69,7 +69,7 @@ WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_pre
 EDITION_MIGRATIONS = ('20261008041452_edition_version_transitions.sql', '20261008045733_edition_version_guard_hardening.sql', '20261008065000_explicit_edition_cursor_override.sql', '20261008090000_edition_admin_cursor_repair.sql')
 REVIEWED_MIGRATION_SHA256 = {
     '20261124100000_reviews_dropbox_media.sql': '5bb9d4d39e7fc32a5990b75d8e8c2c9090524e750a4eaa4375674b7174692147',
-    '20261124090000_reviews_media_collection.sql': 'ab617360be1530867387118b6a7ab93f215042b23588272bf46a578a401d64fa',
+    '20261124090000_reviews_media_collection.sql': '884f95ffa4a99cdb4c770b1dca3e85fb833ec3423669f4f30e6f9322f1665abd',
     '20261118070000_product_upload_manual_restart.sql': '2f61f018ea0f9c56f1295a726cca5bff145b9b610a2cb0ada07fe8bd940619a9',
     '20261117150000_morning_design_queue.sql': '2a2cb46778cc536f133f735279ebfde11ab6739d22f9726804d2eb6f84fb7d0c',
     '20261117110000_product_upload_staff_queue.sql': '7b4df2b1b79d05d16ef51308eeaa7391032efa6c2f69c044ae162e28d998fd0b',
