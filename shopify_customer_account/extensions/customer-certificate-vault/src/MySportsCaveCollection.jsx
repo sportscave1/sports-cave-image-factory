@@ -317,44 +317,16 @@ function CertificateCard({certificate, onOpen}) {
           ) : null}
         </s-stack>
 
-        <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 100px), 1fr))"
-          gap="small"
-          alignItems="stretch"
-        >
-          {hasPdf ? (
-            <s-button
-              variant="primary"
-              command="--show"
-              commandFor="certificate-viewer"
-              onClick={() => onOpen(certificate)}
-            >
-              View Certificate
-            </s-button>
-          ) : null}
-          {hasPdf ? (
-            <s-button
-              command="--show"
-              commandFor="certificate-viewer"
-              onClick={() => onOpen(certificate, true)}
-              variant="secondary"
-            >
-              Get Certificate Framed
-            </s-button>
-          ) : null}
-          {hasPrint ? (
-            <s-button
-              href={certificate.certificate_print_jpg_url}
-              target="_blank"
-              variant="secondary"
-            >
-              Download Print
-            </s-button>
-          ) : null}
-          {!hasPdf ? (
-            <s-badge tone="neutral">Certificate processing</s-badge>
-          ) : null}
-        </s-grid>
+        <s-stack gap="small-200">
+          {hasPdf ? <s-grid gridTemplateColumns="1fr"><s-button variant="primary" command="--show" commandFor="certificate-viewer"
+            onClick={() => onOpen(certificate,true)}>Get certificate framed</s-button></s-grid> : null}
+          <s-grid gridTemplateColumns="1fr 1fr" alignItems="center" gap="small">
+            {hasPdf ? <s-clickable command="--show" commandFor="certificate-viewer" padding="small-200" minBlockSize="44px" accessibilityLabel="View certificate"
+              onClick={() => onOpen(certificate)}><s-text>View certificate</s-text></s-clickable> : null}
+            {hasPrint ? <s-link href={certificate.certificate_print_jpg_url} target="_blank">Free print download</s-link> : null}
+          </s-grid>
+          {!hasPdf ? <s-badge tone="neutral">Certificate processing</s-badge> : null}
+        </s-stack>
       </s-grid>
     </s-box>
   );

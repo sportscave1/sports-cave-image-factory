@@ -11,3 +11,5 @@ Storefront product reads use @inContext(country) from the live account country s
 Validation: 53 focused Python tests, 23 Node checks, two Storefront GraphQL queries validated against 2026-04, native Shopify app build/config validation. Bundled UI validator cannot resolve its own TypeScript dependency; native build and live desktop/mobile review provide validation instead.
 
 No topology changes or Blueprint sync. Preserve canonical primary and supporting services. Current upstream inbox changes were fast-forwarded before release.
+
+Live checks: desktop review strip now aligns with native Orders navigation; four certificate cards and four recommendations each fit one row. US country switch returns US$249 recommendation prices (AU$339 in Australia) with market compare-at RRP. Final account version account-compact-verified-20261123 (1262162116609).

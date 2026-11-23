@@ -178,7 +178,7 @@ function StarRating({rating, onChange, modalId = ""}) {
         >
           <s-icon
             type={value <= rating ? "star-filled" : "star"}
-            tone={value <= rating ? "warning" : "neutral"}
+            tone="warning"
           ></s-icon>
         </s-clickable>
       ))}
