@@ -13,6 +13,7 @@ Read directly from the installed app without saving any Judge.me settings.
 | Domestic/international first request | 14 days after fulfilment |
 | POS first request | 7 days after fulfilment |
 | Reminders | None |
+| Marketing opt-outs | Judge.me allows request emails to opted-out customers; native CRM consent/suppression guards remain enforced |
 | Multi-product orders | Maximum 3 items; most expensive first; separate emails 5 days apart |
 | Customer request limit | Every order; variant requests enabled |
 | Missing/deleted product | Store review fallback enabled |
@@ -72,10 +73,43 @@ existing reviews-page write button opens a native form in its existing modal.
 Anonymous website submissions are explicitly unverified and pending moderation;
 they cannot earn verified-order rewards. Email requests are order-verified.
 The live theme and Judge.me collection/settings were untouched by this task.
+The existing product-title review button now targets the native widget rather
+than a removed Judge.me element; its appearance is unchanged.
 
 ## Validation and rollout
 
-Rollout verification pending at source commit; append final release evidence below.
+Final executable release: `793d5d6cb47c77e9ddfa5e236a3b2b9ed6e51362`.
+All three existing services are Live at that source:
+
+- Primary: `dep-dc2cictbedkc73ar4v80` (live 24 Nov, 10:19 AEDT).
+- Webhooks: `dep-dc2cictbedkc73ar518g`.
+- Worker: `dep-dc2cictbedkc73ar51i0`.
+
+Primary OS health, native form `/reviews/write`, and published review summary
+all returned HTTP 200. The primary initially lacked a signing key; this was fixed
+with a dedicated `REVIEWS_FORM_SECRET` merged into its existing Render environment.
+The existing CRM/unsubscribe signing key was not changed or rotated. Secret
+values are absent from this report and repository.
+
+The native form was opened successfully inside the duplicate theme's existing
+modal: rating, display name, title, review, photo/video file input, consent, submit.
+No production test review was submitted. The product review jump scrolls to the
+native section; both pages display 209 reviews at 4.82/5. The duplicate has no
+Judge.me scripts/widgets. After exiting preview, the live page still contained
+Judge.me scripts and two Judge.me widgets, with the preview cookie cleared.
+
+Source validation: 105 focused reviews/lifecycle tests passed on a fresh disposable
+SQL fixture; all 10 journey cases passed again after the dedicated-key correction.
+The existing widget browser regression passed. Studio static/isolation verification
+passed. The wider three unrelated automation failures were reproduced using the
+unmodified main modules, as noted below.
+
+Theme readback matched the uploaded review JavaScript and section byte-for-byte;
+settings JSON was structurally identical (Shopify adds its generated comment).
+Final native product-title snippets passed Liquid validation after the anchor fix.
+Production data check: 209 published reviews, 29 approved Dropbox media, zero
+reward records, zero new Post Checkout publication jobs; revision 114 and the
+unchanged published version/fingerprint above.
 
 Synthetic-only validation covers order timing, POS timing, missing-product skips,
 product pagination/ranking, buyer token rendering, duplicate submissions,
