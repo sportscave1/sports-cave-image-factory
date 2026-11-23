@@ -16,4 +16,6 @@ Canonical Render primary srv-d8kl4on7f7vs73dvavv0 and existing webhook service o
 
 Live verification: selected Oak for Nolan Ryan edition #027; Add showed Added to cart. Checkout now returned to the previous Formula One collection page with native cart drawer open, correct Oak variant, original edition and certificate thumbnail. Removed only the test cart line afterward; no order/payment placed. Modal changed to Shopify large-100 fixed size after visual review to retain two columns without max-height empty space. All three Small colour mappings validated with disposable SQL fixtures. Additional regression run: 140 passed.
 
-Shopify released version: certificate-cart-layout-20261123 (1262124302337).
+Shopify released version: certificate-cart-final-20261123 (1262128234497).
+
+Final fixed modal uses adaptive 240px minimum columns: side-by-side certificate/options within native 640px desktop modal, stacked on narrow screens.
