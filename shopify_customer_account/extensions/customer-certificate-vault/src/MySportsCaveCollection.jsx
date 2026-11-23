@@ -324,13 +324,13 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
         <s-box display="@container (inline-size > 850px) none, auto">
           <s-stack gap="small-400">
             <s-scroll-box key={active.key} overflow="hidden auto" accessibilityLabel="Swipe through your editions, then tap an edition to view its certificate">
-              <s-grid gridTemplateColumns={`repeat(${certificates.length}, minmax(0, 100%))`} inlineSize="100%" gap="small">
+              <s-stack direction="inline" gap="small">
                 {certificates.slice(index).concat(certificates.slice(0, index)).map(item => <s-clickable key={item.key}
-                  onClick={() => onSelect(item.key)} accessibilityLabel={`${compactTitle(item.product_title)}, ${compactVariant(item.variant_title)}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
+                  onClick={() => onSelect(item.key)} minInlineSize="280px" maxInlineSize="280px" accessibilityLabel={`${compactTitle(item.product_title)}, ${compactVariant(item.variant_title)}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
                   border={item.key === active.key ? "large" : "base"} borderRadius="large" padding="small" background="subdued">
                   {card(item, true)}
                 </s-clickable>)}
-              </s-grid>
+              </s-stack>
             </s-scroll-box>
             {certificates.length > 1 ? <s-grid gridTemplateColumns="44px minmax(0, 1fr) 44px" alignItems="center">
               <s-clickable accessibilityLabel="Previous edition" onClick={() => browse(-1)} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-left" size="large" /></s-clickable>
