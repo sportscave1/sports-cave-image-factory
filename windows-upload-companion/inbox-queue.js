@@ -51,7 +51,15 @@ async function inboxQueueTick(){
   await chrome.storage.local.remove('inboxBrowserPending');
   return true;
  }catch{return false;}
- finally{inboxActive=null;if(!scanOnly)ordersTickRunning=false;inboxTickRunning=false;clearInterval(keepAlive);}
+ finally{
+  inboxActive=null;inboxTickRunning=false;clearInterval(keepAlive);
+  if(!scanOnly){
+   ordersTickRunning=false;
+   // Edge can coalesce both alarms. Always wake Orders after yielding its slot
+   // so an idle Inbox poll cannot repeatedly consume the Orders alarm.
+   if(typeof continueOrdersSoon==='function')continueOrdersSoon();
+  }
+ }
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
  if(sender.id!==chrome.runtime.id||message?.type!=='inbox:permit'||!inboxActive||sender.tab?.id!==inboxActive.tab)return;

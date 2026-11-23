@@ -40,18 +40,27 @@ for(const initial of [false,true])test('customer order changes pause indefinitel
 });
 
 function worker(overrides={}){
- let alarms=[],calls=[],removed=[],tabCalls=0,listener;
+ let alarms=[],calls=[],removed=[],tabCalls=0,listener,wakes=0;
  const storage={staffQueueCredential:'paired',...(overrides.pending?{inboxBrowserPending:base}:{})};
  const context={URL,AbortSignal,setInterval:()=>1,clearInterval:()=>{},ordersTickRunning:!!overrides.ordersBusy,osOrigin:'https://sports-cave-image-factory.onrender.com',
   prodigiWorkerTab:async()=>{tabCalls++;return {id:17}},prodigiWaitForPage:async()=>true,
-  fetch:async(url,options)=>{const action=url.split('/').pop();calls.push({action,body:JSON.parse(options.body)});return {ok:true,json:async()=>action==='tick'?{browser:overrides.plan||base}:{permitted:true}};},
+  fetch:async(url,options)=>{const action=url.split('/').pop();calls.push({action,body:JSON.parse(options.body)});if(overrides.failure)throw Error('Offline');return {ok:true,json:async()=>action==='tick'?(overrides.empty?{}:{browser:overrides.plan||base}):{permitted:true}};},
+  continueOrdersSoon:()=>{assert.equal(context.ordersTickRunning,false);wakes++;},
   chrome:{storage:{local:{get:async key=>typeof key==='string'?{[key]:storage[key]}:storage,set:async value=>Object.assign(storage,value),remove:async key=>{removed.push(key);delete storage[key]}}},
    alarms:{get:async()=>null,create:async(name)=>alarms.push(name),onAlarm:{addListener:()=>{}}},runtime:{id:'paired',onStartup:{addListener:()=>{}},onInstalled:{addListener:()=>{}},onMessage:{addListener:fn=>listener=fn}},
    tabs:{sendMessage:async()=>({evidence:{address_saved:true}})}}};
- vm.runInNewContext(queueSource,context);return{context,calls,storage,removed,get tabCalls(){return tabCalls},listener};
+ vm.runInNewContext(queueSource,context);return{context,calls,storage,removed,get tabCalls(){return tabCalls},get wakes(){return wakes},listener};
 }
 test('Inbox scans during an Orders upload without touching its tab or releasing its writer',async()=>{
  const w=worker({ordersBusy:true});assert.equal(await w.context.inboxQueueTick(),true);assert.deepEqual(w.calls.map(c=>c.action),['tick']);assert.equal(w.tabCalls,0);assert.equal(w.context.ordersTickRunning,true);
+ assert.equal(w.wakes,0);
+});
+
+for(const options of [{empty:true},{failure:true},{}])test('coalesced alarms always wake Orders after Inbox yields '+JSON.stringify(options),async()=>{
+ const w=worker(options);const pending=w.context.inboxQueueTick();
+ assert.equal(w.context.ordersTickRunning,true); // An Orders alarm at this instant must yield.
+ await pending;
+ assert.equal(w.context.ordersTickRunning,false);assert.equal(w.wakes,1);
 });
 test('Inbox uses the existing paired server and owned tab, then finishes once',async()=>{
  const w=worker();assert.equal(await w.context.inboxQueueTick(),true);assert.deepEqual(w.calls.map(c=>c.action),['tick','finish']);assert.equal(w.tabCalls,1);assert.equal(w.context.ordersTickRunning,false);
