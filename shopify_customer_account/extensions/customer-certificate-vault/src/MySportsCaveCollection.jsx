@@ -649,13 +649,13 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
       id={modalId}
       heading={framingOnly ? "Get your certificate framed" : title}
       accessibilityLabel={`Certificate viewer for ${title}`}
-      size="large"
+      size="large-100"
       padding="base"
       onAfterHide={onClose}
     >
       {certificate ? (
         <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 320px), 1fr))"
+          gridTemplateColumns={framingOnly ? "repeat(auto-fit, minmax(min(100%, 240px), 1fr))" : "1fr"}
           gap="large"
           alignItems="start"
         >
