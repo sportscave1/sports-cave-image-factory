@@ -113,7 +113,7 @@ def permit(key,token,sha256):
     with stages.edit(browser.LOCK) as cur:
         raw,value=authorised(cur,key,token)
         receipt=value['product_browser']
-        if receipt['started'] or value['status']!=ACTIVE or value.get('submission'):
+        if receipt['started'] or value['status']!=ACTIVE or value.get('submission') or (value.get('signin_wait') or {}).get('state')=='waiting':
             raise ValueError('Product selection permit already used or stopped.')
         if (datetime.now(timezone.utc)-datetime.fromisoformat(receipt['claimed_at'])).total_seconds()>900:
             raise ValueError('Product selection handoff expired.')
@@ -227,6 +227,7 @@ def recover_readbacks(user):
     with connection(prep.connect) as c,c.cursor() as q:
         q.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
           AND value->>'status'='Needs review'
+          AND COALESCE(value->'signin_wait'->>'state','')<>'waiting'
           AND (value->'product_browser'->>'started'='true'
                OR (value->'product_browser'->>'started'='false'
                    AND value->'product_browser'->>'client_stage'='product-select'
@@ -246,6 +247,7 @@ def recover_readbacks(user):
 def _recover_readback(key):
     with stages.edit(browser.LOCK) as q:
         value=browser.read(q,key);receipt=value.get('product_browser') or {}
+        if (value.get('signin_wait') or {}).get('state')=='waiting':return False
         if (value.get('status')!='Needs review' or receipt.get('verified')
             or receipt.get('client_stage') not in ('product-select','product-readback') or value.get('submission') or value.get('browser')
             or (value.get('product_readback_recovery_policy')==READBACK_POLICY and value.get('product_readback_recoveries',0)>=2)):return False

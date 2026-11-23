@@ -7,7 +7,7 @@ import prodigi_preparation as prep
 
 SLOTS=BoundedSemaphore(1)
 PREFIX='orders_runtime:'
-LABELS={'received':'Companion received this step','download':'Downloading verified JPG','open':'Opening saved order','readback':'Verifying saved supplier state','retrying':'Retrying a temporary connection failure',
+LABELS={'signin':'Prodigi sign-in needed · orders resume automatically','received':'Companion received this step','download':'Downloading verified JPG','open':'Opening saved order','readback':'Verifying saved supplier state','retrying':'Retrying a temporary connection failure',
  'page':'Checking order page','row':'Waiting for exact product','editor':'Opening image editor','reset-image':'Replacing authorised artwork',
  'picker':'Opening image picker','transfer':'Transferring numbered JPG','uploaded':'Waiting for image processing',
  'orientation':'Checking orientation and fit','permit':'Verifying Save permission','save':'Saving artwork',

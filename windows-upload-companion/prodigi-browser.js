@@ -227,7 +227,12 @@ async function prodigiBrowserRun(plan) {
       tab=await prodigiReadyOwnedPage(plan,tab,refresh,30);
       if(!tab)throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');
       stage=plan.kind==='qa'?'qa':'product';
-      const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
+      const message={type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}};
+      const result=typeof prodigiSigninHandoff==='function'?await prodigiSigninHandoff(plan,tab,message):await chrome.tabs.sendMessage(tab.id,message);
+      if(result?.error&&typeof prodigiSigninNeeded==='function'&&await prodigiSigninNeeded(plan,Error(result.error))){
+        finishing=true; // The sign-in outbox owns recovery until acknowledged.
+        return await prodigiPauseForSignin(plan);
+      }
       return await complete(result?.stage||'product',result?.error||'',result?.evidence||null);
     }
     const file=await prodigiReadFetch(plan.artwork_url,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(150000)},'download');
@@ -245,13 +250,18 @@ async function prodigiBrowserRun(plan) {
     if(!tab) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
     const stopWake=prodigiUploadWake(plan,tab);
     let result;
-    try{result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});}
+    try{const message={type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}};
+      result=typeof prodigiSigninHandoff==='function'?await prodigiSigninHandoff(plan,tab,message):await chrome.tabs.sendMessage(tab.id,message);}
     finally{stopWake();}
     stage=result?.stage||'page';
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');
     return await complete(stage);
   } catch(error) {
     if(finishing)throw error; // Keep the exact completion/evidence until acknowledged.
+    // The server records an auth wait before the browser navigates to login.
+    // A consumed permit will resume through independent readback, never replay.
+    if(typeof prodigiSigninNeeded==='function'&&await prodigiSigninNeeded(plan,error))
+      return await prodigiPauseForSignin(plan);
     stage=error.prodigiStage||stage;
     // Read back this same item; never repeat an uncertain Save or upload.
     return await complete(stage,plan.kind==='qa'?('QA '+stage+': '+String(error.message||'Browser handoff interrupted')).slice(0,240):String(error.message||'Browser handoff interrupted'));

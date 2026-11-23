@@ -15,7 +15,8 @@ def snapshot(connect):
               (EXISTS(SELECT 1 FROM app_settings WHERE key='orders_companion_seen' AND updated_at>now()-interval '95 seconds')
                OR EXISTS(SELECT 1 FROM product_upload_desktop WHERE singleton AND seen_at>now()-interval '95 seconds')) AS online
             FROM stats LEFT JOIN LATERAL (SELECT * FROM units ORDER BY
-              CASE WHEN value->>'status' IN ('Uploading','Selecting product','Browser uploading','Generating','Checking QA','Checking dashboard QA','Submitting','Certificate pending') THEN 0
+              CASE WHEN value->'signin_wait'->>'state'='waiting' THEN -1
+                   WHEN value->>'status' IN ('Uploading','Selecting product','Browser uploading','Generating','Checking QA','Checking dashboard QA','Submitting','Certificate pending') THEN 0
                    WHEN value->>'status' IN ('Needs QA','Needs review','Repair','Submission uncertain') THEN 1
                    WHEN value->>'status' IN ('Waiting for order','Queued','Waiting','Preparing JPG','Awaiting product selection','Awaiting browser upload','Awaiting dashboard QA','Ready for manual payment','Submitted') THEN 2 ELSE 3 END,updated_at DESC LIMIT 10) recent ON true""")
             rows=q.fetchall()
@@ -28,7 +29,10 @@ def snapshot(connect):
                 ('Uploading','Selecting product','Browser uploading','Generating','Checking QA','Checking dashboard QA','Submitting','Certificate pending')
                 else 'waiting' if status in ('Waiting for order','Queued','Waiting','Preparing JPG','Awaiting product selection','Awaiting browser upload','Awaiting dashboard QA','Ready for manual payment','Submitted') else 'failed')
             snap=v.get('snapshot') or {}
+            signin=(v.get('signin_wait') or {}).get('state')=='waiting'
             jobs.append(dict(id=str(v.get('allocation_id')),title=(snap.get('order_reference') or v.get('order_reference') or '')+' · '+(snap.get('product') or v.get('title') or 'Order'),
-                state=state,can_restart=state=='failed',label='JPG ready' if status=='Ready' else status,updated_at=str(row['updated_at']),percent=100 if state=='complete' else 0,estimated=False))
+                state='waiting' if signin else state,can_restart=state=='failed' and not signin,label='Prodigi sign-in needed' if signin else 'JPG ready' if status=='Ready' else status,
+                detail='Sign into Prodigi in Edge. Waiting orders resume automatically after sign-in.' if signin else '',
+                updated_at=str(row['updated_at']),percent=100 if state=='complete' else 0,estimated=False))
         return dict(enabled=prep.enabled(),automation_enabled=bool(rows and rows[0]['automatic']),online=bool(rows and rows[0]['online']),waiting=rows[0]['waiting'] if rows else 0,jobs=jobs)
     except Exception:return dict(enabled=prep.enabled(),online=False,waiting=0,jobs=[],unavailable=True)

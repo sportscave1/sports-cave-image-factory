@@ -316,7 +316,9 @@ def permit(key,token,evidence):
             check_write(value,provider,resolver)
         values=batch_values(q,value,receipt,token)
         if receipt.get('item_only'):raise ValueError('Item QA cannot change order shipping or tax; wait for final whole-order QA.')
-        if receipt.get('started') or value['status']!=ACTIVE:raise ValueError('QA shipping permit already used.')
+        if (receipt.get('started') or value['status']!=ACTIVE or
+            any((unit.get('signin_wait') or {}).get('state')=='waiting' for unit in values)):
+            raise ValueError('QA shipping permit already used or waiting for sign-in.')
         snap,order,_=current(value,provider,resolver)
         for unit in values:current_for_order(unit,order,resolver)
         if pinned_order(receipt['before'])!=pinned_order(order) or clean(receipt['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):

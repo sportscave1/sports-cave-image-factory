@@ -24,6 +24,9 @@ def action_state(saved, fulfilment=""):
     inbox=(saved or {}).get('_inbox') or {}
     if inbox.get('blocking'):
         return dict(label='Paused customer request' if inbox.get('paused') else 'Customer request · review',tone='warning',action='',url=supplier_link((saved or {}).get('order_id')),detail=inbox.get('label','Review customer request in Inbox Companion.'))
+    if ((saved or {}).get('signin_wait') or {}).get('state')=='waiting':
+        from prodigi_signin import DETAIL
+        return dict(label='Sign in to Prodigi',tone='warning',action='',url=supplier_link(saved.get('order_id')),detail=DETAIL)
     if str(fulfilment).strip().lower()=="complete":
         if saved and saved.get('status')=='Complete':
             return dict(label='Complete',tone='success',action='',url=supplier_link(saved.get('order_id')),detail=saved.get('message','Supplier submission confirmed.'))

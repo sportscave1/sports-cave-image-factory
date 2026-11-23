@@ -2,7 +2,8 @@
   "manifest_version": 3,
   "name": "Sports Cave Companion",
   "description": "Processes designs, uploads, Meta Ads and guarded Prodigi order preparation through the paired Edge desktop.",
-  "version": "1.7.54",
+  "version": "1.7.55",
+  "action": {"default_title": "Sports Cave Companion"},
   "permissions": [
     "storage",
     "alarms",
@@ -21,7 +22,12 @@
   "content_scripts": [
     {
       "matches": ["https://dashboard.prodigi.com/orders/*/detail", "https://sandbox-beta-dashboard.pwinty.com/orders/*/detail"],
-      "js": ["prodigi-wait.js", "prodigi-page.js", "prodigi-dashboard-qa.js", "inbox-page.js"],
+      "js": ["prodigi-wait.js", "prodigi-page.js", "prodigi-dashboard-qa.js", "inbox-page.js", "prodigi-signin-page.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://dashboard.prodigi.com/login*"],
+      "js": ["prodigi-signin-page.js"],
       "run_at": "document_idle"
     },
     {

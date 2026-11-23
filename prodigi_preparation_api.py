@@ -40,6 +40,10 @@ def desktop(token,*,slots=None):
 
 
 async def ready_handoff(request, merge_supported):
+    # Shared browser authentication is unavailable on this paired desktop.
+    # Continue preparation, server readback and status sync without opening more
+    # supplier tabs until its durable sign-in wait has reconciled.
+    if request.headers.get('x-sports-cave-orders-signin-waiting')=='1':return None
     from prodigi_browser import claim
     browser = None
     preferred=request.headers.get('x-sports-cave-orders-continue','')
@@ -264,8 +268,9 @@ from orders_wake import listen as orders_notifications
 from orders_feed import feed as orders_row_feed
 from orders_runtime import endpoint as orders_progress
 from orders_runtime import metrics_endpoint as orders_metrics
+from prodigi_signin import endpoint as prodigi_signin
 
-ROUTES = (('/api/orders/feed',orders_row_feed,('POST',)),('/api/orders-companion/notifications',orders_notifications,('GET',)),('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
+ROUTES = (('/api/orders-companion/signin',prodigi_signin,('POST',)),('/api/orders/feed',orders_row_feed,('POST',)),('/api/orders-companion/notifications',orders_notifications,('GET',)),('/api/orders-companion/status',order_status,('GET',)),('/api/orders-companion/restart',restart_order,('POST',)),('/api/orders/certificate',open_certificate,('GET',)),('/api/orders-companion/qa/permit',dashboard_qa_action,('POST',)),
           ('/api/orders-companion/qa/finish',dashboard_qa_action,('POST',)),('/api/orders-companion/tick', tick, ('POST',)),
           ('/api/orders-companion/browser/permit',browser_action,('POST',)),
           ('/api/orders-companion/browser/finish',browser_action,('POST',)),

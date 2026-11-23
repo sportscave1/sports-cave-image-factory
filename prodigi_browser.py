@@ -253,7 +253,7 @@ def permit(key,token,sha256):
     with stages.edit(LOCK) as cur:
         value=authorised(cur,key,token)
         browser=value['browser']
-        if browser['started'] or value['status']!='Browser uploading':
+        if browser['started'] or value['status']!='Browser uploading' or (value.get('signin_wait') or {}).get('state')=='waiting':
             raise ValueError('This Save permit has already been used. Recheck manually.')
         age=datetime.now(timezone.utc)-datetime.fromisoformat(browser['claimed_at'])
         if age.total_seconds()>900:
@@ -411,6 +411,7 @@ def recover_selected_empty_editors(user,*,page_supported=False,processing_suppor
             AND (value->>'status'='Needs review' OR (%s AND value->>'status'='Browser uploading'
                  AND (value->'browser'->>'claimed_at')::timestamptz<now()-interval '5 minutes'))
             AND value->'browser'->>'started'='false'
+            AND COALESCE(value->'signin_wait'->>'state','')<>'waiting'
             AND ((value->'browser'->>'last_stage'='page'
                   AND value->'browser'->>'client_error'='An existing editor requires manual review.'
                   AND value->'product_browser'->>'verified'='true')
@@ -491,6 +492,7 @@ def _recover_ready_editor(user,key,*,page_supported=False,processing_supported=F
     provider,resolver,_,sandbox=context(key)
     with stages.edit(LOCK) as q:
         value=read(q,key);receipt=value.get('browser') or {}
+        if (value.get('signin_wait') or {}).get('state')=='waiting':return False
         stalled=False
         if page_supported and value.get('status')=='Browser uploading' and value.get('readiness_recovery_policy')!=READINESS_POLICY:
             try:

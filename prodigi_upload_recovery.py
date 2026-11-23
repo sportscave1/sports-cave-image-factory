@@ -52,6 +52,7 @@ def recover(user):
         cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
             AND value->>'status'='Needs review'
             AND value->'browser'->>'started'='false'
+            AND COALESCE(value->'signin_wait'->>'state','')<>'waiting'
             AND value->'browser'->>'last_stage'=ANY(%s)
             AND value->'browser'->>'client_error'=ANY(%s)
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
@@ -92,6 +93,7 @@ def recover_one(key):
         receipt = value.get('browser') or {}
         previous = value.get('upload_recovery') or {}
         if (value.get('status') != 'Needs review' or receipt.get('started') is not False
+                or (value.get('signin_wait') or {}).get('state') == 'waiting'
                 or receipt.get('verified') or receipt.get('last_stage') not in STAGES
                 or receipt.get('client_error') not in ERRORS or value.get('submission') or value.get('write_intent')):
             return False
