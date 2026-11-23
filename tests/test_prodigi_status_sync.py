@@ -119,3 +119,24 @@ def test_one_status_clock_per_server_process(monkeypatch):
     monkeypatch.setattr(sync.threading,'Thread',Clock)
     sync.start_worker();sync.start_worker()
     assert len(created)==1 and created[0]['name']=='orders-status-clock'
+
+
+@pytest.mark.parametrize('population',[1,18,100])
+def test_tracking_budget_scales_without_repeating_submission(store,monkeypatch,population):
+    from datetime import datetime,timezone
+    v,p=submitted();p.data['status']='on_hold'
+    with prep.connect() as c,c.cursor() as q:
+        for n in range(population):
+            row=deepcopy(v);row['allocation_id']=n+1;row['order_id']=str(n+99)
+            prep.save(q,row)
+    calls=[]
+    def order(oid):
+        calls.append(oid);result=deepcopy(p.data);result['id']=oid;return result
+    p.order=order;monkeypatch.setattr(prep,'Client',lambda:p)
+    monkeypatch.setattr(submission,'kick',lambda:None)
+    sync.tick();sync.tick()
+    assert len(calls)==min(population,40) # bounded batches, no immediate repeat
+    row=prep.read(1)
+    delay=(datetime.fromisoformat(row['supplier_sync']['next_at'])-datetime.now(timezone.utc)).total_seconds()
+    assert delay>=max(60,population*9)-10
+    assert not p.submits

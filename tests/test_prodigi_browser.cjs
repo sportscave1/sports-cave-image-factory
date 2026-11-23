@@ -170,6 +170,30 @@ test('sleep recovery never activates a user-navigated tab',async()=>{
  await assert.rejects(vm.runInContext('prodigiWaitForPage(tab,true,1,orderUrl)',context),/changed before wake/);
 });
 
+test('slow upload wakes its exact owned tab once, without navigating or sending another file',async()=>{
+ const {context,storage}=setup();const events=[];let wake;
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.setTimeout=(fn,ms)=>{assert.equal(ms,30000);wake=fn;return 1;};
+ context.chrome.tabs.get=async id=>({id,url:plan.order_url+'?imageLibraryType=artwork'});
+ context.chrome.tabs.update=async(id,options)=>events.push({id,options:JSON.parse(JSON.stringify(options))});
+ context.chrome.tabs.reload=()=>assert.fail('No reload during upload');
+ context.chrome.tabs.sendMessage=()=>assert.fail('No repeated upload');
+ context.plan=plan;vm.runInContext('var stopWake=prodigiUploadWake(plan,{id:9})',context);
+ wake();await new Promise(resolve=>setImmediate(resolve));
+ vm.runInContext('stopWake()',context);
+ assert.deepEqual(events,[{id:9,options:{active:true,autoDiscardable:false}}]);
+});
+
+test('finished upload cancels its delayed wake and a changed tab is never activated',async()=>{
+ const {context,storage}=setup();let wake,cancelled=0;
+ context.setTimeout=fn=>{wake=fn;return 7;};context.clearTimeout=id=>{assert.equal(id,7);cancelled++;};
+ context.plan=plan;vm.runInContext('prodigiUploadWake(plan,{id:9})()',context);assert.equal(cancelled,1);
+ storage.ordersWorkerTabs={[plan.order_url]:9};
+ context.chrome.tabs.get=async id=>({id,url:'https://dashboard.prodigi.com/orders/other/detail'});
+ context.chrome.tabs.update=()=>assert.fail('User navigation must win');
+ vm.runInContext('prodigiUploadWake(plan,{id:9})',context);wake();await new Promise(resolve=>setImmediate(resolve));
+});
+
 test('ready probe releases its deadline on immediate response',async()=>{
  const {context}=setup();let cleared=0;context.clearTimeout=id=>{cleared++;clearTimeout(id);};
  assert.equal((await vm.runInContext('prodigiReadyProbe(9)',context)).ready,true);assert.equal(cleared,1);

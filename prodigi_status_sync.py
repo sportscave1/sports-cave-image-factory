@@ -36,7 +36,7 @@ def save(value):
         prep.save(q,value)
 
 
-def refresh(value, order, persist):
+def refresh(value, order, persist, *, poll_interval=60):
     """Observe only the pinned supplier identity; never repeat submission/PDF."""
     before=(value.get('dashboard_qa') or {}).get('before') or {}
     if (str(order.get('id')) != str(value.get('order_id')) or
@@ -48,7 +48,7 @@ def refresh(value, order, persist):
     receipt=value['submission']
     receipt.update(supplier_status=state,checked_at=prep.now())
     value['supplier_sync']={'checked_at':prep.now(),'status':state,
-        'next_at':after(86400 if state in TERMINAL else 60 if state in submission.FINALISED else 15)}
+        'next_at':after(86400 if state in TERMINAL else max(300 if state in submission.FINALISED else 60,poll_interval))}
     if value['status']=='Submitted' and state in {'cancelled','failed'}:
         value.update(status='Needs review',message='Prodigi reports '+state+'. Open the existing order for review.')
         persist(value)
@@ -68,6 +68,15 @@ def tick(limit=20):
         budget(q)
         q.execute('SELECT pg_try_advisory_xact_lock(%s) AS acquired',(LOCK,))
         if not q.fetchone()['acquired']:return
+        # Reserve API capacity for uploads/QA. Prodigi v5 allows 1,000 reads and
+        # writes/hour/key; passive tracking gets at most ~400 reads/hour as the
+        # tracked population grows. One read still serves every order sibling.
+        q.execute("""SELECT count(DISTINCT value->>'order_id') AS total FROM app_settings
+          WHERE key LIKE 'prodigi_prepare:%%' AND value ? 'submission'
+          AND NOT COALESCE((value->>'hidden')::boolean,false)
+          AND value->>'status' IN ('Submitted','Complete')
+          AND COALESCE(value->'supplier_sync'->>'status','') NOT IN ('completed','cancelled','failed')""")
+        poll_interval=max(60,int(q.fetchone()['total'])*9)
         q.execute("""SELECT key,value FROM app_settings
           WHERE key LIKE 'prodigi_prepare:%%' AND value ? 'submission'
           AND NOT COALESCE((value->>'hidden')::boolean,false)
@@ -94,7 +103,7 @@ def tick(limit=20):
             for value in values:
                 try:
                     if order is None:raise ValueError('Supplier status temporarily unavailable.')
-                    refresh(value,order,lambda _:None)
+                    refresh(value,order,lambda _:None,poll_interval=poll_interval)
                 except Exception:
                     # Preserve last good supplier state and certificate. Back off
                     # instead of treating a network failure as a production failure.

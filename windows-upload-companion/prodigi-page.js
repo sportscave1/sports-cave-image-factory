@@ -286,7 +286,7 @@ if(typeof module!=='undefined') module.exports={prodigiExactRow,prodigiPinnedRow
       stage='uploaded';reportStage(stage,plan);
       const loaded=await wait(()=>{
         const e=dialog('Image Editor');return e&&!dialog('Select image')&&text(e).includes('Uploaded image:')&&e;
-      },240000);
+      },600000); // Large JPG processing can exceed four minutes; never replay the file here.
       const compact=text(loaded).replace(/\s/g,'');
       if(!Array.isArray(plan.dimensions)||!compact.includes(plan.dimensions.join('x')+'px'))
         throw Error('Uploaded image dimensions differ from the numbered archive.');

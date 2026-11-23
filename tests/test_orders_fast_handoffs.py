@@ -139,3 +139,20 @@ def test_fixed_page_ready_capability_reaches_qa_recovery(monkeypatch):
     headers={'Authorization':'Bearer '+'x'*43,'X-Sports-Cave-Orders-Item-QA':'1','X-Sports-Cave-Orders-Fresh-Page':'1'}
     response=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])])).post('/tick',content='{}',headers=headers)
     assert response.status_code==200 and calls==[(actor,dict(page_supported=True))]
+
+
+@pytest.mark.parametrize('capable',[False,True])
+def test_processing_recovery_only_admitted_by_fixed_upload_worker(monkeypatch,capable):
+    calls=[];actor={'id':'fixture'}
+    monkeypatch.setattr(prep,'enabled',lambda:True)
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:actor)
+    for name in ['orders_automatic.kick','prodigi_submission.kick','prodigi_status_sync.kick','prodigi_product_browser.recover_readbacks']:
+        monkeypatch.setattr(name,lambda *a:None)
+    monkeypatch.setattr('prodigi_browser.recover_selected_empty_editors',lambda user,**kw:calls.append((user,kw)))
+    async def ready(*_):return {'key':'fixture'}
+    monkeypatch.setattr(api,'ready_handoff',ready)
+    headers={'Authorization':'Bearer '+'x'*43,'X-Sports-Cave-Orders-Empty-Editor':'1','X-Sports-Cave-Orders-Fresh-Page':'1'}
+    if capable:headers['X-Sports-Cave-Orders-Upload-Ready']='1'
+    response=TestClient(Starlette(routes=[Route('/tick',api.tick,methods=['POST'])])).post('/tick',content='{}',headers=headers)
+    assert response.status_code==200
+    assert calls==[(actor,dict(page_supported=True,**({'processing_supported':True} if capable else {})))]

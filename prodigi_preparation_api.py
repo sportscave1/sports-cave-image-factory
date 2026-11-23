@@ -85,7 +85,9 @@ async def tick(request):
         if request.headers.get('x-sports-cave-orders-empty-editor')=='1':
             stage='empty_product_editor_recovery'
             from prodigi_browser import recover_selected_empty_editors
-            if request.headers.get('x-sports-cave-orders-fresh-page')=='1':
+            if request.headers.get('x-sports-cave-orders-upload-ready')=='1':
+                await run_in_threadpool(recover_selected_empty_editors,actor,page_supported=True,processing_supported=True)
+            elif request.headers.get('x-sports-cave-orders-fresh-page')=='1':
                 await run_in_threadpool(recover_selected_empty_editors,actor,page_supported=True)
             else:await run_in_threadpool(recover_selected_empty_editors,actor)
             stage='product_selection_readback_recovery'

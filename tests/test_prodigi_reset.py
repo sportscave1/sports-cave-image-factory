@@ -215,3 +215,24 @@ def test_rate_limited_unused_save_recovers_without_replaying_a_permit(draft,case
     save(v)
     assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True)==(1 if case=='unchanged' else 0)
     assert not p.writes
+
+
+@pytest.mark.parametrize('case',['unchanged','old_worker','used_permit','changed_address','changed_asset','exhausted'])
+def test_processing_timeout_recovery_needs_fixed_worker_and_unchanged_empty_order(draft,case):
+    p,s=draft;p.data['items'][0]['assets']=[]
+    v=reset.reset_order({'id':'owner'},1);prep.run(v,p,prep.resolve,None,save)
+    plan=browser.claim(exact_item_supported=True,reset_supported=True)
+    browser.finish(plan['key'],plan['token'],'uploaded',error='The expected Prodigi control did not finish loading.')
+    v=prep.read(1)
+    if case=='used_permit':v['browser']['started']=True
+    if case=='changed_address':p.data['recipient']['address']['line1']='Changed fixture address'
+    if case=='changed_asset':p.data['items'][0]['assets']=[dict(url='https://fixture/other',printArea='default')]
+    if case=='exhausted':v['processing_recoveries']=1
+    save(v)
+    assert browser.recover_selected_empty_editors({'id':'owner'},page_supported=True,
+        processing_supported=case!='old_worker')==(1 if case=='unchanged' else 0)
+    assert not p.writes
+    if case=='unchanged':
+        assert prep.read(1)['processing_recoveries']==1
+        next_plan=browser.claim(exact_item_supported=True,reset_supported=True)
+        assert next_plan['token']!=plan['token'] and next_plan['selected_empty_product']

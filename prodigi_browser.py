@@ -317,7 +317,7 @@ def resume_unstarted(user,key):
         return value
 
 
-def recover_selected_empty_editors(user,*,page_supported=False):
+def recover_selected_empty_editors(user,*,page_supported=False,processing_supported=False):
     """Recover this known pre-permit handoff bug, never uncertain supplier writes.
 
     Called only by companions advertising the empty-editor transition fix.
@@ -347,15 +347,19 @@ def recover_selected_empty_editors(user,*,page_supported=False):
                   AND value->>'message' LIKE 'Prodigi returned HTTP 429;%%'
                   AND COALESCE((value->>'api_rate_recoveries')::int,0)<1
                   AND COALESCE((value->>'api_rate_retry_at')::timestamptz,'epoch')<now()
+                  AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation'))
+              OR (%s AND value->'browser'->>'last_stage'='uploaded'
+                  AND value->'browser'->>'client_error'='The expected Prodigi control did not finish loading.'
+                  AND COALESCE((value->>'processing_recoveries')::int,0)<1
                   AND (value->'product_browser'->>'verified'='true' OR value ? 'reset_authorisation')))
             AND NOT value ? 'submission'
             AND NOT COALESCE((value->>'hidden')::boolean,false)
-            ORDER BY updated_at LIMIT 2""",(page_supported,page_supported,page_supported,page_supported))
+            ORDER BY updated_at LIMIT 2""",(page_supported,page_supported,page_supported,page_supported,processing_supported))
         keys=[row['key'] for row in cur.fetchall()]
     recovered=0
     for key in keys:
         try:
-            recovered+=bool(_recover_ready_editor(user,key,page_supported=page_supported))
+            recovered+=bool(_recover_ready_editor(user,key,page_supported=page_supported,processing_supported=processing_supported))
         except (ValueError,PermissionError):
             pass  # Changed artwork/address/source stays stopped for review.
     if recovered:
@@ -365,7 +369,7 @@ def recover_selected_empty_editors(user,*,page_supported=False):
 
 
 @stages.stale_result(False)
-def _recover_ready_editor(user,key,*,page_supported=False):
+def _recover_ready_editor(user,key,*,page_supported=False,processing_supported=False):
     provider,resolver,_,sandbox=context(key)
     with stages.edit(LOCK) as q:
         value=read(q,key);receipt=value.get('browser') or {}
@@ -382,6 +386,9 @@ def _recover_ready_editor(user,key,*,page_supported=False):
         rate_wait=(page_supported and receipt.get('last_stage')=='permit'
                    and value.get('message','').startswith('Prodigi returned HTTP 429;')
                    and value.get('api_rate_recoveries',0)<1)
+        processing_wait=(processing_supported and receipt.get('last_stage')=='uploaded'
+                         and receipt.get('client_error')=='The expected Prodigi control did not finish loading.'
+                         and value.get('processing_recoveries',0)<1)
         readiness=stalled or receipt.get('last_stage') in ('signin','readiness') and receipt.get('client_error') in (
             'Sign into Prodigi in Edge, then review the same draft.',
             'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
@@ -392,7 +399,7 @@ def _recover_ready_editor(user,key,*,page_supported=False):
             _,order,item=checked(value,provider,resolver,sandbox)
             from prodigi_reset import replacement_allowed
             if not ((value.get('product_browser') or {}).get('verified') is True or replacement_allowed(value,order,item)):return False
-        elif rate_wait:
+        elif rate_wait or processing_wait:
             if value.get('api_rate_retry_at') and datetime.fromisoformat(value['api_rate_retry_at'])>datetime.now(timezone.utc):return False
             _,order,item=checked(value,provider,resolver,sandbox)
             from prodigi_reset import replacement_allowed
@@ -405,6 +412,7 @@ def _recover_ready_editor(user,key,*,page_supported=False):
             or business(order,item['id'])!=receipt.get('before')):return False
         value.setdefault('browser_history',[]).append({k:receipt.get(k) for k in ('claimed_at','filename','started','last_stage')})
         if rate_wait:value['api_rate_recoveries']=value.get('api_rate_recoveries',0)+1
+        if processing_wait:value['processing_recoveries']=value.get('processing_recoveries',0)+1
         if readiness:
             value['readiness_recoveries']=attempts+1
             if page_supported:value['readiness_recovery_policy']=READINESS_POLICY

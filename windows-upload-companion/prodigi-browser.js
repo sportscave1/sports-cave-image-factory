@@ -56,6 +56,12 @@ async function prodigiWakeOwnedTab(tab,orderUrl) {
     throw Error('The worker order tab changed before wake-up.');
   await chrome.tabs.update(tab.id,{active:true,autoDiscardable:false});
 }
+function prodigiUploadWake(plan,tab) {
+  // One wake after processing has stalled, without navigation, another upload,
+  // or a Save. The ownership/URL fence is rechecked immediately before waking.
+  let timer=setTimeout(()=>{timer=null;void prodigiWakeOwnedTab(tab,plan.order_url).catch(()=>{});},30000);
+  return ()=>{if(timer!==null)clearTimeout(timer);timer=null;};
+}
 async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
   let previousPage,reloaded=false;
   let woke=false;
@@ -192,7 +198,10 @@ async function prodigiBrowserRun(plan) {
     // Only a server-verified empty item may clear a product-selection shell.
     tab=await prodigiReadyOwnedPage(plan,tab,plan.selected_empty_product===true||plan.replace_artwork===true,60);
     if(!tab) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
-    const result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
+    const stopWake=prodigiUploadWake(plan,tab);
+    let result;
+    try{result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});}
+    finally{stopWake();}
     stage=result?.stage||'page';
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');
     return await prodigiReceipt(plan,'finish',stage);
