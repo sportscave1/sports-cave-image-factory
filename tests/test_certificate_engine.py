@@ -11,6 +11,15 @@ import shopify_sync
 
 class CertificateEngineTests(unittest.TestCase):
     def setUp(self):
+        image_upload = patch.object(
+            shopify_sync, "upload_image_to_shopify_files",
+            side_effect=lambda path, **kwargs: {
+                "file_id": "gid://shopify/MediaImage/1",
+                "url": "https://cdn.example/" + Path(path).name,
+            },
+        )
+        image_upload.start()
+        self.addCleanup(image_upload.stop)
         self.config = {
             "store_domain": "sports-cave.myshopify.com",
             "access_token": "test-token",

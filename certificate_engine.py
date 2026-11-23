@@ -209,7 +209,7 @@ def _line_handle(allocation, line_item, product_title):
 
 def _certificate_key(record):
     return (
-        str(record.get("line_item_id") or ""),
+        str(record.get("line_item_id") or record.get("shopify_line_item_id") or ""),
         int(record.get("edition_number") or 0),
         int(record.get("line_item_unit_index") or 1),
     )
@@ -425,29 +425,31 @@ def _sync_order_certificate_records(
         return {"ok": False, "error": str(error)}
 
 
-def _generate_certificate_image_assets(record, output_dir):
+def _generate_certificate_image_assets(record, output_dir, *, only_missing=False):
     updated = dict(record or {})
     asset_errors = []
     try:
-        updated["local_print_jpg_path"] = certificate_service.generate_certificate_print_jpg(
-            output_dir,
-            product_title=updated.get("product_title"),
-            edition_number=updated.get("edition_number"),
-            edition_total=updated.get("edition_total"),
-            order_name=updated.get("order_name"),
-            shopify_handle=updated.get("handle"),
-        )
+        if not only_missing or not updated.get("certificate_print_jpg_url"):
+            updated["local_print_jpg_path"] = certificate_service.generate_certificate_print_jpg(
+                output_dir,
+                product_title=updated.get("product_title"),
+                edition_number=updated.get("edition_number"),
+                edition_total=updated.get("edition_total"),
+                order_name=updated.get("order_name"),
+                shopify_handle=updated.get("handle"),
+            )
     except Exception as error:
         asset_errors.append(f"Print JPG generation failed: {error}")
     try:
-        updated["local_preview_image_path"] = certificate_service.generate_certificate_preview_webp(
-            output_dir,
-            product_title=updated.get("product_title"),
-            edition_number=updated.get("edition_number"),
-            edition_total=updated.get("edition_total"),
-            order_name=updated.get("order_name"),
-            shopify_handle=updated.get("handle"),
-        )
+        if not only_missing or not updated.get("certificate_preview_image_url"):
+            updated["local_preview_image_path"] = certificate_service.generate_certificate_preview_webp(
+                output_dir,
+                product_title=updated.get("product_title"),
+                edition_number=updated.get("edition_number"),
+                edition_total=updated.get("edition_total"),
+                order_name=updated.get("order_name"),
+                shopify_handle=updated.get("handle"),
+            )
     except Exception as error:
         asset_errors.append(f"Preview image generation failed: {error}")
     if asset_errors:
@@ -515,6 +517,32 @@ def _upload_certificate_image_assets(updated, *, config=None, request_post=None,
         updated["asset_sync_error"] = ""
     else:
         updated["asset_sync_status"] = updated.get("asset_sync_status") or "pdf_ready"
+    return updated
+
+
+def ensure_certificate_customer_assets(record, *, config=None, request_post=None, upload_post=None, output_dir=None, require_complete=True):
+    """Complete customer downloads without replacing an issued PDF or existing images."""
+    updated = dict(record or {})
+    if updated.get("certificate_print_jpg_url") and updated.get("certificate_preview_image_url"):
+        updated.update(asset_sync_status="ready", asset_sync_error="")
+        return updated
+    updated = _generate_certificate_image_assets(
+        updated, Path(output_dir or CERTIFICATE_OUTPUT_DIR), only_missing=True,
+    )
+    # A retry can carry local paths for images already uploaded successfully.
+    if updated.get("certificate_print_jpg_url"):
+        updated.pop("local_print_jpg_path", None)
+    if updated.get("certificate_preview_image_url"):
+        updated.pop("local_preview_image_path", None)
+    updated = _upload_certificate_image_assets(
+        updated, config=config, request_post=request_post, upload_post=upload_post,
+    )
+    if not (updated.get("certificate_print_jpg_url") and updated.get("certificate_preview_image_url")):
+        if require_complete:
+            raise RuntimeError(updated.get("asset_sync_error") or "Certificate print JPG or preview upload is incomplete. Retry this certificate.")
+        updated["asset_sync_status"] = "partial"
+        return updated
+    updated.update(asset_sync_status="ready", asset_sync_error="")
     return updated
 
 
@@ -637,11 +665,12 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     updated["certificate_pdf_url"] = upload_result.get("url") or ""
     updated["pdf_size_bytes"] = len(local_bytes)
     updated["shopify_file_status"] = upload_result.get("status") or ""
-    updated = _upload_certificate_image_assets(
+    updated = ensure_certificate_customer_assets(
         updated,
         config=config,
         request_post=request_post,
         upload_post=upload_post,
+        require_complete=False,
     )
     updated["status"] = "Ready"
     updated["sync_error"] = ""
@@ -668,6 +697,25 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None, 
     )
     with certificate_stage("Supabase_update"):
         record_to_save = certificate_metafield_record(record)
+        state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
+        certificates = state.get("certificates") or []
+        existing = find_existing_certificate(certificates, record_to_save)
+        assets_added = False
+        if existing and _certificate_has_pdf(existing):
+            # An issued certificate is immutable. Only fill missing customer assets.
+            merged = dict(existing)
+            for url_key, id_key in (
+                ("certificate_print_jpg_url", "shopify_print_jpg_file_id"),
+                ("certificate_preview_image_url", "shopify_preview_file_id"),
+            ):
+                if not merged.get(url_key) and record_to_save.get(url_key):
+                    merged[url_key] = record_to_save[url_key]
+                    merged[id_key] = record_to_save.get(id_key) or ""
+                    assets_added = True
+            if merged.get("certificate_print_jpg_url") and merged.get("certificate_preview_image_url"):
+                merged.update(asset_sync_status="ready", asset_sync_error="")
+            record_to_save = merged
+            certificates = _replace_certificate(certificates, merged)
         with certificate_stage("certificate_db_update"):
             persist_result = persist_certificate_record_to_supabase(
                 record_to_save,
@@ -681,15 +729,7 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None, 
                 error=persist_result.get("error"),
             )
             raise RuntimeError(persist_result.get("error"))
-        state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
-        certificates = state.get("certificates") or []
-        existing = _existing_ready_certificate(
-            {_certificate_key(item): item for item in certificates},
-            record_to_save.get("line_item_id"),
-            record_to_save.get("edition_number"),
-            record_to_save.get("line_item_unit_index"),
-        )
-        if existing:
+        if existing and _certificate_has_pdf(existing):
             sync_result = _sync_order_certificate_records(
                 order_gid,
                 certificates,
@@ -706,9 +746,9 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None, 
                 existing=True,
             )
             return {
-                "record": existing,
-                "saved": False,
-                "skipped_existing": True,
+                "record": record_to_save,
+                "saved": assets_added,
+                "skipped_existing": not assets_added,
                 "metafields_synced": bool(sync_result.get("ok")),
                 "metafield_error": sync_result.get("error") or "",
             }
