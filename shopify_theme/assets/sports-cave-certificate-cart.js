@@ -75,6 +75,10 @@
         localStorage.setItem(LAST, path);
         localStorage.setItem(POSITION, JSON.stringify({path, y: scrollY}));
       } catch (_) {}
+      try {
+        sessionStorage.setItem(LAST, current.pathname + current.search + current.hash);
+        sessionStorage.setItem(POSITION, JSON.stringify({path: current.pathname + current.search + current.hash, y: scrollY}));
+      } catch (_) {}
     };
     remember();
     addEventListener('pagehide', remember);
@@ -85,7 +89,8 @@
     return;
   }
   let lastPage;
-  try { lastPage = localStorage.getItem(LAST); } catch (_) {}
+  try { lastPage = sessionStorage.getItem(LAST); } catch (_) {}
+  if (!lastPage) { try { lastPage = localStorage.getItem(LAST); } catch (_) {} }
   const target = new URL(targetPath(lastPage, location.origin), location.origin);
   const here = new URL(location.href);
   ['sc_certificate_cart', 'sc_cart', 'country', 'sso'].forEach(key => { here.searchParams.delete(key); });
@@ -111,7 +116,10 @@
     await uiReady();
     const drawer = document.querySelector('cart-drawer');
     try {
-      const position = JSON.parse(localStorage.getItem(POSITION));
+      let savedPosition;
+      try { savedPosition = sessionStorage.getItem(POSITION); } catch (_) {}
+      if (!savedPosition) { try { savedPosition = localStorage.getItem(POSITION); } catch (_) {} }
+      const position = JSON.parse(savedPosition);
       const current = new URL(location.href); current.searchParams.delete('country'); current.searchParams.delete('sso');
       if (position?.path === current.pathname + current.search + current.hash) scrollTo(0, Number(position.y) || 0);
     } catch (_) {}

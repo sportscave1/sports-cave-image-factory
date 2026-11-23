@@ -77,3 +77,15 @@ test('return links retain the exact product variant and anchor',()=>{
  assert.equal(targetPath('/products/art?variant=42#sizes',origin),'/products/art?variant=42&sc_cart=1#sizes');
  assert.equal(targetPath('/en-us/account',origin),'/collections/all-sports-wall-art?sc_cart=1');
 });
+
+test('another storefront tab cannot replace this tab\'s certificate return page',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');
+ const source=fs.readFileSync(require.resolve('../shopify_theme/assets/sports-cave-certificate-cart.js'),'utf8');
+ const LAST='sports-cave:last-storefront-page';let destination;
+ const local=new Map([[LAST,'/pages/reviews']]),session=new Map([[LAST,'/products/original?variant=42#sizes']]);
+ vm.runInNewContext(source,{window:{},URL,location:{href:origin+'/?country=CA&sc_certificate_cart=fixture',origin,replace:value=>{destination=value}},
+  localStorage:{getItem:key=>local.get(key)},sessionStorage:{getItem:key=>session.get(key)}});
+ const target=new URL(destination,origin);
+ assert.equal(target.pathname,'/products/original');assert.equal(target.searchParams.get('variant'),'42');
+ assert.equal(target.searchParams.get('country'),'CA');assert.equal(target.hash,'#sizes');
+});
