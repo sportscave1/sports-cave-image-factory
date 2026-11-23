@@ -80,6 +80,12 @@ Exact committed acceptance and release verification follow; the public live
 catalogue is currently empty, so a populated production photo gain cannot yet be
 measured without creating a real listing (not authorised as a test).
 
+The normal release suite exposed an obsolete sidebar test on the unchanged main
+source: it required the AI Reels dispatcher removed by79a61d51's community-inbox
+release. Its assertion now verifies the real legacy redirect, destination
+permission key and absence of a standalone retired page. No navigation source or
+test-suite selection was removed; the full normal gate must pass before push.
+
 Rollback is reverting the two runtime files through the same release process;
 process exit discards cached bytes. No schema or external writes need reversal.
 No deletion is justified. Aggregate storage: Speed6reports/19229B, largest SEO
