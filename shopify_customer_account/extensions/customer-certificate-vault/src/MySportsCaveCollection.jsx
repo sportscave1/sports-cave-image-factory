@@ -784,6 +784,7 @@ function FramedCertificateOffer({
           </s-badge>
         ) : (
           <s-button
+            inlineSize="fill"
             variant="primary"
             onClick={onAdd}
             loading={checkoutState.status === "adding"}

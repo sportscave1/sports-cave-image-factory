@@ -27,6 +27,8 @@ test('frame picker uses maximum native modal with a larger preview column',()=>{
  const tree=fixture().view();assert.equal(tree.props.size,'max');
  assert.ok(find(tree,n=>n.type==='s-grid' && /1\.25fr/.test(n.props.gridTemplateColumns)));
  assert.equal(tree.props.heading,'Frame your certificate');
+ const offer=fixture().exports.FramedCertificateOffer({product:{variants:[{color:'Black',contextual_price:{amount:'99',currencyCode:'AUD'}}]},frameColor:'Black',onColorChange:()=>{},checkoutState:{status:'idle'},onAdd:()=>{},formatNumber:String});
+ assert.equal(find(offer,n=>n.type==='s-button'&&n.props.onClick).props.inlineSize,'fill');
 });
 for(const existing of [false,true])test(`Add stays over account and opens cart confirmation, existing cart: ${existing}`,async()=>{
  const f=fixture({existing});const offer=find(f.view(),n=>n.type?.name==='FramedCertificateOffer');
