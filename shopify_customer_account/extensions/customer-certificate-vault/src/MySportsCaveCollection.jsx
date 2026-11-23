@@ -646,10 +646,10 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
       <s-query-container>
       {certificate ? (
         <s-grid gridTemplateColumns="minmax(0, 1120px)" justifyContent="center">
-        <s-box padding="@container (inline-size > 750px) base, none">
+        <s-box padding="@container (inline-size > 520px) base, none">
         <s-grid
-          gridTemplateColumns={framingOnly ? "@container (inline-size > 750px) 'minmax(0, 1.1fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" : "1fr"}
-          gap="@container (inline-size > 750px) large, none"
+          gridTemplateColumns={framingOnly ? "@container (inline-size > 520px) 'minmax(0, 1.1fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" : "1fr"}
+          gap="@container (inline-size > 520px) large, none"
           alignItems="stretch"
         >
           {framingOnly && frameOffer.previewUrl ? <FramedCertificatePreview certificate={certificate} previewUrl={frameOffer.previewUrl} color={frameColor} /> : <CertificatePreview certificate={certificate} previewUrl={!framingOnly
@@ -658,8 +658,8 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 ? `${frameOffer.previewUrl}&frame=${frameColor.toLowerCase()}`
                 : certificate.frame_preview_url || certificate.certificate_preview_image_url
           } eager />}
-          <s-box padding="@container (inline-size > 750px) none, small">
-          <s-stack gap="@container (inline-size > 750px) large, small" blockSize="100%" justifyContent="space-between">
+          <s-box padding="@container (inline-size > 520px) none, small">
+          <s-stack gap="@container (inline-size > 520px) large, small" blockSize="100%" justifyContent="space-between">
             <s-stack gap="small-400">
               <s-heading>{compactTitle(title)}</s-heading>
               {certificate.edition_display ? (
@@ -668,7 +668,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 </s-text>
               ) : null}
               {cartReady ? <s-badge tone="auto" icon="check">Added to cart</s-badge> : null}
-              {framingOnly ? <s-box display="@container (inline-size > 750px) auto, none"><s-text>Your numbered certificate, professionally printed and framed.</s-text></s-box> : null}
+              {framingOnly ? <s-box display="@container (inline-size > 520px) auto, none"><s-text>Your numbered certificate, professionally printed and framed.</s-text></s-box> : null}
               {framingOnly ? <s-text color="subdued">Small · 21 × 30 cm</s-text> : null}
             </s-stack>
             {framingOnly && frameOffer.status === "loading" ? (
@@ -727,18 +727,18 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
 }
 
 function FramedCertificatePreview({certificate, previewUrl, color}) {
-  return <s-stack alignItems="center" justifyContent="center">
-    <s-box borderRadius="large" overflow="hidden" inlineSize="@container (inline-size > 750px) 100%, 160px">
+  return <s-grid gridTemplateColumns="@container (inline-size > 520px) 'minmax(0, 1fr)', '160px'" justifyContent="center" alignItems="center">
+    <s-box borderRadius="large" overflow="hidden">
     {["Black", "Oak", "White"].map(frame => (
       <s-box key={frame} display={frame === color ? "auto" : "none"} accessibilityVisibility={frame === color ? "visible" : "hidden"}>
         <s-image src={`${previewUrl}&frame=${frame.toLowerCase()}`}
           alt={`${frame} framed certificate for ${certificate.product_title || "your edition"}`}
           aspectRatio="1/1" objectFit="contain" loading="eager"
-          sizes="(min-width: 750px) 560px, 160px" />
+          sizes="(min-width: 520px) 560px, 160px" />
       </s-box>
     ))}
     </s-box>
-  </s-stack>;
+  </s-grid>;
 }
 
 function FramedCertificateOffer({
@@ -756,7 +756,7 @@ function FramedCertificateOffer({
 
   return (
     <s-box>
-      <s-stack gap="@container (inline-size > 750px) large, small">
+      <s-stack gap="@container (inline-size > 520px) large, small">
         <s-heading>Choose frame</s-heading>
         <s-grid gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap="small">
           {(product.variants?.length ? product.variants : [{color: "Black"}]).map((variant) => (
@@ -765,11 +765,11 @@ function FramedCertificateOffer({
               accessibilityLabel={`${variant.color} frame${frameColor === variant.color ? ", selected" : ""}`}
               onClick={() => onColorChange(variant.color)}>
               <s-stack gap="none" alignItems="center">
-                <s-box inlineSize="100%" display="@container (inline-size > 750px) auto, none">
+                <s-box inlineSize="100%" display="@container (inline-size > 520px) auto, none">
                   <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
                     alt={`${variant.color} frame detail`} aspectRatio="1/1" objectFit="cover" loading="eager" />
                 </s-box>
-                <s-box inlineSize="100%" display="@container (inline-size > 750px) none, auto">
+                <s-box inlineSize="100%" display="@container (inline-size > 520px) none, auto">
                   <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
                     alt={`${variant.color} frame detail`} aspectRatio="2/1" objectFit="cover" loading="eager" />
                 </s-box>
