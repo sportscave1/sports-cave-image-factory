@@ -53,7 +53,8 @@ async def ready_handoff(request, merge_supported):
         browser=await run_in_threadpool(qa_claim,tax_supported=request.headers.get('x-sports-cave-orders-tax')=='1',exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',batch_supported=request.headers.get('x-sports-cave-orders-qa-batch')=='1',sequential_supported=request.headers.get('x-sports-cave-orders-sequential')=='1',item_qa_supported=request.headers.get('x-sports-cave-orders-item-qa')=='1',**priority)
     # Continue the selected item through upload before choosing a sibling.
     if browser is None and request.headers.get('x-sports-cave-orders-browser')=='1':
-        browser=await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1',**priority)
+        recovery={'upload_recovery_supported':True} if request.headers.get('x-sports-cave-orders-upload-recovery')=='1' else {}
+        browser=await run_in_threadpool(claim,exact_item_supported=request.headers.get('x-sports-cave-orders-products')=='1',reset_supported=request.headers.get('x-sports-cave-orders-reset')=='1',**recovery,**priority)
     if browser is None and request.headers.get('x-sports-cave-orders-products')=='1' and __import__('os').getenv('SPORTS_CAVE_PRODIGI_BROWSER_ACCEPTED','').lower()=='true':
         from prodigi_product_browser import claim as product_claim
         browser=await run_in_threadpool(product_claim,**priority)
@@ -82,6 +83,10 @@ async def tick(request):
             return JSONResponse({'enabled': False, 'job': None}, headers=HEADERS)
         stage='authentication'
         actor=await run_in_threadpool(desktop, auth[7:])
+        if request.headers.get('x-sports-cave-orders-upload-recovery')=='1':
+            stage='upload_wait_recovery'
+            from prodigi_upload_recovery import recover
+            await run_in_threadpool(recover,actor)
         if request.headers.get('x-sports-cave-orders-empty-editor')=='1':
             stage='empty_product_editor_recovery'
             from prodigi_browser import recover_selected_empty_editors

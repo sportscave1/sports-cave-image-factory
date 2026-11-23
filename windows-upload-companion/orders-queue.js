@@ -21,7 +21,8 @@ async function ordersQueueTick() {
     if (!token) return false;
     const interrupted=(await chrome.storage.local.get('ordersBrowserPending')).ordersBrowserPending;
     if(interrupted && typeof prodigiReceipt==='function') {
-      await prodigiReceipt(interrupted,'finish');
+      if(typeof prodigiResumeCompletion==='function')await prodigiResumeCompletion(interrupted);
+      else await prodigiReceipt(interrupted,'finish');
       await chrome.storage.local.remove('ordersBrowserPending');
     }
     // Drain a bounded chain without a 30-second alarm gap between stages.
@@ -32,6 +33,7 @@ async function ordersQueueTick() {
     const response = await fetch(osOrigin + '/api/orders-companion/tick', {
       method:'POST', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json',
         'X-Sports-Cave-Orders-Version':typeof ordersRuntimeVersion==='function'?ordersRuntimeVersion():'1.7.48',
+        'X-Sports-Cave-Orders-Upload-Recovery':'1',
         ...(typeof preferred==='string'&&/^[A-Za-z0-9-]{1,100}$/.test(preferred)?{'X-Sports-Cave-Orders-Continue':preferred}:{}),
         'X-Sports-Cave-Orders-Browser':'1','X-Sports-Cave-Orders-QA':'1','X-Sports-Cave-Orders-Tax':'1','X-Sports-Cave-Orders-Products':'1','X-Sports-Cave-Orders-QA-Batch':'1','X-Sports-Cave-Orders-Reset':'1','X-Sports-Cave-Orders-Merge':'1','X-Sports-Cave-Orders-Sequential':'1','X-Sports-Cave-Orders-Upload-Ready':'1','X-Sports-Cave-Orders-Fresh-Page':'1','X-Sports-Cave-Orders-Page-Ready':'1','X-Sports-Cave-Orders-Empty-Editor':'1','X-Sports-Cave-Orders-Item-QA':'1'},
       body:'{}', credentials:'omit', signal:AbortSignal.timeout(150000),

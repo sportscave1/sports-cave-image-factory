@@ -159,7 +159,7 @@ def has_existing_artwork(item):
 
 
 @stages.stale_result(None)
-def claim(*,exact_item_supported=False,reset_supported=False,preferred_order=''):
+def claim(*,exact_item_supported=False,reset_supported=False,upload_recovery_supported=False,preferred_order=''):
     import os
     with stages.edit(LOCK) as cur:
         cur.execute('''SELECT key,value FROM app_settings WHERE
@@ -179,9 +179,21 @@ def claim(*,exact_item_supported=False,reset_supported=False,preferred_order='')
                 continue
             if value.get('browser') or value.get('write_intent'):
                 continue  # An uncertain upload is never automatically repeated.
+            recovery=value.get('upload_recovery')
+            if recovery and (not upload_recovery_supported or not exact_item_supported):continue
             try:
                 snap, order, item = checked(value, provider, resolver, sandbox)
                 replace=has_existing_artwork(item)
+                if recovery and (sandbox or replace or recovery.get('source_sha256')!=snap['output']['sha256']
+                        or business(order,item['id'])!=recovery.get('before')
+                        or (item.get('assets') or [])!=recovery.get('empty_slots')):
+                    raise ValueError('The empty upload recovery draft changed; review this same order.')
+                reused_asset=None
+                if recovery and recovery.get('asset_id'):
+                    from prodigi_upload_recovery import reusable_asset
+                    reused_asset=reusable_asset(provider,recovery['filename'],snap)
+                    if reused_asset!=recovery['asset_id']:
+                        raise ValueError('The verified library upload changed before recovery.')
                 if replace:
                     from prodigi_reset import replacement_allowed
                     if not replacement_allowed(value,order,item):raise ValueError('Existing supplier artwork requires an explicit full Reset.')
@@ -205,8 +217,10 @@ def claim(*,exact_item_supported=False,reset_supported=False,preferred_order='')
                 token = secrets.token_urlsafe(32)
                 value.update(status='Browser uploading',message='Companion is uploading artwork. Payment and production remain manual.')
                 filename=f'SC-{value["allocation_id"]}-{snap["job_id"][:16]}-{prep.digest(token)[:8]}.jpg'
+                if reused_asset:filename=recovery['filename']
                 value['browser'] = dict(token_hash=prep.digest(token), started=False,filename=filename,
                     before=business(order,item['id']),empty_slots=deepcopy(item.get('assets') or []), claimed_at=prep.now(), environment=provider.mode)
+                if reused_asset:value['browser']['library_asset_id']=reused_asset
                 save(cur,key,value)
                 host = 'sandbox-beta-dashboard.pwinty.com' if sandbox else 'dashboard.prodigi.com'
                 return dict(key=key,token=token,environment=provider.mode,order_id=value['order_id'],
@@ -214,6 +228,8 @@ def claim(*,exact_item_supported=False,reset_supported=False,preferred_order='')
                     order_url=f'https://{host}/orders/{value["order_id"]}/detail',artwork_url=url,
                     sha256=snap['output']['sha256'],bytes=snap['output']['bytes'],dimensions=snap['dimensions'],
                     filename=filename,exact_item=exact_item_supported,
+                    **({'fresh_empty_item':True} if recovery else {}),
+                    **({'library_asset_id':reused_asset} if reused_asset else {}),
                     **({'selected_empty_product':True} if not sandbox and exact_item_supported and not replace
                        and (value.get('product_browser',{}).get('verified') is True or reset_empty) else {}),
                     **({'replace_artwork':True} if replace else {}))
@@ -252,6 +268,10 @@ def permit(key,token,sha256):
         if ((has_existing_artwork(item) and not replacement_allowed(value,order,item)) or (item.get('assets') or [])!=browser.get('empty_slots',[])
                 or business(order,item['id'])!=browser['before']):
             raise ValueError('The supplier order changed before Save.')
+        if browser.get('library_asset_id'):
+            from prodigi_upload_recovery import reusable_asset
+            if reusable_asset(provider,browser['filename'],snap)!=browser['library_asset_id']:
+                raise ValueError('The recovered library JPG changed before Save.')
         browser.update(started=True,save_permitted_at=prep.now(),companion_sha256=sha256)
         if value.get('reset_authorisation'):value['reset_authorisation']['used_at']=prep.now()
         save(cur,key,value)  # Commit before the browser is permitted to Save.
