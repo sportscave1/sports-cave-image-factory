@@ -33,7 +33,7 @@ for(const existing of [false,true])test(`Add stays over account and opens cart c
  await offer.props.onAdd();assert.equal(f.state[2].status,'ready');assert.equal(f.queries,existing?0:1);
  assert.equal(f.calls[0].body.frame_variant_id,'gid://shopify/ProductVariant/42');assert.equal(f.calls[0].body.country,'US');
  const cart=f.view();assert.equal(cart.props.heading,'Your framed certificate cart');
- assert.equal(find(cart,n=>n.type==='s-button'&&n.children.includes('Continue to checkout')).props.href,'https://fixture.test/launch');
+ assert.equal(find(cart,n=>n.type==='s-button'&&n.children.includes('Continue to cart')).props.href,'https://fixture.test/launch');
  assert.ok(find(cart,n=>n.type==='s-button'&&n.props.command==='--hide'));
  assert.ok(find(cart,n=>n.children.includes('USD 79')));
  assert.equal(find(cart,n=>n.type?.name==='FramedCertificateOffer'),null);
@@ -73,4 +73,13 @@ test('paired products keep the smart order and return only two published availab
  const product=(id,available=true)=>({id,handle:id,variants:{nodes:[{availableForSale:available}]}});
  const result=commerceModule.exports.pairedProducts(['1','2','3','4','5'],[product('5'),product('3'),product('1',false),null,product('4')]);
  assert.deepEqual(Array.from(result,p=>p.id),['3','4']);
+});
+
+test('native responsive grid expressions escape reserved CSS punctuation',()=>{
+ for(const file of ['MySportsCaveCollection.jsx','AccountReview.jsx']){
+ const jsx=fs.readFileSync(path.join(__dirname,'../shopify_customer_account/extensions/customer-certificate-vault/src',file),'utf8');
+ for(const match of jsx.matchAll(/gridTemplateColumns="(@container[^"]+)"/g)){
+  const value=match[1];if(value.includes('minmax(')) assert.match(value,/\) '[^']+', '[^']+'$/);
+ }
+ }
 });

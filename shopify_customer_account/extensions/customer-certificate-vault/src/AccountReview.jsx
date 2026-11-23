@@ -84,10 +84,10 @@ export function AccountReview({prompt, certificate, request}) {
 
   return (
     <s-box padding="base" border="base" borderRadius="large" background="subdued">
-      <s-grid gridTemplateColumns="@container (inline-size > 650px) 104px minmax(0, 1fr), 64px minmax(0, 1fr)" gap="base" alignItems="center">
+      <s-grid gridTemplateColumns="@container (inline-size > 650px) '104px minmax(0, 1fr)', '64px minmax(0, 1fr)'" gap="base" alignItems="center">
         <s-box><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url}
           alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="4/3" objectFit="contain" loading="eager" /></s-box>
-        <s-grid gridTemplateColumns="@container (inline-size > 650px) minmax(0, 1fr) auto, 1fr" gap="base" alignItems="center">
+        <s-grid gridTemplateColumns="@container (inline-size > 650px) 'minmax(0, 1fr) auto', '1fr'" gap="base" alignItems="center">
         <s-stack gap="small-400">
           <s-text type="strong">{submitted ? "Thank you for your review" : "How does it look in your space?"}</s-text>
           <StarRating rating={rating} onChange={chooseRating} modalId={modalId} />

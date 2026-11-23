@@ -303,7 +303,7 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
   const edition = item => editionLabel(item.edition_display).replace(/^Edition #/, "");
   const preview = active.certificate_preview_image_url;
   return <s-stack gap="large-200">
-    <s-grid gridTemplateColumns="@container (inline-size > 850px) minmax(0, 0.8fr) minmax(0, 1.2fr), minmax(0, 1fr)" gap="large-200" alignItems="start">
+    <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 0.8fr) minmax(0, 1.2fr)', 'minmax(0, 1fr)'" gap="large-200" alignItems="start">
       <s-stack gap="large">
         <s-stack gap="small-400">
           <s-heading>My Collection</s-heading>
@@ -641,11 +641,12 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
       padding="none"
       onAfterHide={onClose}
     >
+      <s-query-container>
       {certificate ? (
         <s-grid gridTemplateColumns="minmax(0, 1200px)" justifyContent="center">
         <s-box padding="@container (inline-size > 750px) large-200, none">
         <s-grid
-          gridTemplateColumns={framingOnly ? "@container (inline-size > 750px) minmax(0, 1.25fr) minmax(0, 1fr), minmax(0, 1fr)" : "1fr"}
+          gridTemplateColumns={framingOnly ? "@container (inline-size > 750px) 'minmax(0, 1.25fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" : "1fr"}
           gap="@container (inline-size > 750px) large-200, none"
           alignItems="start"
         >
@@ -690,7 +691,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 </s-box>
                 <s-text color="subdued">Your existing store cart items will be included at checkout.</s-text>
                 <s-grid gridTemplateColumns="1fr" gap="base">
-                  <s-button variant="primary" href={checkoutState.checkoutUrl}>Continue to checkout</s-button>
+                  <s-button variant="primary" href={checkoutState.checkoutUrl}>Continue to cart</s-button>
                   <s-button variant="secondary" command="--hide" commandFor={modalId}>Continue browsing My Collection</s-button>
                 </s-grid>
               </s-stack>
@@ -718,6 +719,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
       ) : (
         <s-text color="subdued">Choose a certificate to view it.</s-text>
       )}
+      </s-query-container>
     </s-modal>
   );
 }
@@ -839,7 +841,7 @@ function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
     {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
     <s-grid gridTemplateColumns="@container (inline-size > 480px) 1fr 1fr, 1fr" gap="large" alignItems="stretch">
       {products.map(product => <s-link key={product.id} href={`https://www.sportscaveshop.com/products/${product.handle}?country=${country}`} target="_blank">
-        <s-grid gridTemplateColumns="@container (inline-size > 850px) minmax(0, 1.2fr) minmax(0, 1fr), 1fr" gap="base" alignItems="center">
+        <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 1.2fr) minmax(0, 1fr)', '1fr'" gap="base" alignItems="center">
           {product.featuredImage?.url ? <s-image src={product.featuredImage.url} alt={product.featuredImage.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : null}
           <s-text type="strong">{compactTitle(product.title)}</s-text>
         </s-grid>
