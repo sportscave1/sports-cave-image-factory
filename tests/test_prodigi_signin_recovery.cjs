@@ -53,6 +53,12 @@ test('failed wait acknowledgement retains the sign-in outbox over worker restart
  assert.equal(w.saved.ordersBrowserPending.ordersSignInDetected,true);
  assert.equal(w.saved.ordersBrowserPending.token,plan.token);
 });
+test('a retired sign-in outbox is released without navigation or another supplier action',async()=>{
+ const w=worker();w.context.fetch=async()=>({ok:true,json:async()=>({status:'retired'})});
+ const result=await vm.runInContext('prodigiPauseForSignin(plan)',w.context);
+ assert.equal(result.status,'Handoff unavailable');assert(!w.saved.ordersBrowserPending);
+ assert.equal(w.actions.length,0);
+});
 test('saved password enters only the top-frame pinned login and is absent from persistent state and requests',async()=>{
  const w=worker();await vm.runInContext('prodigiSigninRecover()',w.context);
  assert.deepEqual(w.calls.map(c=>c.data.action),['pending','credentials']);

@@ -63,11 +63,17 @@ def owned(value, receipt, user, pairing, wait_id):
 
 def pause(user, pairing, data):
     key = data['key'].removeprefix('product:')
+    if data['kind'] not in FIELDS or not re.fullmatch(r'prodigi_prepare:\d+', key):
+        raise ValueError('Invalid sign-in recovery scope.')
     with stages.edit(browser.LOCK) as cur:
-        value, receipt, field, active, _ = scoped(cur, key, data['kind'])
-        if (not isinstance(data['token'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', data['token'])
-                or not hmac.compare_digest(receipt.get('token_hash', ''), prep.digest(data['token']))):
+        try:
+            value, receipt, field, active, _ = scoped(cur, key, data['kind'])
+        except ValueError:
+            return {'status': 'retired'}  # Removed/hidden order; release the old desktop outbox.
+        if not isinstance(data['token'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', data['token']):
             raise PermissionError('Sign-in handoff token rejected.')
+        if not hmac.compare_digest(receipt.get('token_hash', ''), prep.digest(data['token'])):
+            return {'status': 'retired'}  # Reset revoked this token; never hold later orders.
         if not valid_login(data['login_url'], value):
             raise ValueError('Sign-in must return to this exact Prodigi order.')
         if value.get('submission') or receipt.get('verified') or value.get('status') not in (active, 'Needs review'):

@@ -215,6 +215,21 @@ def test_retired_wait_cannot_mutate_a_new_handoff_or_submission(blank):
     assert saved['product_browser']['token_hash'] == prep.digest('new-token') and saved['submission'] and not saved.get('signin_wait')
 
 
+@pytest.mark.parametrize('retired', ['reset', 'hidden'])
+def test_a_retired_signin_outbox_is_acknowledged_without_mutating_the_current_order(blank, retired):
+    plan = product.claim()
+    target = signin.login_url(prep.read(1))
+    value = prep.read(1)
+    if retired == 'reset':
+        value.pop('product_browser'); value['status'] = product.WAITING
+    else:
+        value['hidden'] = True
+    write(value)
+    before = deepcopy(prep.read(1))
+    assert signin.pause(USER, PAIR, dict(key=plan['key'], token=plan['token'], kind='product', login_url=target)) == {'status': 'retired'}
+    assert prep.read(1) == before and not blank.writes
+
+
 def test_signin_api_rejects_unpaired_oversized_and_extra_fields_without_echoing_secrets(monkeypatch):
     import prodigi_preparation_api as api
     monkeypatch.setattr(api, 'desktop', lambda _: USER)
