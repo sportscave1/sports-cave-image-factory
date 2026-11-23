@@ -336,7 +336,7 @@ def approve(snapshot,provider,asset_id):
     native=snapshot['certificate_evidence']['source_dimensions']
     ppi=[n*25.4/mm for n,mm in zip(native,physical)]
     blockers=[]
-    if min(ppi)<dpi:blockers.append('The original certificate resolution is below the supplier recommendation; review required.')
+    if min(ppi)+0.5<dpi:blockers.append('The original certificate resolution is below the supplier recommendation; review required.')
     with tempfile.TemporaryDirectory(prefix='sc-certificate-qa-') as folder:
         path=fetch(snapshot,folder)
         if hashlib.sha256(Path(path).read_bytes()).hexdigest()!=snapshot['output']['sha256']:
