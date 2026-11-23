@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts' / 'studio'))
@@ -112,8 +113,18 @@ def main():
         evidence['functional_checks_passed'] = True
         print(json.dumps({k: v for k, v in evidence.items() if k not in {'policy', 'source_manifest'}}, indent=2))
     finally:
-        runtime.stop()
-        studio.atomic(folder / 'acceptance.json', evidence)
+        try:
+            for attempt in range(30):
+                try:
+                    runtime.stop()
+                    evidence['cleanup_complete'] = True
+                    break
+                except RuntimeError as error:
+                    if not str(error).startswith('Registry occupied.') or attempt == 29:
+                        raise
+                    time.sleep(1)
+        finally:
+            studio.atomic(folder / 'acceptance.json', evidence)
 
 
 if __name__ == '__main__':
