@@ -107,3 +107,33 @@ Disposable-database tests prove successful and rejected recovery and duplicate p
 The release preserves the concurrently approved collection/certificate release by
 rebasing onto current remote main; the task never edits another task checkout.
 Companion 1.7.52 was observed in the server runtime record after owner reload.
+
+## Companion readiness follow-up 1.7.53
+
+Both original JPGs passed independent source/asset verification. Shared dashboard QA
+then timed out at open. Read-only inspection of the exact rendered supplier draft
+showed both numbered artworks as Excellent, its exact order heading under main, and
+document.readyState still interactive. The old readiness handler required complete,
+which can wait on unrelated supplier resources even after the order is usable.
+
+Version 1.7.53 accepts interactive or complete only with one exact rendered order
+heading matching the pinned order path. Loading, sign-in, missing/duplicate headings,
+and another/prefix-matched order stay rejected. All action permits remain unchanged.
+Eight readiness regressions were added; no backend behavior changes in this follow-up.
+This extension-only follow-up is committed with skip-render to retain the verified
+running backend. The installed extension and an offline package are updated directly;
+the hosted package will pick it up on the next normal backend release.
+
+## Confirmed order outcome and complete hosted package
+
+Both allocations passed full dashboard QA and have independently confirmed Submitted
+receipts for original supplier order 75351351495771648. The supplier dashboard showed
+its normal finite countdown of approximately six hours until production. No hold,
+payment, production delay, customer automation or supplier account setting was changed.
+Certificates remain scheduled by the existing workflow after production is confirmed.
+
+The final normal release also ships the 1.7.53 hosted extension download, so a newly
+paired desktop receives the same readiness fix as the repaired local installation.
+No Python application logic changed after the full 455-case Python gate; the follow-up
+passes all 148 Node cases and offline package verification. Backend health, actual
+service revisions, local companion version and order receipts are verified separately.
