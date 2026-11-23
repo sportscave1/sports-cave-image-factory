@@ -1,10 +1,14 @@
 /** @jsxImportSource preact */
 import {useEffect,useRef,useState} from 'preact/hooks';
+import {reviewProductId, secondProductImage, REVIEW_IMAGE_QUERY} from './account-review-utils.js';
 import {fileFromDropEvent,inputValue,isAllowedReviewPhoto} from './vault-utils.js';
-export function AccountReview({prompt, certificate, request}) {
+export function AccountReview({prompt, certificate, request, api}) {
   const [submitted,setSubmitted]=useState(false);
   const onSubmitted=()=>setSubmitted(true);
   const [rating, setRating] = useState(0);
+  const [name, setName] = useState("");
+  const [setupImage, setSetupImage] = useState(null);
+  const productId = reviewProductId(prompt, certificate);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [photo, setPhoto] = useState(null);
@@ -20,6 +24,15 @@ export function AccountReview({prompt, certificate, request}) {
       if (readerRef.current?.readyState === 1) readerRef.current.abort();
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    setSetupImage(null);
+    if (productId) api.query(REVIEW_IMAGE_QUERY, {variables: {id: productId}})
+      .then(result => { if (active) setSetupImage(secondProductImage(result.data?.product)); })
+      .catch(() => {}); // Purchased image remains usable when product media is unavailable.
+    return () => { active = false; };
+  }, [api, productId]);
 
   const chooseRating = (value) => {
     setRating(value);
@@ -55,6 +68,10 @@ export function AccountReview({prompt, certificate, request}) {
       setSubmitState({status: "error", message: "Choose a star rating."});
       return;
     }
+    if (!name.trim()) {
+      setSubmitState({status: "error", message: "Enter your name."});
+      return;
+    }
     if (body.trim().length < 10) {
       setSubmitState({status: "error", message: "Review text must be at least 10 characters."});
       return;
@@ -66,6 +83,7 @@ export function AccountReview({prompt, certificate, request}) {
         body: {
           review_reference: prompt.reference,
           rating,
+          reviewer_name: name.trim(),
           title,
           body,
           photo: photo ? {
@@ -102,35 +120,44 @@ export function AccountReview({prompt, certificate, request}) {
       <s-modal
         ref={modalRef}
         id={modalId}
-        heading={`Review ${prompt?.product_title || certificate?.product_title || "your edition"}`}
+        heading="How does it look in your space?"
         accessibilityLabel={`Leave a review for ${prompt?.product_title || certificate?.product_title || "your edition"}`}
         size="large"
       >
         <s-stack gap="small">
           {!prompt ? <s-banner tone="info">Reviews are available for delivered editions. Your review options will appear here when ready.</s-banner> : null}
-          <s-text color="subdued">Your review is sent to Judge.me for publishing under our review settings.</s-text>
+          <s-grid gridTemplateColumns="80px minmax(0, 1fr)" gap="base" alignItems="center">
+            <s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your edition"} aspectRatio="4/3" objectFit="cover" />
+            <s-stack gap="small-400">
+              <s-text type="strong">{prompt?.product_title || certificate?.product_title}</s-text>
+              <s-text color="subdued">Edition {certificate?.edition_display?.replace(/^#/, "").replace(/\s*\/\s*/, " of ")}</s-text>
+            </s-stack>
+          </s-grid>
+          <s-divider />
+          <s-text type="strong">Your rating</s-text>
           <StarRating rating={rating} onChange={chooseRating} />
-          <s-text-field
-            label="Review title (optional)"
-            value={title}
-            maxLength={120}
-            onInput={(event) => setTitle(inputValue(event))}
-          ></s-text-field>
-          <s-text-area
-            label="Your review"
-            value={body}
-            minLength={10}
-            maxLength={2000}
-            required
-            rows={3}
-            onInput={(event) => setBody(inputValue(event))}
-          ></s-text-area>
-          <s-drop-zone
-            label="Add a customer photo (optional)"
-            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-            error={photoError}
-                onInput={handlePhoto}
-          ></s-drop-zone>
+          <s-box border="base" borderRadius="large" padding="base" background="subdued">
+            <s-grid gridTemplateColumns="@container (inline-size > 500px) 'minmax(0, 1fr) minmax(0, 1.2fr)', 'minmax(0, 1fr)'" gap="base" alignItems="center">
+              <s-image src={setupImage?.url || certificate?.purchased_image_url} alt={setupImage?.altText || "Your edition in a room"} aspectRatio="1.25" objectFit="cover" loading="lazy" />
+              <s-stack gap="small">
+                <s-heading>Show us your setup</s-heading>
+                <s-text>Start with the whole wall, then move in on your edition number.</s-text>
+                <s-drop-zone
+                  label="Add photo (optional)"
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  error={photoError}
+                  onInput={handlePhoto}
+                ></s-drop-zone>
+              </s-stack>
+            </s-grid>
+          </s-box>
+          <s-text-field label="Name" value={name} maxLength={120} required
+            onInput={(event) => setName(inputValue(event))}></s-text-field>
+          <s-text-field label="Review title (optional)" value={title} maxLength={120}
+            onInput={(event) => setTitle(inputValue(event))}></s-text-field>
+          <s-text-area label="Your review" placeholder="What stands out now that it’s on your wall?"
+            value={body} minLength={10} maxLength={2000} required rows={3}
+            onInput={(event) => setBody(inputValue(event))}></s-text-area>
           {photo ? (
             <s-stack gap="small">
               <s-image
@@ -170,7 +197,7 @@ export function AccountReview({prompt, certificate, request}) {
 
 function StarRating({rating, onChange, modalId = "", compact = false}) {
   return (
-    <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" inlineSize={compact ? "120px" : "180px"} gap="none" alignItems="center">
+    <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" inlineSize={compact ? "120px" : "260px"} gap="none" alignItems="center">
       {[1, 2, 3, 4, 5].map((value) => (
         <s-clickable
           key={value}
@@ -185,7 +212,7 @@ function StarRating({rating, onChange, modalId = "", compact = false}) {
           <s-icon
             type={value <= rating ? "star-filled" : "star"}
             tone="warning"
-            size="base"
+            size={compact ? "base" : "large"}
           ></s-icon>
         </s-clickable>
       ))}

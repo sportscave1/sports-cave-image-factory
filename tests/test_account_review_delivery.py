@@ -80,3 +80,20 @@ def test_documented_background_acceptance_does_not_require_immediate_review_id()
 def test_non_success_http_response_is_not_reported_as_submitted(status):
     with pytest.raises(vault.CollectorVaultUnavailableError):
         deliver(status, {})
+
+@pytest.mark.parametrize("display_name,expected", [("  Collector Name  ","Collector Name"), ("", "Order Name"), ("x" * 160, "x" * 120)])
+def test_public_name_reaches_judgeme_without_overriding_verified_email(display_name, expected):
+    from unittest.mock import MagicMock
+    db = MagicMock()
+    db.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value = {"submission_reference": "fixture"}
+    with patch.object(vault, "_resolve_review_reference", return_value={"certificate_row_id": 1}), \
+         patch.object(vault, "customer_hash", return_value="owner"), \
+         patch.object(vault, "_reserve_review_submission", return_value={"id": 1}), \
+         patch.object(vault, "_upload_review_photo", return_value={}), \
+         patch.object(vault, "_reviewer_details", return_value=("Order Name", "owner@example.test")), \
+         patch.object(vault, "_submit_judgeme_review", return_value={}) as deliver_review, \
+         patch.object(vault.supabase_backend, "connect", return_value=db), \
+         patch.object(vault, "record_event"):
+        vault.submit_review("owner", review_reference="signed", rating=4, body="Looks great on the wall", reviewer_name=display_name)
+    assert deliver_review.call_args.kwargs["name"] == expected
+    assert deliver_review.call_args.kwargs["email"] == "owner@example.test"

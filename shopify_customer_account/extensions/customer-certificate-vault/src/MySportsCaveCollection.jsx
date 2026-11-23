@@ -175,7 +175,7 @@ function Extension() {
             />
           ) : null}
           {status === "ready" ? (
-            <AccountReview certificate={firstCertificate} prompt={reviewPrompt} request={(path, options) => vaultRequest(api, apiBaseUrl, path, options)} />
+            <AccountReview api={api} certificate={certificates.find(item => item.shopify_product_id === reviewPrompt?.shopify_product_id) || firstCertificate} prompt={reviewPrompt} request={(path, options) => vaultRequest(api, apiBaseUrl, path, options)} />
           ) : null}
           {status === "ready" && certificates.length === 0 ? (
             <EmptyState />

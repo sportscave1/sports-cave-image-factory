@@ -1775,6 +1775,7 @@ def submit_review(
     rating,
     body,
     title="",
+    reviewer_name="",
     photo=None,
     request_post=None,
 ):
@@ -1786,6 +1787,7 @@ def submit_review(
         raise CollectorVaultError("Choose a star rating from 1 to 5.")
     body_value = _clean_review_text(body, maximum=REVIEW_BODY_MAX_LENGTH)
     title_value = _clean_review_text(title, maximum=REVIEW_TITLE_MAX_LENGTH)
+    name_value = _clean_review_text(reviewer_name, maximum=120)
     if len(body_value) < REVIEW_BODY_MIN_LENGTH:
         raise CollectorVaultError("Review text must be at least 10 characters.")
     row = _resolve_review_reference(review_reference, shopify_customer_id)
@@ -1805,7 +1807,7 @@ def submit_review(
         judge_result = _submit_judgeme_review(
             row,
             judge_submission,
-            name=name,
+            name=name_value or name,
             email=email,
             photo_upload=photo_upload,
             request_post=request_post,

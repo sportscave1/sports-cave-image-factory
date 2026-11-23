@@ -225,6 +225,7 @@ async def collector_vault_review_submit(request: Request):
             review_reference=body.get("review_reference"),
             rating=body.get("rating"),
             title=body.get("title"),
+            reviewer_name=body.get("reviewer_name"),
             body=body.get("body"),
             photo=body.get("photo"),
         )
