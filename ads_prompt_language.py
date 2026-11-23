@@ -1,6 +1,7 @@
 """Prompt wording only; no validation gates, storage or execution changes."""
 from functools import wraps
 from inspect import signature
+from ads_ie_scenes import NEUTRAL_WALL_RULES
 
 CONTINUITY = """SPORTS CAVE AD PROMPT LANGUAGE — CONTINUE WITH SUPPORTED CONTENT
 Treat supplied product references as edition identity and visual evidence. Write truthful collector advertising using the supplied facts and established owner-confirmed edition policies. For uncertain optional claims about achievements, endorsement, affiliation, licensing, autographs, stock or offers, omit the claim and use grounded emotional collector wording in the same field. Do not turn an optional copy uncertainty into a campaign-wide refusal, approval request or workflow stop. An edition name or depicted sporting subject alone does not establish endorsement or affiliation; do not claim either without evidence.
@@ -24,6 +25,8 @@ def apply(prompt, country='', campaign_type=''):
     if not prompt:
         return prompt
     rules = '' if CONTINUITY in prompt else CONTINUITY
+    if NEUTRAL_WALL_RULES not in prompt:
+        rules += '\n' + NEUTRAL_WALL_RULES
     if australian_ie(country, campaign_type) and AU_COPY not in prompt:
         rules += '\n' + AU_COPY
     if not rules:

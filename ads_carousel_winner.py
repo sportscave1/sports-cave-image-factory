@@ -54,9 +54,9 @@ SPECIALIST_ROOMS = {"garage_lounge", "workshop_office", "clubroom", "pavilion", 
 LIGHT_WALLS = ("light weathered stone textured plaster", "light earthy taupe natural stone", "weathered stone concrete",
                "light smoky grey matte painted brick", "weathered stone aged timber", "light earthy taupe textured plaster",
                "light weathered stone natural stone")
-DARK_WALLS = ("charcoal textured plaster", "graphite aged timber", "heritage green natural stone",
-              "muted olive matte painted brick", "earthy taupe textured plaster", "deep navy concrete",
-              "midnight blue matte painted brick", "graphite natural stone")
+DARK_WALLS = ("charcoal textured plaster", "graphite aged timber", "deep weathered stone natural stone",
+              "warm mushroom matte painted brick", "earthy taupe textured plaster", "deep neutral brown concrete",
+              "dark neutral brown matte painted brick", "graphite natural stone")
 CAMERAS = ("straight-on with 1° natural offset", "slight left 6°", "slight right 6°",
            "left three-quarter 9°", "right three-quarter 9°",
            "slightly above centre with 4° downward view", "slightly below centre with 3° upward view")

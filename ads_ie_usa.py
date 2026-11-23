@@ -2,6 +2,7 @@
 import hashlib
 import re
 import random
+from ads_ie_scenes import NEUTRAL_WALL_RULES
 
 VERSION = 'USA IE PRODUCT FIRST V1'
 HEADLINE = 'Limited to 100 Worldwide'
@@ -29,9 +30,8 @@ COMPOSITION = ('USA PRODUCT-FIRST COMPOSITION: Preserve the angled collector hal
                'Keep furniture, bright windows and patterns subordinate. Coherent natural or warm directional light must not darken faces or key details. '
                'Use the supplied edition colours, contrast and mood; never recolour the product or add compulsory team colours, flags, neon or invented memorabilia. '
                'Recent history prevents accidental near-duplicates, not reuse of effective neutral settings across products. Inspect actual images before claiming visual quality.')
-WALL_RULES = ('USA automatic walls randomly select from eligible colours without prioritising warm neutrals. Warm greige, stone beige, sand and taupe count as one colour family; never repeat that family within a fresh pack. Soft warm off-white is a separate family; '
-              'charcoal or smoky grey require clear frame separation. Deep navy, heritage green and muted olive are eligible when supplied '
-              'edition colours support them. Vary eligible calm matte paint, fine plaster and restrained stone/concrete across the pack. Resolve room, colour, finish and lighting choices once before export; preserve assigned choices on reopen and export. Keep pronounced masonry, timber joins '
+WALL_RULES = (NEUTRAL_WALL_RULES + ' USA automatic walls randomly select from eligible neutral colours. Warm greige, stone beige, sand and taupe count as one colour family; never repeat that family within a fresh pack. Soft warm off-white is a separate family; '
+              'charcoal or smoky grey require clear frame separation. Vary eligible calm matte paint, fine plaster and restrained stone/concrete across the pack. Resolve room, colour, finish and lighting choices once before export; preserve assigned choices on reopen and export. Keep pronounced masonry, timber joins '
               'and strong material details peripheral. No fixed colour per slot or stereotyped American sports-bar styling.')
 COPY_RULES = ('USA SUPPORTING WORDING: Keep legacy_standard, framed_greatness and choose_a_side in their existing order, line/blank-line positions, '
               'approximate length and distinct approaches. Preserve signature hooks, approved scarcity, ownership closes and CTA. '
@@ -49,9 +49,9 @@ WALLS = (
     ('soft warm off-white', 'off-white', 'light', 'neutral', 'matte painted wall'),
     ('smoky grey', 'grey', 'mid', 'grey', 'restrained concrete'),
     ('charcoal', 'charcoal', 'dark', 'grey', 'matte painted wall'),
-    ('deep navy', 'navy', 'dark', 'blue', 'matte painted wall'),
-    ('heritage green', 'green', 'mid', 'green', 'fine plaster'),
-    ('muted olive', 'olive', 'mid', 'olive', 'fine plaster'),
+    ('deep neutral brown', 'neutral brown', 'dark', 'brown', 'matte painted wall'),
+    ('weathered stone', 'stone', 'mid', 'stone', 'fine plaster'),
+    ('warm mushroom', 'mushroom', 'mid', 'mushroom', 'fine plaster'),
 )
 
 
@@ -124,8 +124,6 @@ def fresh_distinct(a, b):
 
 def select_scenes(seed, context, recent=(), selections=()):
     from ads_ie_scenes import SCENES, signature, _rank, HISTORY_LIMIT
-    metadata = context.get('product_metadata') or {}
-    palette = ' '.join(str(metadata.get(k, '')) for k in ('artwork_colours', 'artwork_colors', 'dominant_colours', 'dominant_colors', 'colour_palette')).lower()
     history = [r for r in list(recent)[:HISTORY_LIMIT] if isinstance(r, dict)]
     pools = []
     for slot in SCENES:
@@ -133,8 +131,6 @@ def select_scenes(seed, context, recent=(), selections=()):
         for original in slot:
             # Retain curated homes, roles, architecture and lights; change only eligible wall treatments.
             for wi, wall in enumerate(WALLS):
-                if wi >= 7 and wall[1] not in palette:
-                    continue
                 s = dict(original)
                 colour, family, lightness, group, finish = wall
                 s.update(scene_selection_version=VERSION, scene_id=original['scene_id']+'|usa:'+str(wi),
