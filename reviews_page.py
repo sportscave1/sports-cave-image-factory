@@ -35,6 +35,18 @@ def load(key,fn,ttl=60):
     return value,activity
 def changed(*groups):invalidate(state(),*groups)
 
+def refresh_pending_reads(pending):
+    # Streamlit owns this timer so hidden tabs do not lose a one-shot JS refresh.
+    # Disable the interval as soon as the registered reads finish.
+    from time import monotonic
+    @st.fragment(run_every=1.2 if pending else None)
+    def poll():
+        stamp=monotonic();previous=state().setdefault('poll_at',stamp)
+        if pending and stamp-previous>=1:
+            state()['poll_at']=stamp
+            st.rerun(scope='app')
+    poll()
+
 def kpi_html(data=None):
     data=data or {};values=(('Average rating',None if data.get('average') is None else f"{data['average']:.1f}",':material/star:'),
       ('Total reviews',data.get('total'),''),('Reviews (30 days)',data.get('recent'),''),
@@ -303,6 +315,4 @@ def render_page(user,navigate=lambda _:None,*,store=None):
         except Exception:st.warning('Reviews could not complete this operation. Retry when storage is available.')
         with st.container(key='reviews-poll'):
             if st.button('Refresh reviews',key='reviews-refresh'):pass
-        if any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()):
-            # One controller, active only for pending reads/imports. No provider polling.
-            st.html('<script>setTimeout(()=>{if(!document.hidden&&!document.querySelector("[role=dialog]"))document.querySelector(".st-key-reviews-poll button")?.click()},1200)</script>',unsafe_allow_javascript=True)
+        refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))
