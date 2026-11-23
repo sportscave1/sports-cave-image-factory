@@ -18,6 +18,12 @@
     const item = await answer.json();
     if (!answer.ok || !item.ok || !/^\d+$/.test(String(item.variant_id)) || !item.request_reference) throw new Error('Certificate handoff unavailable');
     const root = env.root || '/';
+    if (/^[A-Z]{2}$/.test(item.country_code || '')) {
+      const localized = await env.fetch(root + 'localization', {method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:new URLSearchParams({form_type:'localization',country_code:item.country_code,return_to:'/'}).toString()});
+      if (!localized.ok) throw new Error('Country context unavailable');
+    }
     const response = await env.fetch(root + 'cart.js', {credentials: 'same-origin', cache: 'no-store'});
     if (!response.ok) throw new Error('Cart unavailable');
     const cart = await response.json();
