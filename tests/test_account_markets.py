@@ -25,14 +25,12 @@ def test_launch_uses_only_shopify_localization_without_replacing_cart(monkeypatc
     monkeypatch.setenv('COLLECTOR_VAULT_ASSET_SIGNING_SECRET',SECRET)
     token=vault._signed_token({'purpose':'frame_cart','country':'US','request_reference':str(uuid.uuid4()),'variant_id':'gid://shopify/ProductVariant/42'},ttl_seconds=60)
     app=Starlette(routes=[Route('/launch',api.collector_vault_cart_launch)])
-    response=TestClient(app).get('/launch',params={'sc_certificate_cart':token})
-    assert response.status_code==200
-    assert 'action="https://www.sportscaveshop.com/localization"' in response.text
-    assert 'name="country_code" value="US"' in response.text
-    assert 'name="_method" value="put"' in response.text
-    assert 'name="return_to" value="/?sc_certificate_cart=' in response.text
-    assert '/cart/clear' not in response.text and response.headers['cache-control']=='no-store'
-    assert TestClient(app).get('/launch',params={'sc_certificate_cart':'invalid'}).status_code in (401,403)
+    response=TestClient(app).get('/launch',params={'sc_certificate_cart':token},follow_redirects=False)
+    assert response.status_code==303
+    assert response.headers['location']==('https://www.sportscaveshop.com/?country=US&sc_certificate_cart='+token)
+    assert '/cart/clear' not in response.headers['location']
+    assert response.headers['cache-control']=='no-store'
+    assert TestClient(app).get('/launch',params={'sc_certificate_cart':'invalid'},follow_redirects=False).status_code in (401,403)
 
 def test_owned_purchase_review_does_not_require_carrier_delivery(monkeypatch):
     from tests.test_collector_vault import _certificate_row,CUSTOMER_A

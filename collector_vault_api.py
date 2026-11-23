@@ -1,5 +1,4 @@
 import json
-import html
 import logging
 import os
 import uuid
@@ -8,7 +7,7 @@ from urllib.parse import quote
 
 import requests
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from starlette.responses import RedirectResponse, JSONResponse, Response, StreamingResponse
 
 import collector_vault
 from services import r2_storage
@@ -316,26 +315,20 @@ async def collector_vault_recommendations(request: Request):
 
 
 async def collector_vault_cart_launch(request: Request):
-    """Use Shopify's own localization form before the existing cart/drawer bridge."""
+    """Apply Shopify's account return country before the existing cart/drawer bridge."""
     try:
         token=str(request.query_params.get("sc_certificate_cart") or "")
         payload=collector_vault._verify_signed_token(token, expected_purpose="frame_cart")
         country=str(payload.get("country") or "AU")
         if not collector_vault.re.fullmatch(r"[A-Z]{2}",country):
             raise collector_vault.CollectorVaultError("Invalid cart country.")
-        nonce=uuid.uuid4().hex
-        destination="/?sc_certificate_cart=" + quote(token, safe="")
-        page=f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opening your Sports Cave cart</title><body>
-        <form id="market-cart" method="post" action="https://www.sportscaveshop.com/localization">
-        <input type="hidden" name="form_type" value="localization">
-        <input type="hidden" name="_method" value="put">
-        <input type="hidden" name="utf8" value="&#x2713;">
-        <input type="hidden" name="country_code" value="{html.escape(country,quote=True)}">
-        <input type="hidden" name="return_to" value="{html.escape(destination,quote=True)}">
-        <p>Opening your Sports Cave cart…</p><button type="submit">Continue to your cart</button></form>
-        <script nonce="{nonce}">document.getElementById('market-cart').submit();</script></body></html>"""
-        return HTMLResponse(page, headers={"Cache-Control":"no-store","Referrer-Policy":"no-referrer",
-            "Content-Security-Policy":f"default-src 'none'; script-src 'nonce-{nonce}'; form-action https://www.sportscaveshop.com; base-uri 'none'; frame-ancestors 'none'"})
+        # Match Shopify's customer-account return link. A cross-site localization
+        # POST can retain the browser's previous market; country on the top-level
+        # storefront GET applies the market before the existing cart bridge runs.
+        destination=("https://www.sportscaveshop.com/?country=" + country
+                     + "&sc_certificate_cart=" + quote(token, safe=""))
+        return RedirectResponse(destination, status_code=303, headers={
+            "Cache-Control":"no-store", "Referrer-Policy":"no-referrer"})
     except Exception as error:
         return _error_response(error,"cart_launch")
 
