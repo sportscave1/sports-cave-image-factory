@@ -98,7 +98,68 @@ def recover_waiting_item_qa(user,*,page_supported=False):
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
             ORDER BY updated_at LIMIT 2""",(page_supported,))
         keys=[row['key'] for row in cur.fetchall()]
-    return sum(_recover_item_qa(key,page_supported=page_supported) for key in keys)
+    return recover_colour_plans(user)+sum(_recover_item_qa(key,page_supported=page_supported) for key in keys)
+
+
+def canonical_colour(snapshot):
+    mapping=snapshot['mapping']
+    return '' if mapping['frame']=='Unframed' else mapping['prodigi_frame_colour']
+
+
+def recover_colour_plans(user):
+    """Retire only the known unused grouped handoff with mixed colour casing."""
+    prep.require_user(user)
+    from companion_poll_transaction import connection
+    with connection(prep.connect) as conn,conn.cursor() as q:
+        q.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+          AND value->>'status'=%s AND value->'dashboard_qa'->>'started'='false'
+          AND jsonb_array_length(value->'dashboard_qa'->'batch')>1
+          AND (value->'dashboard_qa'->>'claimed_at')::timestamptz<now()-interval '90 seconds'
+          AND COALESCE((value->>'qa_colour_plan_recoveries')::int,0)<1
+          AND COALESCE(value->'dashboard_qa'->>'colour_policy','')<>'canonical-v1'
+          AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
+          ORDER BY updated_at LIMIT 2""",(ACTIVE,))
+        keys=[row['key'] for row in q.fetchall()]
+    recovered=0
+    for key in keys:
+        try:recovered+=bool(_recover_colour_plan(key))
+        except (ValueError,PermissionError):pass
+    return recovered
+
+
+@stages.stale_result(False)
+def _recover_colour_plan(key):
+    provider,resolver,_,_=browser.context(key)
+    resolver=stages.resolver_once(resolver)
+    with stages.edit(browser.LOCK) as q:
+        value=browser.read(q,key);receipt=value.get('dashboard_qa') or {}
+        if (value.get('status')!=ACTIVE or receipt.get('started') is not False
+            or value.get('qa_colour_plan_recoveries',0)>=1 or value.get('submission')
+            or receipt.get('colour_policy')=='canonical-v1'):return False
+        if (datetime.now(timezone.utc)-datetime.fromisoformat(receipt['claimed_at'])).total_seconds()<90:return False
+        ids=receipt.get('batch') or []
+        if not 2<=len(ids)<=100 or len(set(ids))!=len(ids):return False
+        before_item=next((i for i in receipt.get('before',{}).get('items',[]) if str(i.get('id'))==str(value['item_id'])),{})
+        raw=(before_item.get('attributes') or {}).get('color','');colour=canonical_colour(value['snapshot'])
+        if raw==colour or clean(raw)!=clean(colour):return False
+        _,order,_=current(value,provider,resolver)
+        units=[]
+        for aid in ids:
+            unit=browser.read(q,prep.PREFIX+str(int(aid)));other=unit.get('dashboard_qa') or {}
+            if (unit.get('status')!=ACTIVE or other.get('started') is not False
+                or other.get('token_hash')!=receipt.get('token_hash') or other.get('batch')!=ids
+                or unit.get('qa_colour_plan_recoveries',0)>=1 or unit.get('submission')):return False
+            current_for_order(unit,order,resolver)
+            if pinned_order(other['before'])!=pinned_order(order):return False
+            if clean(other['before'].get('shippingMethod'))!=clean(order.get('shippingMethod')):return False
+            units.append(unit)
+        if {str(u['item_id']) for u in units}!={str(i['id']) for i in order['items']}:return False
+        for unit in units:
+            unit.setdefault('dashboard_qa_history',[]).append({'claimed_at':receipt['claimed_at'],'event':'mixed_colour_plan_retired'})
+            unit.pop('dashboard_qa');unit['qa_colour_plan_recoveries']=1
+            unit.update(status=WAITING,message='Retrying the unused grouped QA plan with consistent verified frame colours.')
+            browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
+        return True
 
 
 @stages.stale_result(False)
@@ -210,15 +271,15 @@ def claim(*,tax_supported=False,exact_item_supported=False,batch_supported=False
                 current_for_order(unit,order,resolver)
                 previous=unit.get('dashboard_qa')
                 if previous:unit.setdefault('dashboard_qa_history',[]).append({k:previous.get(k) for k in ('policy','claimed_at','checked_at','verified')})
-                unit['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=stamp,before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required,batch=batch,item_only=item_only)
+                unit['dashboard_qa']=dict(token_hash=prep.digest(token),claimed_at=stamp,before=order,started=False,policy=POLICY,tax_policy=TAX_POLICY,tax_required=tax_required,batch=batch,item_only=item_only,colour_policy='canonical-v1')
                 unit.update(status=ACTIVE,message='Checking this edition before preparing the next item.' if item_only else 'Checking all numbered items, shipping, inserts and tax in one QA pass.')
                 browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
             return dict(kind='qa',key=key,token=token,environment='live',order_id=value['order_id'],item_id=value['item_id'],exact_item=exact_item_supported,
                 order_url='https://dashboard.prodigi.com/orders/'+value['order_id']+'/detail',
-                reference=order['merchantReference'],sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''),fresh_saved_order=True,
+                reference=order['merchantReference'],sku=item['sku'],colour=canonical_colour(snap),fresh_saved_order=True,
                 shipping_intent=intent(snap.get('shipping')),branding_set=SET,tax_declaration=True,tax_required=tax_required,
                 **({'item_only':True} if item_only else {}),
-                **({'items':[dict(item_id=v['item_id'],sku=v['snapshot']['mapping']['prodigi_code'],colour='' if v['snapshot']['mapping']['frame']=='Unframed' else v['snapshot']['mapping']['prodigi_frame_colour']) for v in values]} if len(values)>1 else {}))
+                **({'items':[dict(item_id=v['item_id'],sku=v['snapshot']['mapping']['prodigi_code'],colour=canonical_colour(v['snapshot'])) for v in values]} if len(values)>1 else {}))
         except ValueError as error:
             value.update(status='Needs review',message=str(error));prep.record_failure(value,'dashboard_qa',str(error));browser.save(q,key,value)
 

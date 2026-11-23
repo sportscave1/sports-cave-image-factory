@@ -128,6 +128,50 @@ def batch_plan(pair,monkeypatch):
     return plan,p,auth
 
 
+def test_real_grouped_server_plan_is_accepted_by_companion_with_lowercase_provider_colour(pair,monkeypatch):
+    import subprocess
+    from pathlib import Path
+    plan,p,_=batch_plan(pair,monkeypatch)
+    assert p.data['items'][0]['attributes']['color']=='natural'
+    assert plan['colour']=='Natural' and all(row['colour']==plan['colour'] for row in plan['items'])
+    script="""const fs=require('fs'),vm=require('vm');
+const c=vm.createContext({chrome:{runtime:{onMessage:{addListener(){}}}},URL});
+vm.runInContext(fs.readFileSync('windows-upload-companion/prodigi-browser.js','utf8'),c);
+c.plan=JSON.parse(fs.readFileSync(0,'utf8'));
+if(!vm.runInContext('prodigiPlanValid(plan)',c))process.exit(1);"""
+    result=subprocess.run(['node','-e',script],input=json.dumps(plan),text=True,capture_output=True,
+        cwd=Path(__file__).resolve().parent.parent,timeout=10)
+    assert result.returncode==0,result.stderr
+
+
+@pytest.mark.parametrize('case',['unchanged','used_permit','changed_asset','changed_currency','changed_address','exhausted','fixed_plan','recent_plan'])
+def test_mixed_colour_plan_recovers_whole_group_only_before_any_permit(pair,monkeypatch,case):
+    from datetime import datetime,timezone,timedelta
+    plan,p,_=batch_plan(pair,monkeypatch)
+    monkeypatch.setattr(prep,'require_user',lambda _:None)
+    with prep.connect() as c,c.cursor() as q:
+        for aid in (1,2):
+            v=prep.read(aid);r=v['dashboard_qa']
+            r.pop('colour_policy',None)
+            r['claimed_at']=(datetime.now(timezone.utc)-timedelta(seconds=10 if case=='recent_plan' else 180)).isoformat()
+            if case=='used_permit' and aid==2:r['started']=True
+            if case=='exhausted':v['qa_colour_plan_recoveries']=1
+            if case=='fixed_plan':r['colour_policy']='canonical-v1'
+            prep.save(q,v)
+    if case=='changed_asset':p.data['items'][1]['assets'][0]['url']='https://fixture/wrong'
+    if case=='changed_currency':p.data['items'][1]['unitPrice']={'amount':'52','currency':'AUD'}
+    if case=='changed_address':p.data['recipient']['address']['line1']='Changed'
+    assert qa.recover_colour_plans({'id':'owner'})==(1 if case=='unchanged' else 0)
+    assert not p.submits and not p.writes
+    if case=='unchanged':
+        assert prep.read(1)['status']==prep.read(2)['status']==qa.WAITING
+        assert prep.read(1)['browser']['verified'] and prep.read(2)['browser']['verified']
+        new=qa.claim(tax_supported=True,exact_item_supported=True,batch_supported=True)
+        assert new['token']!=plan['token'] and new['colour']==new['items'][0]['colour']
+        with pytest.raises(PermissionError):qa.permit(plan['key'],plan['token'],{})
+        assert qa.recover_colour_plans({'id':'owner'})==0
+
+
 def test_one_batch_checks_every_item_then_submits_order_only_once(pair,monkeypatch):
     from test_prodigi_dashboard_qa import options,inserts
     plan,p,auth=batch_plan(pair,monkeypatch)
