@@ -123,3 +123,17 @@ Eight readiness regressions were added; no backend behavior changes in this foll
 This extension-only follow-up is committed with skip-render to retain the verified
 running backend. The installed extension and an offline package are updated directly;
 the hosted package will pick it up on the next normal backend release.
+
+## Confirmed order outcome and complete hosted package
+
+Both allocations passed full dashboard QA and have independently confirmed Submitted
+receipts for original supplier order 75351351495771648. The supplier dashboard showed
+its normal finite countdown of approximately six hours until production. No hold,
+payment, production delay, customer automation or supplier account setting was changed.
+Certificates remain scheduled by the existing workflow after production is confirmed.
+
+The final normal release also ships the 1.7.53 hosted extension download, so a newly
+paired desktop receives the same readiness fix as the repaired local installation.
+No Python application logic changed after the full 455-case Python gate; the follow-up
+passes all 148 Node cases and offline package verification. Backend health, actual
+service revisions, local companion version and order receipts are verified separately.
