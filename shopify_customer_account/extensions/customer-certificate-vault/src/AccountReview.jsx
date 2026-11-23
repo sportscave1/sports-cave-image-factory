@@ -137,7 +137,7 @@ export function AccountReview({prompt, certificate, request, api}) {
           <s-text type="strong">Your rating</s-text>
           <StarRating rating={rating} onChange={chooseRating} />
           <s-box border="base" borderRadius="large" padding="base" background="subdued">
-            <s-grid gridTemplateColumns="@container (inline-size > 500px) 'minmax(0, 1fr) minmax(0, 1.2fr)', 'minmax(0, 1fr)'" gap="base" alignItems="center">
+            <s-grid gridTemplateColumns="minmax(0, 0.9fr) minmax(0, 1.1fr)" gap="base" alignItems="center">
               <s-image src={setupImage?.url || certificate?.purchased_image_url} alt={setupImage?.altText || "Your edition in a room"} aspectRatio="1.25" objectFit="cover" loading="lazy" />
               <s-stack gap="small">
                 <s-heading>Show us your setup</s-heading>
