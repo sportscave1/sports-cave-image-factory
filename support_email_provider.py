@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 SAFE_ERROR = "Email server temporarily unavailable. Retry connection."
 MAX_TEXT_BYTES = 512 * 1024
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
-HEADER_FIELDS = "FROM REPLY-TO TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES CONTENT-TYPE"
+HEADER_FIELDS = "FROM REPLY-TO TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES CONTENT-TYPE AUTO-SUBMITTED PRECEDENCE AUTHENTICATION-RESULTS RECEIVED"
 
 
 class MailboxError(RuntimeError):
@@ -191,6 +191,8 @@ def parse_headers(raw, *, uid, uidvalidity, flags=(), internaldate="", folder="I
     try:
         msg = BytesHeaderParser(policy=policy.default).parsebytes(raw)
         base.update(subject=decoded(msg.get("Subject", "(No subject)")),
+                    automated=(str(msg.get('Auto-Submitted','no')).casefold()!='no' or
+                               str(msg.get('Precedence','')).casefold() in {'bulk','list','junk'} or len(msg.get_all('From',[]))!=1 or len(addresses(msg.get_all('From',[])))!=1),
                     sender=(addresses(msg.get_all("From", [])) or [base["sender"]])[0],
                     to=addresses(msg.get_all("To", [])), cc=addresses(msg.get_all("Cc", [])),
                     reply_to=addresses(msg.get_all("Reply-To", [])),
@@ -199,6 +201,8 @@ def parse_headers(raw, *, uid, uidvalidity, flags=(), internaldate="", folder="I
                     in_reply_to=message_ids(" ".join(msg.get_all("In-Reply-To", []))),
                     date=parse_date(msg.get("Date")))
         base["received_at"] = base["received_at"] or base["date"]
+        from inbox_companion_policy import verified_sender
+        base['sender_verified']=verified_sender(msg,base['sender']['email'],os.getenv('SPORTS_CAVE_INBOX_AUTH_SERVERS','').split(','))
         if msg.defects:
             base["error"] = "Some message headers could not be read."
     except Exception:
@@ -1133,7 +1137,7 @@ class ImapProvider:
         return decode_part(payloads[0], part)
 
     @_retry_read
-    def read_message(self, header):
+    def read_message(self, header, *, load_inline_images=True):
         with self._connection(header["folder"], header["uidvalidity"]) as (conn, _, __):
             parts = self._structure(conn, header["uid"])
             if len(parts) > 100:
@@ -1162,7 +1166,7 @@ class ImapProvider:
                     if error.retryable or error.code in {"authentication", "tls", "select", "configuration"}:
                         raise
                     warnings.append("A body part could not be opened; using available content.")
-            wanted = referenced_cids(markup)
+            wanted = referenced_cids(markup) if load_inline_images else set()
             budget = 8 * 1024 * 1024
             for part in parts:
                 cid = part.get("content_id")

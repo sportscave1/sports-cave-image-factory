@@ -21,6 +21,9 @@ def supplier_link(order_id):
 
 
 def action_state(saved, fulfilment=""):
+    inbox=(saved or {}).get('_inbox') or {}
+    if inbox.get('blocking'):
+        return dict(label='Paused customer request' if inbox.get('paused') else 'Customer request · review',tone='warning',action='',url=supplier_link((saved or {}).get('order_id')),detail=inbox.get('label','Review customer request in Inbox Companion.'))
     if str(fulfilment).strip().lower()=="complete":
         if saved and saved.get('status')=='Complete':
             return dict(label='Complete',tone='success',action='',url=supplier_link(saved.get('order_id')),detail=saved.get('message','Supplier submission confirmed.'))
@@ -134,7 +137,10 @@ def review(saved,row,jpg):
         items=[dict(label=label,state='pending') for label in CHECKS.values()]
     timestamps=[str(v) for v in (runtime.get('seen_at'),(saved or {}).get('updated_at'),
         ((saved or {}).get('last_failure') or {}).get('at'),artwork.get('updated_at')) if v]
-    return dict(status=state,message=(artwork.get('message') if repairing else None) or runtime.get('label') or (saved or {}).get('message','Waiting for automatic artwork preparation.'),
+    message=(artwork.get('message') if repairing else None) or runtime.get('label') or (saved or {}).get('message','Waiting for automatic artwork preparation.')
+    inbox=((saved or {}).get('_inbox') or {}).get('label')
+    if inbox:message=inbox+' · '+message
+    return dict(status=state,message=message,
         artwork=artwork,
         progress=runtime,companion_version=(saved or {}).get('_companion_version',''),
         updated_at=latest_update(timestamps),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
@@ -151,17 +157,28 @@ def review(saved,row,jpg):
 
 
 def payload_rows(rows,display_rows,statuses,*,allowed):
+    from inbox_companion import available,FLAG,prep,order_identity
+    flags={}
+    if allowed and available():
+        # Include requests received before an allocation/preparation exists, in one read.
+        keys=list({FLAG+order_identity(r.get('shopify_order_id')) for r in rows if order_identity(r.get('shopify_order_id'))})
+        with prep.connect() as c,c.cursor() as q:
+            q.execute('SELECT key,value FROM app_settings WHERE key=ANY(%s)',(keys,))
+            flags={r['key']:r['value'] for r in q.fetchall()}
     payload=[]
     for r,d in zip(rows,display_rows):
         aid=str(r.get('edition_order_id') or '')
-        state=action_state(statuses.get(aid),r.get("prodigi")) if allowed and aid.isdigit() else dict(label='—',action='',tone='muted',url='',detail='')
+        saved=dict(statuses.get(aid) or {})
+        inbox=flags.get(FLAG+order_identity(r.get('shopify_order_id')))
+        if inbox:saved['_inbox']=inbox
+        state=action_state(saved or None,r.get("prodigi")) if allowed and (aid.isdigit() or inbox) else dict(label='—',action='',tone='muted',url='',detail='')
         if str(r.get('prodigi','')) in ('Refunded','Refund Pending'):state=dict(label='Blocked',action='',tone='warning',url='',detail='Refunded order')
         payload.append(dict(id=row_identity(r),cells={k:str(d.get(k) or '') for k in ('order','edition','customer','product','variant','shipping','date','prodigi')},
             psd=safe_link(d.get('file')),jpg=safe_link(d.get('print_jpg')),
             jpg_label=str(d.get('print_jpg') or '').rsplit('#',1)[-1] if '#' in str(d.get('print_jpg') or '') else ('Open JPG' if safe_link(d.get('print_jpg')) else str(d.get('print_jpg') or '')),
             state=state,certificate=(ORIGIN+'/api/orders/certificate?allocation_id='+aid if aid.isdigit() and str(r.get('prodigi','')).lower()=='complete' else safe_link(r.get('certificate_pdf_url') or r.get('shopify_file_url'))),
             jpg_download=(safe_link(d.get('print_jpg')).replace('&inline=1','').split('#')[0] if '/api/auto-editions/file?' in str(d.get('print_jpg')) else '')))
-        payload[-1]['review']=review(statuses.get(aid),r,payload[-1]['jpg'])
+        payload[-1]['review']=review(saved,r,payload[-1]['jpg'])
         if statuses.get(aid,{}).get('status')=='Complete' and statuses[aid].get('certificate_url'):
             payload[-1]['cells']['prodigi']='Complete'
             payload[-1]['certificate']=ORIGIN+'/api/orders/certificate?allocation_id='+aid

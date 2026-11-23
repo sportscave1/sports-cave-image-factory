@@ -19,6 +19,7 @@ from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 from support_email_events import EVENTS_PATH, email_events
 from support_email_completion import PATH as EMAIL_READY_PATH, read_ready
 from support_email_idle import IdleLifecycle
+from inbox_companion_api import ROUTES as INBOX_COMPANION_ROUTES
 from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
 from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
 from wall_preview_analytics_api import ROUTES as WALL_PREVIEW_ANALYTICS_ROUTES
@@ -76,6 +77,7 @@ routes = [
         *WALL_PREVIEW_CRM_ROUTES,
         *STOREFRONT_PROTECTION_ROUTES,
         *AUTH_COOKIE_CLEANUP_ROUTES,
+        *INBOX_COMPANION_ROUTES,
     )
 ]
 routes.extend(app_branding.public_branding_routes())

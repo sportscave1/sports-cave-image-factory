@@ -35,6 +35,8 @@ def configure(user,enabled):
 
 
 def checked(value,provider,resolver,authorisation,*,whole_order=True,_order=None,units=None):
+    from inbox_companion import submission_guard
+    submission_guard(value)
     from prodigi_dashboard_qa import current,current_for_order,pinned_order,POLICY,CHECKS
     if whole_order:
         from prodigi_stage import resolver_once
