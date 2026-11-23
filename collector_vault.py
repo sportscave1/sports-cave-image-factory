@@ -1501,11 +1501,22 @@ def validate_review_photo(photo):
             )
             if int(image.width) * int(image.height) > max_pixels:
                 raise CollectorVaultError("Photo dimensions are too large.")
-            cleaned = image.convert("RGB") if expected_format in {"JPEG", "WEBP"} else image.copy()
+            # Judge.me's picture_urls accepts JPEG/PNG, not WebP. Keep accepting
+            # WebP at the account form, then convert it before provider delivery.
+            output_format = "JPEG" if expected_format == "WEBP" else expected_format
+            if expected_format == "WEBP":
+                with image.convert("RGBA") as rgba:
+                    cleaned = Image.new("RGB", rgba.size, "white")
+                    cleaned.paste(rgba, mask=rgba.getchannel("A"))
+                mime_type, extension = "image/jpeg", ".jpg"
+            else:
+                cleaned = image.convert("RGB") if expected_format == "JPEG" else image.copy()
             output = io.BytesIO()
-            save_options = {"quality": 88, "optimize": True} if expected_format in {"JPEG", "WEBP"} else {"optimize": True}
-            cleaned.save(output, expected_format, **save_options)
+            save_options = {"quality": 88, "optimize": True} if output_format == "JPEG" else {"optimize": True}
+            cleaned.save(output, output_format, **save_options)
             cleaned.close()
+            if output.tell() > min(max_bytes, 10 * 1024 * 1024):
+                raise CollectorVaultError("Photo is too large after processing. Please use a smaller photo.")
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
         raise CollectorVaultError("Photo could not be validated.") from error
     return {
@@ -1669,10 +1680,14 @@ def _submit_judgeme_review(row, submission, *, name, email, photo_upload, reques
         json=payload,
         timeout=20,
     )
-    if response.status_code >= 400:
+    if not 200 <= response.status_code < 300:
         raise CollectorVaultUnavailableError("Judge.me did not accept the review.")
     result = response.json() if response.content else {}
+    if not isinstance(result, dict) or result.get("error") or result.get("errors") or result.get("success") is False:
+        raise CollectorVaultUnavailableError("Judge.me did not accept the review.")
     review = result.get("review") or result
+    if not isinstance(review, dict):
+        raise CollectorVaultUnavailableError("Judge.me did not accept the review.")
     verification_status = str(
         review.get("verification_status") or review.get("source") or ""
     )
