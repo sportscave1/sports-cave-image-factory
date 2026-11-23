@@ -677,6 +677,57 @@ def resolve_asset_token(token):
     return asset
 
 
+def resolve_cart_preview(reference, variant_id):
+    """The random saved frame-request UUID grants only its small cart image.
+
+    Cart lifetimes exceed account asset-token lifetimes. Never reuse this
+    capability for printable/PDF assets or for selecting another certificate.
+    """
+    reference = str(reference or "").strip()
+    variant = _canonical_gid("ProductVariant", variant_id)
+    if not _UUID.match(reference) or not variant:
+        raise CollectorVaultError("Invalid cart preview reference.")
+    _require_database()
+    with supabase_backend.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT c.*, c.id AS certificate_row_id,
+                   c.shopify_customer_id AS certificate_customer_id,
+                   o.customer_id AS order_customer_id,
+                   r.customer_hash AS request_customer_hash,
+                   r.shopify_customer_id AS request_customer_id,
+                   r.status AS request_status, r.frame_variant_id,
+                   r.certificate_id AS request_certificate_id,
+                   r.edition_number AS request_edition_number
+            FROM collector_frame_requests r
+            JOIN certificates c ON c.id=r.certificate_row_id
+            JOIN shopify_orders o
+              ON regexp_replace(COALESCE(o.shopify_order_id,''),'^.*/','')
+               = regexp_replace(COALESCE(c.shopify_order_id,''),'^.*/','')
+            WHERE r.request_reference=%s
+            LIMIT 1
+        """, (reference,))
+        row = dict(cur.fetchone() or {})
+    if not row or row.get("request_status") not in {"pending", "cart_created", "ordered"}:
+        raise CollectorVaultNotFoundError("Cart preview is unavailable.")
+    owner = _canonical_gid("Customer", _row_customer_id(row))
+    certificate_owner = _canonical_gid("Customer", row.get("certificate_customer_id"))
+    if (not owner or owner != _canonical_gid("Customer", row.get("request_customer_id"))
+        or certificate_owner and certificate_owner != owner
+        or not hmac.compare_digest(str(row.get("request_customer_hash") or ""), customer_hash(owner))
+        or variant != row.get("frame_variant_id")
+        or row.get("request_certificate_id") != row.get("certificate_id")
+        or row.get("request_edition_number") != row.get("edition_number")):
+        raise CollectorVaultAuthorizationError("Cart preview does not match its certificate.")
+    if str(row.get("certificate_status") or row.get("status") or "").lower() in {"deleted", "cancelled"}:
+        raise CollectorVaultNotFoundError("Cart preview is unavailable.")
+    asset = _asset_reference(row, "preview")
+    if not asset:
+        raise CollectorVaultNotFoundError("Cart preview is not ready.")
+    return {**asset, "kind": "preview", "certificate_row_id": row["certificate_row_id"],
+            "owner_hash": customer_hash(owner),
+            "asset_version": str(row.get("updated_at") or row.get("generated_at") or "")}
+
+
 FRAME_PRODUCT_BY_ID_QUERY = """
 query CollectorVaultFrameProductById($id: ID!, $country: CountryCode!) {
   product(id: $id) {
@@ -1391,12 +1442,11 @@ def frame_cart_handoff(token):
         request = cur.fetchone()
     if not request or request.get("status") not in ("pending", "cart_created") or request.get("frame_variant_id") != payload.get("variant_id"):
         raise CollectorVaultAuthorizationError("This cart handoff is unavailable.")
-    asset_token = _signed_token({"purpose": "asset", "kind": "preview",
-                                 "certificate_row_id": request["certificate_row_id"],
-                                 "customer_hash": request["customer_hash"]}, ttl_seconds=ASSET_TOKEN_TTL_SECONDS)
     color = next((color.lower() for sku, color in FRAME_SKUS.items()
                   if sku == _frame_variant_sku(request["frame_variant_id"])), "black")
-    preview = f"https://sports-cave-image-factory.onrender.com{API_BASE_PATH}/asset?token={asset_token}&frame={color}"
+    variant = str(request["frame_variant_id"]).rsplit("/", 1)[-1]
+    preview = (f"https://sports-cave-image-factory.onrender.com{API_BASE_PATH}/frame/preview"
+               f"?reference={reference}&variant_id={variant}&frame={color}")
     return {"country_code": payload.get("country") or _frame_product_country(),
             "destination": "checkout" if payload.get("destination") == "checkout" else "drawer",
             "variant_id": str(request["frame_variant_id"]).rsplit("/", 1)[-1],

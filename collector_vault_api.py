@@ -277,6 +277,39 @@ def _stream_chunks(response):
         response.close()
 
 
+async def _framed_preview_response(asset, frame, width):
+    from collector_preview_cache import PREVIEWS, PreviewBusyError, PreviewSourceError
+    def source_url():
+        url = (r2_storage.generate_presigned_download_url(asset.get("bucket"), asset.get("key"), expires_seconds=300)
+               if asset.get("storage") == "r2" else asset.get("url"))
+        if not url:
+            raise collector_vault.CollectorVaultNotFoundError("Certificate asset is unavailable.")
+        return url
+    try:
+        image = await run_in_threadpool(PREVIEWS.framed, asset, frame, width, source_url)
+    except (PreviewBusyError, PreviewSourceError, TimeoutError):
+        raise collector_vault.CollectorVaultUnavailableError("Certificate preview is temporarily unavailable.") from None
+    return Response(image, media_type="image/webp", headers={
+        **_cors_headers(), "Cache-Control": "private, max-age=300",
+        "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+    })
+
+
+async def collector_vault_cart_preview(request: Request):
+    if request.method == "OPTIONS":
+        return await collector_vault_options(request)
+    try:
+        frame = request.query_params.get("frame")
+        if frame not in ("black", "oak", "white"):
+            raise collector_vault.CollectorVaultError("Invalid certificate frame preview.")
+        asset = await run_in_threadpool(collector_vault.resolve_cart_preview,
+            request.query_params.get("reference"), request.query_params.get("variant_id"))
+        # Fixed thumbnail output. This route cannot return a print/PDF or a source URL.
+        return await _framed_preview_response(asset, frame, 400)
+    except Exception as error:
+        return _error_response(error, "cart_preview")
+
+
 async def collector_vault_asset(request: Request):
     if request.method == "OPTIONS":
         return await collector_vault_options(request)
@@ -288,23 +321,8 @@ async def collector_vault_asset(request: Request):
         width_value = request.query_params.get("w", "1000")
         if width_value not in ("400", "1000") or ("w" in request.query_params and not frame):
             raise collector_vault.CollectorVaultError("Invalid certificate preview size.")
-        def preview_source_url():
-            if asset.get("storage") == "r2":
-                url = r2_storage.generate_presigned_download_url(asset.get("bucket"), asset.get("key"), expires_seconds=300)
-            else:
-                url = asset.get("url")
-            if not url:
-                raise collector_vault.CollectorVaultNotFoundError("Certificate asset is unavailable.")
-            return url
         if frame:
-            from collector_preview_cache import PREVIEWS, PreviewBusyError, PreviewSourceError
-            try:
-                image = await run_in_threadpool(PREVIEWS.framed, asset, frame, int(width_value), preview_source_url)
-            except (PreviewBusyError, PreviewSourceError, TimeoutError):
-                raise collector_vault.CollectorVaultUnavailableError("Certificate preview is temporarily unavailable.") from None
-            return Response(image, media_type="image/webp", headers={
-                **_cors_headers(), "Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff",
-            })
+            return await _framed_preview_response(asset, frame, int(width_value))
         headers = {
             **_cors_headers(),
             "Cache-Control": "private, max-age=300" if asset.get("kind") == "preview" else "no-store",
@@ -421,6 +439,7 @@ async def collector_vault_performance(request: Request):
 COLLECTOR_VAULT_ROUTES = (
     ('/api/collector-vault/performance', collector_vault_performance, ('POST', 'OPTIONS')),
     ("/api/collector-vault/frame/launch", collector_vault_cart_launch, ("GET",)),
+    ("/api/collector-vault/frame/preview", observe("frame_preview", collector_vault_cart_preview), ("GET", "OPTIONS")),
     ("/api/collector-vault/frame/cart-handoff", collector_vault_cart_handoff, ("POST", "OPTIONS")),
     ("/api/collector-vault/recommendations", observe('recommendations', collector_vault_recommendations), ("GET", "OPTIONS")),
     ("/api/collector-vault/bootstrap", observe('bootstrap', collector_vault_bootstrap), ("GET", "OPTIONS")),

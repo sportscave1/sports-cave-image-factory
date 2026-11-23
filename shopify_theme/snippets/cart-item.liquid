@@ -40,10 +40,20 @@
 <div class="cart-item product-{{ item.product.handle }}"{% if animate %}{%- render 'animation-attrs', attrs: 'data-cc-animate', always: true -%}{% endif %}>
   <div class="cart-item__column cart-item__image">
     <a class="cart-item__image-link" {% unless sc_private_certificate %}href="{{ item.url }}"{% endunless %}>
-      {%- assign sc_certificate_preview = item.properties['_sports_cave_certificate_preview'] -%}
-      {%- assign sc_certificate_origin = sc_certificate_preview | slice: 0, 79 -%}
-      {%- if item.properties['_sports_cave_frame_request'] != blank and sc_certificate_origin == 'https://sports-cave-image-factory.onrender.com/api/collector-vault/asset?token=' -%}
-        <img src="{{ sc_certificate_preview | escape }}" alt="{{ item.product.title | escape }}" width="100" height="100" loading="lazy" style="object-fit:contain">
+      {%- assign sc_frame_reference = item.properties['_sports_cave_frame_request'] -%}
+      {%- liquid
+        assign sc_cart_frame = ''
+        case item.variant.sku
+          when 'SC-FCC-A4-BLK'
+            assign sc_cart_frame = 'black'
+          when 'SC-FCC-A4-OAK'
+            assign sc_cart_frame = 'oak'
+          when 'SC-FCC-A4-WHT'
+            assign sc_cart_frame = 'white'
+        endcase
+      -%}
+      {%- if sc_private_certificate and sc_frame_reference != blank and sc_cart_frame != blank -%}
+        <img src="https://sports-cave-image-factory.onrender.com/api/collector-vault/frame/preview?reference={{ sc_frame_reference | url_encode }}&amp;variant_id={{ item.variant_id }}&amp;frame={{ sc_cart_frame }}" alt="{{ item.properties['Certificate'] | escape }} certificate in {{ sc_cart_frame }} frame" width="100" height="100" loading="eager" style="object-fit:contain">
       {%- else -%}
       {%- render 'image', image: item.image, sizes: '100px', widths: '100, 200', loading: image_loading -%}
       {%- endif -%}

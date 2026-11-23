@@ -1199,3 +1199,95 @@ class CollectorVaultImplementationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# A browser cart outlives the account's short-lived signed asset links.
+def _cart_preview_fixture(monkeypatch, **changes):
+    from unittest.mock import MagicMock
+    reference = "12345678-1234-4234-8234-123456789012"
+    monkeypatch.setenv("COLLECTOR_VAULT_ASSET_SIGNING_SECRET", SECRET)
+    row = {**_certificate_row(), "edition_number": 27,
+           "order_customer_id": CUSTOMER_A, "certificate_customer_id": CUSTOMER_A,
+           "request_customer_id": CUSTOMER_A, "request_customer_hash": collector_vault.customer_hash(CUSTOMER_A),
+           "request_status": "cart_created", "frame_variant_id": FRAME_VARIANT_ID,
+           "request_certificate_id": "SC-1044-027", "request_edition_number": 27,
+           **changes}
+    connection = MagicMock()
+    cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = row
+    monkeypatch.setattr(collector_vault.supabase_backend, "is_configured", lambda: True)
+    monkeypatch.setattr(collector_vault.supabase_backend, "connect", lambda: connection)
+    return reference, cursor
+
+
+def test_cart_preview_survives_account_asset_expiry_without_relaxing_asset_auth(monkeypatch):
+    import pytest
+    reference, cursor = _cart_preview_fixture(monkeypatch)
+    old = collector_vault._signed_token({"purpose": "asset", "kind": "preview"}, ttl_seconds=1800)
+    later = time.time() + 86400 * 30
+    monkeypatch.setattr(collector_vault.time, "time", lambda: later)
+    with pytest.raises(collector_vault.CollectorVaultAuthenticationError, match="expired"):
+        collector_vault.resolve_asset_token(old)
+    asset = collector_vault.resolve_cart_preview(reference, FRAME_VARIANT_ID)
+    assert asset['kind'] == 'preview' and asset['certificate_row_id'] == _certificate_row()['certificate_row_id']
+    assert asset['owner_hash'] == collector_vault.customer_hash(CUSTOMER_A)
+    assert cursor.execute.call_args.args[1] == (reference,)
+
+
+def test_cart_preview_rejects_changed_owner_variant_certificate_and_revoked_requests(monkeypatch):
+    import pytest
+    for changes in [
+        {'request_customer_id': CUSTOMER_B}, {'order_customer_id': CUSTOMER_B},
+        {'certificate_customer_id': CUSTOMER_B}, {'request_customer_hash': 'changed'},
+        {'frame_variant_id': 'gid://shopify/ProductVariant/999'},
+        {'request_certificate_id': 'different'}, {'request_edition_number': 28},
+    ]:
+        reference, _ = _cart_preview_fixture(monkeypatch, **changes)
+        with pytest.raises(collector_vault.CollectorVaultAuthorizationError):
+            collector_vault.resolve_cart_preview(reference, FRAME_VARIANT_ID)
+    for changes in [{'request_status':'cancelled'}, {'request_status':'failed'}, {'status':'Deleted'}]:
+        reference, _ = _cart_preview_fixture(monkeypatch, **changes)
+        with pytest.raises(collector_vault.CollectorVaultNotFoundError):
+            collector_vault.resolve_cart_preview(reference, FRAME_VARIANT_ID)
+
+
+def test_cart_preview_is_a_fixed_small_framed_image_not_a_print_download(monkeypatch):
+    from collector_preview_cache import PreviewPipeline
+    import collector_preview_cache
+    reference, _ = _cart_preview_fixture(monkeypatch)
+    source = io.BytesIO()
+    Image.new('RGB', (1200, 850), 'white').save(source, 'PNG')
+    pipeline = PreviewPipeline(fetch=lambda _: source.getvalue())
+    monkeypatch.setattr(collector_preview_cache, 'PREVIEWS', pipeline)
+    app = Starlette(routes=[Route(path, handler, methods=methods) for path, handler, methods in collector_vault_api.COLLECTOR_VAULT_ROUTES])
+    client = TestClient(app)
+    for color in ('black', 'oak', 'white'):
+        response = client.get('/api/collector-vault/frame/preview', params={
+            'reference':reference, 'variant_id':FRAME_VARIANT_ID, 'frame':color,
+            'kind':'print', 'w':'3508',
+        })
+        assert response.status_code == 200
+        assert response.headers['content-type'] == 'image/webp'
+        with Image.open(io.BytesIO(response.content)) as image:
+            assert image.size == (400, 400)
+    assert client.get('/api/collector-vault/frame/preview', params={'reference':reference,'variant_id':FRAME_VARIANT_ID,'frame':'other'}).status_code == 400
+    assert client.get('/api/collector-vault/frame/preview', params={'reference':'not-a-uuid','variant_id':FRAME_VARIANT_ID,'frame':'black'}).status_code == 400
+
+
+
+def test_new_cart_handoff_stores_a_durable_preview_url(monkeypatch):
+    import uuid
+    from urllib.parse import urlparse, parse_qs
+    reference, cursor = _cart_preview_fixture(monkeypatch)
+    cursor.fetchone.return_value = {'request_reference': reference, 'status':'cart_created',
+        'frame_variant_id':FRAME_VARIANT_ID, 'certificate_row_id':_certificate_row()['certificate_row_id'],
+        'customer_hash':collector_vault.customer_hash(CUSTOMER_A), 'artwork_title':'Fixture edition',
+        'edition_number':27,'edition_limit':100}
+    monkeypatch.setattr(collector_vault, '_frame_variant_sku', lambda _: 'SC-FCC-A4-BLK')
+    signed=collector_vault._signed_token({'purpose':'frame_cart','request_reference':reference,
+        'variant_id':FRAME_VARIANT_ID,'country':'AU'},ttl_seconds=60)
+    result=collector_vault.frame_cart_handoff(signed)
+    url=urlparse(result['properties']['_sports_cave_certificate_preview'])
+    assert url.path == '/api/collector-vault/frame/preview'
+    assert parse_qs(url.query) == {'reference':[reference], 'variant_id':[FRAME_VARIANT_ID.split('/')[-1]], 'frame':['black']}
+    assert 'token=' not in url.query
