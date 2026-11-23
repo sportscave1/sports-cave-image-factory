@@ -51,6 +51,18 @@ def main(argv=None):
     # The existing publication queue must not wait behind external maintenance.
     # --once retains the synchronous Engine tick for administrative/test callers.
     publication_thread=None
+    # Review media downloads and reward providers have their own bounded loop;
+    # slow file transfers must not delay the existing email delivery cycle.
+    def reviews_run():
+        from reviews_worker import tick
+        while not stop.is_set():
+            try:tick()
+            except Exception as exc:logging.getLogger(__name__).warning('review_worker_cycle_failed type=%s',type(exc).__name__)
+            stop.wait(2)
+    review_thread=None
+    if not args.once:
+        review_thread=threading.Thread(target=reviews_run,name='review-collection-poll',daemon=True)
+        review_thread.start()
     # External verification is isolated from delivery ticks. The thread owns no
     # durable state: DB leases and fenced publication recover across processes.
     def lifecycle_run():
@@ -96,10 +108,11 @@ def main(argv=None):
             wall_preview_customer_tick()
         except Exception as exc:logging.getLogger(__name__).warning('wall_preview_customer_cycle_failed type=%s',type(exc).__name__)
         # Durable review imports are independent of marketing delivery gates.
-        try:
-            from reviews_worker import tick as review_import_tick
-            review_import_tick()
-        except Exception as exc:logging.getLogger(__name__).warning('review_worker_cycle_failed type=%s',type(exc).__name__)
+        if args.once:
+            try:
+                from reviews_worker import tick as review_import_tick
+                review_import_tick()
+            except Exception as exc:logging.getLogger(__name__).warning('review_worker_cycle_failed type=%s',type(exc).__name__)
         try:engine.tick(owner)
         except WorkerStopping:break
         except Exception as exc:logging.getLogger(__name__).warning('crm_worker_cycle_failed type=%s',type(exc).__name__)
@@ -114,6 +127,7 @@ def main(argv=None):
     if preparation_thread:preparation_thread.join(timeout=6)
     if buyer_thread:buyer_thread.join(timeout=6)
     if lifecycle_thread:lifecycle_thread.join(timeout=6)
+    if review_thread:review_thread.join(timeout=6)
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

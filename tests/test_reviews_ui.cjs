@@ -19,7 +19,7 @@ const EXT=path.join(ROOT,'shopify_customer_account/extensions/sports-cave-review
    await page.waitForFunction(()=>{const main=document.querySelector('[data-testid=stMain]');return main.scrollWidth<=main.clientWidth+1},null,{timeout:10000});
    if(width<=430)assert(await page.locator('.st-key-reviews-filters [data-testid=stSelectbox]').first().evaluate(e=>e.getBoundingClientRect().width>=110),'Readable mobile filter');
    assert.equal(await page.locator('.sc-home-kpi').count(),5);
-   assert.equal(await page.locator('.st-key-reviews-tabs button').count(),3);
+   assert.equal(await page.locator('.st-key-reviews-tabs button').count(),4);
    await page.screenshot({path:path.join(evidence,'overview-'+width+'.png'),fullPage:true});
   }
   await page.setViewportSize({width:1366,height:768});await page.goto('http://127.0.0.1:8541');await page.locator('.rv-row').first().waitFor();

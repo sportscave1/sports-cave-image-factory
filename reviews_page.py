@@ -56,7 +56,7 @@ def kpi_html(data=None):
 def row_html(r):
     from crm_campaign_html import email_image_url
     image=email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
-    product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" width="42" height="42">' if image else '')+escape(r.get('product_title') or 'Needs product match')
+    product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" width="42" height="42">' if image else '')+escape('Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match')
     return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Judge.me','csv':'CSV','sports_cave':'Sports Cave'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
 
 @st.dialog('Review',width='large')
@@ -64,11 +64,26 @@ def detail(store,user,identity):
     r=store.get_review(identity)
     if not r:st.warning('Review is unavailable.');return
     stamp=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Date unavailable'
-    st.subheader(r.get('product_title') or 'Needs product match');st.caption(r['reviewer_name']+' · '+str(r['rating'])+'/5 · '+stamp+' · '+r['source'])
+    st.subheader('Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match');st.caption(r['reviewer_name']+' · '+str(r['rating'])+'/5 · '+stamp+' · '+r['source'])
     if r['verified_purchase']:st.caption('Verified purchase · matched Shopify order, customer and product')
     elif r['source_verified']:st.caption('Source reports verification · not verified by Sports Cave')
     if r['title']:st.write(r['title'])
     st.write(r['body'])
+    for media in store.media(identity):
+        st.caption(media['kind'].title()+' · '+media['status'].title())
+        if media['status']=='FAILED' and st.button('Retry media copy',key='rv_retry_'+str(media['id'])):
+            store.retry_media(user,media['id']);changed('migration');st.rerun()
+        if media['status']=='COPIED':
+            from reviews_dropbox import asset,ReviewDropboxStorage
+            try:
+                ref,_=asset(media.get('storage',{}),'320',media['kind'])
+                preview=ReviewDropboxStorage().open(ref)
+                st.image(b''.join(preview.iter_chunks()),width=240)
+                if media['kind']=='video':st.caption('Video · poster preview; customers open a bounded player.')
+            except Exception:st.caption('Dropbox preview is unavailable. No external source is substituted.')
+            if st.button('Hide media' if media['approved'] else 'Approve media',key='rv_media_'+str(media['id'])):
+                store.approve_media(user,media['id'],not media['approved'])
+                changed('table','summary','migration','rewards');st.rerun()
     if r.get('order_id'):
         import os
         shop=os.getenv('SHOPIFY_STORE_DOMAIN','')
@@ -90,7 +105,7 @@ def detail(store,user,identity):
         store.moderate(user,identity,status='ARCHIVED');changed('table','summary');st.rerun()
     if spam.button('Mark spam',icon=':material/block:'):
         store.moderate(user,identity,status='SPAM');changed('table','summary');st.rerun()
-    with st.expander('Resolve product' if not r['product_id'] else 'Change product match'):
+    with st.expander('Convert to product review' if r.get('review_type')=='STORE' else 'Resolve product' if not r['product_id'] else 'Change product match'):
         query=st.text_input('Find product',key='review_match_search')
         choices=store.products(query)
         if choices:
@@ -149,23 +164,33 @@ def importer(store,user):
     if sync.button('Sync now',disabled=not provider.configured):store.enqueue_sync(user);changed('imports','sources');st.toast('Review sync queued')
     with settings.popover('Settings'):
         st.caption('Use the Judge.me Private API token in server configuration: JUDGEME_PRIVATE_API_TOKEN. The existing SHOPIFY_STORE_DOMAIN identifies the store. No credentials are stored in the browser or review records.')
-    st.subheader('Import file');uploaded=st.file_uploader('UTF-8 CSV · up to 10 MB / 10,000 rows',type=['csv'])
+    connections()
+    report,_=load(('migration',),store.migration_summary,ttl=10)
+    if report:
+        st.caption(f"Judge.me migration · {report['published']} published reviews · {report['store_reviews']} store reviews · {report['unmatched']} products need matching · {report['media_copied']}/{report['media_total']} media files in Dropbox · {report['media_failed']} transfer failures")
+    st.caption('Media source: Dropbox · 03_ASSETS / Reviews · originals plus WebP display copies')
+    st.caption('Keep Judge.me live until review counts, product matches, replies and every media copy are reconciled. CSV exports exclude videos; add those separately using a video_urls column.')
+    st.subheader('Import file')
+    st.download_button('Download CSV template','source_review_id,review_type,product_id,product_handle,reviewer_name,email,rating,title,body,review_date,status,picture_urls,video_urls,reply\nfixture-1,product,,example-product,Collector,,5,Great print,Looks great on my wall,2026-01-01,Published,,,\n',file_name='sports-cave-reviews-template.csv',mime='text/csv')
+    uploaded=st.file_uploader('UTF-8 CSV · up to 10 MB / 10,000 rows',type=['csv'])
     if uploaded:
         data=uploaded.getvalue();digest=hashlib.sha256(data).hexdigest();headers,raw=read_csv(data)
-        safe_preview=[{k:v for k,v in row.items() if 'email' not in k.lower()} for row in raw[:5]]
+        safe_preview=[{k:v for k,v in row.items() if k in ('rating','title','body','review_title','review_body','status','curated','product_handle','review_date')} for row in raw[:5]]
         st.dataframe(safe_preview,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
-        source=st.selectbox('Import source',['csv','judgeme'],format_func=lambda v:'Judge.me CSV' if v=='judgeme' else 'CSV')
+        source=st.selectbox('Import source',['csv','judgeme'],index=int('curated' in headers),format_func=lambda v:'Judge.me CSV' if v=='judgeme' else 'CSV')
+        published_only=st.checkbox('Import published reviews only',value=source=='judgeme')
+        st.caption('Judge.me published exports use curated=ok. Hidden, pending and archived rows are excluded. Media copies run in the background; source URLs alone do not count as transferred files.')
         suggested=auto_mapping(headers);mapping={}
         with st.expander('Column mapping',expanded=True):
             columns=st.columns(3)
             for i,field in enumerate(FIELDS):
                 choices=['',*headers];mapping[field]=columns[i%3].selectbox(field.replace('_',' ').title(),choices,index=choices.index(suggested[field]),key='rv_map_'+digest[:10]+field)
-        key=('preview',digest,source,tuple(mapping.items()))
+        key=('preview',digest,source,published_only,tuple(mapping.items()))
         if st.button('Validate import',type='primary'):state()['preview_key']=key
         if state().get('preview_key')==key:
-            result,activity=load(key,lambda:preview(raw,mapping,store,source,__import__('os').getenv('SHOPIFY_STORE_DOMAIN','')))
+            result,activity=load(key,lambda:preview(raw,mapping,store,source,__import__('os').getenv('SHOPIFY_STORE_DOMAIN',''),published_only))
             if result:
-                st.caption(f"Ready: {result['ready']:,} · Duplicates: {result['duplicates']:,} · Need product match: {result['unresolved']:,} · Invalid: {len(result['invalid']):,}")
+                st.caption(f"Ready: {result['ready']:,} · Duplicates: {result['duplicates']:,} · Need product match: {result['unresolved']:,} · Invalid: {len(result['invalid']):,} · Excluded: {result['skipped']:,} · Media files: {result['media']:,}")
                 if result['invalid']:st.dataframe(result['invalid'][:50],hide_index=True, row_height=TABLE_ROW_HEIGHT)
                 if st.button('Confirm import',disabled=not result['items']):
                     store.enqueue_import(user,source,uploaded.name,result['items'],len(result['invalid']));state().pop('preview_key',None);changed('imports');st.toast('Import queued');st.rerun(scope='fragment')
@@ -182,6 +207,46 @@ def importer(store,user):
             state()['completed_imports']=completed
             changed('table','summary','sources')
     if activity=='ERROR':st.caption('Import history could not refresh.')
+
+def connections():
+    st.subheader('Connections')
+    providers=(('ⓕ Facebook','Facebook Page reviews / recommendations'),('Ⓖ Google Reviews','Google Business Profile reviews'),('E Etsy','Etsy shop reviews'),('ebay eBay','eBay seller feedback'),('★ Trustpilot','Trustpilot business reviews'))
+    columns=st.columns(5)
+    for column,(label,description) in zip(columns,providers):
+        with column.popover(label,use_container_width=True):
+            st.write(description);st.caption('Not connected · setup planned')
+            st.caption('Account authorization and a supported review import are required. No reviews or customer details are shared until setup is complete.')
+            st.caption('Use the CSV importer for an authorized export in the meantime.')
+
+@st.fragment
+def collection(store,user,navigate):
+    st.subheader('Collect photos and videos')
+    st.caption('Order-linked review requests use the existing email automation editor. Reviews accept up to five media files, including one video. Review text and media are moderated separately.')
+    value,activity=load(('collection',),store.collection_settings)
+    if value is None:st.caption('Loading collection settings…' if activity!='ERROR' else 'Collection settings unavailable.');return
+    with st.form('review_reward_settings'):
+        enabled=st.checkbox('Track photo/video reward eligibility',value=value['rewards_enabled'])
+        left,right=st.columns(2)
+        image=left.number_input('Photo reward (%)',1,50,value['image_percent'])
+        video=right.number_input('Video reward (%)',1,50,value['video_percent'])
+        st.caption('One reward per verified native review, after media approval, regardless of star rating. Imported reviews do not earn rewards. Codes are customer-specific, single-use, expire after 30 days and cannot combine with other discounts. Delivery honours existing email consent and suppression.')
+        import os
+        st.caption('Automatic delivery: '+('release gate enabled' if os.getenv('REVIEW_REWARDS_DELIVERY_ENABLED','').lower()=='true' else 'off · requires release configuration'))
+        if st.form_submit_button('Save reward settings'):
+            store.save_collection_settings(user,{'rewards_enabled':enabled,'image_percent':image,'video_percent':video});changed('collection');st.toast('Reward settings saved')
+    st.subheader('Reward queue')
+    rewards,_=load(('rewards',),lambda:store.q('SELECT review_id,media_kind,percent,status,error_code,created_at FROM sc_review_rewards ORDER BY created_at DESC LIMIT 50'))
+    if rewards:st.dataframe(rewards,hide_index=True,row_height=TABLE_ROW_HEIGHT)
+    else:st.caption('No reward submissions yet.')
+    request_automation(store,user,navigate)
+    with st.expander('Launch report · what is still required'):
+        st.markdown('''1. Release the reviewed changes and database migration through the existing OS release process.
+2. Import the published Judge.me CSV; reconcile every review, product match, public reply and media file against the archive. Source links alone are not a completed media transfer.
+3. Keep Judge.me running during the comparison period. Transfer any newly collected reviews before switching.
+4. Confirm photo/video reward percentages, Shopify discount permissions, email sender configuration and consent. Test one complete request → upload → moderation → reward journey with test accounts.
+5. Point existing review entry points and widgets at the native collection flow and verify store and product reviews. No replacement widget is required.
+6. Connect Facebook, Google, Etsy, eBay and Trustpilot when their accounts and supported access are ready.
+7. Disable Judge.me requests only after the native flow is verified, then turn Judge.me off. Keep the export and media archive for recovery.''')
 
 @st.fragment
 def display(store,user,navigate):
@@ -204,6 +269,9 @@ def display(store,user,navigate):
         value['moderation']=st.selectbox('New Sports Cave reviews',['manual','publish_all'],index=['manual','publish_all'].index(settings['moderation']),format_func=lambda v:'Manual moderation · every rating' if v=='manual' else 'Publish every rating')
         if st.form_submit_button('Save display settings',type='primary'):
             value['enabled']=enabled;store.save_settings(user,value);changed('settings');st.toast('Display settings saved')
+    request_automation(store,user,navigate)
+
+def request_automation(store,user,navigate):
     import os_accounts
     if os_accounts.can_access_page(user,'crm_automations_manage'):
         with st.expander('Review-request automation'):
@@ -224,11 +292,12 @@ def render_page(user,navigate=lambda _:None,*,store=None):
     st.html(STYLE+STYLE_REVIEW)
     with st.container(key='sc-reviews'):
         st.title('Reviews');st.caption('Manage customer reviews and storefront social proof.')
-        tab=st.segmented_control('Reviews area',['Overview','Import reviews','Display'],default='Overview',key='reviews-tabs') or 'Overview'
+        tab=st.segmented_control('Reviews area',['Overview','Import reviews','Collect & reward','Display'],default='Overview',key='reviews-tabs') or 'Overview'
         state()['activity']={}
         try:
             if tab=='Overview':overview(store,user)
             elif tab=='Import reviews':importer(store,user)
+            elif tab=='Collect & reward':collection(store,user,navigate)
             else:display(store,user,navigate)
         except (ValueError,PermissionError) as exc:st.warning(str(exc))
         except Exception:st.warning('Reviews could not complete this operation. Retry when storage is available.')

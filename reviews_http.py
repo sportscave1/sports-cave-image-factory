@@ -30,8 +30,20 @@ async def published_reviews(request:Request):
         rows=[] if request.query_params.get('summary')=='1' else await run_in_threadpool(load,store,('table',product,offset,sort,rating,search,settings['per_page']),lambda:store.rows(product=product,offset=offset,limit=settings['per_page'],sort=sort,rating=rating,search=search,public=True))
         aggregate=await run_in_threadpool(load,store,('aggregate',product),lambda:store.aggregate(product or None))
         more=len(rows)>settings['per_page'];rows=rows[:settings['per_page']]
+        media=[] if not rows else await run_in_threadpool(store.q,
+            "SELECT id,review_id,kind,storage FROM sc_review_media WHERE review_id=ANY(%s::uuid[]) AND status='COPIED' AND approved=true AND storage->>'provider'='dropbox' ORDER BY created_at,id",([str(r['id']) for r in rows],))
+        by_review={}
+        for m in media:
+            url=str(request.base_url).rstrip('/')+'/reviews/media/'+str(m['id'])
+            variants=m['storage'].get('posters' if m['kind']=='video' else 'variants') or {}
+            if not variants.get('320') or not variants.get('1280'):continue
+            by_review.setdefault(str(m['review_id']),[]).append({'kind':m['kind'],
+              'url':url+('?size=original' if m['kind']=='video' else '?size=1280'),
+              'thumbnail_url':url+'?size=320','poster_url':url+'?size=1280',
+              'width':variants['1280'].get('width',1280),'height':variants['1280'].get('height',1280)})
         from crm_tracking import public_https
         for row in rows:
+            row['media']=by_review.get(str(row['id']),[])
             row.pop('status',None)
             row['created_at']=str(row['created_at']) if settings['date'] and row.pop('date_known',True) else None
             row.pop('date_known',None)
@@ -44,6 +56,42 @@ async def published_reviews(request:Request):
     except (ValueError,TypeError):return Response(status_code=400)
     except Exception:return Response(status_code=503)
 
+@router.api_route('/reviews/media/{identity}',methods=['GET','HEAD'])
+async def review_media(identity:str,request:Request):
+    from fastapi.responses import StreamingResponse
+    from starlette.background import BackgroundTask
+    import uuid
+    if not allow_rate('review-media:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
+    try:
+        identity=str(uuid.UUID(identity));store=ReviewsStore()
+        settings=await run_in_threadpool(store.settings)
+        if not settings['enabled']:return Response(status_code=404)
+        media=await run_in_threadpool(store.q,"""SELECT m.kind,m.storage FROM sc_review_media m JOIN sc_reviews r ON r.id=m.review_id
+            WHERE m.id=%s AND m.status='COPIED' AND m.approved=true AND r.status='PUBLISHED'""",(identity,),True)
+        if not media:return Response(status_code=404)
+        from reviews_dropbox import asset,ReviewDropboxStorage
+        ref,mime=asset(media['storage'],request.query_params.get('size','original' if media['kind']=='video' else '1280'),media['kind'])
+        total=ref['size'];start=0;end=total-1;partial=False
+        headers={'Cache-Control':'public,max-age=300','Referrer-Policy':'no-referrer','Accept-Ranges':'bytes',
+          'ETag':'"'+ref['sha256']+'"','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'*',
+          'Access-Control-Expose-Headers':'Content-Length,Content-Range,Accept-Ranges,ETag'}
+        if request.headers.get('if-none-match')==headers['ETag'] and not request.headers.get('range'):return Response(status_code=304,headers=headers)
+        if request.headers.get('range'):
+            import re
+            match=re.fullmatch(r'bytes=(\d*)-(\d*)',request.headers['range'])
+            if not match or not any(match.groups()):return Response(status_code=416,headers={'Content-Range':f'bytes */{total}'})
+            a,b=match.groups()
+            if a:start=int(a);end=min(int(b),end) if b else end
+            else:start=max(0,total-int(b))
+            if not 0<=start<=end<total:return Response(status_code=416,headers={'Content-Range':f'bytes */{total}'})
+            partial=True;headers['Content-Range']=f'bytes {start}-{end}/{total}'
+        headers['Content-Length']=str(end-start+1)
+        if request.method=='HEAD':return Response(status_code=206 if partial else 200,media_type=mime,headers=headers)
+        stream=await run_in_threadpool(ReviewDropboxStorage().open,ref,start,end)
+        return StreamingResponse(stream.iter_chunks(),status_code=206 if partial else 200,media_type=mime,headers=headers,background=BackgroundTask(stream.close))
+    except ValueError:return Response(status_code=404)
+    except Exception:return Response(status_code=503)
+
 FORM_STYLE='<style>body{font:16px system-ui;color:#191919;background:#faf8f3;margin:0;padding:24px}main{max-width:560px;margin:24px auto;background:white;padding:24px;border:1px solid #e8e2d7;border-radius:12px;box-sizing:border-box}input,textarea,select,button{font:inherit;max-width:100%;box-sizing:border-box;width:100%;padding:10px;margin:6px 0 16px;border:1px solid #d4cfc5;border-radius:5px}button{background:#c7a13f;color:#181818}label{display:block}.trap{display:none}input[type=checkbox]{width:auto}h1{font-size:24px}</style>'
 
 @router.get('/reviews/request/{token}',response_class=HTMLResponse)
@@ -54,7 +102,7 @@ async def review_form(token:str,request:Request):
         if row['review_id']:return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
         product=await run_in_threadpool(store.match_product,{'product_id':row['product_id']})
         if not product:raise ValueError()
-        html=FORM_STYLE+'<main><h1>Share your review</h1><p>'+escape(product['title'])+'</p><form method="post"><label>Rating<select name="rating" required>'+''.join('<option value="'+str(n)+'">'+str(n)+' stars</option>' for n in (5,4,3,2,1))+'</select></label><label>Display name<input name="reviewer_name" maxlength="120" required></label><label>Title<input name="title" maxlength="200"></label><label>Review<textarea name="body" maxlength="5000" required rows="5"></textarea></label><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label><label><input type="checkbox" name="display_consent" value="yes" required>Display my review and chosen name publicly</label><button type="submit">Submit review</button></form></main>'
+        html=FORM_STYLE+'<main><h1>Share your review</h1><p>'+escape(product['title'])+'</p><form method="post" enctype="multipart/form-data"><label>Rating<select name="rating" required>'+''.join('<option value="'+str(n)+'">'+str(n)+' stars</option>' for n in (5,4,3,2,1))+'</select></label><label>Display name<input name="reviewer_name" maxlength="120" required></label><label>Title<input name="title" maxlength="200"></label><label>Review<textarea name="body" maxlength="5000" required rows="5"></textarea></label><label>Photos or video (optional)<input type="file" name="media" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" multiple></label><p>Up to 5 files: images up to 10 MB each, one video up to 50 MB, 65 MB total. Files are reviewed before display.</p><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label><label><input type="checkbox" name="display_consent" value="yes" required>Display my review, attached media and chosen name publicly</label><button type="submit">Submit review</button></form></main>'
         return HTMLResponse(html,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"})
     except ValueError:return HTMLResponse(FORM_STYLE+'<main><h1>Review link unavailable</h1><p>This link is invalid or expired.</p></main>',status_code=400)
     except Exception:return Response(status_code=503)
@@ -68,11 +116,42 @@ async def review_submit(token:str,request:Request):
         origin=request.headers.get('origin')
         expected=urlsplit(str(request.url));expected_origin=expected.scheme+'://'+expected.netloc
         if origin and origin!=expected_origin:return Response(status_code=403)
-        if request.headers.get('content-type','').split(';')[0]!='application/x-www-form-urlencoded':return Response(status_code=415)
-        fields=parse_qs((await bounded_body(request,24000)).decode('utf-8'),keep_blank_values=True)
+        store=ReviewsStore()
+        known=await run_in_threadpool(token_row,store,token)
+        if known['review_id']:return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+        content_type=request.headers.get('content-type','').split(';')[0]
+        uploads=[]
+        if content_type=='multipart/form-data':
+            from starlette.formparsers import MultiPartParser,MultiPartException
+            from starlette.datastructures import UploadFile
+            # Bound total bytes before multipart parsing, including chunked requests.
+            async def limited_stream():
+                total=0
+                async for part in request.stream():
+                    total+=len(part)
+                    if total>65*1024*1024:raise MultiPartException('Upload exceeds 65 MB.')
+                    yield part
+            try:form=await MultiPartParser(request.headers,limited_stream(),max_files=5,max_fields=10).parse()
+            except MultiPartException:raise ValueError('Invalid or oversized upload.') from None
+            try:
+                fields={}
+                for key,value in form.multi_items():
+                    if isinstance(value,UploadFile):
+                        if key!='media':raise ValueError('Invalid file field.')
+                        if not value.filename:continue
+                        kind='video' if (value.content_type or '').startswith('video/') else 'image'
+                        limit=50*1024*1024 if kind=='video' else 10*1024*1024
+                        data=await value.read(limit+1)
+                        if len(data)>limit:raise ValueError('Media exceeds file size limit.')
+                        uploads.append({'data':data,'kind':kind})
+                    else:fields.setdefault(key,[]).append(value)
+            finally:await form.close()
+        elif content_type=='application/x-www-form-urlencoded':
+            fields=parse_qs((await bounded_body(request,24000)).decode('utf-8'),keep_blank_values=True)
+        else:return Response(status_code=415)
         if any(len(v)!=1 for v in fields.values()):return Response(status_code=400)
         payload={k:v[0] for k,v in fields.items()};payload['display_consent']=payload.get('display_consent')=='yes'
-        await run_in_threadpool(submit,ReviewsStore(),token,payload)
+        await run_in_threadpool(submit,store,token,payload,uploads)
         return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
     except (ValueError,TypeError):return HTMLResponse(FORM_STYLE+'<main><h1>Review not submitted</h1><p>Check your review and link, then try again.</p></main>',status_code=400)
     except Exception:return Response(status_code=503)

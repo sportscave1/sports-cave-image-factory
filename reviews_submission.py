@@ -46,13 +46,18 @@ def token_row(store,token):
     if not row or date(row['expires_at'])<now():raise ValueError('Review link is invalid or expired.')
     return row
 
-def submit(store,token,payload):
+def submit(store,token,payload,uploads=None):
     if not isinstance(payload,dict) or set(payload)-{'rating','title','body','reviewer_name','website','display_consent'}:raise ValueError('Invalid review submission.')
     if payload.get('website') or payload.get('display_consent') is not True:raise ValueError('Confirm permission to display your review.')
     row=token_row(store,token)
+    if row['review_id']:return str(row['review_id'])
+    uploads=uploads or []
+    if len(uploads)>5 or sum(u['kind']=='video' for u in uploads)>1:raise ValueError('Attach up to five files, including one video.')
     item=normalize(payload,'sports_cave');product=store.match_product({'product_id':row['product_id']})
     if not product:raise ValueError('Review product is unavailable.')
     policy=store.settings();state='PUBLISHED' if policy['moderation']=='publish_all' else 'PENDING'
+    from reviews_media import save_owned
+    media=[{**save_owned(u['data'],u['kind']),'kind':u['kind']} for u in uploads]
     with store.db() as conn:
         locked=conn.execute('SELECT * FROM sc_review_tokens WHERE token_hash=%s FOR UPDATE',(row['token_hash'],)).fetchone()
         if not locked or date(locked['expires_at'])<now():raise ValueError('Review link is invalid or expired.')
@@ -63,6 +68,10 @@ def submit(store,token,payload):
           (row['token_hash'],row['product_id'],product['title'],product['handle'],product.get('image_url') or '',product.get('online_store_url') or '',
            row['customer_id'],row['order_id'],item['reviewer_name'],item['rating'],item['title'],item['body'],state,'native:'+row['token_hash'])).fetchone()
         conn.execute('UPDATE sc_review_tokens SET review_id=%s WHERE token_hash=%s',(result['id'],row['token_hash']))
+        for m in media:
+            conn.execute("""INSERT INTO sc_review_media(review_id,kind,source_url,object_key,sha256,size_bytes,mime_type,status,consent,storage)
+              VALUES(%s,%s,%s,%s,%s,%s,%s,'COPIED',true,%s::jsonb) ON CONFLICT DO NOTHING""",
+              (result['id'],m['kind'],'native:'+m['sha256'],m['object_key'],m['sha256'],m['size_bytes'],m['mime_type'],json.dumps(m.get('storage',{}))))
         return str(result['id'])
 
 def prepare_email(content,row,enrollment,shop,store):

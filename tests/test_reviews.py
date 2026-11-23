@@ -84,7 +84,7 @@ class ModelTests(unittest.TestCase):
         import os_accounts
         self.assertEqual(len([p for p in os_accounts.PAGE_REGISTRY if p['route']=='Reviews']),1)
         self.assertFalse(os_accounts.PAGE_BY_KEY['reviews'].get('navigation_child'))
-        text=(ROOT/'reviews_page.py').read_text();self.assertIn("['Overview','Import reviews','Display']",text)
+        text=(ROOT/'reviews_page.py').read_text();self.assertIn("['Overview','Import reviews','Collect & reward','Display']",text)
         self.assertNotIn('Judge.me admin',text)
     def test_page_shell_is_emitted_without_waiting_for_reads_and_hidden_tabs(self):
         from streamlit.testing.v1 import AppTest
@@ -167,7 +167,7 @@ class DatabaseTests(unittest.TestCase):
                 self.store.moderate(ADMIN,r['id'],reply='Local reply',status='ARCHIVED')
         r=self.store.get_review(r['id']);self.assertEqual(r['merchant_reply'],'Local reply');self.assertEqual(r['status'],'ARCHIVED')
     def test_csv_preview_invalid_duplicates_unresolved_no_raw_email(self):
-        rows=[{'rating':'5','body':'Excellent','product_id':self.pid,'email':'test@example.test'}, {'rating':'5','body':'Excellent','product_id':self.pid,'email':'test@example.test'}, {'rating':'9','body':'Invalid'}, {'rating':'2','body':'Unknown product'}]
+        rows=[{'rating':'5','body':'Excellent','product_id':self.pid,'email':'test@example.test'}, {'rating':'5','body':'Excellent','product_id':self.pid,'email':'test@example.test'}, {'rating':'9','body':'Invalid'}, {'rating':'2','body':'Unknown product','review_type':'product'}]
         result=preview(rows,{},self.store);self.assertEqual((result['ready'],result['duplicates'],result['unresolved'],len(result['invalid'])),(2,1,1,1))
         self.assertNotIn('test@example.test',json.dumps(result))
     def test_moderation_permissions_audit_and_source_verified_not_native(self):

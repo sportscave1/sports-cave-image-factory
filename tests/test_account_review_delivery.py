@@ -31,6 +31,19 @@ def test_transparent_webp_uses_white_background_for_review_photo():
         assert all(channel > 245 for channel in image.getpixel((5, 5)))
 
 
+def test_account_review_photo_uses_dropbox_before_judgeme_without_r2():
+    original={'id':'id:fixture','path':'/Sportscave Team Folder/03_ASSETS/Reviews/fixture-original.jpg'}
+    storage=__import__('unittest.mock',fromlist=['Mock']).Mock();storage.context={'token':'fixture'}
+    with patch('reviews_dropbox.ReviewDropboxStorage',return_value=storage), \
+         patch('reviews_media.save_owned',return_value={'storage':{'provider':'dropbox','original':original},'mime_type':'image/jpeg'}) as save, \
+         patch('dropbox_integration.get_temporary_link',return_value='https://dl.dropboxusercontent.com/fixture') as link, \
+         patch.object(vault.r2_storage,'upload_bytes') as r2:
+        result=vault._upload_review_photo({'submission_reference':'fixture'},{'bytes':b'fixture'})
+    save.assert_called_once_with(b'fixture','image',storage);r2.assert_not_called()
+    link.assert_called_once_with('fixture',original['path'])
+    assert result['bucket']=='dropbox' and result['key']=='id:fixture'
+
+
 def deliver(status, result=None, content=b"json"):
     class Response:
         status_code = status

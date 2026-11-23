@@ -4,7 +4,13 @@ COLUMNS={'sc_reviews':('id','source','source_review_id','product_id','rating','t
  'sc_review_days':('day','total'),'sc_review_settings':('key','value'),
  'sc_review_imports':('id','status','payload','cursor','lease_until','attempts','imported','duplicates','invalid'),
  'sc_review_tokens':('token_hash','expires_at','order_id','customer_id','product_id','review_id'),
- 'sc_review_audit':('id','review_id','actor','action')}
+ 'sc_review_audit':('id','review_id','actor','action'),
+ 'sc_review_media':('id','review_id','kind','source_url','object_key','status','approved','consent','attempts','lease_until'),
+ 'sc_review_rewards':('review_id','customer_id','order_id','media_kind','percent','status','code','discount_id','issued_at','provider_id','error_code'),
+ 'sc_review_identities':('source','source_store_id','external_id','review_id')}
+COLUMNS['sc_reviews']+=('review_type','source_fingerprint')
+COLUMNS['sc_review_imports']+=('skipped',)
+COLUMNS['sc_review_media']+=('storage',)
 INDEXES=('sc_reviews_source','sc_reviews_page','sc_reviews_product_page','sc_reviews_search','sc_review_import_due')
 
 def schema_issues(cur):
