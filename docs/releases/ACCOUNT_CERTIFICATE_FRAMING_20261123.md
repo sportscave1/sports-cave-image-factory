@@ -14,9 +14,12 @@ are verified within the configured certificate product and rechecked before
 creating the owner-bound request. Paid-order matching checks each request and
 variant together. No database schema or Render topology changes are required.
 
-Build your collection uses the existing smart catalogue resolver, including its
-purchase exclusions and collection ranking. Up to four eligible recommendations
-are hydrated with available Storefront frame/size variants and current prices.
+Build your collection reuses the smart catalogue's exact sport membership,
+purchase exclusion, edition eligibility, sales ranking and balancing helpers.
+All purchase ID formats and owned certificates contribute to exclusions.
+Up to eight ranked candidates are checked by the authenticated account's native
+Storefront token to display four available frame/size cards with current prices.
+No additional server Storefront credential is required.
 Adds are serialized into a shared cart for the page session. Checkout remains
 authoritative for availability, currency, tax, and delivery.
 
@@ -28,7 +31,7 @@ The product was published only to the Online Store for checkout availability.
 Validation:
 
 - `python -m unittest tests.test_collector_collection_offers tests.test_collector_vault tests.test_customer_certificate_vault tests.test_crm_smart_catalogue -q`:
-  86 tests, 80 passed and 6 database integration tests skipped.
+  87 tests, 81 passed and 6 database integration tests skipped.
 - `npm --prefix shopify_customer_account run test:vault`: 15 passed.
 - `shopify app config validate --path shopify_customer_account --json`: valid.
 - `shopify app build --path shopify_customer_account`: successful.
@@ -46,3 +49,10 @@ Validation:
 Release verification is recorded in Developer Studio after deployment. Preserve
 the canonical `sports-cave-os` service and the supporting webhook service; this
 release must not sync or create any Blueprint resources.
+
+Live verification exposed an existing unfinished Shopify secret rotation: the
+webhook receiver accepted the older active signing secret, while the primary
+service only held the newer OAuth secret. With the user's explicit credential
+sync authorization, the same active verification fallback was configured on the
+primary service. Both secrets remain active; no key was created or revoked.
+Safe authentication failure-stage logging contains no token or claim values.

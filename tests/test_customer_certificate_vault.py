@@ -265,7 +265,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertNotIn("/api/collector-vault/", card)
         self.assertIn("payload.frame_product", viewer)
         self.assertIn("matchingFrameCertificate(", viewer)
-        self.assertIn("previewUrl: ownedCertificate.preview_url", viewer)
+        self.assertIn("previewUrl: vaultAssetUrl(apiBaseUrl, ownedCertificate.preview_url)", viewer)
         self.assertIn("<s-heading>{product.title}</s-heading>", viewer)
         self.assertIn("contextual_price", viewer)
         self.assertIn("Your exact numbered certificate", viewer)

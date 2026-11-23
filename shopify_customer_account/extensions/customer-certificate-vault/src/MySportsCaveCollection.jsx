@@ -114,7 +114,12 @@ function Extension() {
         if (controller.signal.aborted) return;
         setCertificates((items) => items.map((certificate) => {
           const owned = matchingFrameCertificate(payload.certificates, certificate);
-          return {...certificate, frame_preview_url: owned?.preview_url ? `${owned.preview_url}&frame=black` : ""};
+          const preview = vaultAssetUrl(apiBaseUrl, owned?.preview_url);
+          return {...certificate,
+            frame_preview_url: preview ? `${preview}&frame=black` : "",
+            certificate_preview_image_url: certificate.certificate_preview_image_url || preview,
+            certificate_print_jpg_url: certificate.certificate_print_jpg_url || vaultAssetUrl(apiBaseUrl, owned?.print_url),
+          };
         }));
       }).catch(() => {}); // Existing certificate assets remain usable independently.
     return () => controller.abort();
@@ -447,7 +452,7 @@ function CertificatePreview({certificate, eager = false, previewUrl}) {
         <s-image
           src={imageUrl}
           alt={`Certificate preview for ${title}`}
-          aspectRatio="16/9"
+          aspectRatio={certificate.frame_preview_url || previewUrl ? "1/1" : "16/9"}
           objectFit="contain"
           loading={eager ? "eager" : "lazy"}
           sizes="(min-width: 1100px) 33vw, (min-width: 700px) 50vw, 100vw"
@@ -538,7 +543,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
         setFrameOffer({
           status: "ready",
           product,
-          previewUrl: ownedCertificate.preview_url,
+          previewUrl: vaultAssetUrl(apiBaseUrl, ownedCertificate.preview_url),
           certificateReference: ownedCertificate.reference,
         });
       } catch (error) {
@@ -654,7 +659,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           alignItems="start"
         >
           <CertificatePreview certificate={certificate} previewUrl={frameColor === "Unframed"
-              ? certificate.certificate_preview_image_url
+              ? frameOffer.previewUrl || certificate.certificate_preview_image_url
               : frameOffer.previewUrl
                 ? `${frameOffer.previewUrl}&frame=${frameColor.toLowerCase()}`
                 : certificate.certificate_preview_image_url
@@ -835,7 +840,7 @@ function CollectionUpsells({api, apiBaseUrl}) {
       try {
         const recommended = await vaultRequest(api, apiBaseUrl,
           "/api/collector-vault/recommendations", {signal: controller.signal});
-        const ids = (recommended.products || []).slice(0, 4).map((p) => p.id);
+        const ids = (recommended.products || []).slice(0, 8).map((p) => p.id);
         if (!ids.length) {
           if (!controller.signal.aborted) { setProducts([]); setStatus("empty"); }
           return;
@@ -847,7 +852,7 @@ function CollectionUpsells({api, apiBaseUrl}) {
           } }
         }`, {variables: {ids}});
         if (result.errors?.length) throw new Error("Products unavailable");
-        const nodes = (result.data?.nodes || []).filter((p) => p?.variants?.nodes?.some((v) => v.availableForSale));
+        const nodes = (result.data?.nodes || []).filter((p) => p?.variants?.nodes?.some((v) => v.availableForSale)).slice(0, 4);
         if (!controller.signal.aborted) { setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
       } catch (_error) {
         if (!controller.signal.aborted) setStatus("error");
@@ -914,6 +919,13 @@ function editionLabel(value) {
 function configuredApiBaseUrl(api) {
   const configured = String(api.settings?.value?.api_base_url || "").trim();
   return (configured || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+}
+
+function vaultAssetUrl(apiBaseUrl, value) {
+  const path = String(value || "");
+  return path.startsWith("/api/collector-vault/asset?token=")
+    ? `${apiBaseUrl}${path}`
+    : "";
 }
 
 function matchingFrameCertificate(items, certificate) {

@@ -10,6 +10,22 @@ from tests.test_collector_vault import _frame_product_payload, _frame_environmen
 
 
 class CollectionOffersTests(unittest.TestCase):
+    def test_account_matching_excludes_all_purchases_and_certificates(self):
+        owned = "gid://shopify/Product/55"
+        certificate_product = "gid://shopify/Product/56"
+        candidate = "gid://shopify/Product/57"
+        catalogue = MagicMock()
+        catalogue.resolve.return_value = [{"id": candidate, "edition": {"sold": 3}}]
+        with patch("crm_smart_catalogue.histories", return_value={CUSTOMER_A: [{"products": [{"product_id": 55}]}]}), \
+             patch.object(collector_vault, "list_owned_certificates", return_value=[{"shopify_product_id": certificate_product}]), \
+             patch("crm_collector_transport.bounded", return_value=MagicMock()), patch("crm_catalogue.Catalogue", return_value=catalogue), \
+             patch("crm_smart_candidates.memberships", return_value=[{"id": "sport"}]), \
+             patch("crm_smart_candidates.collection_products", return_value=[owned, certificate_product, candidate]), \
+             patch("crm_catalogue.edition_available", return_value=True), patch("crm_catalogue.product_issues", return_value=[]):
+            result = offers.recommendations(CUSTOMER_A)
+        self.assertEqual([p["id"] for p in result], [candidate])
+        self.assertEqual(catalogue.resolve.call_args.args[0], [candidate])
+
     def test_oak_paid_webhook_matches_request_and_variant_together(self):
         import os
         reference = "12345678-1234-4234-8234-123456789012"

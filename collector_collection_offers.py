@@ -41,12 +41,52 @@ def render_certificate_frame(content, color):
 
 
 def recommendations(customer_id):
-    from crm_smart_catalogue import hydrate
+    from crm_smart_catalogue import histories, lines
+    from crm_smart_candidates import memberships, collection_products, balanced
+    from crm_catalogue import Catalogue, product_id, product_issues, edition_available
+    from crm_collector_transport import bounded
     from crm_shopify import Shopify
     from crm_store import Store
+    from collector_vault import list_owned_certificates, customer_id_candidates
     import supabase_backend
-    doc = {"market": "AU", "middle_sections": [{"type": "catalogue", "visible": True,
-           "settings": {"smart": True, "smart_count": 4, "display": {"image": True, "price": True}}, "products": []}]}
-    resolved = hydrate(doc, Store(connect=supabase_backend.connect), Shopify(), {"id": customer_id})
-    section = resolved["middle_sections"][0]
-    return section.get("products", [])[:4] if section.get("visible") else []
+    import logging
+    store = Store(connect=supabase_backend.connect)
+    aliases = customer_id_candidates(customer_id)
+    ledger = histories(store, aliases)  # A failed/incomplete history never relaxes ownership.
+    orders = [order for alias in aliases for order in ledger.get(alias, [])]
+    owned = set()
+    for order in orders:
+        for item in lines(order):
+            variant = item.get("variant") or {}
+            product = item.get("product") or variant.get("product") or {}
+            identity = product_id(product.get("id") or item.get("product_id"))
+            if identity:
+                owned.add(identity)
+    for certificate in list_owned_certificates(customer_id):
+        identity = product_id(certificate.get("shopify_product_id"))
+        if identity:
+            owned.add(identity)
+    if not owned:
+        return []
+    shop = bounded(Shopify(), seconds=12)
+    groups = [collection_products(shop, collection) for collection in memberships(shop, sorted(owned))]
+    candidates = list(dict.fromkeys(identity for group in groups for identity in group if identity not in owned))[:120]
+    country = next((order.get("_country") for order in orders if order.get("_country")), "AU")
+    market = {"GB": "UK"}.get(country, country)
+    if market not in ("AU", "US", "UK", "CA", "NZ"):
+        market = "Global"
+    catalogue = Catalogue(shop, connect=supabase_backend.connect)
+    eligible = {}
+    for start in range(0, len(candidates), 20):
+        for product in catalogue.resolve(candidates[start:start + 20], market, allow_missing=True):
+            if product["id"] not in owned and edition_available(product.get("edition")) and not product_issues(product, {"display": {"image": True, "price": True}}):
+                eligible[product["id"]] = product
+        if len(eligible) >= 8:
+            break
+    # Use the same exact sport memberships, edition eligibility, verified sales
+    # ranking and balancing as Smart catalogue. The authenticated account client
+    # performs Storefront publication/variant/price checks using its native token,
+    # so this endpoint never needs a separate server Storefront credential.
+    chosen = balanced(groups, eligible, 8)
+    logging.getLogger(__name__).info("Account recommendations candidates=%s eligible=%s returned=%s", len(candidates), len(eligible), len(chosen))
+    return chosen
