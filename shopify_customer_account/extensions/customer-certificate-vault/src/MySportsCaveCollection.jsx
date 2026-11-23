@@ -487,7 +487,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
   const [frameOffer, setFrameOffer] = useState({
     status: "idle",
     product: null,
-    certificateReference: "", previewUrl: "",
+    certificateReference: "", previewUrl: "", country: "", certificateKey: "",
   });
   const [frameColor, setFrameColor] = useState("Black");
   const [checkoutState, setCheckoutState] = useState({
@@ -495,16 +495,21 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
     message: "",
     checkoutUrl: "",
   });
+  const addController = useRef(null);
+  const currentOffer = frameOffer.status === "ready"
+    && frameOffer.country === country && frameOffer.certificateKey === certificate?.key;
 
   useEffect(() => {
     const controller = new AbortController();
+    addController.current?.abort();
+    addController.current = null;
     setCheckoutState({status: "idle", message: "", checkoutUrl: ""});
     setFrameColor("Black");
     if (!certificate) {
       setFrameOffer({
         status: "idle",
         product: null,
-        certificateReference: "", previewUrl: "",
+        certificateReference: "", previewUrl: "", country: "", certificateKey: "",
       });
       return () => controller.abort();
     }
@@ -512,7 +517,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
     setFrameOffer({
       status: "loading",
       product: null,
-      certificateReference: "", previewUrl: "",
+      certificateReference: "", previewUrl: "", country: "", certificateKey: "",
     });
     async function loadFrameOffer() {
       try {
@@ -542,13 +547,16 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
           setFrameOffer({
             status: "unavailable",
             product: null,
-            certificateReference: "", previewUrl: "",
+            certificateReference: "", previewUrl: "", country: "", certificateKey: "",
           });
           return;
         }
+        setFrameColor(product.variants?.[0]?.color || "Black");
         setFrameOffer({
           status: "ready",
           product,
+          country,
+          certificateKey: certificate.key,
           previewUrl: vaultAssetUrl(apiBaseUrl, ownedCertificate.preview_url),
           certificateReference: ownedCertificate.reference,
         });
@@ -557,22 +565,26 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
         setFrameOffer({
           status: "error",
           product: null,
-          certificateReference: "", previewUrl: "",
+          certificateReference: "", previewUrl: "", country: "", certificateKey: "",
         });
       }
     }
     loadFrameOffer();
-    return () => controller.abort();
+    return () => { controller.abort(); addController.current?.abort(); };
   }, [api, apiBaseUrl, certificate?.key, country, offerLoader]);
 
   const addFramedCertificate = async () => {
     if (
-      frameOffer.status !== "ready"
+      !currentOffer || accountCountry(api) !== country
       || checkoutState.status === "adding"
+      || addController.current
     ) {
       return;
     }
-    const product = (frameOffer.product.variants || []).find((v) => v.color === frameColor) || frameOffer.product;
+    const product = (frameOffer.product.variants || []).find((v) => v.color === frameColor);
+    if (!product?.variant_id || !product?.contextual_price) return;
+    const controller = new AbortController();
+    addController.current = controller;
     setCheckoutState({
       status: "adding",
       message: "Adding your framed certificate...",
@@ -585,6 +597,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
         "/api/collector-vault/frame/request",
         {
           method: "POST",
+          signal: controller.signal,
           body: {
             certificate_reference: frameOffer.certificateReference,
             frame_variant_id: product.variant_id,
@@ -594,6 +607,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
           },
         },
       );
+      if (controller.signal.aborted) return;
       if (request.status === "ordered") {
         setCheckoutState({
           status: "ordered",
@@ -609,11 +623,14 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
       }
       throw new Error("Certificate cart handoff unavailable.");
     } catch (_error) {
+      if (controller.signal.aborted) return;
       setCheckoutState({
         status: "error",
         message: "Could not add your certificate. Please try again.",
         checkoutUrl: "",
       });
+    } finally {
+      if (addController.current === controller) addController.current = null;
     }
   };
 
@@ -653,7 +670,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
               {framingOnly ? <s-text>Your numbered certificate, professionally printed and framed.</s-text> : null}
               {framingOnly ? <s-text color="subdued">Small · 21 × 30 cm</s-text> : null}
             </s-stack>
-            {framingOnly && frameOffer.status === "loading" ? (
+            {framingOnly && (frameOffer.status === "loading" || frameOffer.status === "ready" && !currentOffer) ? (
               <s-stack direction="inline" gap="small" alignItems="center">
                 <s-spinner
                   size="small"
@@ -664,7 +681,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 </s-text>
               </s-stack>
             ) : null}
-            {framingOnly && frameOffer.status === "ready" ? (
+            {framingOnly && currentOffer ? (
               <FramedCertificateOffer
                 product={frameOffer.product}
                 frameColor={frameColor}
@@ -717,10 +734,8 @@ function FramedCertificateOffer({
   onAdd,
   formatNumber,
 }) {
-  const price = formatFramePrice(
-    ((product.variants || []).find((v) => v.color === frameColor) || product).contextual_price,
-    formatNumber,
-  );
+  const selected = (product.variants || []).find((v) => v.color === frameColor);
+  const price = formatFramePrice(selected?.contextual_price, formatNumber);
 
   return (
     <s-box>
@@ -765,6 +780,7 @@ function FramedCertificateOffer({
             inlineSize="fill"
             variant="primary"
             onClick={onAdd}
+            disabled={!selected?.variant_id || !price}
             loading={checkoutState.status === "adding"}
           >
             <s-box paddingBlock="small"><s-text type="strong">Add to cart · {price}</s-text></s-box>
