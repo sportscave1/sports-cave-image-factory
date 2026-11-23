@@ -1,8 +1,9 @@
 # Sports Cave reviews migration and launch report
 
-24 November 2026, Australia/Sydney. Judge.me remains live. The export is complete;
-the OS changes are implemented locally. Production deployment, database migration
-and the OS production import have not been performed.
+24 November 2026, Australia/Sydney. This is the original migration design and
+pre-release checklist. The owner subsequently authorized release; the production
+import is complete. See [the release report](REVIEWS_RELEASE_20261124.md) for
+current deployment, media verification and remaining cutover work. Judge.me remains live.
 
 ## Export and media archive
 
