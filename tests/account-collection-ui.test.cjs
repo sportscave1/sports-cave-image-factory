@@ -23,9 +23,9 @@ function fixture({existing=false,failure=false}={}){
  return {exports:module.exports,state,calls,get queries(){return queries},view:()=>{index=0;return module.exports.CertificateViewer({certificate:{key:'fixture',framingOnly:true,product_title:'Fixture edition'},api,apiBaseUrl:'https://fixture.test',country:'US',onClose:()=>{}})}};
 }
 function find(node,predicate){if(!node||typeof node!=='object')return null;if(predicate(node))return node;for(const child of node.children||[]){const match=find(child,predicate);if(match)return match;}return null;}
-test('frame picker uses maximum native modal with a larger preview column',()=>{
- const tree=fixture().view();assert.equal(tree.props.size,'max');
- assert.ok(find(tree,n=>n.type==='s-grid' && /1\.25fr/.test(n.props.gridTemplateColumns)));
+test('frame picker fits content with balanced columns and a full-width primary Add',()=>{
+ const tree=fixture().view();assert.equal(tree.props.size,'large-100');
+ assert.ok(find(tree,n=>n.type==='s-grid' && /1\.1fr/.test(n.props.gridTemplateColumns)));
  assert.equal(tree.props.heading,'Frame your certificate');
  const offer=fixture().exports.FramedCertificateOffer({product:{variants:[{color:'Black',contextual_price:{amount:'99',currencyCode:'AUD'}}]},frameColor:'Black',onColorChange:()=>{},checkoutState:{status:'idle'},onAdd:()=>{},formatNumber:String});
  assert.equal(find(offer,n=>n.type==='s-button'&&n.props.onClick).props.inlineSize,'fill');
@@ -42,7 +42,7 @@ for(const existing of [false,true])test(`Add stays over account and opens cart c
 });
 test('failed Add keeps the frame picker and never presents checkout',async()=>{
  const f=fixture({failure:true});await find(f.view(),n=>n.type?.name==='FramedCertificateOffer').props.onAdd();
- assert.equal(f.state[2].status,'error');assert.equal(f.queries,0);assert.equal(f.view().props.size,'max');
+ assert.equal(f.state[2].status,'error');assert.equal(f.queries,0);assert.equal(f.view().props.size,'large-100');
  assert.equal(find(f.view(),n=>n.type==='s-button'&&n.props.href),null);
 });
 test('certificate gallery uses two desktop columns and one mobile column without horizontal scrolling',()=>{
@@ -53,7 +53,7 @@ test('certificate gallery uses two desktop columns and one mobile column without
 test('all three certificate previews remain mounted and eagerly load for colour switching',()=>{
  const f=fixture();
  const tree=f.exports.FramedCertificatePreview({certificate:{product_title:'Fixture'},previewUrl:'https://fixture.test/asset?token=owner',color:'Oak'});
- const boxes=tree.children;assert.equal(boxes.length,3);
+ const boxes=tree.children[0].children;assert.equal(boxes.length,3);
  assert.deepEqual(Array.from(boxes,b=>b.props.display),['none','auto','none']);
  assert.deepEqual(Array.from(boxes,b=>b.props.accessibilityVisibility),['hidden','visible','hidden']);
  for(const box of boxes){assert.equal(box.children[0].props.loading,'eager');assert.equal(box.children[0].props.objectFit,'contain');}
@@ -64,7 +64,7 @@ test('showcase uses raw certificate and preserves original downloads; selection 
  const f=fixture();const items=[{key:'black',product_title:'Edition – Athlete',variant_title:'Black / M',edition_display:'#027 / 100',purchased_image_url:'https://fixture.test/black.jpg',certificate_preview_image_url:'https://fixture.test/raw.png',frame_preview_url:'https://fixture.test/framed.webp',certificate_pdf_url:'https://fixture.test/original.pdf',certificate_download_url:'https://fixture.test/asset?token=print'}, {key:'oak',product_title:'Edition – Athlete',variant_title:'Oak / M',edition_display:'#028 / 100',purchased_image_url:'https://fixture.test/oak.jpg',certificate_preview_image_url:'https://fixture.test/raw2.png'}];
  let selected;const tree=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[0],onSelect:key=>selected=key,onOpen:()=>{}});
  assert.equal(find(tree,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/raw.png').props.objectFit,'contain');
- assert.equal(find(tree,n=>n.type==='s-link'&&n.children.includes('Download certificate')).props.href,'https://fixture.test/asset?token=print');
+ assert.equal(find(tree,n=>n.type==='s-link'&&n.children.includes('Download printable certificate')).props.href,'https://fixture.test/asset?token=print');
  const choice=find(tree,n=>n.type==='s-clickable'&&n.props.accessibilityLabel.includes('Oak / M'));choice.props.onClick();assert.equal(selected,'oak');
  const second=f.exports.CollectionShowcase({certificates:items,activeCertificate:items[1],onSelect:()=>{},onOpen:()=>{}});
  assert.ok(find(second,n=>n.type==='s-image'&&n.props.src==='https://fixture.test/oak.jpg'));

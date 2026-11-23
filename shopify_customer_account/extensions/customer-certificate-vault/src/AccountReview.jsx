@@ -102,13 +102,12 @@ export function AccountReview({prompt, certificate, request, api}) {
 
   return (
     <s-box padding="none" border="base" borderRadius="large" overflow="hidden" background="subdued">
-      <s-grid gridTemplateColumns="@container (inline-size > 650px) '144px minmax(0, 1fr)', '76px minmax(0, 1fr)'" gap="small" alignItems="center">
-        <s-box>
-          <s-box display="@container (inline-size > 650px) auto, none"><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="1.5" objectFit="cover" loading="eager" /></s-box>
-          <s-box display="@container (inline-size > 650px) none, auto"><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="0.75" objectFit="cover" loading="eager" /></s-box>
+      <s-grid gridTemplateColumns="@container (inline-size > 650px) '144px minmax(0, 1fr)', 'minmax(0, 1fr)'" gap="small" alignItems="center">
+        <s-box display="@container (inline-size > 650px) auto, none">
+          <s-box><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="1.5" objectFit="cover" loading="eager" /></s-box>
         </s-box>
         <s-box padding="small">
-          <s-grid gridTemplateColumns="@container (inline-size > 650px) 'minmax(0, 1fr) 164px', 'minmax(0, 1fr) 88px'" gap="small" alignItems="center">
+          <s-grid gridTemplateColumns="@container (inline-size > 650px) 'minmax(0, 1fr) 164px', 'minmax(0, 1fr) 128px'" gap="small" alignItems="center">
             <s-stack gap="small-400">
               <s-text type="strong">{submitted ? "Thank you for your review" : "How does it look in your space?"}</s-text>
               <StarRating rating={rating || 5} onChange={chooseRating} modalId={modalId} compact />

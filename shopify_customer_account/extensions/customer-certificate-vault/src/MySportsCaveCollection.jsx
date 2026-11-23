@@ -306,8 +306,8 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
   const edition = item => editionLabel(item.edition_display).replace(/^Edition #/, "");
   const count = `${certificates.length} numbered ${certificates.length === 1 ? "edition" : "editions"}`;
   const preview = active.certificate_preview_image_url;
-  const card = (item, mobile = false) => <s-grid gridTemplateColumns={mobile ? "56px minmax(0, 1fr)" : "80px minmax(0, 1fr) auto"} gap="small" alignItems="center">
-    {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit="cover" loading="eager" /> : <s-box minBlockSize="48px" />}
+  const card = (item, mobile = false) => <s-grid gridTemplateColumns={mobile ? "minmax(0, 1fr) minmax(0, 1fr)" : "80px minmax(0, 1fr) auto"} gap="small" alignItems="center">
+    {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit={mobile ? "contain" : "cover"} loading="eager" /> : <s-box minBlockSize="48px" />}
     <s-stack gap="small-400"><s-text type="strong">{compactTitle(item.product_title)}</s-text><s-text color="subdued">{compactVariant(item.variant_title)}</s-text>{mobile ? <s-text>{edition(item)}</s-text> : null}</s-stack>
     {!mobile ? <s-text>{edition(item)} ›</s-text> : null}
   </s-grid>;
@@ -315,7 +315,6 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
     <s-grid gridTemplateColumns="@container (inline-size > 850px) 'minmax(0, 0.7fr) minmax(0, 1.3fr)', 'minmax(0, 1fr)'" gap="base" alignItems="start">
       <s-stack gap="base">
         <s-box display="@container (inline-size > 850px) auto, none"><s-stack gap="small-400"><s-heading>My Collection</s-heading><s-text type="emphasis">{count}</s-text></s-stack></s-box>
-        <s-box display="@container (inline-size > 850px) none, auto"><s-heading>{count}</s-heading></s-box>
         <s-box display="@container (inline-size > 850px) auto, none"><s-stack gap="small-400">
           {certificates.map(item => <s-clickable key={item.key} onClick={() => onSelect(item.key)}
             accessibilityLabel={`${compactTitle(item.product_title)}, ${compactVariant(item.variant_title)}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
@@ -323,11 +322,22 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
             borderRadius="large" padding="small" minBlockSize="72px">{card(item)}</s-clickable>)}
         </s-stack></s-box>
         <s-box display="@container (inline-size > 850px) none, auto">
-          <s-grid gridTemplateColumns="44px minmax(0, 1fr) 44px" gap="small-400" alignItems="center">
-            <s-clickable accessibilityLabel="Previous edition" onClick={() => browse(-1)} disabled={certificates.length < 2} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-left" size="large" /></s-clickable>
-            <s-box border="base" borderRadius="large" padding="small" background="subdued" accessibilityLabel={`Edition ${index + 1} of ${certificates.length}`}>{card(active, true)}</s-box>
-            <s-clickable accessibilityLabel="Next edition" onClick={() => browse(1)} disabled={certificates.length < 2} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-right" size="large" /></s-clickable>
-          </s-grid>
+          <s-stack gap="small-400">
+            <s-scroll-box key={active.key} overflow="hidden auto" accessibilityLabel="Swipe through your editions, then tap an edition to view its certificate">
+              <s-grid gridTemplateColumns={`repeat(${certificates.length}, minmax(0, 100%))`} inlineSize="100%" gap="small">
+                {certificates.slice(index).concat(certificates.slice(0, index)).map(item => <s-clickable key={item.key}
+                  onClick={() => onSelect(item.key)} accessibilityLabel={`${compactTitle(item.product_title)}, ${compactVariant(item.variant_title)}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
+                  border={item.key === active.key ? "large" : "base"} borderRadius="large" padding="small" background="subdued">
+                  {card(item, true)}
+                </s-clickable>)}
+              </s-grid>
+            </s-scroll-box>
+            {certificates.length > 1 ? <s-grid gridTemplateColumns="44px minmax(0, 1fr) 44px" alignItems="center">
+              <s-clickable accessibilityLabel="Previous edition" onClick={() => browse(-1)} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-left" size="large" /></s-clickable>
+              <s-stack alignItems="center" accessibilityLabel={`Edition ${index + 1} of ${certificates.length}`}><s-text color="subdued">{index + 1}/{certificates.length}</s-text></s-stack>
+              <s-clickable accessibilityLabel="Next edition" onClick={() => browse(1)} minInlineSize="44px" minBlockSize="44px" padding="small"><s-icon type="chevron-right" size="large" /></s-clickable>
+            </s-grid> : null}
+          </s-stack>
         </s-box>
       </s-stack>
       <s-stack gap="small">
@@ -336,7 +346,7 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
           {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active, true)}>Frame certificate</s-button> : <s-badge>Certificate processing</s-badge>}
           {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : null}
         </s-grid>
-        {active.certificate_download_url ? <s-link href={active.certificate_download_url} target="auto">Download certificate</s-link> : null}
+        {active.certificate_download_url ? <s-link href={active.certificate_download_url} target="auto">Download printable certificate</s-link> : null}
         {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} alt="" loading="eager" /></s-box> : null}
       </s-stack>
     </s-grid>
@@ -629,18 +639,18 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
       id={modalId}
       heading={cartReady ? "Your framed certificate cart" : framingOnly ? "Frame your certificate" : title}
       accessibilityLabel={`Certificate viewer for ${title}`}
-      size={framingOnly && !cartReady ? "max" : "large-100"}
+      size="large-100"
       padding="none"
       onAfterHide={onClose}
     >
       <s-query-container>
       {certificate ? (
-        <s-grid gridTemplateColumns="minmax(0, 1200px)" justifyContent="center">
-        <s-box padding="@container (inline-size > 750px) large-200, none">
+        <s-grid gridTemplateColumns="minmax(0, 1120px)" justifyContent="center">
+        <s-box padding="@container (inline-size > 750px) base, none">
         <s-grid
-          gridTemplateColumns={framingOnly ? "@container (inline-size > 750px) 'minmax(0, 1.25fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" : "1fr"}
-          gap="@container (inline-size > 750px) large-200, none"
-          alignItems="start"
+          gridTemplateColumns={framingOnly ? "@container (inline-size > 750px) 'minmax(0, 1.1fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" : "1fr"}
+          gap="@container (inline-size > 750px) large, none"
+          alignItems="stretch"
         >
           {framingOnly && frameOffer.previewUrl ? <FramedCertificatePreview certificate={certificate} previewUrl={frameOffer.previewUrl} color={frameColor} /> : <CertificatePreview certificate={certificate} previewUrl={!framingOnly
               ? frameOffer.previewUrl || certificate.certificate_preview_image_url
@@ -648,8 +658,8 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 ? `${frameOffer.previewUrl}&frame=${frameColor.toLowerCase()}`
                 : certificate.frame_preview_url || certificate.certificate_preview_image_url
           } eager />}
-          <s-box padding="@container (inline-size > 750px) none, base">
-          <s-stack gap="large-200">
+          <s-box padding="@container (inline-size > 750px) none, small">
+          <s-stack gap="@container (inline-size > 750px) large, small" blockSize="100%" justifyContent="space-between">
             <s-stack gap="small-400">
               <s-heading>{compactTitle(title)}</s-heading>
               {certificate.edition_display ? (
@@ -658,7 +668,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
                 </s-text>
               ) : null}
               {cartReady ? <s-badge tone="auto" icon="check">Added to cart</s-badge> : null}
-              {framingOnly ? <s-text>Your numbered certificate, professionally printed and framed.</s-text> : null}
+              {framingOnly ? <s-box display="@container (inline-size > 750px) auto, none"><s-text>Your numbered certificate, professionally printed and framed.</s-text></s-box> : null}
               {framingOnly ? <s-text color="subdued">Small · 21 × 30 cm</s-text> : null}
             </s-stack>
             {framingOnly && frameOffer.status === "loading" ? (
@@ -717,16 +727,18 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
 }
 
 function FramedCertificatePreview({certificate, previewUrl, color}) {
-  return <s-box borderRadius="large" overflow="hidden">
+  return <s-stack alignItems="center" justifyContent="center">
+    <s-box borderRadius="large" overflow="hidden" inlineSize="@container (inline-size > 750px) 100%, 160px">
     {["Black", "Oak", "White"].map(frame => (
       <s-box key={frame} display={frame === color ? "auto" : "none"} accessibilityVisibility={frame === color ? "visible" : "hidden"}>
         <s-image src={`${previewUrl}&frame=${frame.toLowerCase()}`}
           alt={`${frame} framed certificate for ${certificate.product_title || "your edition"}`}
           aspectRatio="1/1" objectFit="contain" loading="eager"
-          sizes="(min-width: 750px) 660px, 100vw" />
+          sizes="(min-width: 750px) 560px, 160px" />
       </s-box>
     ))}
-  </s-box>;
+    </s-box>
+  </s-stack>;
 }
 
 function FramedCertificateOffer({
@@ -744,7 +756,7 @@ function FramedCertificateOffer({
 
   return (
     <s-box>
-      <s-stack gap="large">
+      <s-stack gap="@container (inline-size > 750px) large, small">
         <s-heading>Choose frame</s-heading>
         <s-grid gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap="small">
           {(product.variants?.length ? product.variants : [{color: "Black"}]).map((variant) => (
@@ -753,9 +765,15 @@ function FramedCertificateOffer({
               accessibilityLabel={`${variant.color} frame${frameColor === variant.color ? ", selected" : ""}`}
               onClick={() => onColorChange(variant.color)}>
               <s-stack gap="none" alignItems="center">
-                <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
-                  alt={`${variant.color} frame detail`} aspectRatio="1/1" objectFit="cover" loading="eager" />
-                <s-box padding="small" minBlockSize="44px"><s-text type="strong">{frameColor === variant.color ? "✓ " : ""}{variant.color}</s-text></s-box>
+                <s-box inlineSize="100%" display="@container (inline-size > 750px) auto, none">
+                  <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
+                    alt={`${variant.color} frame detail`} aspectRatio="1/1" objectFit="cover" loading="eager" />
+                </s-box>
+                <s-box inlineSize="100%" display="@container (inline-size > 750px) none, auto">
+                  <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
+                    alt={`${variant.color} frame detail`} aspectRatio="2/1" objectFit="cover" loading="eager" />
+                </s-box>
+                <s-box padding="small-400" minBlockSize="32px"><s-text type="strong">{frameColor === variant.color ? "✓ " : ""}{variant.color}</s-text></s-box>
               </s-stack>
             </s-clickable>
           ))}
@@ -781,7 +799,7 @@ function FramedCertificateOffer({
             onClick={onAdd}
             loading={checkoutState.status === "adding"}
           >
-            Add to cart · {price}
+            <s-box paddingBlock="small"><s-text type="strong">Add to cart · {price}</s-text></s-box>
           </s-button>
         )}
         {checkoutState.message ? (
