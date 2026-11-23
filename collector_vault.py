@@ -1759,29 +1759,19 @@ def _reserve_review_submission(owner_hash, row, rating):
 def _upload_review_photo(submission, photo):
     if not photo:
         return {}
-    if not r2_storage.safe_r2_enabled():
-        raise CollectorVaultUnavailableError("Photo uploads are temporarily unavailable.")
-    bucket = r2_storage.get_bucket_name("assets")
-    if not bucket:
-        raise CollectorVaultUnavailableError("Photo storage is not configured.")
-    key = (
-        f"collector-reviews/{datetime.now(timezone.utc):%Y/%m}/"
-        f"{submission.get('submission_reference')}{photo.get('extension')}"
-    )
-    result = r2_storage.upload_bytes(
-        bucket,
-        key,
-        photo.get("bytes") or b"",
-        content_type=photo.get("mime_type"),
-    )
-    if not result.get("ok"):
-        raise CollectorVaultUnavailableError("Photo could not be uploaded.")
-    return {
-        "bucket": bucket,
-        "key": key,
-        "mime_type": photo.get("mime_type"),
-        "url": r2_storage.generate_presigned_download_url(bucket, key, expires_seconds=3600),
-    }
+    from reviews_media import save_owned
+    from reviews_dropbox import ReviewDropboxStorage
+    import dropbox_integration as dbx
+    try:
+        storage=ReviewDropboxStorage()
+        owned=save_owned(photo.get('bytes') or b'','image',storage)
+        original=owned['storage']['original']
+        # Judge.me stays live during migration. It can ingest this short-lived
+        # Dropbox copy; the permanent source and native WebP copies stay here.
+        url=dbx.get_temporary_link(storage.context['token'],original['path'])
+        return {'bucket':'dropbox','key':original['id'],'mime_type':owned['mime_type'],'url':url,'storage':owned['storage']}
+    except Exception:
+        raise CollectorVaultUnavailableError('Review photo could not be saved to Dropbox.') from None
 
 
 def _submit_judgeme_review(row, submission, *, name, email, photo_upload, request_post=None):

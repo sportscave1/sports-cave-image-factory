@@ -19,4 +19,7 @@ store.rows.side_effect=lambda **kw:[r for r in rows if kw.get('status')!='PENDIN
 store.settings.return_value=dict(DEFAULT_DISPLAY);store.imports.return_value=[];store.q.return_value=None
 store.products.return_value=[{'shopify_product_id':'gid://shopify/Product/55','title':'Fixture product'}]
 store.get_review.side_effect=lambda identity:next(r for r in rows if r['id']==identity)
+store.media.return_value=[]
+store.migration_summary.return_value={'published':6,'store_reviews':0,'unmatched':0,'media_total':0,'media_copied':0,'media_failed':0}
+store.collection_settings.return_value={'rewards_enabled':False,'image_percent':10,'video_percent':15}
 render_page(ADMIN,store=store)

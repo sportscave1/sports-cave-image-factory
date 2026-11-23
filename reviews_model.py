@@ -8,13 +8,15 @@ from crm_logic import date, now
 
 SOURCES=('csv','judgeme','sports_cave')
 STATUSES=('PENDING','PUBLISHED','ARCHIVED','SPAM')
-FIELDS=('source_review_id','product_id','product_handle','product_url','product_sku','product_title','reviewer_name','email','rating','title','body','created_at','source_verified','merchant_reply','status')
-ALIASES={'source_review_id':('review_id','id'),'product_id':('shopify_product_id','product_external_id'),
+FIELDS=('source_review_id','product_id','product_handle','product_url','product_sku','product_title','reviewer_name','email','rating','title','body','created_at','source_verified','merchant_reply','status','curated','picture_urls','video_urls','review_type','merchant_reply_at')
+ALIASES={'source_review_id':('review_id','id','metaobject_handle'),'product_id':('shopify_product_id','product_external_id'),
  'product_handle':('handle',),'product_url':('product_link','url'),'product_sku':('sku',),'product_title':('product_name',),
  'reviewer_name':('name','customer','reviewer'),'email':('reviewer_email','customer_email'),
  'rating':('stars','review_rating'),'title':('review_title',),'body':('review_body','review','content'),
  'created_at':('date','review_date','created_at'),'source_verified':('verified','verified_buyer'),
- 'merchant_reply':('reply','reply_body'),'status':('published','review_status')}
+ 'merchant_reply':('reply','reply_body'),'status':('published','review_status'),
+ 'curated':(), 'picture_urls':('pictures','image_urls','photo_urls'),
+ 'video_urls':('videos','video_url'),'review_type':('type',), 'merchant_reply_at':('reply_date','replied_at')}
 
 class Plain(HTMLParser):
     def __init__(self):super().__init__(convert_charrefs=True);self.parts=[];self.skip=0
@@ -53,7 +55,7 @@ def normalize(raw,source='csv',mapping=None,source_store=''):
     supplied=str(get('created_at') or '').strip();at=None
     if supplied:
         try:
-            parsed=datetime.fromisoformat(supplied.replace('Z','+00:00'))
+            parsed=datetime.fromisoformat(re.sub(r'\s+UTC$','+00:00',supplied).replace('Z','+00:00'))
             at=parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
         except ValueError:at=None
         if not at:
@@ -65,18 +67,33 @@ def normalize(raw,source='csv',mapping=None,source_store=''):
     hashed=hashlib.sha256(identity.encode()).hexdigest() if identity else None
     name=plain(get('reviewer_name'),120) or 'Collector'
     status=str(get('status') or '').strip().lower()
-    status='ARCHIVED' if status=='archived' else 'PUBLISHED' if status in ('published','true','1','yes') else 'PENDING'
+    curated=str(get('curated') or '').strip().lower()
+    status=('ARCHIVED' if status=='archived' else 'SPAM' if status in ('hidden','spam','false','0','no') else
+            'PUBLISHED' if status in ('published','true','1','yes','ok') else 'PENDING' if status else
+            'PUBLISHED' if curated=='ok' else 'SPAM' if curated=='spam' else 'PENDING')
     source_id=plain(get('source_review_id'),200)
     hints={k:plain(get(k),500) for k in ('product_id','product_handle','product_url','product_sku','product_title')}
     product=product_gid(hints['product_id'])
+    kind=str(get('review_type') or '').strip().lower()
+    if kind and kind not in ('store','shop','product'):raise ValueError('Review type must be store or product.')
+    review_type='STORE' if kind in ('store','shop') else 'PRODUCT' if kind=='product' or any(hints.values()) else 'STORE'
+    from reviews_media import media_references
+    media=media_references(get('picture_urls'),'image')+media_references(get('video_urls'),'video')
     basis=['id',source,source_store,source_id] if source_id else ['fallback',source,source_store,product or hints, int(rating),title,body,at.isoformat() if at else '',hashed or name.casefold()]
     import json
     key=hashlib.sha256(json.dumps(basis,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    # CSV metaobject handles and API numeric IDs can refer to the same review.
+    # Reconcile only with a date AND email identity, never text/name alone.
+    fingerprint=None
+    if source=='judgeme' and at and hashed:
+        canonical=[source,source_store,product or review_type,int(rating),title,body,at.replace(microsecond=0).isoformat(),hashed]
+        fingerprint=hashlib.sha256(json.dumps(canonical,ensure_ascii=False).encode()).hexdigest()
     return {'source':source,'source_review_id':source_id or None,'source_store_id':source_store[:200],
       'product_id':product,'product_hints':hints,'reviewer_name':name,'reviewer_email_hash':hashed,
       'rating':int(rating),'title':title,'body':body,'created_at':at.isoformat() if at else None,
       'status':status,'source_verified':str(get('source_verified')).lower() in ('true','1','yes','verified'),
-      'verified_purchase':False,'merchant_reply':plain(get('merchant_reply'),3000),'dedupe_key':key}
+      'verified_purchase':False,'merchant_reply':plain(get('merchant_reply'),3000),'dedupe_key':key,
+      'review_type':review_type,'media':media,'merchant_reply_at':str(get('merchant_reply_at') or '')[:100],'source_fingerprint':fingerprint}
 
 DEFAULT_DISPLAY={'enabled':False,'verified':True,'date':True,'thumbnail':True,'reply':True,'per_page':8,'sort':'newest','accent':'#b99232','density':'compact','moderation':'manual'}
 
