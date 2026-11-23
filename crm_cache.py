@@ -9,11 +9,13 @@ class DisplayCache:
     def __init__(self, limit=256, byte_limit=12*1024*1024, clock=time.monotonic):
         self.limit,self.byte_limit,self.clock=limit,byte_limit,clock
         self.rows=OrderedDict();self.bytes=0;self.lock=threading.RLock();self.version=None
+        self.generation=0
 
     def invalidate(self, version=None):
         with self.lock:
             if version is not None and version==self.version:return
             self.rows.clear();self.bytes=0;self.version=version
+            self.generation+=1
 
     def get(self,key):
         with self.lock:

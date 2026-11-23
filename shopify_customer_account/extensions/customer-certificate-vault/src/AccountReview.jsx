@@ -1,8 +1,9 @@
 /** @jsxImportSource preact */
+import {collectionThumbnail} from './collection-image-utils.js';
 import {useEffect,useRef,useState} from 'preact/hooks';
 import {reviewProductId, secondProductImage, REVIEW_IMAGE_QUERY} from './account-review-utils.js';
 import {fileFromDropEvent,inputValue,isAllowedReviewPhoto} from './vault-utils.js';
-export function AccountReview({prompt, certificate, request, api}) {
+export function AccountReview({prompt, certificate, request, api, reviewStatus = "ready", onRetryReview = () => {}}) {
   const [submitted,setSubmitted]=useState(false);
   const onSubmitted=()=>setSubmitted(true);
   const [rating, setRating] = useState(0);
@@ -104,7 +105,7 @@ export function AccountReview({prompt, certificate, request, api}) {
     <s-box padding="none" border="base" borderRadius="large" overflow="hidden" background="subdued">
       <s-grid gridTemplateColumns="@container (inline-size > 650px) '144px minmax(0, 1fr)', 'minmax(0, 1fr)'" gap="small" alignItems="center">
         <s-box display="@container (inline-size > 650px) auto, none">
-          <s-box><s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="1.5" objectFit="cover" loading="eager" /></s-box>
+          <s-box><s-image src={collectionThumbnail(certificate?.purchased_image_url) || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your collection"} aspectRatio="1.5" objectFit="cover" loading="eager" /></s-box>
         </s-box>
         <s-box padding="small">
           <s-grid gridTemplateColumns="@container (inline-size > 650px) 'minmax(0, 1fr) 164px', 'minmax(0, 1fr) 128px'" gap="small" alignItems="center">
@@ -112,7 +113,9 @@ export function AccountReview({prompt, certificate, request, api}) {
               <s-text type="strong">{submitted ? "Thank you for your review" : "How does it look in your space?"}</s-text>
               <StarRating rating={rating || 5} onChange={chooseRating} modalId={modalId} compact />
             </s-stack>
-            <s-button inlineSize="fill" variant="primary" command="--show" commandFor={modalId} onClick={()=>chooseRating(rating || 5)}>Leave a review</s-button>
+            {reviewStatus === "error" ? <s-button inlineSize="fill" variant="primary" onClick={onRetryReview}>Retry review</s-button> :
+              <s-button inlineSize="fill" variant="primary" command="--show" commandFor={modalId} onClick={()=>chooseRating(rating || 5)}>Leave a review</s-button>}
+
           </s-grid>
         </s-box>
       </s-grid>
@@ -124,9 +127,9 @@ export function AccountReview({prompt, certificate, request, api}) {
         size="large"
       >
         <s-stack gap="small">
-          {!prompt ? <s-banner tone="info">Reviews are available for delivered editions. Your review options will appear here when ready.</s-banner> : null}
+          {reviewStatus === "error" ? <s-banner tone="critical">Review options could not load. Please try again.<s-button onClick={onRetryReview}>Retry review</s-button></s-banner> : reviewStatus === "loading" ? <s-banner tone="info">Loading your review options…</s-banner> : !prompt ? <s-banner tone="info">There are no editions awaiting a review.</s-banner> : null}
           <s-grid gridTemplateColumns="80px minmax(0, 1fr)" gap="base" alignItems="center">
-            <s-image src={certificate?.purchased_image_url || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your edition"} aspectRatio="4/3" objectFit="cover" />
+            <s-image src={collectionThumbnail(certificate?.purchased_image_url) || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your edition"} aspectRatio="4/3" objectFit="cover" />
             <s-stack gap="small-400">
               <s-text type="strong">{prompt?.product_title || certificate?.product_title}</s-text>
               <s-text color="subdued">Edition {certificate?.edition_display?.replace(/^#/, "").replace(/\s*\/\s*/, " of ")}</s-text>
@@ -137,16 +140,19 @@ export function AccountReview({prompt, certificate, request, api}) {
           <StarRating rating={rating} onChange={chooseRating} />
           <s-box border="base" borderRadius="large" padding="base" background="subdued">
             <s-grid gridTemplateColumns="minmax(0, 0.9fr) minmax(0, 1.1fr)" gap="base" alignItems="center">
-              <s-image src={setupImage?.url || certificate?.purchased_image_url} alt={setupImage?.altText || "Your edition in a room"} aspectRatio="1.25" objectFit="cover" loading="lazy" />
+              <s-image src={setupImage?.url || collectionThumbnail(certificate?.purchased_image_url, 480)} alt={setupImage?.altText || "Your edition in a room"} aspectRatio="1.25" objectFit="cover" loading="lazy" />
               <s-stack gap="small">
                 <s-heading>Show us your setup</s-heading>
                 <s-text>Start with the whole wall, then move in on your edition number.</s-text>
+                <s-text type="strong">Add photo/video (optional)</s-text>
                 <s-drop-zone
-                  label="Add photo (optional)"
+                  label="Add photo"
                   accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
                   error={photoError}
                   onInput={handlePhoto}
                 ></s-drop-zone>
+                <s-button href="https://www.sportscaveshop.com/pages/reviews#judgeme_review_widget" target="_blank">Add video</s-button>
+                <s-text color="subdued">For video, open Write a review in the new tab and finish your review there.</s-text>
               </s-stack>
             </s-grid>
           </s-box>

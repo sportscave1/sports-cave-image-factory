@@ -1,0 +1,39 @@
+name: Collection and certificate release gate
+on:
+  push:
+    branches: [main]
+    paths: ['collection_performance.py', 'collector_*.py', 'certificate_*.py', 'crm_cache.py', 'assets/certificates/**', 'shopify_customer_account/**', 'tests/*collection*', 'tests/*certificate*', '.github/workflows/collection-performance.yml']
+  pull_request:
+    paths: ['collection_performance.py', 'collector_*.py', 'certificate_*.py', 'crm_cache.py', 'assets/certificates/**', 'shopify_customer_account/**', 'tests/*collection*', 'tests/*certificate*', '.github/workflows/collection-performance.yml']
+permissions:
+  contents: read
+jobs:
+  release-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt pytest pytest-subtests
+      - run: npm ci --prefix shopify_customer_account
+      - run: npm install --prefix "$RUNNER_TEMP/collection-db" --no-save --package-lock=false @electric-sql/pglite@0.5.17
+      - name: Collection, certificate and cache regressions
+        env:
+          AUTO_EDITIONS_TEST_PGLITE: ${{ runner.temp }}/collection-db/node_modules/@electric-sql/pglite/dist/index.js
+        run: python -m pytest -q tests/test_collection_phase1.py tests/test_collection_phase2.py tests/test_collection_phase3.py tests/test_collection_phase4.py tests/test_collection_pairs.py tests/test_collector_collection_offers.py tests/test_collector_vault.py tests/test_crm.py::ProviderTests tests/test_certificate_typography.py tests/test_certificate_engine.py tests/test_certificate_print_download.py tests/test_certificate_frame_fulfilment.py tests/test_orders_certificate.py
+      - name: Native account tests
+        run: node --no-warnings --test tests/account-collection-ui.test.cjs tests/account-collection-phase1.test.mjs tests/account-collection-phase3.test.cjs tests/account-collection-phase4.test.mjs tests/account-review-setup.test.mjs tests/account-review-media.test.cjs tests/certificate-cart.test.cjs shopify_customer_account/extensions/customer-certificate-vault/src/vault-utils.test.mjs shopify_customer_account/extensions/customer-certificate-vault/src/legacy-certificate-utils.test.mjs
+      - name: Native account types
+        run: node shopify_customer_account/node_modules/typescript/bin/tsc --noEmit --allowJs --checkJs --jsx react-jsx --jsxImportSource preact --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler shopify_customer_account/extensions/customer-certificate-vault/src/MySportsCaveCollection.jsx
+      - name: Existing Orders and Inbox release gate
+        run: python scripts/check_orders_release.py --pglite "$RUNNER_TEMP/collection-db/node_modules/@electric-sql/pglite/dist/index.js" --evidence "$RUNNER_TEMP/collection-orders"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: collection-orders-evidence
+          path: ${{ runner.temp }}/collection-orders/

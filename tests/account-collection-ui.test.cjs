@@ -18,7 +18,7 @@ function fixture({existing=false,failure=false}={}){
  const utils={formatFramePrice:p=>p?`${p.currencyCode} ${p.amount}`:'',frameCartInput:(id,reference)=>({lines:[{merchandiseId:id,quantity:1,attributes:[{key:'_sports_cave_frame_request',value:reference}]}]})};
  const fetch=async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return {ok:!failure,status:failure?503:200,json:async()=>url.endsWith('/request')?{request_reference:'owned-request',cart_handoff_url:'https://fixture.test/launch',...(existing?{checkout_url:'https://fixture.test/checkout'}:{})}:{ok:true}}};
  const jsx=(type,props)=>h(type,props,...[props?.children]);
- vm.runInNewContext(compiled,{exports:module.exports,module,h,AbortController,fetch,require:name=>name==='preact/jsx-runtime'?{jsx,jsxs:jsx}:name==='preact/hooks'?hooks:name==='./vault-utils.js'?utils:name==='./account-commerce.js'?commerceModule.exports:{}});
+ vm.runInNewContext(compiled,{exports:module.exports,module,h,AbortController,fetch,require:name=>name==='preact/jsx-runtime'?{jsx,jsxs:jsx}:name==='preact/hooks'?hooks:name==='./vault-utils.js'?utils:name==='./account-commerce.js'?commerceModule.exports:name==='./collection-performance.js'?{timedOperation:(_a,_b,_o,work)=>work(),operationForPath:()=>null}:name==='./collection-image-utils.js'?{collectionThumbnail:value=>value}:{}});
  const api={sessionToken:{get:async()=>'fixture-only'},query:async()=>{queries++;return {data:{cartCreate:{cart:{id:'fixture-cart',checkoutUrl:'https://fixture.test/checkout'}}}}},i18n:{formatNumber:String}};
  return {exports:module.exports,state,calls,get queries(){return queries},view:()=>{index=0;return module.exports.CertificateViewer({certificate:{key:'fixture',framingOnly:true,product_title:'Fixture edition'},api,apiBaseUrl:'https://fixture.test',country:'US',onClose:()=>{}})}};
 }
@@ -58,6 +58,7 @@ test('all three certificate previews remain mounted and eagerly load for colour 
  assert.deepEqual(Array.from(boxes,b=>b.props.accessibilityVisibility),['hidden','visible','hidden']);
  for(const box of boxes){assert.equal(box.children[0].props.loading,'eager');assert.equal(box.children[0].props.objectFit,'contain');}
  assert.match(boxes[1].children[0].props.src,/frame=oak$/);
+ assert.equal(boxes[1].children[0].props.srcSet,'https://fixture.test/asset?token=owner&frame=oak&w=400 400w, https://fixture.test/asset?token=owner&frame=oak&w=1000 1000w');
 });
 
 test('showcase uses raw certificate and preserves original downloads; selection follows the purchased variant',()=>{
@@ -72,7 +73,7 @@ test('showcase uses raw certificate and preserves original downloads; selection 
  assert.ok(find(tree,n=>n.type==='s-box'&&n.props.display==='none'&&n.props.accessibilityVisibility==='hidden'));
 });
 test('paired products keep the smart order and return only two published available editions',()=>{
- const product=(id,available=true)=>({id,handle:id,variants:{nodes:[{availableForSale:available}]}});
+ const product=(id,available=true)=>({id,handle:id,availableForSale:available});
  const result=commerceModule.exports.pairedProducts(['1','2','3','4','5'],[product('5'),product('3'),product('1',false),null,product('4')]);
  assert.deepEqual(Array.from(result,p=>p.id),['3','4']);
 });

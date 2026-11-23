@@ -12,6 +12,8 @@ import {
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
 import {loadCollectionOrders} from "./collection-order-pages.js";
 import {accountCountry, compactTitle, compactVariant, pairedProducts, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
+import {collectionThumbnail} from "./collection-image-utils.js";
+import {timedOperation, operationForPath} from "./collection-performance.js";
 import {AccountReview} from "./AccountReview.jsx";
 import {formatFramePrice, frameCartInput} from "./vault-utils.js";
 import {createFrameOfferLoader} from "./frame-offer-loader.js";
@@ -78,10 +80,13 @@ function Extension() {
   const frameLoader = useRef(null);
   if (!frameLoader.current || frameLoader.current.api !== api || frameLoader.current.base !== apiBaseUrl) {
     frameLoader.current = {api, base: apiBaseUrl, loader: createFrameOfferLoader({
-      bootstrap: () => vaultRequest(api, apiBaseUrl, "/api/collector-vault/bootstrap"),
+      bootstrap: () => vaultRequest(api, apiBaseUrl, "/api/collector-vault/bootstrap?include_review=false"),
       prices: async (product, country) => {
-        const result = /** @type {any} */ (await api.query(FRAME_PRICE_QUERY, {variables: {id: product.product_id, country}}));
-        if (result.errors?.length) throw new Error("Frame prices unavailable");
+        const result = /** @type {any} */ (await timedOperation(api, apiBaseUrl, 'frame_prices', async () => {
+          const response = await api.query(FRAME_PRICE_QUERY, {variables: {id: product.product_id, country}});
+          if (response.errors?.length) throw new Error("Frame prices unavailable");
+          return response;
+        }));
         return marketFrames(product, result.data?.product);
       },
     })};
@@ -96,7 +101,7 @@ function Extension() {
       setErrorMessage("");
       try {
         const fetchCustomerPage = (_url, options) => fetch(`shopify://customer-account/api/${API_VERSION}/graphql.json`, options);
-        const {customer, orders: orderNodes} = await loadCollectionOrders(fetchCustomerPage, API_VERSION, CERTIFICATES_QUERY);
+        const {customer, orders: orderNodes} = await timedOperation(api, apiBaseUrl, 'collection_orders', () => loadCollectionOrders(fetchCustomerPage, API_VERSION, CERTIFICATES_QUERY));
         const rows = attachPurchasedArtwork(
           collectCertificates(orderNodes, customer),
           orderNodes,
@@ -123,7 +128,9 @@ function Extension() {
   const firstCertificate = certificates[0] || null;
   const activeCertificate = certificates.find(item => item.key === activeKey) || firstCertificate;
   const country = useCountry(api);
-  const [reviewPrompt, setReviewPrompt] = useState(null);
+  const [reviewLoad, setReviewLoad] = useState({status: "loading", prompt: null});
+  const [reviewRetry, setReviewRetry] = useState(0);
+  const reviewPrompt = reviewLoad.prompt;
   const [vaultData, setVaultData] = useState(null);
 
   useEffect(() => {
@@ -133,10 +140,23 @@ function Extension() {
       .then((payload) => {
         if (!active) return;
         setVaultData(payload);
-        setReviewPrompt(payload.review_prompt || null);
+        // Fallback for an older API during a rolling release.
+        if (payload.review_prompt) setReviewLoad({status: "ready", prompt: payload.review_prompt});
       }).catch(() => {}); // Existing assets remain usable if offers are unavailable.
     return () => { active = false; };
   }, [retryKey, offerLoader]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setReviewLoad({status: "loading", prompt: null});
+    vaultRequest(api, apiBaseUrl, "/api/collector-vault/review-prompt", {signal: controller.signal})
+      .then(payload => {
+        if (!controller.signal.aborted) setReviewLoad({status: "ready", prompt: payload.review_prompt || null});
+      }).catch(() => {
+        if (!controller.signal.aborted) setReviewLoad(current => current.prompt ? current : {status: "error", prompt: null});
+      });
+    return () => controller.abort();
+  }, [api, apiBaseUrl, retryKey, reviewRetry]);
 
   useEffect(() => {
     // Prepare country-specific prices before the popup is opened; deduplicated
@@ -175,7 +195,7 @@ function Extension() {
             />
           ) : null}
           {status === "ready" ? (
-            <AccountReview api={api} certificate={certificates.find(item => item.shopify_product_id === reviewPrompt?.shopify_product_id) || firstCertificate} prompt={reviewPrompt} request={(path, options) => vaultRequest(api, apiBaseUrl, path, options)} />
+            <AccountReview api={api} certificate={certificates.find(item => item.shopify_product_id === reviewPrompt?.shopify_product_id) || firstCertificate} prompt={reviewPrompt} reviewStatus={reviewLoad.status} onRetryReview={() => setReviewRetry(value => value + 1)} request={(path, options) => vaultRequest(api, apiBaseUrl, path, options)} />
           ) : null}
           {status === "ready" && certificates.length === 0 ? (
             <EmptyState />
@@ -307,7 +327,7 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
   const count = `${certificates.length} numbered ${certificates.length === 1 ? "edition" : "editions"}`;
   const preview = active.certificate_preview_image_url;
   const card = (item, mobile = false) => <s-grid gridTemplateColumns={mobile ? "minmax(0, 1fr) minmax(0, 1fr)" : "80px minmax(0, 1fr) auto"} gap="small" alignItems="center">
-    {item.purchased_image_url ? <s-image src={item.purchased_image_url} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit={mobile ? "contain" : "cover"} loading="eager" /> : <s-box minBlockSize="48px" />}
+    {item.purchased_image_url ? <s-image src={collectionThumbnail(item.purchased_image_url)} alt={item.purchased_image_alt || item.product_title} aspectRatio="4/3" objectFit={mobile ? "contain" : "cover"} loading="eager" /> : <s-box minBlockSize="48px" />}
     <s-stack gap="small-400"><s-text type="strong">{compactTitle(item.product_title)}</s-text><s-text color="subdued">{compactVariant(item.variant_title)}</s-text>{mobile ? <s-text>{edition(item)}</s-text> : null}</s-stack>
     {!mobile ? <s-text>{edition(item)} ›</s-text> : null}
   </s-grid>;
@@ -347,7 +367,7 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
           {active.certificate_pdf_url ? <s-button inlineSize="fill" variant="secondary" command="--show" commandFor="certificate-viewer" onClick={() => onOpen(active)}>View certificate</s-button> : null}
         </s-grid>
         {active.certificate_download_url ? <s-link href={active.certificate_download_url} target="auto">Download printable certificate</s-link> : null}
-        {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} alt="" loading="eager" /></s-box> : null}
+        {active.frame_preview_url ? <s-box display="none" accessibilityVisibility="hidden"><s-image src={active.frame_preview_url} srcSet={`${active.frame_preview_url}&w=400 400w, ${active.frame_preview_url}&w=1000 1000w`} sizes="(min-width: 520px) 560px, 160px" alt="" loading="eager" /></s-box> : null}
       </s-stack>
     </s-grid>
     <s-divider />
@@ -732,6 +752,7 @@ function FramedCertificatePreview({certificate, previewUrl, color}) {
     {["Black", "Oak", "White"].map(frame => (
       <s-box key={frame} display={frame === color ? "auto" : "none"} accessibilityVisibility={frame === color ? "visible" : "hidden"}>
         <s-image src={`${previewUrl}&frame=${frame.toLowerCase()}`}
+          srcSet={`${previewUrl}&frame=${frame.toLowerCase()}&w=400 400w, ${previewUrl}&frame=${frame.toLowerCase()}&w=1000 1000w`}
           alt={`${frame} framed certificate for ${certificate.product_title || "your edition"}`}
           aspectRatio="1/1" objectFit="contain" loading="eager"
           sizes="(min-width: 520px) 560px, 160px" />
@@ -766,11 +787,11 @@ function FramedCertificateOffer({
               onClick={() => onColorChange(variant.color)}>
               <s-stack gap="none" alignItems="center">
                 <s-box inlineSize="100%" display="@container (inline-size > 520px) auto, none">
-                  <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
+                  <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629&width=320`}
                     alt={`${variant.color} frame detail`} aspectRatio="1/1" objectFit="cover" loading="eager" />
                 </s-box>
                 <s-box inlineSize="100%" display="@container (inline-size > 520px) none, auto">
-                  <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629`}
+                  <s-image src={`https://cdn.shopify.com/s/files/1/0722/2332/6515/files/sports-cave-${variant.color.toLowerCase()}-frame-swatch.webp?v=1785548629&width=320`}
                     alt={`${variant.color} frame detail`} aspectRatio="2/1" objectFit="cover" loading="eager" />
                 </s-box>
                 <s-box padding="small-400" minBlockSize="32px"><s-text type="strong">{frameColor === variant.color ? "✓ " : ""}{variant.color}</s-text></s-box>
@@ -826,14 +847,18 @@ function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
       try {
         if (!certificate?.shopify_product_id) { setProducts([]); setStatus("empty"); return; }
         const recommended = await vaultRequest(api, apiBaseUrl,
-          `/api/collector-vault/recommendations?country=${country}&product_id=${encodeURIComponent(certificate?.shopify_product_id || "")}`, {signal: controller.signal});
+          `/api/collector-vault/recommendations?fields=ids&country=${country}&product_id=${encodeURIComponent(certificate?.shopify_product_id || "")}`, {signal: controller.signal});
+        if (controller.signal.aborted) return;
         const ids = (recommended.products || []).slice(0, 8).map((p) => p.id);
         if (!ids.length) {
           if (!controller.signal.aborted) { setProducts([]); setStatus("empty"); }
           return;
         }
-        const result = await api.query(UPSELL_QUERY, {variables: {ids, country}});
-        if (result.errors?.length) throw new Error("Products unavailable");
+        const result = await timedOperation(api, apiBaseUrl, 'pair_products', async () => {
+          const response = await api.query(UPSELL_QUERY, {variables: {ids, country}});
+          if (response.errors?.length) throw new Error("Products unavailable");
+          return response;
+        });
         // Preserve the smart rank even when Shopify returns nodes in another order.
         const nodes = pairedProducts(ids, result.data?.nodes);
         if (!controller.signal.aborted) { setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
@@ -846,7 +871,9 @@ function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
   }, [api, apiBaseUrl, retry, country, certificate?.shopify_product_id]);
   return <s-stack gap="base">
     <s-heading>Pairs with your {compactTitle(certificate?.product_title || "selected")} edition</s-heading>
-    {status === "loading" ? <s-spinner accessibilityLabel="Finding your recommendations" /> : null}
+    {status === "loading" ? <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large" accessibilityLabel="Finding your recommendations">
+      {[0, 1].map(index => <s-grid key={index} gridTemplateColumns="@container (inline-size > 850px) '152px minmax(0, 1fr)', '1fr'" gap="base" alignItems="center"><s-box minBlockSize="@container (inline-size > 850px) 114px, 120px" background="subdued" borderRadius="base" /><s-box minBlockSize="32px" /></s-grid>)}
+    </s-grid> : null}
     {status === "error" ? <s-stack gap="small"><s-text>Recommendations are temporarily unavailable.</s-text>
       <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
     {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
@@ -945,6 +972,10 @@ function frameIdempotencyKey(certificate) {
 }
 
 async function vaultRequest(api, apiBaseUrl, path, options = {}) {
+  return timedOperation(api, apiBaseUrl, operationForPath(path), () => performVaultRequest(api, apiBaseUrl, path, options));
+}
+
+async function performVaultRequest(api, apiBaseUrl, path, options = {}) {
   const method = options.method || "GET";
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await api.sessionToken.get();

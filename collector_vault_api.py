@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import uuid
+from collection_performance import observe
 from fastapi.encoders import jsonable_encoder
 from urllib.parse import quote
 
@@ -26,7 +27,7 @@ def _cors_headers():
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Expose-Headers": (
             "X-Sports-Cave-Error-Code, X-Sports-Cave-Request-Id, "
-            "X-Sports-Cave-Revision"
+            "X-Sports-Cave-Revision, Server-Timing"
         ),
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
@@ -140,7 +141,15 @@ async def collector_vault_bootstrap(request: Request):
     request_id = _request_id()
     try:
         session = _session(request)
-        payload = collector_vault.build_vault_payload(session["shopify_customer_id"])
+        if request.query_params.get("include_review") == "false":
+            payload = await run_in_threadpool(
+                collector_vault.build_vault_payload,
+                session["shopify_customer_id"], include_review=False,
+            )
+        else:
+            payload = await run_in_threadpool(
+                collector_vault.build_vault_payload, session["shopify_customer_id"],
+            )
         certificate_count = len(payload.get("certificates") or [])
         LOGGER.info(
             "Collector Vault bootstrap completed status=200 certificate_count=%s request_id=%s",
@@ -153,6 +162,19 @@ async def collector_vault_bootstrap(request: Request):
         )
     except Exception as error:
         return _error_response(error, "bootstrap", request_id=request_id)
+
+
+async def collector_vault_review_prompt(request: Request):
+    if request.method == "OPTIONS":
+        return await collector_vault_options(request)
+    try:
+        session = _session(request)
+        payload = await run_in_threadpool(
+            collector_vault.build_review_prompt_payload, session["shopify_customer_id"],
+        )
+        return _json({"ok": True, **payload})
+    except Exception as error:
+        return _error_response(error, "review_prompt")
 
 
 async def collector_vault_event(request: Request):
@@ -259,10 +281,30 @@ async def collector_vault_asset(request: Request):
     if request.method == "OPTIONS":
         return await collector_vault_options(request)
     try:
-        asset = collector_vault.resolve_asset_token(request.query_params.get("token"))
+        asset = await run_in_threadpool(collector_vault.resolve_asset_token, request.query_params.get("token"))
         frame = request.query_params.get("frame")
         if frame and (frame not in ("black", "oak", "white") or asset.get("kind") != "preview"):
             raise collector_vault.CollectorVaultError("Invalid certificate frame preview.")
+        width_value = request.query_params.get("w", "1000")
+        if width_value not in ("400", "1000") or ("w" in request.query_params and not frame):
+            raise collector_vault.CollectorVaultError("Invalid certificate preview size.")
+        def preview_source_url():
+            if asset.get("storage") == "r2":
+                url = r2_storage.generate_presigned_download_url(asset.get("bucket"), asset.get("key"), expires_seconds=300)
+            else:
+                url = asset.get("url")
+            if not url:
+                raise collector_vault.CollectorVaultNotFoundError("Certificate asset is unavailable.")
+            return url
+        if frame:
+            from collector_preview_cache import PREVIEWS, PreviewBusyError, PreviewSourceError
+            try:
+                image = await run_in_threadpool(PREVIEWS.framed, asset, frame, int(width_value), preview_source_url)
+            except (PreviewBusyError, PreviewSourceError, TimeoutError):
+                raise collector_vault.CollectorVaultUnavailableError("Certificate preview is temporarily unavailable.") from None
+            return Response(image, media_type="image/webp", headers={
+                **_cors_headers(), "Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff",
+            })
         headers = {
             **_cors_headers(),
             "Cache-Control": "private, max-age=300" if asset.get("kind") == "preview" else "no-store",
@@ -296,18 +338,6 @@ async def collector_vault_asset(request: Request):
             content = await run_in_threadpool(read_original)
             image = await run_in_threadpool(render_print_jpg, content)
             return Response(image, media_type="image/jpeg", headers=headers)
-        if frame:
-            from collector_collection_offers import render_certificate_frame
-            content = bytearray()
-            try:
-                for chunk in upstream.iter_content(chunk_size=64 * 1024):
-                    content.extend(chunk)
-                    if len(content) > 12 * 1024 * 1024:
-                        raise collector_vault.CollectorVaultError("Certificate preview is too large.")
-            finally:
-                upstream.close()
-            return Response(render_certificate_frame(content, frame), media_type="image/webp",
-                            headers={**_cors_headers(), "Cache-Control": "private, max-age=300"})
         content_length = upstream.headers.get("Content-Length")
         if content_length:
             headers["Content-Length"] = content_length
@@ -329,6 +359,8 @@ async def collector_vault_recommendations(request: Request):
         from starlette.concurrency import run_in_threadpool
         products = await run_in_threadpool(recommendations, session["shopify_customer_id"],
             country=request.query_params.get("country"), seed_product_id=request.query_params.get("product_id"))
+        if request.query_params.get("fields") == "ids":
+            products = [{"id": product["id"]} for product in products[:8]]
         return _json({"ok": True, "products": products})
     except Exception as error:
         return _error_response(error, "recommendations")
@@ -363,11 +395,36 @@ async def collector_vault_cart_handoff(request: Request):
         return _error_response(error, "cart_handoff")
 
 
+async def collector_vault_performance(request: Request):
+    if request.method == 'OPTIONS':
+        return await collector_vault_options(request)
+    try:
+        _require_post_marker(request)
+        _session(request)
+        content = bytearray()
+        async for chunk in request.stream():
+            if len(content) + len(chunk) > 4096:
+                raise collector_vault.CollectorVaultError('Performance report is too large.')
+            content.extend(chunk)
+        from collection_performance import validate_samples, LOGGER as PERFORMANCE_LOGGER
+        try:
+            samples = validate_samples(json.loads(content))
+        except (ValueError, TypeError, KeyError):
+            raise collector_vault.CollectorVaultError('Invalid performance report.') from None
+        for operation, duration, outcome in samples:
+            PERFORMANCE_LOGGER.info('collection_perf source=client operation=%s outcome=%s duration_ms=%d', operation, outcome, duration)
+        return _json({'ok': True})
+    except Exception as error:
+        return _error_response(error, 'performance')
+
+
 COLLECTOR_VAULT_ROUTES = (
+    ('/api/collector-vault/performance', collector_vault_performance, ('POST', 'OPTIONS')),
     ("/api/collector-vault/frame/launch", collector_vault_cart_launch, ("GET",)),
     ("/api/collector-vault/frame/cart-handoff", collector_vault_cart_handoff, ("POST", "OPTIONS")),
-    ("/api/collector-vault/recommendations", collector_vault_recommendations, ("GET", "OPTIONS")),
-    ("/api/collector-vault/bootstrap", collector_vault_bootstrap, ("GET", "OPTIONS")),
+    ("/api/collector-vault/recommendations", observe('recommendations', collector_vault_recommendations), ("GET", "OPTIONS")),
+    ("/api/collector-vault/bootstrap", observe('bootstrap', collector_vault_bootstrap), ("GET", "OPTIONS")),
+    ("/api/collector-vault/review-prompt", observe('review_options', collector_vault_review_prompt), ("GET", "OPTIONS")),
     ("/api/collector-vault/events", collector_vault_event, ("POST", "OPTIONS")),
     ("/api/collector-vault/frame/request", collector_vault_frame_request, ("POST", "OPTIONS")),
     (
@@ -376,5 +433,5 @@ COLLECTOR_VAULT_ROUTES = (
         ("POST", "OPTIONS"),
     ),
     ("/api/collector-vault/review", collector_vault_review_submit, ("POST", "OPTIONS")),
-    ("/api/collector-vault/asset", collector_vault_asset, ("GET", "OPTIONS")),
+    ("/api/collector-vault/asset", observe('frame_preview', collector_vault_asset), ("GET", "OPTIONS")),
 )

@@ -670,6 +670,8 @@ def resolve_asset_token(token):
             "filename": _certificate_filename(row, kind),
             "kind": kind,
             "certificate_row_id": certificate_row_id,
+            "owner_hash": actual_hash,
+            "asset_version": str(row.get("updated_at") or row.get("generated_at") or row.get("created_at") or ""),
         }
     )
     return asset
@@ -1208,7 +1210,7 @@ def _public_certificate_rows(rows, *, include_secure_assets=True):
     return certificates
 
 
-def build_vault_payload(shopify_customer_id):
+def build_vault_payload(shopify_customer_id, *, include_review=True):
     rows, capabilities = _list_owned_certificates_with_capabilities(
         shopify_customer_id
     )
@@ -1243,11 +1245,20 @@ def build_vault_payload(shopify_customer_id):
         ),
         "review_prompt": (
             review_prompt(rows, shopify_customer_id, allow_purchased=True)
-            if secure_assets_available
+            if include_review and secure_assets_available
             else None
         ),
         "frame_product": frame_payload,
     }
+
+
+def build_review_prompt_payload(shopify_customer_id):
+    """Optional review work must not hold up certificates or frame pricing."""
+    rows, capabilities = _list_owned_certificates_with_capabilities(shopify_customer_id)
+    return {"review_prompt": (
+        review_prompt(rows, shopify_customer_id, allow_purchased=True)
+        if capabilities.get("secure_assets") else None
+    )}
 
 
 def _safe_idempotency_key(value):

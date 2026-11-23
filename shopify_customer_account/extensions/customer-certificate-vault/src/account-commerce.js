@@ -10,17 +10,17 @@ export function compactTitle(title) {
 export function pairedProducts(ids, nodes) {
   const byId = new Map((nodes || []).filter(Boolean).map(product => [product.id, product]));
   return [...new Set(ids)].map(id => byId.get(id))
-    .filter(product => product?.handle && product.variants?.nodes?.some(variant => variant.availableForSale))
+    .filter(product => product?.handle && product.availableForSale === true)
     .slice(0, 2);
 }
 export function comparePrice(variant) {
   const price=variant?.price, compare=variant?.compareAtPrice;
   return price && compare && price.currencyCode===compare.currencyCode && Number(compare.amount)>Number(price.amount) ? compare : null;
 }
+// These cards link to products; variant prices/options are loaded on that page.
 export const UPSELL_QUERY = `query CollectionUpsellVariants($ids: [ID!]!, $country: CountryCode!) @inContext(country: $country) {
-  nodes(ids: $ids) { ... on Product { id title handle featuredImage { url altText }
-    variants(first: 100) { nodes { id title availableForSale selectedOptions { name value }
-      price { amount currencyCode } compareAtPrice { amount currencyCode } image { url altText } } }
+  nodes(ids: $ids) { ... on Product { id title handle availableForSale
+    featuredImage { url(transform: {maxWidth: 400}) altText }
   } }
 }`;
 export const FRAME_PRICE_QUERY = `query AccountCertificatePrices($id: ID!, $country: CountryCode!) @inContext(country: $country) {
@@ -39,7 +39,7 @@ export function marketFrames(product, data) {
 // Display labels only: order/fulfilment variant identifiers are unchanged.
 export function compactVariant(value) {
   return String(value || '').split('/').map(part => part
-    .replace(/\b(XL|XS|XXL|S|M|L)\b\s*[-–—]?\s*\d.*$/i, '$1')
-    .replace(/\s*[-–—]?\s*\d+(?:[.,]\d+)?\s*[×x]\s*\d.*$/i, '')
+    .replace(/\b(XL|XS|XXL|S|M|L)\b\s*[-â€“â€”]?\s*\d.*$/i, '$1')
+    .replace(/\s*[-â€“â€”]?\s*\d+(?:[.,]\d+)?\s*[Ã—x]\s*\d.*$/i, '')
     .trim()).filter(Boolean).join(' / ');
 }
