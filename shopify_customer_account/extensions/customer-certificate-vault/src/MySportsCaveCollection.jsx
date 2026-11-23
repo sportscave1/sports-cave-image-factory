@@ -15,7 +15,7 @@ import {accountCountry, compactTitle, compactVariant, pairedProducts, pairedEdit
 import {collectionThumbnail} from "./collection-image-utils.js";
 import {timedOperation, operationForPath} from "./collection-performance.js";
 import {AccountReview} from "./AccountReview.jsx";
-import {formatFramePrice, frameCartInput} from "./vault-utils.js";
+import {formatFramePrice} from "./vault-utils.js";
 import {createFrameOfferLoader} from "./frame-offer-loader.js";
 import {createCollectionPairCache} from "./collection-pair-cache.js";
 
@@ -25,12 +25,6 @@ const API_VERSION = "2026-04";
 const DEFAULT_API_BASE_URL = "https://sports-cave-image-factory.onrender.com";
 const SHOP_LATEST_DROPS_URL = "https://www.sportscaveshop.com";
 const REVIEWS_PAGE_URL = "https://www.sportscaveshop.com/pages/reviews";
-const CART_CREATE_MUTATION = `mutation SportsCaveFramedCertificateCart($input: CartInput!) {
-  cartCreate(input: $input) {
-    cart { id checkoutUrl }
-    userErrors { field message }
-  }
-}`;
 const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates($after: String) {
   customer {
     id
@@ -608,35 +602,12 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
         });
         return;
       }
-      if (request.checkout_url) {
+      if (request.cart_handoff_url) {
         navigation.navigate(request.cart_handoff_url);
         // Keep Add disabled while the host navigates to the storefront drawer.
         return;
       }
-      const cartPayload = await api.query(CART_CREATE_MUTATION, {
-        variables: {
-          input: {...frameCartInput(product.variant_id, String(request.request_reference)), buyerIdentity:{countryCode:country}},
-        },
-      });
-      const cartResult = cartPayload?.data?.cartCreate;
-      const cartError = cartResult?.userErrors?.[0]?.message;
-      if (cartError || !cartResult?.cart?.checkoutUrl) {
-        throw new Error(cartError || "Shopify checkout could not be created.");
-      }
-      await vaultRequest(
-        api,
-        apiBaseUrl,
-        "/api/collector-vault/frame/cart-created",
-        {
-          method: "POST",
-          body: {
-            request_reference: request.request_reference,
-            cart_id: cartResult.cart.id,
-            checkout_url: cartResult.cart.checkoutUrl,
-          },
-        },
-      );
-      navigation.navigate(request.cart_handoff_url);
+      throw new Error("Certificate cart handoff unavailable.");
     } catch (_error) {
       setCheckoutState({
         status: "error",
