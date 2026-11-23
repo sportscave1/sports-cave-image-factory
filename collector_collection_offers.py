@@ -40,7 +40,7 @@ def render_certificate_frame(content, color):
                 canvas.close()
 
 
-def recommendations(customer_id):
+def recommendations(customer_id, country=None):
     from crm_smart_catalogue import histories, lines
     from crm_smart_candidates import memberships, collection_products, balanced
     from crm_catalogue import Catalogue, product_id, product_issues, edition_available
@@ -71,7 +71,7 @@ def recommendations(customer_id):
     shop = bounded(Shopify(), seconds=12)
     groups = [collection_products(shop, collection) for collection in memberships(shop, sorted(owned))]
     candidates = list(dict.fromkeys(identity for group in groups for identity in group if identity not in owned))[:120]
-    country = next((order.get("_country") for order in orders if order.get("_country")), "AU")
+    country = country or next((order.get("_country") for order in orders if order.get("_country")), "AU")
     market = {"GB": "UK"}.get(country, country)
     if market not in ("AU", "US", "UK", "CA", "NZ"):
         market = "Global"

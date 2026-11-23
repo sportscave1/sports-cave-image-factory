@@ -187,6 +187,7 @@ async def collector_vault_frame_request(request: Request):
             frame_variant_id=body.get("frame_variant_id"),
             idempotency_key=body.get("idempotency_key"),
             allow_repeat=bool(body.get("allow_repeat")),
+            country=body.get("country"),
         )
         return _json({"ok": True, **result})
     except Exception as error:
@@ -308,7 +309,7 @@ async def collector_vault_recommendations(request: Request):
     try:
         session = _session(request)
         from collector_collection_offers import recommendations
-        return _json({"ok": True, "products": recommendations(session["shopify_customer_id"])})
+        return _json({"ok": True, "products": recommendations(session["shopify_customer_id"], country=request.query_params.get("country"))})
     except Exception as error:
         return _error_response(error, "recommendations")
 

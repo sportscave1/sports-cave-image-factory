@@ -1275,6 +1275,7 @@ def create_frame_request(
     frame_variant_id,
     idempotency_key,
     allow_repeat=False,
+    country=None,
 ):
     row = _resolve_certificate_reference(certificate_reference, shopify_customer_id)
     frame_product = get_frame_product(force=True)
@@ -1304,7 +1305,7 @@ def create_frame_request(
                 )
                 existing = cur.fetchone()
                 if existing:
-                    return frame_cart_response(dict(existing), row, requested_variant)
+                    return frame_cart_response(dict(existing), row, requested_variant, country)
             cur.execute(
                 """
                 INSERT INTO collector_frame_requests (
@@ -1349,16 +1350,16 @@ def create_frame_request(
         certificate_row_id=row.get("certificate_row_id"),
         event_key=f"frame-request:{created.get('request_reference')}",
     )
-    return frame_cart_response(dict(created), row, requested_variant)
+    return frame_cart_response(dict(created), row, requested_variant, country)
 
 
-def frame_cart_response(result, certificate, variant_id):
+def frame_cart_response(result, certificate, variant_id, country=None):
     """Scoped storefront handoff; no customer identity or permanent asset links."""
     reference = str(result.get("request_reference") or "")
     if not _UUID.match(reference):
         raise CollectorVaultError("Frame request reference is invalid.")
     token = _signed_token({"purpose": "frame_cart", "request_reference": reference,
-                           "variant_id": variant_id}, ttl_seconds=30 * 60)
+                           "variant_id": variant_id, "country": country if re.fullmatch(r"[A-Z]{2}", str(country or "")) else _frame_product_country()}, ttl_seconds=30 * 60)
     result["request_reference"] = reference
     result["cart_handoff_url"] = "https://www.sportscaveshop.com/?sc_certificate_cart=" + token
     return result
@@ -1380,7 +1381,8 @@ def frame_cart_handoff(token):
     color = next((color.lower() for sku, color in FRAME_SKUS.items()
                   if sku == _frame_variant_sku(request["frame_variant_id"])), "black")
     preview = f"https://sports-cave-image-factory.onrender.com{API_BASE_PATH}/asset?token={asset_token}&frame={color}"
-    return {"variant_id": str(request["frame_variant_id"]).rsplit("/", 1)[-1],
+    return {"country_code": payload.get("country") or _frame_product_country(),
+            "variant_id": str(request["frame_variant_id"]).rsplit("/", 1)[-1],
             "request_reference": reference, "quantity": 1,
             "properties": {"_sports_cave_frame_request": reference,
                            "_sports_cave_certificate_preview": preview,
