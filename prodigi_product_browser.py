@@ -150,6 +150,17 @@ def complete(cur,key,value,stage,*,error=''):
         receipt['readback_repriced_fields']=[p for p in observed if p.endswith(('.unitPrice.amount','.lineTotal.amount'))]
         if not receipt['started'] or current_stable!=before_stable:
             raise ValueError('The supplier order changed outside the permitted product selection.')
+        reset=value.get('reset_authorisation')
+        if reset:
+            if (reset.get('generation')!=value.get('reset_generation') or reset.get('used_at')
+                    or reset.get('order_id')!=str(order['id']) or reset.get('item_id')!=str(item['id'])
+                    or reset.get('assets')!=(item.get('assets') or [])
+                    or after_selection_business(business(reset['before'],item['id']))!=before_stable):
+                raise ValueError('The reset authorisation changed before product selection was verified.')
+            # This readback proved the permitted product change and pinned every
+            # other business field. Carry that exact state into the upload fence.
+            reset['before']=browser.business(order,item['id'])
+            reset['product_selection_verified_at']=prep.now()
         receipt.update(verified=True,verified_at=prep.now(),sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''))
         value.update(status=browser.WAITING,message='Original Fulfilment product and frame verified. Uploading this edition next, before selecting another product.')
         value.setdefault('history',[]).append(dict(at=prep.now(),event='blank_product_selected',sku=item['sku']))

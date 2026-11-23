@@ -64,7 +64,7 @@ def snapshot(value, resolver, sandbox):
     return value['snapshot']
 
 
-def business(order, target, *, after_save=False):
+def business(order, target, *, after_save=False, before=None):
     """Pin everything except this item's artwork and its editor sizing."""
     result = {k:deepcopy(order.get(k)) for k in
         ('id','merchantReference','recipient','shippingMethod','branding','packingSlip','charges')}
@@ -81,6 +81,19 @@ def business(order, target, *, after_save=False):
             for key in ('unitPrice','lineTotal'):
                 money=result['items'][-1].get(key)
                 if isinstance(money,dict):money.pop('amount',None)
+                if before is not None and str(item['id'])!=str(target):
+                    previous=[i for i in before.get('items',[]) if str(i.get('id'))==str(item['id'])]
+                    raw=item.get(key)
+                    if len(previous)==1 and previous[0].get(key) is None and isinstance(raw,dict):
+                        # The first artwork can make previously unpriced siblings
+                        # acquire calculated prices. Existing currencies stay pinned.
+                        from decimal import Decimal, InvalidOperation
+                        import re
+                        try:amount=Decimal(str(raw.get('amount')))
+                        except InvalidOperation:amount=Decimal('NaN')
+                        if (set(raw)=={'amount','currency'} and amount.is_finite() and amount>=0
+                                and re.fullmatch('[A-Z]{3}',str(raw.get('currency','')))):
+                            result['items'][-1].pop(key,None)
     return result
 
 
@@ -91,6 +104,46 @@ def checked(value, provider, resolver, sandbox):
     if order.get('charges'):
         raise ValueError('This order has charges; browser preparation stopped.')
     return snap, order, item
+
+
+def verified_sibling_baseline(cur,value,order,target,provider,resolver):
+    """Read back a sibling's separately permitted, verified JPG; never write it."""
+    before=deepcopy(value['browser']['before'])
+    verified=[]
+    for previous in before.get('items',[]):
+        item_id=str(previous.get('id'))
+        if item_id==str(target):continue
+        current=[i for i in order.get('items',[]) if str(i.get('id'))==item_id]
+        if len(current)!=1:continue  # The normal whole-order fence rejects it.
+        current=current[0]
+        if all(previous.get(k)==current.get(k) for k in ('assets','sizing')):continue
+        cur.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+            AND value->>'order_id'=%s AND value->>'item_id'=%s
+            AND NOT COALESCE((value->>'hidden')::boolean,false) LIMIT 2""",
+            (str(order['id']),item_id))
+        rows=cur.fetchall()
+        if len(rows)!=1:raise ValueError('Changed sibling artwork has no unique verified handoff.')
+        sibling=rows[0]['value'];receipt=sibling.get('browser') or {}
+        if (receipt.get('started') is not True or receipt.get('verified') is not True
+                or sibling.get('allocation_id')==value['allocation_id']):
+            raise ValueError('Changed sibling artwork has not passed its own Save verification.')
+        snap=snapshot(sibling,resolver,False)
+        prep.validate_order(order,snap,sibling['order_id'],sibling['item_id'],binding=sibling.get('consolidation_binding'))
+        assets=current.get('assets') or []
+        if (len(assets)!=1 or assets[0].get('printArea')!='default'
+                or receipt.get('original_sha256')!=snap['output']['sha256']):
+            raise ValueError('Changed sibling artwork does not match its verified source.')
+        asset_id,_=verify_original(provider,original_file(assets[0]['url'],snap['dimensions']),
+            receipt['filename'],snap['output'],snap['dimensions'])
+        if asset_id!=receipt.get('original_asset_id'):
+            raise ValueError('Changed sibling artwork is a different supplier asset.')
+        # Only the separately verified artwork/fit may advance. SKU, quantity,
+        # address, shipping, charges and other business fields remain pinned.
+        for key in ('assets','sizing'):
+            if key in current:previous[key]=deepcopy(current[key])
+            else:previous.pop(key,None)
+        verified.append(item_id)
+    return before,verified
 
 
 def has_existing_artwork(item):
@@ -375,27 +428,36 @@ def recover_selected_empty_editors(user,*,page_supported=False,processing_suppor
     return recovered
 
 
+def saved_readback_candidate(value):
+    """One read-only retry for a saved upload, never a new supplier permit."""
+    receipt=value.get('browser') or {}
+    if (value.get('status')!='Needs review' or receipt.get('started') is not True
+            or receipt.get('last_stage')!='save' or value.get('saved_readback_recoveries',0)>=1
+            or value.get('submission') or value.get('hidden')):return False
+    if receipt.get('client_error')=='The expected Prodigi control did not finish loading.':return True
+    import re
+    paths=receipt.get('readback_changed_fields')
+    return bool(isinstance(paths,list) and paths and all(isinstance(path,str) and
+        re.fullmatch(r'items\[\d+\]\.(?:unitPrice|lineTotal|assets|sizing)(?:[.\[].*)?',path) for path in paths))
+
+
 def recover_saved_uploads(user):
     """Reconcile a timed-out Save once using persisted proof; never issue a write."""
     prep.require_user(user)
     from companion_poll_transaction import connection
     with connection(prep.connect) as conn,conn.cursor() as cur:
-        cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+        cur.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
           AND value->>'status'='Needs review' AND value->'browser'->>'started'='true'
           AND value->'browser'->>'last_stage'='save'
-          AND value->'browser'->>'client_error'='The expected Prodigi control did not finish loading.'
           AND COALESCE((value->>'saved_readback_recoveries')::int,0)<1
           AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
-          ORDER BY updated_at LIMIT 2""")
-        keys=[row['key'] for row in cur.fetchall()]
+          ORDER BY updated_at LIMIT 20""")
+        keys=[row['key'] for row in cur.fetchall() if saved_readback_candidate(row['value'])][:2]
     recovered=0
     for key in keys:
         def receipt(q):
             value=read(q,key);b=value.get('browser') or {}
-            if (value.get('status')!='Needs review' or b.get('started') is not True
-                or b.get('last_stage')!='save'
-                or b.get('client_error')!='The expected Prodigi control did not finish loading.'
-                or value.get('saved_readback_recoveries',0)>=1 or value.get('submission')):
+            if not saved_readback_candidate(value):
                 raise PermissionError('Saved artwork recovery is unavailable.')
             value['saved_readback_recoveries']=1
             return value
@@ -476,8 +538,12 @@ def _finish(key,read_receipt,stage,client_error=''):
             snap,order,item=checked(value,provider,resolver,sandbox)
             # Saving the first artwork makes Prodigi calculate target-item prices.
             # Pre-Save checks stay strict; charges and every other item stay pinned.
-            current_business=business(order,item['id'],after_save=True)
-            expected_business=business(value['browser']['before'],item['id'],after_save=True)
+            before=value['browser']['before']
+            if not sandbox:
+                before,verified=verified_sibling_baseline(cur,value,order,item['id'],provider,resolver)
+                if verified:value['browser']['verified_sibling_items']=verified
+            current_business=business(order,item['id'],after_save=True,before=before)
+            expected_business=business(before,item['id'],after_save=True)
             if not value['browser']['started'] or current_business!=expected_business:
                 from prodigi_product_browser import changed_fields
                 value['browser']['readback_changed_fields']=changed_fields(expected_business,current_business)

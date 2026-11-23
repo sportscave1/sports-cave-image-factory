@@ -1,0 +1,156 @@
+--- a/windows-upload-companion/prodigi-browser.js
++++ b/windows-upload-companion/prodigi-browser.js
+@@ -28,0 +29,14 @@
++function prodigiLoginAddress(address,expected) {
++  try {
++    const actual=new URL(address),pinned=new URL(expected);
++    const redirects=actual.searchParams.getAll('redirect');
++    return actual.origin===pinned.origin && !actual.username && !actual.password && !actual.hash &&
++      actual.pathname==='/login' && redirects.length===1 &&
++      Array.from(actual.searchParams.keys()).every(key=>key==='redirect') &&
++      redirects[0]===pinned.pathname;
++  } catch {return false;}
++}
++function prodigiSignInRequired() {
++  return Object.assign(Error('Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.'),
++    {code:'PRODIGI_SIGNIN_REQUIRED',prodigiStage:'signin'});
++}
+@@ -34,0 +49 @@
++      if(prodigiLoginAddress(tab.url,plan.order_url))throw prodigiSignInRequired();
+@@ -37 +52 @@
+-    } catch(error) {if(replaceStale)throw error;}
++    } catch(error) {if(replaceStale||error.code==='PRODIGI_SIGNIN_REQUIRED')throw error;}
+@@ -54,0 +70 @@
++  if(orderUrl&&saved[orderUrl]===tab.id&&prodigiLoginAddress(current.url,orderUrl))throw prodigiSignInRequired();
+@@ -69 +85,8 @@
+-    try{return await prodigiReadyProbe(tab.id);}
++    try{
++      if(orderUrl){
++        const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
++        const current=await chrome.tabs.get(tab.id);
++        if(saved[orderUrl]===tab.id&&prodigiLoginAddress(current.url,orderUrl))throw prodigiSignInRequired();
++      }
++      return await prodigiReadyProbe(tab.id);
++    }
+@@ -70,0 +94 @@
++      if(error.code==='PRODIGI_SIGNIN_REQUIRED'){error.prodigiOwnershipLost=true;throw error;}
+@@ -208,0 +233 @@
++    stage=error.prodigiStage||stage;
+--- a/prodigi_product_browser.py
++++ b/prodigi_product_browser.py
+@@ -152,0 +153,11 @@
++        reset=value.get('reset_authorisation')
++        if reset:
++            if (reset.get('generation')!=value.get('reset_generation') or reset.get('used_at')
++                    or reset.get('order_id')!=str(order['id']) or reset.get('item_id')!=str(item['id'])
++                    or reset.get('assets')!=(item.get('assets') or [])
++                    or after_selection_business(business(reset['before'],item['id']))!=before_stable):
++                raise ValueError('The reset authorisation changed before product selection was verified.')
++            # This readback proved the permitted product change and pinned every
++            # other business field. Carry that exact state into the upload fence.
++            reset['before']=browser.business(order,item['id'])
++            reset['product_selection_verified_at']=prep.now()
+--- a/prodigi_browser.py
++++ b/prodigi_browser.py
+@@ -67 +67 @@
+-def business(order, target, *, after_save=False):
++def business(order, target, *, after_save=False, before=None):
+@@ -83,0 +84,13 @@
++                if before is not None and str(item['id'])!=str(target):
++                    previous=[i for i in before.get('items',[]) if str(i.get('id'))==str(item['id'])]
++                    raw=item.get(key)
++                    if len(previous)==1 and previous[0].get(key) is None and isinstance(raw,dict):
++                        # The first artwork can make previously unpriced siblings
++                        # acquire calculated prices. Existing currencies stay pinned.
++                        from decimal import Decimal, InvalidOperation
++                        import re
++                        try:amount=Decimal(str(raw.get('amount')))
++                        except InvalidOperation:amount=Decimal('NaN')
++                        if (set(raw)=={'amount','currency'} and amount.is_finite() and amount>=0
++                                and re.fullmatch('[A-Z]{3}',str(raw.get('currency','')))):
++                            result['items'][-1].pop(key,None)
+@@ -93,0 +107,40 @@
++
++
++def verified_sibling_baseline(cur,value,order,target,provider,resolver):
++    """Read back a sibling's separately permitted, verified JPG; never write it."""
++    before=deepcopy(value['browser']['before'])
++    verified=[]
++    for previous in before.get('items',[]):
++        item_id=str(previous.get('id'))
++        if item_id==str(target):continue
++        current=[i for i in order.get('items',[]) if str(i.get('id'))==item_id]
++        if len(current)!=1:continue  # The normal whole-order fence rejects it.
++        current=current[0]
++        if all(previous.get(k)==current.get(k) for k in ('assets','sizing')):continue
++        cur.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
++            AND value->>'order_id'=%s AND value->>'item_id'=%s
++            AND NOT COALESCE((value->>'hidden')::boolean,false) LIMIT 2""",
++            (str(order['id']),item_id))
++        rows=cur.fetchall()
++        if len(rows)!=1:raise ValueError('Changed sibling artwork has no unique verified handoff.')
++        sibling=rows[0]['value'];receipt=sibling.get('browser') or {}
++        if (receipt.get('started') is not True or receipt.get('verified') is not True
++                or sibling.get('allocation_id')==value['allocation_id']):
++            raise ValueError('Changed sibling artwork has not passed its own Save verification.')
++        snap=snapshot(sibling,resolver,False)
++        prep.validate_order(order,snap,sibling['order_id'],sibling['item_id'],binding=sibling.get('consolidation_binding'))
++        assets=current.get('assets') or []
++        if (len(assets)!=1 or assets[0].get('printArea')!='default'
++                or receipt.get('original_sha256')!=snap['output']['sha256']):
++            raise ValueError('Changed sibling artwork does not match its verified source.')
++        asset_id,_=verify_original(provider,original_file(assets[0]['url'],snap['dimensions']),
++            receipt['filename'],snap['output'],snap['dimensions'])
++        if asset_id!=receipt.get('original_asset_id'):
++            raise ValueError('Changed sibling artwork is a different supplier asset.')
++        # Only the separately verified artwork/fit may advance. SKU, quantity,
++        # address, shipping, charges and other business fields remain pinned.
++        for key in ('assets','sizing'):
++            if key in current:previous[key]=deepcopy(current[key])
++            else:previous.pop(key,None)
++        verified.append(item_id)
++    return before,verified
+@@ -377,0 +431,13 @@
++def saved_readback_candidate(value):
++    """One read-only retry for a saved upload, never a new supplier permit."""
++    receipt=value.get('browser') or {}
++    if (value.get('status')!='Needs review' or receipt.get('started') is not True
++            or receipt.get('last_stage')!='save' or value.get('saved_readback_recoveries',0)>=1
++            or value.get('submission') or value.get('hidden')):return False
++    if receipt.get('client_error')=='The expected Prodigi control did not finish loading.':return True
++    import re
++    paths=receipt.get('readback_changed_fields')
++    return bool(isinstance(paths,list) and paths and all(isinstance(path,str) and
++        re.fullmatch(r'items\[\d+\]\.(?:unitPrice|lineTotal|assets|sizing)(?:[.\[].*)?',path) for path in paths))
++
++
+@@ -383 +449 @@
+-        cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
++        cur.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+@@ -386 +451,0 @@
+-          AND value->'browser'->>'client_error'='The expected Prodigi control did not finish loading.'
+@@ -389,2 +454,2 @@
+-          ORDER BY updated_at LIMIT 2""")
+-        keys=[row['key'] for row in cur.fetchall()]
++          ORDER BY updated_at LIMIT 20""")
++        keys=[row['key'] for row in cur.fetchall() if saved_readback_candidate(row['value'])][:2]
+@@ -395,4 +460 @@
+-            if (value.get('status')!='Needs review' or b.get('started') is not True
+-                or b.get('last_stage')!='save'
+-                or b.get('client_error')!='The expected Prodigi control did not finish loading.'
+-                or value.get('saved_readback_recoveries',0)>=1 or value.get('submission')):
++            if not saved_readback_candidate(value):
+@@ -479,2 +541,6 @@
+-            current_business=business(order,item['id'],after_save=True)
+-            expected_business=business(value['browser']['before'],item['id'],after_save=True)
++            before=value['browser']['before']
++            if not sandbox:
++                before,verified=verified_sibling_baseline(cur,value,order,item['id'],provider,resolver)
++                if verified:value['browser']['verified_sibling_items']=verified
++            current_business=business(order,item['id'],after_save=True,before=before)
++            expected_business=business(before,item['id'],after_save=True)
+--- a/windows-upload-companion/manifest.json
++++ b/windows-upload-companion/manifest.json
+@@ -5 +5 @@
+-  "version": "1.7.51",
++  "version": "1.7.52",
