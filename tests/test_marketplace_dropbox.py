@@ -91,7 +91,7 @@ class SourceTests(unittest.TestCase):
         self.assertTrue(self.storage.backend.last_response.closed)
         request = self.storage.backend.calls[-1]
         self.assertEqual(json.loads(request['headers']['Dropbox-API-Arg']),
-                         {'path': reference['id'], 'rev': reference['rev']})
+                         {'path': 'rev:' + reference['rev']})
         self.assertEqual(request['headers']['Range'], 'bytes=2-5')
         self.assertFalse(request['allow_redirects'])
         self.assertTrue(request['stream'])
