@@ -32,15 +32,14 @@ test('frame picker fits content with balanced columns and a full-width primary A
 });
 for(const existing of [false,true])test(`Add opens the storefront cart directly, existing cart: ${existing}`,async()=>{
  const f=fixture({existing});const offer=find(f.view(),n=>n.type?.name==='FramedCertificateOffer');
- await offer.props.onAdd();assert.equal(f.state[2].status,'adding');assert.equal(f.queries,existing?0:1);
+ await offer.props.onAdd();assert.equal(f.state[2].status,'adding');assert.equal(f.queries,0);
  assert.equal(f.calls[0].body.frame_variant_id,'gid://shopify/ProductVariant/42');assert.equal(f.calls[0].body.country,'US');
  assert.deepEqual(f.navigations,['https://fixture.test/launch']);
- assert.equal(f.calls.length,existing?1:2);
- if(!existing)assert.ok(f.calls[1].url.endsWith('/cart-created'));
+ assert.equal(f.calls.length,1);
  const cart=f.view();assert.equal(cart.props.heading,'Frame your certificate');
  assert.equal(find(cart,n=>n.type==='s-button'&&n.children.includes('Continue to cart')),null);
  await find(cart,n=>n.type?.name==='FramedCertificateOffer').props.onAdd();
- assert.equal(f.navigations.length,1);assert.equal(f.calls.length,existing?1:2);
+ assert.equal(f.navigations.length,1);assert.equal(f.calls.length,1);
 });
 
 test('failed Add keeps the frame picker and never presents checkout',async()=>{
