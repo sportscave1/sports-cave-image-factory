@@ -1,0 +1,13 @@
+{% layout none %}
+<!doctype html>
+<html lang="{{ request.locale.iso_code | escape }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="refresh" content="0;url={{ routes.cart_url | escape }}">
+  <title>Your cart - Sports Cave</title>
+  <script>window.location.replace({{ routes.cart_url | json }});</script>
+</head>
+<body><noscript><a href="{{ routes.cart_url | escape }}">Continue to cart</a></noscript></body>
+</html>

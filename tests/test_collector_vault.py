@@ -565,9 +565,22 @@ class CollectorVaultReadinessTests(unittest.TestCase):
         self.assertEqual(product["state"], "framed_product_identity_mismatch")
         self.assertFalse(product["available"])
 
+    def test_unlisted_frame_product_remains_purchasable(self):
+        with (
+            patch.dict(os.environ, _frame_environment(), clear=True),
+            patch.object(collector_vault.shopify_sync, "graphql_request",
+                         return_value=(_frame_product_payload(status="UNLISTED"), "2026-04")),
+        ):
+            product = collector_vault.get_frame_product(force=True)
+        self.assertEqual(product["state"], "ready_for_purchase")
+        self.assertTrue(product["available"])
+
     def test_frame_product_draft_unpublished_and_unavailable_states_are_hidden(self):
         scenarios = [
             (_frame_product_payload(status="DRAFT"), "framed_product_draft"),
+            (_frame_product_payload(status="ARCHIVED"), "framed_product_unavailable"),
+            (_frame_product_payload(status="UNLISTED", published=False), "framed_product_not_published"),
+            (_frame_product_payload(status="UNLISTED", variant_available=False), "framed_variant_unavailable"),
             (
                 _frame_product_payload(published=False),
                 "framed_product_not_published",

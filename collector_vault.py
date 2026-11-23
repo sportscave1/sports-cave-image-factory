@@ -758,7 +758,8 @@ def _frame_product_state(product, configured_product_id, configured_variant_id):
     status = str(product.get("status") or "").strip().upper()
     if status == "DRAFT":
         return "framed_product_draft"
-    if status != "ACTIVE":
+    # Unlisted keeps the exact configured product purchasable without discovery.
+    if status not in {"ACTIVE", "UNLISTED"}:
         return "framed_product_unavailable"
     if not str(product.get("onlineStoreUrl") or "").strip():
         return "framed_product_not_published"
