@@ -23,7 +23,7 @@ CUSTOMER_A = "gid://shopify/Customer/101"
 CUSTOMER_B = "gid://shopify/Customer/202"
 SHOP_DOMAIN = "sports-cave.myshopify.com"
 CLIENT_ID = "collector-vault-client"
-SECRET = "collector-vault-test-secret"
+SECRET = "vault-test-fixture"
 FRAME_PRODUCT_ID = "gid://shopify/Product/10332579103027"
 FRAME_VARIANT_ID = "gid://shopify/ProductVariant/53700496261427"
 FRAME_SKU = "SC-FCC-A4-BLK"
@@ -149,7 +149,7 @@ class CollectorVaultAuthenticationTests(unittest.TestCase):
         self.assertEqual(result["shop_domain"], SHOP_DOMAIN)
 
     def test_shopify_shpss_app_secret_is_used_for_session_tokens(self):
-        prefixed_secret = "shpss_collector-vault-test-secret"
+        prefixed_secret = "shpss_test_fixture"
         with (
             patch.dict(
                 os.environ,
@@ -573,16 +573,6 @@ class CollectorVaultReadinessTests(unittest.TestCase):
                 "framed_product_not_published",
             ),
             (
-                {
-                    **_frame_product_payload(),
-                    "product": {
-                        **_frame_product_payload()["product"],
-                        "featuredImage": None,
-                    },
-                },
-                "framed_product_image_missing",
-            ),
-            (
                 _frame_product_payload(variant_available=False),
                 "framed_variant_unavailable",
             ),
@@ -767,7 +757,7 @@ class CollectorVaultApiTests(unittest.TestCase):
         self.assertNotIn(revision, response.text)
 
     def test_bootstrap_accepts_production_style_shopify_app_secret(self):
-        prefixed_secret = "shpss_collector-vault-production-style-secret"
+        prefixed_secret = "shpss_production_test"
         payload = {
             "certificates": [
                 {

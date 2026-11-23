@@ -181,7 +181,8 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         )
         self.assertIn("collectCertificates(orderNodes, customer)", source)
         self.assertIn("View Certificate", source)
-        self.assertIn("Download PDF", source)
+        self.assertNotIn("Download PDF", source)
+        self.assertIn("Get Certificate Framed", source)
         self.assertIn("Your collection is waiting", source)
         self.assertNotIn("CollectorVaultRedesign", source)
         self.assertNotIn("review_prompt", source)
@@ -220,7 +221,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         ]
         self.assertEqual(card.count('variant="primary"'), 1)
         self.assertIn("View Certificate", card)
-        self.assertIn("Download PDF", card)
+        self.assertIn("Get Certificate Framed", card)
         self.assertIn("Download Print", card)
 
     def test_phase_one_viewer_uses_native_modal_and_existing_asset_urls(self):
@@ -232,18 +233,16 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("onAfterHide={onClose}", viewer)
         self.assertIn('command="--hide"', viewer)
         self.assertIn("certificate.certificate_preview_image_url", source)
-        self.assertIn("certificate.certificate_pdf_url", viewer)
         self.assertIn("certificate.certificate_print_jpg_url", viewer)
-        self.assertIn("Download Certificate", viewer)
+        self.assertNotIn("Download Certificate", viewer)
         self.assertIn("Close", viewer)
         self.assertNotIn("Order It Framed", source)
         self.assertNotIn("Leave a Review", viewer)
         self.assertNotIn("Judge.me", source)
         self.assertNotIn("review_prompt", source)
-        self.assertIn("Display It Framed", viewer)
+        self.assertIn("Display your numbered certificate", viewer)
         self.assertIn("Add Framed Certificate", viewer)
-        self.assertIn("product.image?.url", viewer)
-        self.assertIn("product.inclusions", viewer)
+        self.assertIn("Your exact numbered certificate", viewer)
         self.assertIn("/api/collector-vault/bootstrap", viewer)
         self.assertIn("/api/collector-vault/frame/request", viewer)
         self.assertIn("/api/collector-vault/frame/cart-created", viewer)
@@ -266,10 +265,10 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertNotIn("/api/collector-vault/", card)
         self.assertIn("payload.frame_product", viewer)
         self.assertIn("matchingFrameCertificate(", viewer)
-        self.assertIn("product.image?.url", viewer)
+        self.assertIn("previewUrl: ownedCertificate.preview_url", viewer)
         self.assertIn("<s-heading>{product.title}</s-heading>", viewer)
-        self.assertIn("product.contextual_price", viewer)
-        self.assertIn("product.inclusions", viewer)
+        self.assertIn("contextual_price", viewer)
+        self.assertIn("Your exact numbered certificate", viewer)
         self.assertIn("certificate_reference: frameOffer.certificateReference", viewer)
         self.assertIn("frame_variant_id: product.variant_id", viewer)
         self.assertNotRegex(viewer, r"gid://shopify/(Product|ProductVariant)/\d+")
@@ -340,7 +339,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         ]
         self.assertIn("<CertificatePreview", card)
         self.assertNotIn("purchased_image_url", card)
-        for action in ("View Certificate", "Download PDF", "Download Print"):
+        for action in ("View Certificate", "Get Certificate Framed", "Download Print"):
             self.assertIn(action, card)
         gallery = source[
             source.index("function CertificateGallery"):
@@ -358,7 +357,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("Frame the proof.", redesign)
         self.assertIn("Submit review", redesign)
         self.assertIn("/api/collector-vault/bootstrap", production)
-        self.assertIn("Display It Framed", production)
+        self.assertIn("Display your numbered certificate", production)
         self.assertNotIn("CollectorVaultRedesign", production)
 
 

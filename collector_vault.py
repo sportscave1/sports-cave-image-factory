@@ -21,6 +21,7 @@ from PIL import Image, UnidentifiedImageError
 
 import shopify_sync
 import supabase_backend
+from collector_collection_offers import FRAME_SKUS, frame_variants
 from services import r2_storage
 
 
@@ -756,8 +757,8 @@ def _frame_product_state(product, configured_product_id, configured_variant_id):
         return "framed_product_unavailable"
     if not str(product.get("onlineStoreUrl") or "").strip():
         return "framed_product_not_published"
-    if not _frame_product_image(product):
-        return "framed_product_image_missing"
+    # Account offers render the owner's signed certificate in the frame template;
+    # a generic public product image is optional.
     price = (selected.get("contextualPricing") or {}).get("price") or {}
     if (
         not selected.get("availableForSale")
@@ -865,6 +866,7 @@ def get_frame_product(*, force=False):
                 "ProductVariant",
                 selected_variant.get("id"),
             ),
+            "variants": frame_variants(product),
             "sku": str(selected_variant.get("sku") or ""),
             "status": str(product.get("status") or "").strip().upper(),
             "published": bool(str(product.get("onlineStoreUrl") or "").strip()),
@@ -1224,6 +1226,7 @@ def build_vault_payload(shopify_customer_id):
                 "image": frame_product.get("image"),
                 "inclusions": list(frame_product.get("inclusions") or [])[:3],
                 "variant_id": frame_product.get("variant_id") or "",
+                "variants": frame_product.get("variants") or [],
                 "contextual_price": dict(
                     frame_product.get("contextual_price") or {}
                 ),
@@ -1276,7 +1279,9 @@ def create_frame_request(
     row = _resolve_certificate_reference(certificate_reference, shopify_customer_id)
     frame_product = get_frame_product(force=True)
     requested_variant = _canonical_gid("ProductVariant", frame_variant_id)
-    if not frame_product.get("available") or requested_variant != frame_product.get("variant_id"):
+    allowed_variants = {v["variant_id"] for v in frame_product.get("variants", [])}
+    allowed_variants.add(frame_product.get("variant_id"))
+    if not frame_product.get("available") or requested_variant not in allowed_variants:
         raise CollectorVaultUnavailableError("The framed certificate is currently unavailable.")
     owner_hash = customer_hash(shopify_customer_id)
     key = _safe_idempotency_key(idempotency_key)
@@ -1290,11 +1295,12 @@ def create_frame_request(
                     FROM collector_frame_requests
                     WHERE customer_hash=%s
                       AND certificate_row_id=%s
+                      AND frame_variant_id=%s
                       AND status IN ('pending', 'cart_created', 'ordered')
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
-                    (owner_hash, int(row.get("certificate_row_id") or 0)),
+                    (owner_hash, int(row.get("certificate_row_id") or 0), requested_variant),
                 )
                 existing = cur.fetchone()
                 if existing:
@@ -1422,11 +1428,15 @@ def process_framed_order_paid(order_payload):
     configured_variant_id = _configured_frame_variant_id()
     if not configured_variant_id:
         return {"updated": 0}
-    request_references = {
-        _line_item_properties(line_item).get("_sports_cave_frame_request", "")
+    matched_lines = [
+        line_item
         for line_item in (payload.get("line_items") or [])
-        if _line_item_variant_id(line_item) == configured_variant_id
-    }
+        if _line_item_variant_id(line_item) == configured_variant_id or (
+            _canonical_gid("Product", line_item.get("product_id")) == _configured_frame_product_id()
+            and line_item.get("sku") in FRAME_SKUS
+        )
+    ]
+    request_references = {_line_item_properties(line).get("_sports_cave_frame_request", "") for line in matched_lines}
     request_references = {value for value in request_references if _UUID.match(str(value or ""))}
     if not request_references:
         return {"updated": 0}
@@ -1447,7 +1457,9 @@ def process_framed_order_paid(order_payload):
                     updated_at=now()
                 WHERE request_reference = ANY(%s)
                   AND shopify_customer_id = ANY(%s)
-                  AND frame_variant_id=%s
+                  AND (request_reference::text, frame_variant_id) IN (
+                    SELECT * FROM unnest(%s::text[], %s::text[])
+                  )
                   AND status <> 'ordered'
                 RETURNING request_reference, customer_hash
                 """,
@@ -1456,7 +1468,8 @@ def process_framed_order_paid(order_payload):
                     str(payload.get("name") or "").strip(),
                     list(request_references),
                     customer_id_candidates(customer_id),
-                    configured_variant_id,
+                    [_line_item_properties(line).get("_sports_cave_frame_request", "") for line in matched_lines],
+                    [_line_item_variant_id(line) for line in matched_lines],
                 ),
             )
             updated = cur.fetchall() or []

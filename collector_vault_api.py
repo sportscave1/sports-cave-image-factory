@@ -252,6 +252,9 @@ async def collector_vault_asset(request: Request):
         return await collector_vault_options(request)
     try:
         asset = collector_vault.resolve_asset_token(request.query_params.get("token"))
+        frame = request.query_params.get("frame")
+        if frame and (frame not in ("black", "oak", "white") or asset.get("kind") != "preview"):
+            raise collector_vault.CollectorVaultError("Invalid certificate frame preview.")
         headers = {
             **_cors_headers(),
             "Cache-Control": "private, max-age=300" if asset.get("kind") == "preview" else "no-store",
@@ -270,6 +273,18 @@ async def collector_vault_asset(request: Request):
             raise collector_vault.CollectorVaultNotFoundError("Certificate asset is unavailable.")
         upstream = requests.get(source_url, stream=True, timeout=(8, 60))
         upstream.raise_for_status()
+        if frame:
+            from collector_collection_offers import render_certificate_frame
+            content = bytearray()
+            try:
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    content.extend(chunk)
+                    if len(content) > 12 * 1024 * 1024:
+                        raise collector_vault.CollectorVaultError("Certificate preview is too large.")
+            finally:
+                upstream.close()
+            return Response(render_certificate_frame(content, frame), media_type="image/webp",
+                            headers={**_cors_headers(), "Cache-Control": "private, max-age=300"})
         content_length = upstream.headers.get("Content-Length")
         if content_length:
             headers["Content-Length"] = content_length
@@ -282,7 +297,19 @@ async def collector_vault_asset(request: Request):
         return _error_response(error, "asset")
 
 
+async def collector_vault_recommendations(request: Request):
+    if request.method == "OPTIONS":
+        return await collector_vault_options(request)
+    try:
+        session = _session(request)
+        from collector_collection_offers import recommendations
+        return _json({"ok": True, "products": recommendations(session["shopify_customer_id"])})
+    except Exception as error:
+        return _error_response(error, "recommendations")
+
+
 COLLECTOR_VAULT_ROUTES = (
+    ("/api/collector-vault/recommendations", collector_vault_recommendations, ("GET", "OPTIONS")),
     ("/api/collector-vault/bootstrap", collector_vault_bootstrap, ("GET", "OPTIONS")),
     ("/api/collector-vault/events", collector_vault_event, ("POST", "OPTIONS")),
     ("/api/collector-vault/frame/request", collector_vault_frame_request, ("POST", "OPTIONS")),

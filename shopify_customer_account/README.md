@@ -66,7 +66,8 @@ Configure one Shopify product:
 
 - Title: `Framed Collector Certificate`
 - Handle: `framed-collector-certificate`
-- One variant: premium black frame, A4 landscape, SKU `SC-FCC-A4-BLK`
+- Three A4 landscape variants: Black (`SC-FCC-A4-BLK`), Oak
+  (`SC-FCC-A4-OAK`), and White (`SC-FCC-A4-WHT`)
 - Real Shopify price and inventory/availability configuration
 
 Configure:
@@ -78,10 +79,21 @@ FRAMED_CERTIFICATE_VARIANT_ID=gid://shopify/ProductVariant/...
 ```
 
 The product and variant GIDs are authoritative; the handle is discovery-only.
+The configured variant remains the original Black variant. Oak and White are
+resolved by their exact SKU within that same verified product. Available colors
+are checked again before creating a framing request. Free unframed certificates
+use the existing Download Print action, never a paid Shopify variant.
 The offer is intentionally hidden while the product is Draft, unpublished,
 unavailable, or the safe variant/SKU mapping cannot be resolved. Price and
 currency are fetched contextually through Shopify at render time; checkout
 remains authoritative.
+
+Account previews use the existing upload mockup templates and artwork placement
+box, containing the owner's signed certificate image without cropping. Signed
+preview URLs accept `frame=black|oak|white`; print and PDF assets are unchanged.
+The account's Build your collection section uses the existing smart catalogue
+resolver, then fetches current Storefront variants and prices. Its four cards
+share a cart during the page session.
 
 ## Judge.me
 

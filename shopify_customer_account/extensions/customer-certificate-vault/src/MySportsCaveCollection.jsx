@@ -2,7 +2,7 @@
 /// <reference types="@shopify/ui-extensions/customer-account.page.render" />
 import "@shopify/ui-extensions/preact";
 import {render} from "preact";
-import {useEffect, useState} from "preact/hooks";
+import {useEffect, useRef, useState} from "preact/hooks";
 import {useApi} from "@shopify/ui-extensions/customer-account/preact";
 
 import {
@@ -106,6 +106,20 @@ function Extension() {
 
   const firstCertificate = certificates[0] || null;
 
+  useEffect(() => {
+    if (status !== "ready") return;
+    const controller = new AbortController();
+    vaultRequest(api, apiBaseUrl, "/api/collector-vault/bootstrap", {signal: controller.signal})
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        setCertificates((items) => items.map((certificate) => {
+          const owned = matchingFrameCertificate(payload.certificates, certificate);
+          return {...certificate, frame_preview_url: owned?.preview_url ? `${owned.preview_url}&frame=black` : ""};
+        }));
+      }).catch(() => {}); // Existing certificate assets remain usable independently.
+    return () => controller.abort();
+  }, [status, retryKey, api, apiBaseUrl]);
+
   return (
     <s-page>
       <s-grid
@@ -132,6 +146,9 @@ function Extension() {
               certificates={certificates}
               onOpen={setSelectedCertificate}
             />
+          ) : null}
+          {status === "ready" && certificates.length > 0 ? (
+            <CollectionUpsells api={api} apiBaseUrl={apiBaseUrl} />
           ) : null}
         </s-stack>
       </s-grid>
@@ -386,11 +403,12 @@ function CertificateCard({certificate, onOpen}) {
           ) : null}
           {hasPdf ? (
             <s-button
-              href={certificate.certificate_pdf_url}
-              target="_blank"
+              command="--show"
+              commandFor="certificate-viewer"
+              onClick={() => onOpen(certificate)}
               variant="secondary"
             >
-              Download PDF
+              Get Certificate Framed
             </s-button>
           ) : null}
           {hasPrint ? (
@@ -411,13 +429,14 @@ function CertificateCard({certificate, onOpen}) {
   );
 }
 
-function CertificatePreview({certificate, eager = false}) {
+function CertificatePreview({certificate, eager = false, previewUrl}) {
   const title = certificate.product_title || "Sports Cave artwork";
   const hasDownload = Boolean(
     certificate.certificate_pdf_url
       || certificate.certificate_print_jpg_url,
   );
-  if (certificate.certificate_preview_image_url) {
+  const imageUrl = previewUrl || certificate.frame_preview_url || certificate.certificate_preview_image_url;
+  if (imageUrl) {
     return (
       <s-box
         background="base"
@@ -426,7 +445,7 @@ function CertificatePreview({certificate, eager = false}) {
         overflow="hidden"
       >
         <s-image
-          src={certificate.certificate_preview_image_url}
+          src={imageUrl}
           alt={`Certificate preview for ${title}`}
           aspectRatio="16/9"
           objectFit="contain"
@@ -465,6 +484,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
     product: null,
     certificateReference: "",
   });
+  const [frameColor, setFrameColor] = useState("Black");
   const [checkoutState, setCheckoutState] = useState({
     status: "idle",
     message: "",
@@ -474,6 +494,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
   useEffect(() => {
     const controller = new AbortController();
     setCheckoutState({status: "idle", message: "", checkoutUrl: ""});
+    setFrameColor("Black");
     if (!certificate) {
       setFrameOffer({
         status: "idle",
@@ -517,6 +538,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
         setFrameOffer({
           status: "ready",
           product,
+          previewUrl: ownedCertificate.preview_url,
           certificateReference: ownedCertificate.reference,
         });
       } catch (error) {
@@ -539,7 +561,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
     ) {
       return;
     }
-    const product = frameOffer.product;
+    const product = (frameOffer.product.variants || []).find((v) => v.color === frameColor) || frameOffer.product;
     setCheckoutState({
       status: "adding",
       message: "Preparing secure checkout...",
@@ -555,7 +577,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           body: {
             certificate_reference: frameOffer.certificateReference,
             frame_variant_id: product.variant_id,
-            idempotency_key: frameIdempotencyKey(certificate),
+            idempotency_key: `${frameIdempotencyKey(certificate)}-${frameColor.toLowerCase()}`,
             allow_repeat: false,
           },
         },
@@ -631,7 +653,12 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
           gap="large"
           alignItems="start"
         >
-          <CertificatePreview certificate={certificate} eager />
+          <CertificatePreview certificate={certificate} previewUrl={frameColor === "Unframed"
+              ? certificate.certificate_preview_image_url
+              : frameOffer.previewUrl
+                ? `${frameOffer.previewUrl}&frame=${frameColor.toLowerCase()}`
+                : certificate.certificate_preview_image_url
+          } eager />
           <s-stack gap="large">
             <s-stack gap="small-400">
               <s-heading>{title}</s-heading>
@@ -677,10 +704,18 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
             {frameOffer.status === "ready" ? (
               <FramedCertificateOffer
                 product={frameOffer.product}
+                frameColor={frameColor}
+                onColorChange={(color) => {
+                  setFrameColor(color);
+                  setCheckoutState({status: "idle", message: "", checkoutUrl: ""});
+                }}
                 checkoutState={checkoutState}
                 onAdd={addFramedCertificate}
                 formatNumber={api.i18n.formatNumber}
               />
+            ) : null}
+            {["error", "unavailable"].includes(frameOffer.status) ? (
+              <s-text color="subdued">Framing is temporarily unavailable. Your certificate downloads remain available.</s-text>
             ) : null}
           </s-stack>
         </s-grid>
@@ -688,18 +723,12 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
         <s-text color="subdued">Choose a certificate to view it.</s-text>
       )}
       {certificate?.certificate_pdf_url ? (
-        <s-button
-          slot="primary-action"
-          href={certificate.certificate_pdf_url}
-          target="_blank"
-        >
-          Download Certificate
+        <s-button slot="secondary-actions" href={certificate.certificate_pdf_url} target="_blank">
+          View full certificate
         </s-button>
       ) : null}
       <s-button
-        slot={certificate?.certificate_pdf_url
-          ? "secondary-actions"
-          : "primary-action"}
+        slot="primary-action"
         command="--hide"
         commandFor={modalId}
       >
@@ -711,17 +740,16 @@ function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
 
 function FramedCertificateOffer({
   product,
+  frameColor,
+  onColorChange,
   checkoutState,
   onAdd,
   formatNumber,
 }) {
   const price = formatFramePrice(
-    product.contextual_price,
+    ((product.variants || []).find((v) => v.color === frameColor) || product).contextual_price,
     formatNumber,
   );
-  const inclusions = Array.isArray(product.inclusions)
-    ? product.inclusions.slice(0, 3)
-    : [];
 
   return (
     <s-box
@@ -731,26 +759,20 @@ function FramedCertificateOffer({
       background="subdued"
     >
       <s-stack gap="base">
-        <s-heading>Display It Framed</s-heading>
-        {product.image?.url ? (
-          <s-image
-            src={product.image.url}
-            alt={product.image.alt_text || `${product.title} product image`}
-            aspectRatio="4/3"
-            objectFit="contain"
-            loading="lazy"
-            sizes="(min-width: 760px) 30vw, 100vw"
-          ></s-image>
-        ) : null}
+        <s-heading>Display your numbered certificate</s-heading>
+        <s-select label="Certificate frame" value={frameColor}
+          disabled={checkoutState.status === "adding"}
+          onChange={(event) => onColorChange(event.currentTarget.value)}>
+          {(product.variants?.length ? product.variants : [{color: "Black"}]).map((variant) => (
+            <s-option key={variant.color} value={variant.color}>{variant.color}</s-option>
+          ))}
+          <s-option value="Unframed">Unframed — free print download</s-option>
+        </s-select>
         <s-heading>{product.title}</s-heading>
-        {inclusions.length ? (
-          <s-stack gap="small-200">
-            {inclusions.map((inclusion) => (
-              <s-text key={inclusion}>{inclusion}</s-text>
-            ))}
-          </s-stack>
-        ) : null}
-        {checkoutState.checkoutUrl ? (
+        <s-text color="subdued">Your exact numbered certificate, professionally printed in A4 landscape and installed in your selected frame. Artwork is not included.</s-text>
+        {frameColor === "Unframed" ? (
+          <s-text>Use Download Print above for your free unframed certificate.</s-text>
+        ) : checkoutState.checkoutUrl ? (
           <s-button
             variant="primary"
             href={checkoutState.checkoutUrl}
@@ -782,6 +804,99 @@ function FramedCertificateOffer({
       </s-stack>
     </s-box>
   );
+}
+
+function CollectionUpsells({api, apiBaseUrl}) {
+  const sharedCart = useRef(null);
+  const cartQueue = useRef(Promise.resolve());
+  const addToCollectionCart = (variantId) => {
+    const operation = cartQueue.current.then(async () => {
+      const lines = [{merchandiseId: variantId, quantity: 1}];
+      const result = sharedCart.current
+        ? await api.query(`mutation CollectionCartAdd($cartId: ID!, $lines: [CartLineInput!]!) {
+            cartLinesAdd(cartId: $cartId, lines: $lines) { cart { id checkoutUrl } userErrors { field message } }
+          }`, {variables: {cartId: sharedCart.current.id, lines}})
+        : await api.query(CART_CREATE_MUTATION, {variables: {input: {lines}}});
+      const created = result.data?.cartLinesAdd || result.data?.cartCreate;
+      if (result.errors?.length || created?.userErrors?.length || !created?.cart?.checkoutUrl) throw new Error("Cart unavailable");
+      sharedCart.current = created.cart;
+      return created.cart.checkoutUrl;
+    });
+    cartQueue.current = operation.catch(() => {});
+    return operation;
+  };
+  const [products, setProducts] = useState([]);
+  const [status, setStatus] = useState("loading");
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setStatus("loading");
+    async function load() {
+      try {
+        const recommended = await vaultRequest(api, apiBaseUrl,
+          "/api/collector-vault/recommendations", {signal: controller.signal});
+        const ids = (recommended.products || []).slice(0, 4).map((p) => p.id);
+        if (!ids.length) {
+          if (!controller.signal.aborted) { setProducts([]); setStatus("empty"); }
+          return;
+        }
+        const result = await api.query(`query CollectionUpsellVariants($ids: [ID!]!) {
+          nodes(ids: $ids) { ... on Product { id title featuredImage { url altText }
+            variants(first: 100) { nodes { id title availableForSale selectedOptions { name value }
+              price { amount currencyCode } image { url altText } } }
+          } }
+        }`, {variables: {ids}});
+        if (result.errors?.length) throw new Error("Products unavailable");
+        const nodes = (result.data?.nodes || []).filter((p) => p?.variants?.nodes?.some((v) => v.availableForSale));
+        if (!controller.signal.aborted) { setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
+      } catch (_error) {
+        if (!controller.signal.aborted) setStatus("error");
+      }
+    }
+    load();
+    return () => controller.abort();
+  }, [api, apiBaseUrl, retry]);
+  return <s-stack gap="base">
+    <s-heading>Build your collection</s-heading>
+    <s-text color="subdued">Discover editions selected for your collection. Choose your frame and size below.</s-text>
+    {status === "loading" ? <s-spinner accessibilityLabel="Finding your recommendations" /> : null}
+    {status === "error" ? <s-stack gap="small"><s-text>Recommendations are temporarily unavailable.</s-text>
+      <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
+    {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
+    <s-grid gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 240px), 1fr))" gap="base">
+      {products.map((product) => <UpsellProduct key={product.id} product={product} api={api} onAdd={addToCollectionCart} />)}
+    </s-grid>
+  </s-stack>;
+}
+
+function UpsellProduct({product, api, onAdd}) {
+  const variants = product.variants.nodes.filter((v) => v.availableForSale);
+  const [variantId, setVariantId] = useState(variants[0]?.id || "");
+  const [cart, setCart] = useState({status: "idle", url: ""});
+  const variant = variants.find((v) => v.id === variantId);
+  const image = variant?.image || product.featuredImage;
+  const add = async () => {
+    if (!variant || cart.status === "adding") return;
+    setCart({status: "adding", url: ""});
+    try {
+      const url = await onAdd(variant.id);
+      setCart({status: "ready", url});
+    } catch (_error) { setCart({status: "error", url: ""}); }
+  };
+  return <s-box padding="base" border="base" borderRadius="base" background="subdued">
+    <s-stack gap="base">
+      {image?.url ? <s-image src={image.url} alt={image.altText || product.title} aspectRatio="1/1" objectFit="contain" /> : null}
+      <s-heading>{product.title}</s-heading>
+      <s-select label="Frame and size" value={variantId} disabled={cart.status === "adding"}
+        onChange={(event) => { setVariantId(event.currentTarget.value); setCart({status: "idle", url: ""}); }}>
+        {variants.map((v) => <s-option key={v.id} value={v.id}>{v.title}</s-option>)}
+      </s-select>
+      <s-text type="strong">{formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-text>
+      {cart.url ? <s-button variant="primary" href={cart.url} target="_blank">Continue to checkout</s-button>
+        : <s-button variant="primary" onClick={add} loading={cart.status === "adding"} disabled={!variant}>Add to cart</s-button>}
+      {cart.status === "error" ? <s-text>Could not create your cart. Please try again.</s-text> : null}
+    </s-stack>
+  </s-box>;
 }
 
 function editionLabel(value) {
