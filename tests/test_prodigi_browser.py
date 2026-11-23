@@ -115,6 +115,16 @@ def test_after_save_price_calculation_does_not_hide_product_changes(handoff,monk
     assert not sandbox.list_tests()[0]['browser'].get('verified')
 
 
+def test_sibling_repricing_is_only_ignored_after_save_and_preserves_currency():
+    data={'items':[{'id':'target'},{'id':'sibling','unitPrice':{'amount':'45.00','currency':'USD'},
+        'lineTotal':{'amount':'45.00','currency':'USD'},'assets':[{'url':'saved-original'}]}]}
+    changed=deepcopy(data);changed['items'][1]['unitPrice']['amount']='45.34';changed['items'][1]['lineTotal']['amount']='45.34'
+    assert browser.business(data,'target')!=browser.business(changed,'target')
+    assert browser.business(data,'target',after_save=True)==browser.business(changed,'target',after_save=True)
+    changed['items'][1]['unitPrice']['currency']='AUD'
+    assert browser.business(data,'target',after_save=True)!=browser.business(changed,'target',after_save=True)
+
+
 def test_interrupted_upload_is_reviewed_without_another_browser_claim(handoff):
     _,provider,_=handoff;plan=browser.claim()
     assert browser.finish(KEY,plan['token'])['status']=='Needs review'

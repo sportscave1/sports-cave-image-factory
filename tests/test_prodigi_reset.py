@@ -236,3 +236,38 @@ def test_processing_timeout_recovery_needs_fixed_worker_and_unchanged_empty_orde
         assert prep.read(1)['processing_recoveries']==1
         next_plan=browser.claim(exact_item_supported=True,reset_supported=True)
         assert next_plan['token']!=plan['token'] and next_plan['selected_empty_product']
+
+
+@pytest.mark.parametrize('case',['repriced','changed_currency','changed_sibling_image','changed_quantity','changed_address','unused_permit','exhausted','wrong_original'])
+def test_completed_save_recovers_read_only_and_never_reuploads(draft,monkeypatch,case):
+    p,s=draft;v=prep.read(1)
+    sibling=deepcopy(p.data['items'][0]);sibling.update(id='89',merchantReference='fixture-sibling')
+    sibling.update(unitPrice={'amount':'45.00','currency':'USD'},lineTotal={'amount':'45.00','currency':'USD'})
+    p.data['items'].append(sibling)
+    v['browser'].update(verified=False,started=True,last_stage='save',
+        client_error='The expected Prodigi control did not finish loading.',before=browser.business(p.data,'88'),
+        companion_sha256=s['output']['sha256'],filename='fixture.jpg')
+    v['last_failure']={'stage':'artwork.save'}
+    sibling['unitPrice']['amount']='45.34';sibling['lineTotal']['amount']='45.34'
+    if case=='changed_currency':sibling['unitPrice']['currency']='AUD'
+    if case=='changed_sibling_image':sibling['assets'][0]['url']='https://fixture/other'
+    if case=='changed_quantity':sibling['quantity']=2
+    if case=='changed_address':p.data['recipient']['address']['line1']='Changed'
+    if case=='unused_permit':v['browser']['started']=False
+    if case=='exhausted':v['saved_readback_recoveries']=1
+    save(v);verified=[]
+    monkeypatch.setattr('prodigi_full_qa.enabled',lambda:False)
+    monkeypatch.setattr(browser,'original_file',lambda *a:'https://fixture/original')
+    def original(*args):
+        verified.append(args)
+        if case=='wrong_original':raise ValueError('Original differs')
+        return 'fixture-asset',True
+    monkeypatch.setattr(browser,'verify_original',original)
+    assert browser.recover_saved_uploads({'id':'owner'})==(1 if case=='repriced' else 0),prep.read(1).get('message')
+    row=prep.read(1)
+    assert not p.writes
+    if case=='repriced':
+        assert row['browser']['verified'] and row['browser']['original_sha256']==s['output']['sha256']
+        assert 'last_failure' not in row and len(verified)==1
+    else:assert not row['browser']['verified']
+    assert browser.recover_saved_uploads({'id':'owner'})==0

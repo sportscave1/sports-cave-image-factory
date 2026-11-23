@@ -74,6 +74,13 @@ def business(order, target, *, after_save=False):
             if k not in ('status','productionTime') and
             (str(item['id']) != str(target) or k not in
              (('assets','sizing','unitPrice','lineTotal') if after_save else ('assets','sizing')))})
+        if after_save:
+            # Saving a final image can reprice already-saved siblings too.
+            # Only supplier-calculated amounts may vary; currencies, products,
+            # quantities and every sibling artwork/placement remain pinned.
+            for key in ('unitPrice','lineTotal'):
+                money=result['items'][-1].get(key)
+                if isinstance(money,dict):money.pop('amount',None)
     return result
 
 
@@ -356,7 +363,7 @@ def recover_selected_empty_editors(user,*,page_supported=False,processing_suppor
             AND NOT COALESCE((value->>'hidden')::boolean,false)
             ORDER BY updated_at LIMIT 2""",(page_supported,page_supported,page_supported,page_supported,processing_supported))
         keys=[row['key'] for row in cur.fetchall()]
-    recovered=0
+    recovered=recover_saved_uploads(user)
     for key in keys:
         try:
             recovered+=bool(_recover_ready_editor(user,key,page_supported=page_supported,processing_supported=processing_supported))
@@ -365,6 +372,35 @@ def recover_selected_empty_editors(user,*,page_supported=False,processing_suppor
     if recovered:
         import logging
         logging.getLogger(__name__).info('ORDERS_EMPTY_EDITOR_RECOVERY resumed=%d',recovered)
+    return recovered
+
+
+def recover_saved_uploads(user):
+    """Reconcile a timed-out Save once using persisted proof; never issue a write."""
+    prep.require_user(user)
+    from companion_poll_transaction import connection
+    with connection(prep.connect) as conn,conn.cursor() as cur:
+        cur.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
+          AND value->>'status'='Needs review' AND value->'browser'->>'started'='true'
+          AND value->'browser'->>'last_stage'='save'
+          AND value->'browser'->>'client_error'='The expected Prodigi control did not finish loading.'
+          AND COALESCE((value->>'saved_readback_recoveries')::int,0)<1
+          AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
+          ORDER BY updated_at LIMIT 2""")
+        keys=[row['key'] for row in cur.fetchall()]
+    recovered=0
+    for key in keys:
+        def receipt(q):
+            value=read(q,key);b=value.get('browser') or {}
+            if (value.get('status')!='Needs review' or b.get('started') is not True
+                or b.get('last_stage')!='save'
+                or b.get('client_error')!='The expected Prodigi control did not finish loading.'
+                or value.get('saved_readback_recoveries',0)>=1 or value.get('submission')):
+                raise PermissionError('Saved artwork recovery is unavailable.')
+            value['saved_readback_recoveries']=1
+            return value
+        result=_finish(key,receipt,'readback')
+        recovered+=result.get('status') not in ('Needs review','Handoff unavailable')
     return recovered
 
 
@@ -440,7 +476,11 @@ def _finish(key,read_receipt,stage,client_error=''):
             snap,order,item=checked(value,provider,resolver,sandbox)
             # Saving the first artwork makes Prodigi calculate target-item prices.
             # Pre-Save checks stay strict; charges and every other item stay pinned.
-            if not value['browser']['started'] or business(order,item['id'],after_save=True)!=business(value['browser']['before'],item['id'],after_save=True):
+            current_business=business(order,item['id'],after_save=True)
+            expected_business=business(value['browser']['before'],item['id'],after_save=True)
+            if not value['browser']['started'] or current_business!=expected_business:
+                from prodigi_product_browser import changed_fields
+                value['browser']['readback_changed_fields']=changed_fields(expected_business,current_business)
                 raise ValueError('Supplier order changed or Save was not permitted. Review this exact draft.')
             if value['browser'].get('companion_sha256')!=snap['output']['sha256']:
                 raise ValueError('The paired companion source checksum was not confirmed.')
@@ -467,6 +507,7 @@ def _finish(key,read_receipt,stage,client_error=''):
             value['browser'].update(verified=True,verified_at=prep.now(),
                 original_sha256=snap['output']['sha256'],original_asset_id=asset_id,
                 supplier_original_bytes_verified=raw_verified,full_image_fit_verified=True)
+            value.pop('last_failure',None)
             from prodigi_full_qa import enabled,live_enabled
             if enabled() and (sandbox or live_enabled()):
                 if sandbox:
