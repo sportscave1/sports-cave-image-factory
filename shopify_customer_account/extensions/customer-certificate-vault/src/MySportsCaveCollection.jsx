@@ -776,15 +776,19 @@ function FramedCertificateOffer({
             Framed certificate ordered
           </s-badge>
         ) : (
-          <s-button
-            inlineSize="fill"
-            variant="primary"
-            onClick={onAdd}
-            disabled={!selected?.variant_id || !price}
-            loading={checkoutState.status === "adding"}
-          >
-            <s-box paddingBlock="small"><s-text type="strong">Add to cart · {price}</s-text></s-box>
-          </s-button>
+          <s-stack gap="base">
+            <s-heading>{price}</s-heading>
+            <s-button
+              inlineSize="fill"
+              variant="primary"
+              accessibilityLabel={`Add to cart · ${price}`}
+              onClick={onAdd}
+              disabled={!selected?.variant_id || !price}
+              loading={checkoutState.status === "adding"}
+            >
+              <s-box paddingBlock="base"><s-text type="strong">ADD TO CART · {price}</s-text></s-box>
+            </s-button>
+          </s-stack>
         )}
         {checkoutState.message ? (
           <s-text color={checkoutState.status === "error"
