@@ -138,4 +138,3 @@ class DatabaseJourneyTests(unittest.TestCase):
         row=store.get_review(identity);self.assertEqual(row['status'],'PENDING');self.assertFalse(row['verified_purchase']);self.assertEqual(row['review_type'],'STORE')
         media=store.media(identity);self.assertEqual(media[0]['storage']['provider'],'dropbox');self.assertFalse(media[0]['approved'])
         self.assertIsNone(store.q('SELECT * FROM sc_review_rewards WHERE review_id=%s',(identity,),True))
-
