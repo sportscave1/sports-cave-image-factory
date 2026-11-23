@@ -4,6 +4,7 @@ No migrations, application startup, credentials or network calls at import time.
 Every write is transaction-scoped; photographs and contact details stay private.
 """
 from copy import deepcopy
+from contextlib import contextmanager
 import base64
 import json
 from uuid import uuid4
@@ -34,6 +35,18 @@ class MarketplaceStore(Store):
         super().__init__(connect)
         self._media_storage = media_storage
 
+    @contextmanager
+    def public_read_db(self):
+        # Reuse the existing bounded transport pool, never publication/account
+        # data. Synthetic/injected stores keep their transaction fixture intact.
+        if self.connect:
+            with self.db() as conn:
+                yield conn
+        else:
+            from supabase_backend import read_connection
+            with read_connection() as conn:
+                yield conn
+
     @property
     def media_storage(self):
         if self._media_storage is None:
@@ -42,7 +55,7 @@ class MarketplaceStore(Store):
         return self._media_storage
 
     def listing(self, listing_id, *, public=False):
-        with self.db() as conn:
+        with self.public_read_db() if public else self.db() as conn:
             row = read(conn, 'listing:' + identifier(listing_id))
         if row is None or public and row.get('status') != 'published':
             return None
@@ -53,7 +66,7 @@ class MarketplaceStore(Store):
         if public:
             query += " AND value->>'status'='published'"
         query += ' ORDER BY updated_at DESC LIMIT 600'
-        with self.db() as conn:
+        with self.public_read_db() if public else self.db() as conn:
             rows = [r['value'] for r in conn.execute(query, (PREFIX + 'listing:%',)).fetchall()]
         return [public_listing(row) for row in rows] if public else rows
 
@@ -93,7 +106,7 @@ class MarketplaceStore(Store):
         listing_id = identifier(listing_id)
         if not isinstance(index, int) or not 0 <= index < 4:
             return None
-        with self.db() as conn:
+        with self.public_read_db() if public else self.db() as conn:
             row = read(conn, 'listing:' + listing_id)
             if not row or public and row.get('status') != 'published' or index >= row['photo_count']:
                 return None
@@ -106,7 +119,15 @@ class MarketplaceStore(Store):
                 image = read(conn, f'image:{listing_id}:{index}')
         if reference:
             from marketplace_dropbox import MAX_PHOTO
-            return base64.b64encode(self.media_storage.read(reference, MAX_PHOTO)).decode('ascii')
+            load = lambda: self.media_storage.read(reference, MAX_PHOTO)
+            if public:
+                # Approval above is always fresh; only the exact reviewed bytes
+                # are reusable. Pending/private moderation must still read source.
+                from marketplace_photo_cache import PHOTOS
+                data = PHOTOS.read(listing_id, index, reference, load)
+            else:
+                data = load()
+            return base64.b64encode(data).decode('ascii')
         return image['webp'] if image else None
 
     def moderate(self, listing_id, action, revision, actor):
