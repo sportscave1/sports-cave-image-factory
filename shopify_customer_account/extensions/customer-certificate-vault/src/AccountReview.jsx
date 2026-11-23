@@ -170,7 +170,7 @@ export function AccountReview({prompt, certificate, request}) {
 
 function StarRating({rating, onChange, modalId = "", compact = false}) {
   return (
-    <s-stack direction="inline" gap="none" alignItems="center">
+    <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" inlineSize={compact ? "120px" : "180px"} gap="none" alignItems="center">
       {[1, 2, 3, 4, 5].map((value) => (
         <s-clickable
           key={value}
@@ -178,17 +178,17 @@ function StarRating({rating, onChange, modalId = "", compact = false}) {
           onClick={() => onChange(value)}
           command={modalId ? "--show" : undefined}
           commandFor={modalId || undefined}
-          padding="small-400"
+          padding={compact ? "none" : "small-400"}
           minBlockSize={compact ? "28px" : "36px"}
           minInlineSize={compact ? "24px" : "36px"}
         >
           <s-icon
             type={value <= rating ? "star-filled" : "star"}
             tone="warning"
-            size={compact ? "large" : "base"}
+            size="base"
           ></s-icon>
         </s-clickable>
       ))}
-    </s-stack>
+    </s-grid>
   );
 }

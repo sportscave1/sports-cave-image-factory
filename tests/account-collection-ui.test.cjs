@@ -97,3 +97,15 @@ test('mobile edition carousel wraps with dedicated non-overlay arrow columns and
 test('display variants omit measurements while preserving frame and size labels',()=>{
  for(const [input,want] of [['Black / S- 21 × 30 cm (8.3 × 11.8 in)','Black / S'],['Oak / XL - 62 x 87 cm','Oak / XL'],['Unframed / M - 30 x 45 cm','Unframed / M'],['White / L','White / L']])assert.equal(commerceModule.exports.compactVariant(input),want);
 });
+
+test('compact review stars stay in a fixed five-column row',()=>{
+ const reviewModule={exports:{}};
+ const reviewSource=fs.readFileSync(path.join(__dirname,'../shopify_customer_account/extensions/customer-certificate-vault/src/AccountReview.jsx'),'utf8')+'\nexport {StarRating};';
+ const reviewCode=ts.transpileModule(reviewSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,jsxFactory:'h',target:ts.ScriptTarget.ES2022}}).outputText;
+ const h=(type,props,...children)=>({type,props:props||{},children:children.flat(Infinity).filter(Boolean)});
+ const jsx=(type,props)=>h(type,props,...[props?.children]);
+ vm.runInNewContext(reviewCode,{exports:reviewModule.exports,module:reviewModule,h,require:name=>name==='preact/jsx-runtime'?{jsx,jsxs:jsx}:{}});
+ const stars=reviewModule.exports.StarRating({rating:5,onChange:()=>{},compact:true});
+ assert.equal(stars.type,'s-grid');assert.equal(stars.props.gridTemplateColumns,'repeat(5, minmax(0, 1fr))');assert.equal(stars.props.inlineSize,'120px');assert.equal(stars.children.length,5);
+ assert.ok(stars.children.every(button=>button.props.padding==='none'));
+});
