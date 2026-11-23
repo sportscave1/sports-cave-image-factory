@@ -1345,7 +1345,9 @@ def create_frame_request(
     country=None,
 ):
     row = _resolve_certificate_reference(certificate_reference, shopify_customer_id)
-    frame_product = get_frame_product(force=True)
+    # The account bootstrap has already warmed this bounded public catalogue
+    # cache. Shopify cart/add remains authoritative for live purchasability.
+    frame_product = get_frame_product()
     requested_variant = _canonical_gid("ProductVariant", frame_variant_id)
     allowed_variants = {v["variant_id"] for v in frame_product.get("variants", [])}
     allowed_variants.add(frame_product.get("variant_id"))
@@ -1458,7 +1460,7 @@ def frame_cart_handoff(token):
 
 
 def _frame_variant_sku(variant_id):
-    product = get_frame_product(force=True)
+    product = get_frame_product()
     color = next((item["color"] for item in product.get("variants", []) if item["variant_id"] == variant_id), None)
     if not product.get("available") or not color:
         raise CollectorVaultUnavailableError("The selected frame is unavailable.")
