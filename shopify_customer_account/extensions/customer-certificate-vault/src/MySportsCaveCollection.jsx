@@ -786,7 +786,7 @@ function FramedCertificateOffer({
               disabled={!selected?.variant_id || !price}
               loading={checkoutState.status === "adding"}
             >
-              <s-box paddingBlock="base"><s-text type="strong">ADD TO CART · {price}</s-text></s-box>
+              <s-box paddingBlock="small" minBlockSize="40px"><s-text type="strong">ADD TO CART · {price}</s-text></s-box>
             </s-button>
           </s-stack>
         )}
