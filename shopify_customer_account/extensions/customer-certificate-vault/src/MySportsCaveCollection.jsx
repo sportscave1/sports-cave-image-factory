@@ -318,7 +318,7 @@ function CertificateCard({certificate, onOpen}) {
         </s-stack>
 
         <s-stack gap="small-200">
-          {hasPdf ? <s-grid gridTemplateColumns="1fr"><s-button variant="primary" command="--show" commandFor="certificate-viewer"
+          {hasPdf ? <s-grid gridTemplateColumns="1fr"><s-button inlineSize="fill" variant="primary" command="--show" commandFor="certificate-viewer"
             onClick={() => onOpen(certificate,true)}>Get certificate framed</s-button></s-grid> : null}
           <s-grid gridTemplateColumns="1fr 1fr" alignItems="center" gap="small">
             {hasPdf ? <s-clickable command="--show" commandFor="certificate-viewer" padding="small-200" minBlockSize="44px" accessibilityLabel="View certificate"
@@ -765,8 +765,8 @@ function UpsellProduct({product, api, onAdd}) {
       </s-select>
       {comparePrice(variant) ? <s-text color="subdued">RRP {formatFramePrice(comparePrice(variant), api.i18n.formatNumber)}</s-text> : null}
       <s-grid gridTemplateColumns="1fr">
-      {cart.url ? <s-button variant="primary" href={cart.url} target="_blank">Checkout · {formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-button>
-        : <s-button variant="primary" onClick={add} loading={cart.status === "adding"} disabled={!variant}>Add to cart · {formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-button>}
+      {cart.url ? <s-button inlineSize="fill" variant="primary" href={cart.url} target="_blank">Checkout · {formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-button>
+        : <s-button inlineSize="fill" variant="primary" onClick={add} loading={cart.status === "adding"} disabled={!variant}>Add to cart · {formatFramePrice(variant?.price, api.i18n.formatNumber)}</s-button>}
       </s-grid>
       {cart.status === "error" ? <s-text>Could not create your cart. Please try again.</s-text> : null}
     </s-stack>

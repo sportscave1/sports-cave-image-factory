@@ -12,4 +12,6 @@ Validation: 53 focused Python tests, 23 Node checks, two Storefront GraphQL quer
 
 No topology changes or Blueprint sync. Preserve canonical primary and supporting services. Current upstream inbox changes were fast-forwarded before release.
 
-Live checks: desktop review strip now aligns with native Orders navigation; four certificate cards and four recommendations each fit one row. US country switch returns US$249 recommendation prices (AU$339 in Australia) with market compare-at RRP. Final account version account-compact-verified-20261123 (1262162116609).
+Live checks: desktop review strip now aligns with native Orders navigation; four certificate cards and four recommendations each fit one row. US country switch returns US$249 recommendation prices (AU$339 in Australia) with market compare-at RRP. Final account version account-compact-wide-buttons-20261123 (1262241087489).
+
+Final cart check: White certificate merged into existing cart, returned to original Formula One collection with drawer open and US$73 regular price. Removed only White test, preserved preexisting Black and restored Australia. Known edge: stored return URL explicitly carrying country=AU can override US. Theme helper fix remains blocked by changed_on_shopify publication conflicts; concurrent theme edits preserved.
