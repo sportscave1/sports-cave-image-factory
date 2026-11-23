@@ -324,7 +324,7 @@ function CollectionShowcase({certificates, activeCertificate, onSelect, onOpen})
         <s-box display="@container (inline-size > 850px) none, auto">
           <s-stack gap="small-400">
             <s-scroll-box key={active.key} overflow="hidden auto" accessibilityLabel="Swipe through your editions, then tap an edition to view its certificate">
-              <s-stack direction="inline" gap="small">
+              <s-stack direction="inline" gap="small" minInlineSize={`${certificates.length * 300}px`}>
                 {certificates.slice(index).concat(certificates.slice(0, index)).map(item => <s-clickable key={item.key}
                   onClick={() => onSelect(item.key)} minInlineSize="280px" maxInlineSize="280px" accessibilityLabel={`${compactTitle(item.product_title)}, ${compactVariant(item.variant_title)}, edition ${edition(item)}${item.key === active.key ? ", selected" : ""}`}
                   border={item.key === active.key ? "large" : "base"} borderRadius="large" padding="small" background="subdued">
