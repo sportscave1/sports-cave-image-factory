@@ -204,6 +204,12 @@ def test_existing_order_submission_has_zero_extra_reads_when_disabled(monkeypatc
     monkeypatch.setattr(inbox,'read',lambda _:pytest.fail('No extra Orders I/O with feature off'))
     inbox.submission_guard({'snapshot':{'identity':{'order_id':'123'}}})
 
+@pytest.mark.parametrize('count',[1,2,5,10])
+def test_inbox_enabled_preserves_grouped_submission_and_read_costs(store,monkeypatch,count):
+    from test_orders_qa_scaling import test_submission_read_cost_scales_linearly_and_submits_once
+    monkeypatch.setenv('SPORTS_CAVE_INBOX_COMPANION_ENABLED','true')
+    test_submission_read_cost_scales_linearly_and_submits_once(store,monkeypatch,count)
+
 def test_flag_fences_new_submission_when_enabled(store,monkeypatch):
     monkeypatch.setenv('SPORTS_CAVE_INBOX_COMPANION_ENABLED','true')
     job,_,_=fixture(monkeypatch);persist(job)

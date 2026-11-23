@@ -1,10 +1,10 @@
 name: Orders QA release gate
 on:
   pull_request:
-    paths: ['prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
+    paths: ['inbox_companion*.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
   push:
     branches: [main]
-    paths: ['prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
+    paths: ['inbox_companion*.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
   workflow_dispatch:
 permissions:
   contents: read
