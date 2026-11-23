@@ -252,7 +252,7 @@ function CertificateGallery({certificates, onOpen}) {
   return (
     <s-scroll-box overflow="hidden auto" inlineSize="100%" accessibilityLabel="Your certificates — swipe to explore">
     <s-grid
-      gridTemplateColumns={`@container (inline-size > 900px) repeat(4, minmax(0, 1fr)), (inline-size > 650px) repeat(2, minmax(0, 1fr)), repeat(${certificates.length}, minmax(260px, 82vw))`}
+      gridTemplateColumns={`@container (inline-size > 750px) 1fr 1fr 1fr 1fr, ${certificates.map(()=>"82vw").join(" ")}`}
       gap="small"
       alignItems="stretch"
     >
@@ -762,7 +762,7 @@ function CollectionUpsells({api, apiBaseUrl, country}) {
       <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
     {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
     <s-scroll-box overflow="hidden auto" inlineSize="100%" accessibilityLabel="Recommended editions — swipe to explore">
-    <s-grid gridTemplateColumns="@container (inline-size > 750px) repeat(4, minmax(0, 1fr)), repeat(4, minmax(240px, 78vw))" gap="small" alignItems="stretch">
+    <s-grid gridTemplateColumns="@container (inline-size > 750px) 1fr 1fr 1fr 1fr, 78vw 78vw 78vw 78vw" gap="small" alignItems="stretch">
       {products.map((product) => <UpsellProduct key={`${country}-${product.id}`} product={product} api={api} onAdd={addToCollectionCart} />)}
     </s-grid>
     </s-scroll-box>

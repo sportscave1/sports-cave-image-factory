@@ -1127,7 +1127,7 @@ def _reviewed_keys(owner_hash):
             }
 
 
-def review_prompt(rows, shopify_customer_id):
+def review_prompt(rows, shopify_customer_id, *, allow_purchased=False):
     if not rows or not _judgeme_configured():
         return None
     try:
@@ -1135,14 +1135,14 @@ def review_prompt(rows, shopify_customer_id):
     except Exception as error:
         _log_optional_feature_unavailable("reviews", error)
         return None
-    statuses = delivery_statuses(
+    statuses = {} if allow_purchased else delivery_statuses(
         [row.get("shopify_order_id") for row in rows],
         shopify_customer_id,
     )
     for row in rows:
         order_id = _canonical_gid("Order", row.get("shopify_order_id"))
         product_id = _canonical_gid("Product", row.get("shopify_product_id"))
-        if not order_id or not product_id or not statuses.get(order_id):
+        if not order_id or not product_id or (not allow_purchased and not statuses.get(order_id)):
             continue
         if (order_id, product_id) in reviewed:
             continue
@@ -1164,6 +1164,7 @@ def review_prompt(rows, shopify_customer_id):
                 "customer_hash": customer_hash(shopify_customer_id),
                 "shopify_order_id": order_id,
                 "shopify_product_id": product_id,
+                "allow_purchased": bool(allow_purchased),
             },
             ttl_seconds=REVIEW_REFERENCE_TTL_SECONDS,
         )
@@ -1238,7 +1239,7 @@ def build_vault_payload(shopify_customer_id):
             include_secure_assets=secure_assets_available,
         ),
         "review_prompt": (
-            review_prompt(rows, shopify_customer_id)
+            review_prompt(rows, shopify_customer_id, allow_purchased=True)
             if secure_assets_available
             else None
         ),
@@ -1361,7 +1362,7 @@ def frame_cart_response(result, certificate, variant_id, country=None):
     token = _signed_token({"purpose": "frame_cart", "request_reference": reference,
                            "variant_id": variant_id, "country": country if re.fullmatch(r"[A-Z]{2}", str(country or "")) else _frame_product_country()}, ttl_seconds=30 * 60)
     result["request_reference"] = reference
-    result["cart_handoff_url"] = "https://www.sportscaveshop.com/?sc_certificate_cart=" + token
+    result["cart_handoff_url"] = "https://sports-cave-image-factory.onrender.com/api/collector-vault/frame/launch?sc_certificate_cart=" + token
     return result
 
 
@@ -1596,8 +1597,8 @@ def _resolve_review_reference(reference, shopify_customer_id):
         raise CollectorVaultAuthorizationError("Review order does not match the certificate.")
     if _canonical_gid("Product", row.get("shopify_product_id")) != payload.get("shopify_product_id"):
         raise CollectorVaultAuthorizationError("Review product does not match the certificate.")
-    statuses = delivery_statuses([row.get("shopify_order_id")], shopify_customer_id, force=True)
-    if not statuses.get(_canonical_gid("Order", row.get("shopify_order_id"))):
+    statuses = {} if payload.get("allow_purchased") is True else delivery_statuses([row.get("shopify_order_id")], shopify_customer_id, force=True)
+    if payload.get("allow_purchased") is not True and not statuses.get(_canonical_gid("Order", row.get("shopify_order_id"))):
         raise CollectorVaultAuthorizationError("Reviews are available after confirmed delivery.")
     return row
 

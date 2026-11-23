@@ -20,11 +20,3 @@ for(const present of [false,true]) test(`preserves existing cart and deduplicate
 test('refused handoff does not touch storefront cart',async()=>{
  let calls=0;await assert.rejects(transfer('invalid',{fetch:async()=>{calls++;return {ok:false,json:async()=>({ok:false})};},origin}));assert.equal(calls,1);
 });
-
-test('sets the browser market before adding certificate',async()=>{
- const calls=[];const item={ok:true,variant_id:'123',request_reference:'market',country_code:'US',properties:{_sports_cave_frame_request:'market'}};
- const fetch=async(url,options={})=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('cart.js')?{items:[]}:item};};
- await transfer('signed',{fetch,origin,lastPage:'/products/last'});
- assert.ok(calls[1].url.endsWith('/localization'));assert.ok(calls[1].options.body.includes('country_code=US'));
- assert.ok(calls[2].url.endsWith('/cart.js'));assert.ok(calls[3].url.endsWith('/cart/add.js'));
-});

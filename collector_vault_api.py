@@ -1,4 +1,5 @@
 import json
+import html
 import logging
 import os
 import uuid
@@ -7,7 +8,7 @@ from urllib.parse import quote
 
 import requests
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 import collector_vault
 from services import r2_storage
@@ -314,6 +315,29 @@ async def collector_vault_recommendations(request: Request):
         return _error_response(error, "recommendations")
 
 
+async def collector_vault_cart_launch(request: Request):
+    """Use Shopify's own localization form before the existing cart/drawer bridge."""
+    try:
+        token=str(request.query_params.get("sc_certificate_cart") or "")
+        payload=collector_vault._verify_signed_token(token, expected_purpose="frame_cart")
+        country=str(payload.get("country") or "AU")
+        if not collector_vault.re.fullmatch(r"[A-Z]{2}",country):
+            raise collector_vault.CollectorVaultError("Invalid cart country.")
+        nonce=uuid.uuid4().hex
+        destination="/?sc_certificate_cart=" + quote(token, safe="")
+        page=f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opening your Sports Cave cart</title><body>
+        <form id="market-cart" method="post" action="https://www.sportscaveshop.com/localization">
+        <input type="hidden" name="form_type" value="localization">
+        <input type="hidden" name="country_code" value="{html.escape(country,quote=True)}">
+        <input type="hidden" name="return_to" value="{html.escape(destination,quote=True)}">
+        <p>Opening your Sports Cave cart…</p><button type="submit">Continue to your cart</button></form>
+        <script nonce="{nonce}">document.getElementById('market-cart').submit();</script></body></html>"""
+        return HTMLResponse(page, headers={"Cache-Control":"no-store","Referrer-Policy":"no-referrer",
+            "Content-Security-Policy":f"default-src 'none'; script-src 'nonce-{nonce}'; form-action https://www.sportscaveshop.com; base-uri 'none'; frame-ancestors 'none'"})
+    except Exception as error:
+        return _error_response(error,"cart_launch")
+
+
 async def collector_vault_cart_handoff(request: Request):
     if request.method == "OPTIONS":
         return await collector_vault_options(request)
@@ -325,6 +349,7 @@ async def collector_vault_cart_handoff(request: Request):
 
 
 COLLECTOR_VAULT_ROUTES = (
+    ("/api/collector-vault/frame/launch", collector_vault_cart_launch, ("GET",)),
     ("/api/collector-vault/frame/cart-handoff", collector_vault_cart_handoff, ("POST", "OPTIONS")),
     ("/api/collector-vault/recommendations", collector_vault_recommendations, ("GET", "OPTIONS")),
     ("/api/collector-vault/bootstrap", collector_vault_bootstrap, ("GET", "OPTIONS")),
