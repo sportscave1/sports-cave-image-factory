@@ -334,12 +334,22 @@ def run_certificate_job(row, *, source_page="Diagnostic", upload=False, force=Fa
 
         existing = _existing_uploaded_certificate(normalised, config)
         if existing and not force:
+            repaired = certificate_engine.ensure_certificate_customer_assets(
+                {**record, **existing}, config=config, require_complete=False,
+            )
+            saved = certificate_engine.save_certificate_record_to_order(
+                repaired, config=config, ensure_schema_first=False,
+            )
+            if saved.get("metafields_synced") is False:
+                raise RuntimeError(saved.get("metafield_error") or "Certificate account links could not be saved. Retry.")
+            if repaired.get("asset_sync_status") == "partial":
+                raise RuntimeError(repaired.get("asset_sync_error") or "Certificate print or preview upload is incomplete. Retry.")
             return {
                 "ok": True,
                 "uploaded": False,
                 "skipped_existing": True,
-                "metafields_synced": True,
-                "record": _public_certificate_record({**record, **existing, "status": "Ready"}),
+                "metafields_synced": bool(saved.get("metafields_synced")),
+                "record": _public_certificate_record(saved.get("record") or repaired),
             }
 
         record["local_pdf_path"] = normalised.get("certificate_pdf_path") or record.get("local_pdf_path") or ""
@@ -355,6 +365,8 @@ def run_certificate_job(row, *, source_page="Diagnostic", upload=False, force=Fa
         )
         if saved.get("metafields_synced") is False:
             raise RuntimeError(saved.get("metafield_error") or "Certificate uploaded, but Shopify certificate mirror failed. Retry.")
+        if uploaded.get("asset_sync_status") == "partial":
+            raise RuntimeError(uploaded.get("asset_sync_error") or "Certificate print or preview upload is incomplete. Retry.")
         return {
             "ok": True,
             "uploaded": True,
