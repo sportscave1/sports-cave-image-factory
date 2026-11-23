@@ -3,7 +3,7 @@ import re
 
 
 BASE_DIR = Path(__file__).resolve().parent
-CERTIFICATE_TEMPLATE_PRINT_PATH = BASE_DIR / "assets" / "certificates" / "certificate-template-print.png"
+CERTIFICATE_TEMPLATE_PRINT_PATH = BASE_DIR / "assets" / "certificates" / "certificate-authenticity-master.jpg"
 CERTIFICATE_TEMPLATE_PREVIEW_PATH = BASE_DIR / "assets" / "certificates" / "certificate-template-preview.webp"
 
 
@@ -189,27 +189,8 @@ def render_template_certificate_image(
         certificate = certificate.resize(tuple(int(item) for item in target_size), resample)
 
     draw = ImageDraw.Draw(certificate)
-    width, height = certificate.size
-    scale = width / 1536
-
-    draw_fitted_text(
-        draw,
-        str(product_title or "Sports Cave Artwork"),
-        int(width * 0.41),
-        int(width * 0.82),
-        int(height * 0.682),
-        max_size=max(13, int(25 * scale)),
-        min_size=max(10, int(13 * scale)),
-    )
-    draw_fitted_text(
-        draw,
-        format_edition_number(edition_number, edition_total),
-        int(width * 0.43),
-        int(width * 0.54),
-        int(height * 0.744),
-        max_size=max(15, int(27 * scale)),
-        min_size=max(10, int(15 * scale)),
-    )
+    from certificate_typography import draw_certificate_text
+    draw_certificate_text(draw, certificate.size, product_title, edition_number, edition_total)
     return certificate
 
 
