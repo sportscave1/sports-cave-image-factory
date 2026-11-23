@@ -137,12 +137,14 @@ from prodigi_documents import serve as serve_document
 
 async def browser_action(request):
     from product_upload_api import HEADERS, failure
+    stage='authentication'
     try:
         import json
         auth=request.headers.get('authorization','')
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}',auth):
             raise PermissionError('A paired desktop credential is required.')
         await run_in_threadpool(desktop,auth[7:],slots=_orders_action_auth_slots)
+        stage='request_validation'
         raw=bytearray()
         async for block in request.stream():
             raw.extend(block)
@@ -167,10 +169,15 @@ async def browser_action(request):
             from prodigi_document_browser import permit,finish
         if body['key'].startswith('product:'):
             from prodigi_product_browser import permit,finish
+        kind=('product' if body['key'].startswith('product:') else
+              'document' if body['key'].startswith('document:') else
+              'merge' if body['key'].startswith(('merge:','mergehold:')) else 'artwork')
+        stage=kind+('.permit' if is_permit else '.finish')
         extra={'error':body.get('error','')} if not body['key'].startswith('document:') else {}
         result=await run_in_threadpool(permit,body['key'],body['token'],body['sha256']) if is_permit else await run_in_threadpool(finish,body['key'],body['token'],body.get('stage','readback'),**extra)
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:
+        __import__('logging').getLogger(__name__).warning('Orders browser request stopped stage=%s kind=%s sqlstate=%s',stage,type(error).__name__,getattr(error,'sqlstate',''))
         return failure(error)
 
 

@@ -14,7 +14,7 @@ import prodigi_stage as stages
 
 WAITING = 'Awaiting product selection'
 ACTIVE = 'Selecting product'
-READBACK_POLICY='supplier-price-readback-v1'
+READBACK_POLICY='supplier-empty-slot-readback-v2'
 
 
 def business(order, target):
@@ -152,14 +152,31 @@ def complete(cur,key,value,stage,*,error=''):
             raise ValueError('The supplier order changed outside the permitted product selection.')
         reset=value.get('reset_authorisation')
         if reset:
-            if (reset.get('generation')!=value.get('reset_generation') or reset.get('used_at')
-                    or reset.get('order_id')!=str(order['id']) or reset.get('item_id')!=str(item['id'])
-                    or reset.get('assets')!=(item.get('assets') or [])
-                    or after_selection_business(business(reset['before'],item['id']))!=before_stable):
-                raise ValueError('The reset authorisation changed before product selection was verified.')
+            # Select creates a required, empty print-area slot even though the
+            # imported blank had assets=[]. It is not an uploaded image. Prove
+            # both sides are empty using the same strict slot schema as upload,
+            # then pin the newly observed slot for the one-time Save permit.
+            assets_changed=reset.get('assets')!=(item.get('assets') or [])
+            empty_slot_created=(reset.get('assets')==[]
+                and not browser.has_existing_artwork(item))
+            reset_changes=changed_fields(
+                after_selection_business(business(reset['before'],item['id'])),before_stable)
+            receipt['reset_readback_changed_fields']=reset_changes
+            blocked=[name for name,changed in (
+                ('generation',reset.get('generation')!=value.get('reset_generation')),
+                ('used_at',bool(reset.get('used_at'))),
+                ('order_id',reset.get('order_id')!=str(order['id'])),
+                ('item_id',reset.get('item_id')!=str(item['id'])),
+                ('assets',assets_changed and not empty_slot_created)) if changed]
+            receipt['reset_readback_blocked_fields']=blocked
+            if blocked or reset_changes:
+                raise ValueError('The reset authorisation changed before product selection was verified. Review: '
+                    +', '.join(['reset.'+p for p in blocked]+reset_changes))
             # This readback proved the permitted product change and pinned every
             # other business field. Carry that exact state into the upload fence.
             reset['before']=browser.business(order,item['id'])
+            reset['assets']=deepcopy(item.get('assets') or [])
+            if assets_changed:receipt['reset_empty_slot_created']=True
             reset['product_selection_verified_at']=prep.now()
         receipt.update(verified=True,verified_at=prep.now(),sku=item['sku'],colour=(item.get('attributes') or {}).get('color',''))
         value.update(status=browser.WAITING,message='Original Fulfilment product and frame verified. Uploading this edition next, before selecting another product.')
@@ -210,14 +227,17 @@ def recover_readbacks(user):
     with connection(prep.connect) as c,c.cursor() as q:
         q.execute("""SELECT key FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
           AND value->>'status'='Needs review'
-          AND value->'product_browser'->>'started'='true'
+          AND (value->'product_browser'->>'started'='true'
+               OR (value->'product_browser'->>'started'='false'
+                   AND value->'product_browser'->>'client_stage'='product-select'
+                   AND value->'product_browser'->>'client_error'='The blank item changed before selection.'))
           AND NOT COALESCE((value->'product_browser'->>'verified')::boolean,false)
-          AND value->'product_browser'->>'client_stage'='product-readback'
-          AND (COALESCE(value->>'product_readback_recovery_policy','')<>'supplier-price-readback-v1'
+          AND value->'product_browser'->>'client_stage' IN ('product-select','product-readback')
+          AND (COALESCE(value->>'product_readback_recovery_policy','')<>%s
                OR COALESCE((value->>'product_readback_recoveries')::int,0)<2)
           AND NOT value ? 'submission' AND NOT value ? 'browser'
           AND NOT COALESCE((value->>'hidden')::boolean,false)
-          ORDER BY updated_at LIMIT 2""")
+          ORDER BY updated_at LIMIT 2""",(READBACK_POLICY,))
         keys=[r['key'] for r in q.fetchall()]
     return sum(_recover_readback(key) for key in keys)
 
@@ -226,11 +246,30 @@ def recover_readbacks(user):
 def _recover_readback(key):
     with stages.edit(browser.LOCK) as q:
         value=browser.read(q,key);receipt=value.get('product_browser') or {}
-        if (value.get('status')!='Needs review' or not receipt.get('started') or receipt.get('verified')
-            or receipt.get('client_stage')!='product-readback' or value.get('submission') or value.get('browser')
+        if (value.get('status')!='Needs review' or receipt.get('verified')
+            or receipt.get('client_stage') not in ('product-select','product-readback') or value.get('submission') or value.get('browser')
             or (value.get('product_readback_recovery_policy')==READBACK_POLICY and value.get('product_readback_recoveries',0)>=2)):return False
         count=value.get('product_readback_recoveries',0) if value.get('product_readback_recovery_policy')==READBACK_POLICY else 0
         value.update(product_readback_recoveries=count+1,product_readback_recovery_policy=READBACK_POLICY)
+        if receipt.get('started') is False:
+            if (receipt.get('client_stage')!='product-select'
+                    or receipt.get('client_error')!='The blank item changed before selection.'):return False
+            provider,resolver,_,_=browser.context(key)
+            try:
+                _,order,item=checked(value,provider,resolver)
+                unchanged=(not item.get('sku') and item==receipt['blank_item']
+                    and business(order,item['id'])==receipt['before'])
+            except ValueError:unchanged=False
+            if unchanged:
+                # The durable permit was never issued. Retire its token only
+                # after proving the original blank, so a late request cannot
+                # select alongside a new handoff. Never replay a consumed permit.
+                value['product_browser_history']=(value.get('product_browser_history',[])+[deepcopy(receipt)])[-5:]
+                value.pop('product_browser');value.pop('last_failure',None)
+                value.update(status=WAITING,message='Unchanged blank item verified after an unavailable permit. Retrying product selection with a fresh handoff.')
+            browser.save(q,key,value)
+            return unchanged
+        if receipt.get('started') is not True:return False
         # Keep the original receipt and consumed permit for independent proof.
         complete(q,key,value,'product-readback')
         if receipt.get('verified'):value.pop('last_failure',None)

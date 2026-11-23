@@ -21,6 +21,11 @@ def load_functions():
         context=lambda _: (None,None,None,None),save=lambda *args:None),
         'prep':SimpleNamespace(now=lambda:'verified-now',validate_order=lambda *args,**kwargs:None,
             record_failure=lambda *args:None)}
+    artwork=next(node for node in ast.parse(Path('prodigi_browser.py').read_text(encoding='utf-8')).body
+                 if isinstance(node,ast.FunctionDef) and node.name=='has_existing_artwork')
+    slot_ns={}
+    exec(compile(ast.Module(body=[artwork],type_ignores=[]),'prodigi_browser.py','exec'),slot_ns)
+    namespace['browser'].has_existing_artwork=slot_ns['has_existing_artwork']
     exec(compile(ast.Module(body=selected,type_ignores=[]),'prodigi_product_browser.py','exec'),namespace)
     return namespace
 

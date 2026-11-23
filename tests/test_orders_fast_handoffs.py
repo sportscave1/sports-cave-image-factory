@@ -6,6 +6,17 @@ from starlette.testclient import TestClient
 import prodigi_preparation as prep
 import prodigi_preparation_api as api
 
+def test_unavailable_permit_logs_phase_and_error_type_without_private_values(monkeypatch,caplog):
+    monkeypatch.setattr(api,'desktop',lambda _,**kw:None)
+    def unavailable(*args):raise TimeoutError('private-provider-url-and-customer-data')
+    monkeypatch.setattr('prodigi_product_browser.permit',unavailable)
+    client=TestClient(Starlette(routes=[Route('/browser/permit',api.browser_action,methods=['POST'])]))
+    response=client.post('/browser/permit',json=dict(key='product:prodigi_prepare:1',token='a'*43,sha256='b'*64),headers={'Authorization':'Bearer '+'x'*43})
+    assert response.status_code==503
+    assert 'stage=product.permit kind=TimeoutError' in caplog.text
+    for secret in ['private-provider-url','customer-data','a'*43,'x'*43]:assert secret not in caplog.text
+
+
 def test_critical_qa_auth_is_not_blocked_by_the_poll_auth_slot(monkeypatch):
     seen=[]
     def authenticate(token,*,slots):
