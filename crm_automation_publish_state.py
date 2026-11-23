@@ -52,7 +52,9 @@ def published(store,row,conn=None):
         content=saved['content'];email=deepcopy(by_id.get(step['step_id'],{}))
         email.update(step_id=step['step_id'],delay_seconds=step['delay_seconds'],document=content['document'],enabled=True)
         email.setdefault('name',step.get('name') or 'Email '+str(index+1));emails.append(email)
-        if content.get('review_request'):flow['review_request']=content['review_request']
+        if content.get('review_request'):
+            if 'product_index' in content['review_request']:email['review_request']=content['review_request']
+            else:flow['review_request']=content['review_request']
     if source:
         resolved={s['step_id']:s for s in emails}
         flow['emails']=[resolved.get(s['step_id'],s) for s in source]

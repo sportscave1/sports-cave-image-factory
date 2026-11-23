@@ -56,5 +56,5 @@ def is_lifecycle(row):
 
 def timing_label(step):
     labels = {'subscription':'confirmed subscription', 'payment':'verified payment',
-              'delivery':'confirmed delivery (or configured fulfilment fallback)', 'last_purchase':'latest qualifying purchase'}
+              'fulfilment':'verified fulfilment', 'delivery':'confirmed delivery (or configured fulfilment fallback)', 'last_purchase':'latest qualifying purchase'}
     return ' after ' + labels[step['anchor']]

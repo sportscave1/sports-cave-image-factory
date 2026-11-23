@@ -134,7 +134,10 @@ class MigrationDatabaseTests(unittest.TestCase):
             self.assertEqual(response.status_code,200);self.assertEqual(saved.call_count,1)
         identity=token_row(self.store,token)['review_id'];m=self.store.media(identity)[0]
         self.assertIsNone(self.store.q('SELECT * FROM sc_review_rewards WHERE review_id=%s',(identity,),True))
-        self.store.approve_media(original.ADMIN,m['id'],True);self.store.approve_media(original.ADMIN,m['id'],True)
+        self.store.approve_media(original.ADMIN,m['id'],True)
+        self.assertIsNone(self.store.q('SELECT * FROM sc_review_rewards WHERE review_id=%s',(identity,),True))
+        self.store.moderate(original.ADMIN,identity,status='PUBLISHED')
+        self.store.approve_media(original.ADMIN,m['id'],True)
         reward=self.store.q('SELECT * FROM sc_review_rewards WHERE review_id=%s',(identity,),True)
         self.assertEqual(reward['status'],'ELIGIBLE');self.assertEqual(reward['percent'],10)
         self.store.approve_media(original.ADMIN,m['id'],False)

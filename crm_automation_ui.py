@@ -108,7 +108,10 @@ def settings_control(editor,key):
     step_name=st.text_input('Email name',step.get('name',''),max_chars=150,key=key+'step_name')
     anchor=step.get('anchor');fulfilment=step.get('requires_fulfilment',False)
     if flow.get('lifecycle_version') and flow['trigger']=='post_purchase':
-        anchor=st.selectbox('Timing event',['payment','delivery'],index=['payment','delivery'].index(anchor),key=key+'anchor')
+        anchors=['payment','delivery','fulfilment']
+        anchor=st.selectbox('Timing event',anchors,index=anchors.index(anchor),disabled=bool(step.get('review_request')),key=key+'anchor')
+        if step.get('review_request'):
+            st.caption('Native review request for purchased product '+str(step['review_request']['product_index']+1)+' of up to 3. Online: 14 days after fulfilment, then 5-day intervals. POS: 7 days, then 5-day intervals. No reminders.')
         fulfilment=st.checkbox('Require successful fulfilment',value=fulfilment,disabled=fulfilment,key=key+'fulfilment')
     kind=st.selectbox('Trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda t:TRIGGERS[t][1],key=key+'trigger',disabled=bool(flow.get('lifecycle_version')))
     rules=[]

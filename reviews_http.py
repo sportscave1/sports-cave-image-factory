@@ -102,7 +102,7 @@ async def review_form(token:str,request:Request):
         if row['review_id']:return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
         product=await run_in_threadpool(store.match_product,{'product_id':row['product_id']})
         if not product:raise ValueError()
-        html=FORM_STYLE+'<main><h1>Share your review</h1><p>'+escape(product['title'])+'</p><form method="post" enctype="multipart/form-data"><label>Rating<select name="rating" required>'+''.join('<option value="'+str(n)+'">'+str(n)+' stars</option>' for n in (5,4,3,2,1))+'</select></label><label>Display name<input name="reviewer_name" maxlength="120" required></label><label>Title<input name="title" maxlength="200"></label><label>Review<textarea name="body" maxlength="5000" required rows="5"></textarea></label><label>Photos or video (optional)<input type="file" name="media" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" multiple></label><p>Up to 5 files: images up to 10 MB each, one video up to 50 MB, 65 MB total. Files are reviewed before display.</p><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label><label><input type="checkbox" name="display_consent" value="yes" required>Display my review, attached media and chosen name publicly</label><button type="submit">Submit review</button></form></main>'
+        html=form_html(product['title'],reward=store.collection_settings())
         return HTMLResponse(html,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"})
     except ValueError:return HTMLResponse(FORM_STYLE+'<main><h1>Review link unavailable</h1><p>This link is invalid or expired.</p></main>',status_code=400)
     except Exception:return Response(status_code=503)
@@ -119,39 +119,87 @@ async def review_submit(token:str,request:Request):
         store=ReviewsStore()
         known=await run_in_threadpool(token_row,store,token)
         if known['review_id']:return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
-        content_type=request.headers.get('content-type','').split(';')[0]
-        uploads=[]
-        if content_type=='multipart/form-data':
-            from starlette.formparsers import MultiPartParser,MultiPartException
-            from starlette.datastructures import UploadFile
-            # Bound total bytes before multipart parsing, including chunked requests.
-            async def limited_stream():
-                total=0
-                async for part in request.stream():
-                    total+=len(part)
-                    if total>65*1024*1024:raise MultiPartException('Upload exceeds 65 MB.')
-                    yield part
-            try:form=await MultiPartParser(request.headers,limited_stream(),max_files=5,max_fields=10).parse()
-            except MultiPartException:raise ValueError('Invalid or oversized upload.') from None
-            try:
-                fields={}
-                for key,value in form.multi_items():
-                    if isinstance(value,UploadFile):
-                        if key!='media':raise ValueError('Invalid file field.')
-                        if not value.filename:continue
-                        kind='video' if (value.content_type or '').startswith('video/') else 'image'
-                        limit=50*1024*1024 if kind=='video' else 10*1024*1024
-                        data=await value.read(limit+1)
-                        if len(data)>limit:raise ValueError('Media exceeds file size limit.')
-                        uploads.append({'data':data,'kind':kind})
-                    else:fields.setdefault(key,[]).append(value)
-            finally:await form.close()
-        elif content_type=='application/x-www-form-urlencoded':
-            fields=parse_qs((await bounded_body(request,24000)).decode('utf-8'),keep_blank_values=True)
-        else:return Response(status_code=415)
-        if any(len(v)!=1 for v in fields.values()):return Response(status_code=400)
-        payload={k:v[0] for k,v in fields.items()};payload['display_consent']=payload.get('display_consent')=='yes'
+        payload,uploads=await read_submission(request)
         await run_in_threadpool(submit,store,token,payload,uploads)
         return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
     except (ValueError,TypeError):return HTMLResponse(FORM_STYLE+'<main><h1>Review not submitted</h1><p>Check your review and link, then try again.</p></main>',status_code=400)
+    except Exception:return Response(status_code=503)
+
+async def read_submission(request):
+    from urllib.parse import parse_qs
+    content_type=request.headers.get('content-type','').split(';')[0]
+    uploads=[]
+    if content_type=='multipart/form-data':
+        from starlette.formparsers import MultiPartParser,MultiPartException
+        from starlette.datastructures import UploadFile
+        # Bound total bytes before multipart parsing, including chunked requests.
+        async def limited_stream():
+            total=0
+            async for part in request.stream():
+                total+=len(part)
+                if total>65*1024*1024:raise MultiPartException('Upload exceeds 65 MB.')
+                yield part
+        try:form=await MultiPartParser(request.headers,limited_stream(),max_files=5,max_fields=10).parse()
+        except MultiPartException:raise ValueError('Invalid or oversized upload.') from None
+        try:
+            fields={}
+            for key,value in form.multi_items():
+                if isinstance(value,UploadFile):
+                    if key!='media':raise ValueError('Invalid file field.')
+                    if not value.filename:continue
+                    kind='video' if (value.content_type or '').startswith('video/') else 'image'
+                    limit=50*1024*1024 if kind=='video' else 10*1024*1024
+                    data=await value.read(limit+1)
+                    if len(data)>limit:raise ValueError('Media exceeds file size limit.')
+                    uploads.append({'data':data,'kind':kind})
+                else:fields.setdefault(key,[]).append(value)
+        finally:await form.close()
+    elif content_type=='application/x-www-form-urlencoded':
+        fields=parse_qs((await bounded_body(request,24000)).decode('utf-8'),keep_blank_values=True)
+    else:raise ValueError('Unsupported form format.')
+    if any(len(v)!=1 for v in fields.values()):raise ValueError('Duplicate form field.')
+    payload={k:v[0] for k,v in fields.items()};payload['display_consent']=payload.get('display_consent')=='yes'
+    return payload,uploads
+
+def form_html(title,token=None,reward=None):
+    html=FORM_STYLE+'<main><h1>Share your review</h1><p>'+escape(title)+'</p><form method="post" enctype="multipart/form-data"><label>Rating<select name="rating" required>'+''.join('<option value="'+str(n)+'">'+str(n)+' stars</option>' for n in (5,4,3,2,1))+'</select></label><label>Display name<input name="reviewer_name" maxlength="120" required></label><label>Title<input name="title" maxlength="200"></label><label>Review<textarea name="body" maxlength="5000" required rows="5"></textarea></label><label>Photos or video (optional)<input type="file" name="media" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" multiple></label><p>Up to 5 files: images up to 10 MB each, one video up to 50 MB, 65 MB total. Files are reviewed before display.</p><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label><label><input type="checkbox" name="display_consent" value="yes" required>Display my review, attached media and chosen name publicly</label><button type="submit">Submit review</button></form></main>'
+    if token:html=html.replace('<label>Rating','<input type="hidden" name="form_token" value="'+escape(token,quote=True)+'">'+'<label>Rating')
+    html=html.replace('<h1>Share your review</h1>','<p>SPORTS CAVE · COLLECT. CELEBRATE. KEEP FOREVER.</p><h1>Share your review</h1>')
+    if reward and reward.get('rewards_enabled'):
+        text=f"<p>Once approved, eligible verified buyers receive {int(reward['image_percent'])}% for a photo or {int(reward['video_percent'])}% for a video. One reward per order, valid for 30 days. Your rating never affects the reward.</p>"
+        html=html.replace('<label>Photos or video',text+'<label>Photos or video')
+    return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Share your review | Sports Cave</title>'+html+'</html>'
+
+PUBLIC_FORM_HEADERS={'Cache-Control':'no-store','Referrer-Policy':'no-referrer',
+ 'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors https://www.sportscaveshop.com https://sportscaveshop.com https://sportscave-nb.myshopify.com"}
+
+@router.get('/reviews/write',response_class=HTMLResponse)
+async def storefront_form(request:Request):
+    if not allow_rate('review-write:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
+    try:
+        from reviews_public_submission import issue
+        product=request.query_params.get('product','');store=ReviewsStore()
+        if not await run_in_threadpool(lambda:store.settings()['enabled']):return Response(status_code=404)
+        token=issue(product)
+        mapped=await run_in_threadpool(store.match_product,{'product_id':product}) if product else None
+        if product and not mapped:raise ValueError('Product unavailable.')
+        return HTMLResponse(form_html(mapped['title'] if mapped else 'Tell us about your Sports Cave experience',token),headers=PUBLIC_FORM_HEADERS)
+    except ValueError:return HTMLResponse(FORM_STYLE+'<main><h1>Review form unavailable</h1><p>Please reload and try again.</p></main>',status_code=400,headers=PUBLIC_FORM_HEADERS)
+    except Exception:return Response(status_code=503)
+
+@router.post('/reviews/write',response_class=HTMLResponse)
+async def storefront_submit(request:Request):
+    if not allow_rate('review-write-submit:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
+    try:
+        from urllib.parse import urlsplit
+        origin=request.headers.get('origin');url=urlsplit(str(request.url))
+        if origin and origin!=url.scheme+'://'+url.netloc:return Response(status_code=403)
+        payload,uploads=await read_submission(request)
+        token=payload.pop('form_token','')
+        from reviews_public_submission import submit as public_submit
+        store=ReviewsStore()
+        if not await run_in_threadpool(lambda:store.settings()['enabled']):return Response(status_code=404)
+        await run_in_threadpool(public_submit,store,token,payload,uploads)
+        return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received by Sports Cave and is awaiting review.</p></main>',headers=PUBLIC_FORM_HEADERS)
+    except (ValueError,TypeError):return HTMLResponse(FORM_STYLE+'<main><h1>Review not submitted</h1><p>Check the fields, display permission and file sizes, then try again.</p></main>',status_code=400,headers=PUBLIC_FORM_HEADERS)
     except Exception:return Response(status_code=503)

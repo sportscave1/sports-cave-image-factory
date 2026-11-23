@@ -78,8 +78,16 @@ def submit(store,token,payload,uploads=None):
 def prepare_email(content,row,enrollment,shop,store):
     request=content.get('review_request')
     if not request:return content
-    if content.get('trigger')!='fulfilled' or not enrollment:raise ValueError('Review request requires a fulfilment journey.')
-    url=issue(store,shop,enrollment['trigger_shopify_id'],enrollment['shopify_customer_id'],request['product_id'])
+    if content.get('trigger') not in ('fulfilled','post_purchase') or not enrollment:raise ValueError('Review request requires an order journey.')
+    product=request.get('product_id')
+    if 'product_index' in request:
+        from reviews_journey import order_products
+        order=shop.order(enrollment['trigger_shopify_id'],fresh=True)
+        if not order or order.get('displayFulfillmentStatus')!='FULFILLED':raise ValueError('Order fulfilment is unverified.')
+        choices=order_products(shop,order)
+        if request['product_index']>=len(choices):raise ValueError('Review product is unavailable.')
+        product=choices[request['product_index']]
+    url=issue(store,shop,enrollment['trigger_shopify_id'],enrollment['shopify_customer_id'],product)
     from urllib.parse import urlsplit
     if urlsplit(url).netloc!=urlsplit(request['base_url']).netloc:raise ValueError('Review request URL configuration changed. Republish the flow.')
     result=deepcopy(content)
@@ -87,7 +95,10 @@ def prepare_email(content,row,enrollment,shop,store):
     # One opt-in immutable template marker, never arbitrary text substitution.
     encoded=json.dumps(result['document'])
     if original not in encoded:raise ValueError('Add the review request link before publishing.')
-    result['document']=json.loads(encoded.replace(original,url))
+    from html import escape
+    mapped=store.match_product({'product_id':product}) or {}
+    encoded=encoded.replace(original,url).replace('SC_REVIEW_PRODUCT_TITLE',json.dumps(escape(mapped.get('title','your Sports Cave edition')))[1:-1])
+    result['document']=json.loads(encoded)
     return result
 
 def create_automation(user,base,product,days):

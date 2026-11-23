@@ -34,7 +34,7 @@ test('existing theme reads native reviews, includes video and preserves bounded 
     await page.locator('.sc-reviews__close').click();
     await video.waitFor({state:'detached'});
     assert.equal(requests.filter(url=>url.includes('judge.me')||url.includes('judgeme')).length,0);
-    assert.equal(requests.filter(url=>url.includes('/reviews/public')).length,2);
+    assert.equal(requests.filter(url=>url.includes('/reviews/public')&&!url.includes('summary=1')).length,2);
     assert.deepEqual(errors,[]);
   } finally {await browser.close()}
 });
