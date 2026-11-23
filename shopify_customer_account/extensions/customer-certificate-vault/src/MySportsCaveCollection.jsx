@@ -11,12 +11,13 @@ import {
 } from "./legacy-certificate-utils.js";
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
 import {loadCollectionOrders} from "./collection-order-pages.js";
-import {accountCountry, compactTitle, compactVariant, pairedProducts, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
+import {accountCountry, compactTitle, compactVariant, pairedProducts, pairedEditionTitle, comparePrice, UPSELL_QUERY, FRAME_PRICE_QUERY, marketFrames} from "./account-commerce.js";
 import {collectionThumbnail} from "./collection-image-utils.js";
 import {timedOperation, operationForPath} from "./collection-performance.js";
 import {AccountReview} from "./AccountReview.jsx";
 import {formatFramePrice, frameCartInput} from "./vault-utils.js";
 import {createFrameOfferLoader} from "./frame-offer-loader.js";
+import {createCollectionPairCache} from "./collection-pair-cache.js";
 
 export const COLLECTOR_VAULT_REDESIGN_ENABLED = false;
 
@@ -79,7 +80,7 @@ function Extension() {
   const apiBaseUrl = configuredApiBaseUrl(api);
   const frameLoader = useRef(null);
   if (!frameLoader.current || frameLoader.current.api !== api || frameLoader.current.base !== apiBaseUrl) {
-    frameLoader.current = {api, base: apiBaseUrl, loader: createFrameOfferLoader({
+    frameLoader.current = {api, base: apiBaseUrl, pairs: createCollectionPairCache(), loader: createFrameOfferLoader({
       bootstrap: () => vaultRequest(api, apiBaseUrl, "/api/collector-vault/bootstrap?include_review=false"),
       prices: async (product, country) => {
         const result = /** @type {any} */ (await timedOperation(api, apiBaseUrl, 'frame_prices', async () => {
@@ -209,7 +210,7 @@ function Extension() {
             />
           ) : null}
           {status === "ready" && certificates.length > 0 ? (
-            <CollectionUpsells key={`${country}-${activeCertificate?.shopify_product_id || activeCertificate?.key}`} api={api} apiBaseUrl={apiBaseUrl} country={country} certificate={activeCertificate} />
+            <CollectionUpsells key={`${country}-${activeCertificate?.shopify_product_id || activeCertificate?.key}`} api={api} apiBaseUrl={apiBaseUrl} country={country} certificate={activeCertificate} pairCache={frameLoader.current.pairs} ownedKey={[...new Set(certificates.map(item => item.shopify_product_id))].sort().join(",")} />
           ) : null}
         </s-stack>
       </s-grid>
@@ -811,12 +812,20 @@ function FramedCertificateOffer({
   );
 }
 
-function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
-  const [products, setProducts] = useState([]);
-  const [status, setStatus] = useState("loading");
+function CollectionUpsells({api, apiBaseUrl, country, certificate, pairCache, ownedKey = ""}) {
+  const cacheKey = JSON.stringify([country, certificate?.shopify_product_id, ownedKey]);
+  const saved = pairCache?.get(cacheKey);
+  const [products, setProducts] = useState(saved || []);
+  const [status, setStatus] = useState(saved ? (saved.length ? "ready" : "empty") : "loading");
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    const cached = pairCache?.get(cacheKey);
+    if (cached !== undefined) {
+      setProducts(cached);
+      setStatus(cached.length ? "ready" : "empty");
+      return () => controller.abort();
+    }
     setStatus("loading");
     async function load() {
       try {
@@ -826,7 +835,7 @@ function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
         if (controller.signal.aborted) return;
         const ids = (recommended.products || []).slice(0, 8).map((p) => p.id);
         if (!ids.length) {
-          if (!controller.signal.aborted) { setProducts([]); setStatus("empty"); }
+          if (!controller.signal.aborted) { pairCache?.put(cacheKey, []); setProducts([]); setStatus("empty"); }
           return;
         }
         const result = await timedOperation(api, apiBaseUrl, 'pair_products', async () => {
@@ -836,30 +845,43 @@ function CollectionUpsells({api, apiBaseUrl, country, certificate}) {
         });
         // Preserve the smart rank even when Shopify returns nodes in another order.
         const nodes = pairedProducts(ids, result.data?.nodes);
-        if (!controller.signal.aborted) { setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
+        if (!controller.signal.aborted) { pairCache?.put(cacheKey, nodes); setProducts(nodes); setStatus(nodes.length ? "ready" : "empty"); }
       } catch (_error) {
         if (!controller.signal.aborted) setStatus("error");
       }
     }
     load();
     return () => controller.abort();
-  }, [api, apiBaseUrl, retry, country, certificate?.shopify_product_id]);
+  }, [api, apiBaseUrl, retry, cacheKey, pairCache]);
   return <s-stack gap="base">
     <s-heading>Pairs with your {compactTitle(certificate?.product_title || "selected")} edition</s-heading>
-    {status === "loading" ? <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large" accessibilityLabel="Finding your recommendations">
+    {status === "loading" ? <s-stack gap="small">
+      <s-stack direction="inline" gap="small" alignItems="center"><s-spinner size="small" accessibilityLabel="Loading recommendations" /><s-text color="subdued">Finding your recommendations…</s-text></s-stack>
+      <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large" accessibilityLabel="Finding your recommendations">
       {[0, 1].map(index => <s-grid key={index} gridTemplateColumns="@container (inline-size > 850px) '152px minmax(0, 1fr)', '1fr'" gap="base" alignItems="center"><s-box minBlockSize="@container (inline-size > 850px) 114px, 120px" background="subdued" borderRadius="base" /><s-box minBlockSize="32px" /></s-grid>)}
-    </s-grid> : null}
+    </s-grid></s-stack> : null}
     {status === "error" ? <s-stack gap="small"><s-text>Recommendations are temporarily unavailable.</s-text>
       <s-button variant="secondary" onClick={() => setRetry(retry + 1)}>Try again</s-button></s-stack> : null}
     {status === "empty" ? <s-text color="subdued">More editions for your collection are coming soon.</s-text> : null}
     <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large" alignItems="stretch">
-      {products.map(product => <s-link key={product.id} href={`https://www.sportscaveshop.com/products/${product.handle}?country=${country}`} target="_blank">
+      {status === "ready" && products.map(product => <s-link key={product.id} href={`https://www.sportscaveshop.com/products/${product.handle}?country=${country}`} target="_blank">
         <s-grid gridTemplateColumns="@container (inline-size > 850px) '152px minmax(0, 1fr)', '1fr'" gap="base" alignItems="center">
-          {product.featuredImage?.url ? <s-image src={product.featuredImage.url} alt={product.featuredImage.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="lazy" /> : null}
-          <s-text type="strong">{compactTitle(product.title)}</s-text>
+          {product.featuredImage?.url ? <s-image src={collectionThumbnail(product.featuredImage.url, 320)}
+            srcSet={`${collectionThumbnail(product.featuredImage.url, 200)} 200w, ${collectionThumbnail(product.featuredImage.url, 400)} 400w`}
+            sizes="(min-width: 850px) 152px, calc((100vw - 48px) / 2)"
+            alt={product.featuredImage.altText || product.title} aspectRatio="4/3" objectFit="contain" loading="eager" /> : null}
+          <PairedEditionTitle title={product.title} />
         </s-grid>
       </s-link>)}
     </s-grid>
+  </s-stack>;
+}
+
+function PairedEditionTitle({title}) {
+  const label = pairedEditionTitle(title);
+  return <s-stack gap="small-400">
+    <s-text type="strong">{label.title}</s-text>
+    {label.athlete ? <s-text color="subdued">{label.athlete}</s-text> : null}
   </s-stack>;
 }
 

@@ -94,8 +94,10 @@ def recommendations(customer_id, country=None, seed_product_id=None):
             tags = {}
             identities = [seed, *candidates]
             query = "query AccountEditionAffinity($ids:[ID!]!) { nodes(ids:$ids) { ... on Product { id tags } } }"
-            for start in range(0, len(identities), 25):
-                nodes = shop.query(query, {"ids": identities[start:start+25]}, "account edition affinity", 300).get("nodes") or []
+            # Tags-only facts have no nested connections. The bounded shortlist
+            # is at most 121 IDs, below Shopify's 250-input/1,000-cost limits.
+            for start in range(0, len(identities), 125):
+                nodes = shop.query(query, {"ids": identities[start:start+125]}, "account edition affinity", 300).get("nodes") or []
                 tags.update({node["id"]: node.get("tags") or [] for node in nodes if node})
             try:
                 from website_recommendation_analytics import _ranking_snapshot
@@ -111,8 +113,8 @@ def recommendations(customer_id, country=None, seed_product_id=None):
     candidates = [identity for identity in packet['candidates'] if identity not in owned]
     groups = packet['groups']
     eligible = {}
-    for start in range(0, len(candidates), 20):
-        for product in catalogue.resolve(candidates[start:start + 20], market, allow_missing=True):
+    for start in range(0, len(candidates), 8):
+        for product in catalogue.resolve(candidates[start:start + 8], market, allow_missing=True):
             if product["id"] not in owned and edition_available(product.get("edition")) and not product_issues(product, {"display": {"image": True, "price": True}}):
                 eligible[product["id"]] = product
         if len(eligible) >= 8:

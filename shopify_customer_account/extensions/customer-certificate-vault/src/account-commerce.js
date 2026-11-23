@@ -7,6 +7,14 @@ export function accountCountry(api) {
 export function compactTitle(title) {
   return String(title || '').replace(/\bwall\s+art\b/gi, '').replace(/\s+/g, ' ').replace(/\s+[–—-]\s*$/, '').trim();
 }
+export function pairedEditionTitle(value) {
+  const text = compactTitle(value);
+  const separator = /\s*(?:[–—;:|]|\s+-\s+|\s+["“”'‘’]\s+)\s*/;
+  const match = separator.exec(text);
+  const clean = part => part.trim().replace(/^["“”'‘’\s]+|["“”'‘’\s]+$/g, '');
+  if (!match) return {title: clean(text), athlete: ''};
+  return {title: clean(text.slice(0, match.index)), athlete: clean(text.slice(match.index + match[0].length))};
+}
 export function pairedProducts(ids, nodes) {
   const byId = new Map((nodes || []).filter(Boolean).map(product => [product.id, product]));
   return [...new Set(ids)].map(id => byId.get(id))

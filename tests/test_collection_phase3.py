@@ -238,3 +238,25 @@ def test_legacy_unseeded_recommendations_keep_collection_balancing(sources):
     assert sources.members.call_count == 1 and sources.products.call_count == 2
     assert sources.shop.query.call_count == 0
     assert sources.catalogue.resolve.call_count == 2
+
+
+def test_cold_recommendations_batch_lightweight_affinity_and_stop_after_eight_eligible(sources):
+    candidates = [f"gid://shopify/Product/{i}" for i in range(1000, 1120)]
+    sources.products.return_value = [SEED, *candidates]
+    sources.shop.query.return_value = {'nodes': [{'id': i, 'tags': ['SC_SPORT_BASEBALL']} for i in [SEED, *candidates]]}
+    result = offers.recommendations(OWNER, 'AU', SEED)
+    assert sources.shop.query.call_count == 1
+    assert len(sources.shop.query.call_args.args[1]['ids']) == 121
+    assert sources.catalogue.resolve.call_count == 1
+    assert len(sources.catalogue.resolve.call_args.args[0]) == 8
+    assert [p['id'] for p in result] == candidates[:8]
+
+
+def test_small_fact_batches_still_find_eight_eligible_in_smart_order(sources):
+    candidates = [f"gid://shopify/Product/{i}" for i in range(1000, 1020)]
+    sources.products.return_value = [SEED, *candidates]
+    sources.shop.query.return_value = {'nodes': [{'id': i, 'tags': ['SC_SPORT_BASEBALL']} for i in [SEED, *candidates]]}
+    sources.catalogue.resolve.side_effect = lambda ids, *a, **k: [dict(id=i, edition={'status': 'sold_out' if i in candidates[:4] else 'available'}) for i in ids]
+    result = offers.recommendations(OWNER, 'AU', SEED)
+    assert [p['id'] for p in result] == candidates[4:12]
+    assert sources.catalogue.resolve.call_count == 2
