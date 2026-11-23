@@ -29,7 +29,8 @@ def verified_context(shop,order_id,customer_id,product):
 
 def issue(store,shop,order_id,customer_id,product,env=None):
     env=os.environ if env is None else env
-    base=env.get('CRM_PUBLIC_BASE_URL','').rstrip('/');secret=env.get('CRM_UNSUBSCRIBE_SECRET','')
+    from reviews_routing import public_base
+    base=public_base(env);secret=env.get('CRM_UNSUBSCRIBE_SECRET','')
     if not public_https(base) or len(secret)<32:raise ValueError('Secure review links require the existing CRM public URL and signing secret.')
     product=product_gid(product);verified_context(shop,order_id,customer_id,product)
     if not store.match_product({'product_id':product}):raise ValueError('Review product is not indexed.')
@@ -93,7 +94,8 @@ def create_automation(user,base,product,days):
     from crm_automation_store import AutomationStore
     from crm_middle_sections import commit_middle
     from html import escape
-    env=os.environ;url=env.get('CRM_PUBLIC_BASE_URL','').rstrip('/')
+    from reviews_routing import public_base
+    env=os.environ;url=public_base(env)
     if not public_https(url):raise ValueError('Configure the existing CRM public URL first.')
     if not 1<=int(days)<=90:raise ValueError('Choose 1–90 days after fulfilment.')
     product=product_gid(product)

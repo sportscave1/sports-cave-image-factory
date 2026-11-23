@@ -47,8 +47,11 @@ class MemoryDropbox:
         self.calls.append(kwargs)
         headers = kwargs['headers']
         target = json.loads(headers['Dropbox-API-Arg'])
-        data, metadata = self.objects[target['path']]
-        assert target['rev'] == metadata['rev']
+        assert set(target) == {'path'} and target['path'].startswith('rev:')
+        found = next((value for value in self.objects.values() if 'rev:' + value[1]['rev'] == target['path']), None)
+        if found is None:
+            raise KeyError('Missing synthetic revision')
+        data, metadata = found
         first, last = map(int, headers['Range'].removeprefix('bytes=').split('-'))
         response = FakeResponse(data, metadata, first, last)
         self.last_response = response

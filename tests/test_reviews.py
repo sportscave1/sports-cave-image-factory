@@ -225,8 +225,11 @@ class DatabaseTests(unittest.TestCase):
             def execute(self,*args):self.result=self.conn.execute(*args)
             def fetchall(self):return self.result.fetchall()
         with connect() as conn:self.assertEqual(reviews_schema.schema_issues(Adapter(conn)),[])
-        from run_migrations import reviewed_migration_sql,DEPLOYMENT_MIGRATIONS
-        p=ROOT/'migrations/20261002152512_reviews_v1.sql';reviewed_migration_sql(p,p.read_text());self.assertIn(p.name,DEPLOYMENT_MIGRATIONS)
+        from run_migrations import reviewed_migration_sql,DEPLOYMENT_MIGRATIONS,REVIEWS_MIGRATIONS
+        for name in REVIEWS_MIGRATIONS:
+            p=ROOT/'migrations'/name
+            self.assertTrue(reviewed_migration_sql(p,p.read_text(encoding='utf-8')),name)
+            self.assertIn(name,DEPLOYMENT_MIGRATIONS)
     def test_unknown_date_not_counted_as_a_new_review(self):
         before=self.store.summary()['recent'];self.insert(created_at='')
         self.assertEqual(self.store.summary()['recent'],before)

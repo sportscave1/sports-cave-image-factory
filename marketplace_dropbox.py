@@ -134,7 +134,7 @@ class MarketplaceDropboxStorage:
         # the exact reviewed bytes even if someone later edits the Dropbox file.
         headers = {'Authorization': 'Bearer ' + context['token'],
             'Dropbox-API-Path-Root': json.dumps({'.tag': 'root', 'root': context['namespace']}),
-            'Dropbox-API-Arg': json.dumps({'path': value['id'], 'rev': value['rev']}),
+            'Dropbox-API-Arg': json.dumps({'path': 'rev:' + value['rev']}),
             'Range': f'bytes={start}-{end}', 'Accept-Encoding': 'identity'}
         response = (self.http or dbx._requests()).get(dbx.DROPBOX_CONTENT_URL + '/files/download',
             headers=headers, stream=True, allow_redirects=False, timeout=(5, 30))

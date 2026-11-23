@@ -27,6 +27,7 @@ from wall_preview_inbox_api import ROUTES as WALL_PREVIEW_INBOX_ROUTES
 from storefront_protection_api import ROUTES as STOREFRONT_PROTECTION_ROUTES
 from auth_cookie_cleanup import ROUTES as AUTH_COOKIE_CLEANUP_ROUTES
 from static_asset_compression import StaticAssetCompression
+from reviews_routing import PublicReviews
 from auto_editions_api import ROUTES as AUTO_EDITIONS_ROUTES
 from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
 from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
@@ -135,14 +136,14 @@ class _WallPreviewAccessLogFilter(logging.Filter):
         # The established binary-body contract carries customer identity in the
         # query. Keep it out of HTTP access logs; ingest logs use safe record IDs.
         message=record.getMessage()
-        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message and '/api/prodigi-artwork/' not in message
+        return WALL_PREVIEW_PATH not in message and '/wall-preview/' not in message and '/api/prodigi-artwork/' not in message and '/reviews/request/' not in message
 
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
 from auto_editions_bulk_runtime import ReviewLifecycle
 streamlit_app = NotificationLifecycle(ReviewLifecycle(App("app.py", routes=routes)))
 app = ConstantTimeHealthMiddleware(
-    IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app)))
+    PublicReviews(IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app))))
 )
 
 
