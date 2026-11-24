@@ -164,6 +164,24 @@ class ReviewsStore(Store):
         CACHE.invalidate()
         from reviews_rewards import register
         register(self,identity)
+    def edit_text(self,user,identity,*,title,body,reason,expected_updated_at):
+        require(user);identity=str(uuid.UUID(str(identity)))
+        title=plain(title,200);body=plain(body,5000);reason=plain(reason,500)
+        if len(reason)<5:raise ValueError('Enter the reason for this correction.')
+        if not expected_updated_at:raise ValueError('Reload the review before editing.')
+        with self.db() as conn:
+            row=conn.execute('SELECT * FROM sc_reviews WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+            if not row:raise ValueError('Review not found.')
+            if str(row['updated_at'])!=str(expected_updated_at):raise ValueError('This review changed. Close and reopen Edit to load its latest version.')
+            before={k:row[k] for k in ('title','body')};after={'title':title,'body':body}
+            if before==after:return False
+            conn.execute('UPDATE sc_reviews SET title=%s,body=%s,updated_at=now() WHERE id=%s',(title,body,identity))
+            audit={'reason':reason,'before':before,'after':after,'rating':row['rating']}
+            conn.execute('INSERT INTO sc_review_audit(review_id,actor,action) VALUES(%s,%s,%s)',(identity,actor(user),'edit:'+json.dumps(audit)))
+        from reviews_public_cache import CACHE
+        CACHE.invalidate()
+        return True
+
     def enqueue_import(self,user,source,label,items,invalid=0):
         require(user)
         if source not in ('csv','judgeme') or len(items)>10000:raise ValueError('Import at most 10,000 reviews per file.')

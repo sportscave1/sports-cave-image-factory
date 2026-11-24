@@ -1,0 +1,13 @@
+# Review text corrections
+
+The merchant explicitly authorised the customer-requested correction and Git/Render release on 24 November 2026. Target: review `0d9596e8-ce8a-46ff-88c0-05c7271f45f9`, E Maddock, imported from Judge.me, published with four stars. The requested result is an empty title/body with the existing four-star rating retained. The merchant reports the customer requested this change through Judge.me; the OS audit records that reason and preserves the original text.
+
+Each Overview row now has separate Open and Edit actions. Edit opens a compact form for the title, review text and required correction reason. Empty text is supported for rating-only reviews. Ratings, reviewer identity, publication status, purchase identity, source and dates are preserved. Existing moderation controls remain under Open.
+
+`ReviewsStore.edit_text` checks existing Reviews permission, validates plain text and limits, locks the exact UUID row and checks the version originally displayed by the form. Concurrent changes are rejected without overwriting newer data. The review update and private audit entry commit atomically. Audit action uses the existing text column with an `edit:` prefix and JSON containing the reason, original/revised title and body, and unchanged rating; actor and timestamp use the existing audit columns. No schema change or new public endpoint is required.
+
+The public cache is invalidated after a successful correction; existing cache TTL remains 30 seconds. Duplicated/no-op saves add no audit entry. Text edits do not run reward registration, send email, modify media or restamp review arrivals. Existing storefront projections include published rating-only reviews.
+
+Validation: 57 focused tests passed for the new editor and existing review, storefront projection, unread receipt and Shop import behaviour. New tests cover row Edit opening, populated form/version handling, permission rejection, rating-only saves preserving totals and identity, private audit contents, stale write rejection, no-op behaviour, sanitization, and rollback if audit storage fails. Python compilation, diff check and canonical Render topology validation passed. Local tests used disposable loopback PostgreSQL with synthetic records; no production credentials or customer data were used in previews.
+
+Production acceptance: after rollout, apply the authorised customer correction through the actual OS Edit form, confirm the exact database row and audit entry, and check the public native review response still includes the four-star review with no title/body and unchanged total count. Preserve the existing three Render services; no Shopify theme or account-extension release is involved.

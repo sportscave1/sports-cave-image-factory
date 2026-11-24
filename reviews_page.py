@@ -125,6 +125,27 @@ def detail(store,user,identity):
             if st.button('Save product match'):
                 store.moderate(user,identity,product=picked['shopify_product_id']);changed('table','summary');st.rerun()
 
+@st.dialog('Edit review',width='large')
+def edit_review(store,user,identity):
+    r=store.get_review(identity)
+    if not r:st.warning('Review is unavailable.');return
+    # Keep the version that populated this form, even if another session edits it.
+    with st.form('review_edit_form_'+str(identity)):
+        st.caption(r['reviewer_name']+' · '+str(r['rating'])+'/5 · '+(r.get('product_title') or 'Store review'))
+        title=st.text_input('Review title',value=r['title'],max_chars=200)
+        body=st.text_area('Review text',value=r['body'],max_chars=5000,height=160)
+        reason=st.text_input('Reason for edit',placeholder='Customer-requested correction',max_chars=500)
+        save=st.form_submit_button('Save changes',type='primary')
+    version_key='review_edit_version_'+str(identity)
+    if not save:st.session_state[version_key]=str(r['updated_at'])
+    if save:
+        try:
+            store.edit_text(user,identity,title=title,body=body,reason=reason,expected_updated_at=st.session_state.get(version_key))
+        except (ValueError,PermissionError) as exc:st.warning(str(exc));return
+        except Exception:st.warning('The review could not save. Please try again.');return
+        st.session_state.pop(version_key,None);changed('table','summary');st.rerun()
+
+
 def overview(store,user):
     # Filters must rerun the page so its completion poll observes newly queued
     # reads. A fragment-only rerun leaves the previously idle poll disabled.
@@ -151,14 +172,16 @@ def overview(store,user):
             return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
         rows,activity=load(('table',signature,offset),table)
         if activity=='ERROR':st.caption('Reviews could not refresh. Last resolved rows remain visible.')
-        head,actions=st.columns([12,1])
+        head,actions=st.columns([10,2])
         head.html('<div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DATE','SOURCE','STATUS'))+'</div>')
         actions.html('<div class="rv-head">ACTIONS</div>')
         if rows is not None:
             for r in rows[:25]:
-                content,action=st.columns([12,1])
+                content,action=st.columns([10,2])
                 content.html(row_html(r))
-                if action.button('Open',key='review_'+str(r['id']),help='Open review and actions',icon=':material/more_horiz:'):detail(store,user,r['id'])
+                open_action,edit_action=action.columns(2)
+                if open_action.button('Open',key='review_'+str(r['id']),help='Open review and actions',icon=':material/more_horiz:'):detail(store,user,r['id'])
+                if edit_action.button('Edit',key='review_edit_'+str(r['id']),help='Edit review text',icon=':material/edit:'):edit_review(store,user,r['id'])
             if not rows:st.caption('No reviews match these filters.')
             previous,next_page=st.columns(2)
             if previous.button('Previous',disabled=offset==0):state()['offset']=max(0,offset-25);st.rerun(scope='fragment')
