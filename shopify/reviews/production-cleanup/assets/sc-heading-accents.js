@@ -2,8 +2,7 @@
  const targets=[
  ['.sc-legacy--desktop .sc-legacy__story p:first-child strong',null],
  ['#sc-collector-videos-title','motion'],
- ['#sc-collector-faq-title','Questions'],
- ['.sc-reviews__heading','reviews']
+ ['#sc-collector-faq-title','Questions']
  ];
  const decorate=()=>{
   targets.forEach(([selector,keyword])=>{

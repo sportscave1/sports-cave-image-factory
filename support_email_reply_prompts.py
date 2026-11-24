@@ -35,7 +35,7 @@ REQUIREMENTS
 - Keep the request optional and friendly. Do not pressure the customer.
 - Keep the tone personal, premium, appreciative and genuine rather than corporate or overly promotional.
 - Do not invent any facts about the customer, order or product.
-- Do not mention Judge.me or the review platform.
+- Do not mention internal review infrastructure.
 - Do not include a subject line.
 - Do not use bullet points or markdown.
 - Keep the reply concise, ideally around 70–120 words.

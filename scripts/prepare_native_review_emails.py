@@ -37,7 +37,7 @@ def prepare(flow):
         doc['content'].update(subject='How does your Sports Cave edition look at home?',preheader='Share your honest review, a photo or a video of your setup.',headline=title,
                               intro='Tell us what you think of your Sports Cave edition.',cta_label='Share your honest review',cta_url=link)
         doc.update(copy_reviewed=True,offer_reviewed=True,offer='None',blocks=[],
-                   notes='Judge.me audit 24 Nov 2026: first request 14 days after fulfilment (POS 7), up to three products highest price first five days apart, no reminders. Native order-bound links. Draft only; reward delivery off for testing.')
+                   notes='Request timing audited 24 Nov 2026: first request 14 days after fulfilment (POS 7), up to three products highest price first five days apart, no reminders. Native order-bound links. Draft only; reward delivery off for testing.')
         commit_middle(doc,[{'id':str(uuid.uuid5(uuid.NAMESPACE_URL,step['step_id']+'-body')),'type':'html','visible':True,'html_number':1,'html':html}])
         requests.append(step)
     # Replace the old feedback and photo requests; keep thank-you and upsell intact.

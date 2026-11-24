@@ -1,0 +1,32 @@
+{
+  "summary": {
+    "count": 209,
+    "average": 4.818181818181818
+  },
+  "featured": 17,
+  "native_media": true,
+  "/pages/reviews": {
+    "native_widget": true,
+    "judge_references": 0
+  },
+  "/products/winx-framed-art": {
+    "native_widget": true,
+    "judge_references": 0
+  },
+  "runtime": {
+    "reviews_enabled": true,
+    "rewards_enabled": true,
+    "image_percent": 30,
+    "video_percent": 30,
+    "flow_status": "ACTIVE",
+    "publication_version": 8,
+    "review_slots": 3,
+    "published_media_total": 29,
+    "published_media_dropbox_copied": 29,
+    "published_media_failed": 0,
+    "retired_credentials_empty": true,
+    "legacy_sync_jobs": 0
+  },
+  "uninstalled": true,
+  "release": "e79dcb3967d45dcf2157c9e8ab2e70853b368d3d"
+}
