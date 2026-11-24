@@ -18,6 +18,7 @@ import {AccountReview} from "./AccountReview.jsx";
 import {formatFramePrice} from "./vault-utils.js";
 import {createFrameOfferLoader} from "./frame-offer-loader.js";
 import {createCollectionPairCache} from "./collection-pair-cache.js";
+import {FRAME_PRODUCT_FONT_BOLD, FRAME_PRODUCT_FONT_MEDIUM, FRAME_PRODUCT_FONT_WIDTHS} from "./frame-product-font.js";
 
 export const COLLECTOR_VAULT_REDESIGN_ENABLED = false;
 
@@ -661,7 +662,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
           <s-box padding="@container (inline-size > 520px) none, small">
           <s-stack gap="@container (inline-size > 520px) large, small" blockSize="100%" justifyContent="space-between">
             <s-stack gap="small-400">
-              <s-heading>{compactTitle(title)}</s-heading>
+              {framingOnly ? <FrameProductTitle title={title} /> : <s-heading>{compactTitle(title)}</s-heading>}
               {certificate.edition_display ? (
                 <s-text type="emphasis">
                   {editionLabel(certificate.edition_display).replace("#", "")}
@@ -727,11 +728,96 @@ function FramedCertificatePreview({certificate, previewUrl, color}) {
 }
 
 // Native account typography has no font-size control. Inline vectors keep these
-// two purchase labels crisp at the requested sizes without another network load.
+// purchase lettering crisp at the requested sizes without another network load.
 function framePurchaseLabel(text, size, color, centered = false) {
   const safe = String(text).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[char]));
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40" viewBox="0 0 200 40"><text x="${centered ? 100 : 0}" y="28" text-anchor="${centered ? 'middle' : 'start'}" font-family="Arial,Helvetica,sans-serif" font-size="${size}" font-weight="700" fill="${color}">${safe}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function frameProductEscape(text) {
+  return String(text).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[char]));
+}
+
+function frameProductTextWidth(text, size, spacing = 0) {
+  return Array.from(text).reduce((width, char) => width + (FRAME_PRODUCT_FONT_WIDTHS?.[char] || 0.65) * size + spacing, 0);
+}
+
+function frameProductSvg(content, width, height, medium = false) {
+  const face = (data, weight) => `@font-face{font-family:SCProductMontserrat;font-weight:${weight};src:url(data:font/woff2;base64,${data}) format('woff2')}`;
+  const fonts = face(FRAME_PRODUCT_FONT_BOLD, 700) + (medium ? face(FRAME_PRODUCT_FONT_MEDIUM, 500) : '');
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${fonts}</style>${content}</svg>`)}`;
+}
+
+function frameProductTitleImage(title, mobile) {
+  const text = compactTitle(title).toUpperCase();
+  const size = mobile ? 14 : 27;
+  const spacing = size * 0.025;
+  const fits = value => frameProductTextWidth(value, size, spacing) <= 274;
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    if (current && !fits(`${current} ${word}`)) { lines.push(current); current = ''; }
+    for (const char of word) {
+      if (current && !fits(current + char)) { lines.push(current); current = ''; }
+      current += char;
+    }
+    current += ' ';
+  }
+  if (current.trim()) lines.push(current.trim());
+  if (lines.length === 2) {
+    let difference = Infinity;
+    for (let index = 1; index < words.length; index++) {
+      const first = words.slice(0, index).join(' ');
+      const second = words.slice(index).join(' ');
+      const balance = Math.abs(frameProductTextWidth(first, size, spacing) - frameProductTextWidth(second, size, spacing));
+      if (fits(first) && fits(second) && balance < difference) {
+        lines.splice(0, 2, first, second);
+        difference = balance;
+      }
+    }
+  }
+  const lineHeight = size * 1.14;
+  const height = Math.ceil(Math.max(1, lines.length) * lineHeight + 3);
+  const markup = lines.map((line, index) => `<text x="${mobile ? 140 : 0}" y="${size + index * lineHeight}" text-anchor="${mobile ? 'middle' : 'start'}" font-family="SCProductMontserrat" font-size="${size}" font-weight="700" letter-spacing="${spacing}" fill="#f5f2ea">${frameProductEscape(line.trim())}</text>`).join('');
+  return {height, src: frameProductSvg(markup, 280, height), text};
+}
+
+function FrameProductTitle({title}) {
+  const desktop = frameProductTitleImage(title, false);
+  const mobile = frameProductTitleImage(title, true);
+  return <s-heading>
+    <s-box display="@container (inline-size > 520px) auto, none" inlineSize="280px" maxInlineSize="100%">
+      <s-image src={desktop.src} alt={desktop.text} inlineSize="fill" aspectRatio={`280/${desktop.height}`} loading="eager" />
+    </s-box>
+    <s-grid display="@container (inline-size > 520px) none, auto" justifyContent="center">
+      <s-box inlineSize="280px" maxInlineSize="100%">
+        <s-image src={mobile.src} alt={mobile.text} inlineSize="fill" aspectRatio={`280/${mobile.height}`} loading="eager" />
+      </s-box>
+    </s-grid>
+  </s-heading>;
+}
+
+function frameProductPriceImage(price, currency, mobile = false) {
+  const amount = price.replace(/^(?:AU|US|CA|NZ)(?=\$)/, '');
+  const currencyX = frameProductTextWidth(amount, 34, -0.85) + 8;
+  const prefix = mobile ? ({AUD:'AU', USD:'US', CAD:'CA', NZD:'NZ', GBP:'GBP'}[currency] || '') : '';
+  const amountX = prefix ? frameProductTextWidth(prefix, 17.68, 0.2652) + 1 : 0;
+  const prefixMarkup = prefix ? `<text x="0" y="26" font-family="SCProductMontserrat" font-size="17.68" font-weight="700" letter-spacing="0.2652" fill="#f5f2ea" fill-opacity="0.88">${prefix}</text>` : '';
+  const suffixMarkup = mobile ? '' : `<text x="${currencyX}" y="34" font-family="SCProductMontserrat" font-size="13" font-weight="500" letter-spacing="0.325" fill="#f5f2ea" fill-opacity="0.8">${frameProductEscape(currency)}</text>`;
+  return frameProductSvg(`${prefixMarkup}<text x="${amountX}" y="34" font-family="SCProductMontserrat" font-size="34" font-weight="700" letter-spacing="-0.85" fill="#f5f2ea">${frameProductEscape(amount)}</text>${suffixMarkup}`, 200, 44, !mobile);
+}
+
+function FrameProductPrice({price, currency}) {
+  return <s-heading>
+    <s-box display="@container (inline-size > 520px) auto, none" inlineSize="200px" maxInlineSize="100%" blockSize="44px">
+      <s-image src={frameProductPriceImage(price, currency)} alt={price} inlineSize="fill" aspectRatio="200/44" loading="eager" />
+    </s-box>
+    <s-box display="@container (inline-size > 520px) none, auto" inlineSize="200px" maxInlineSize="100%" blockSize="44px">
+      <s-image src={frameProductPriceImage(price, currency, true)} alt={price} inlineSize="fill" aspectRatio="200/44" loading="eager" />
+    </s-box>
+  </s-heading>;
 }
 
 function FramedCertificateOffer({
@@ -748,6 +834,9 @@ function FramedCertificateOffer({
   return (
     <s-box>
       <s-stack gap="@container (inline-size > 520px) large, small">
+        {!checkoutState.checkoutUrl && checkoutState.status !== "ordered" ? (
+          <FrameProductPrice price={price} currency={selected?.contextual_price?.currencyCode || ''} />
+        ) : null}
         <s-heading>Choose frame</s-heading>
         <s-grid gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap="small">
           {(product.variants?.length ? product.variants : [{color: "Black"}]).map((variant) => (
@@ -784,10 +873,6 @@ function FramedCertificateOffer({
             Framed certificate ordered
           </s-badge>
         ) : (
-          <s-stack gap="base">
-            <s-heading><s-box inlineSize="200px" maxInlineSize="100%" blockSize="40px">
-              <s-image src={framePurchaseLabel(price, 32, '#f5f3ed')} alt={price} inlineSize="fill" aspectRatio="5/1" loading="eager" />
-            </s-box></s-heading>
             <s-button
               inlineSize="fill"
               variant="primary"
@@ -800,7 +885,6 @@ function FramedCertificateOffer({
                 <s-image src={framePurchaseLabel('ADD TO CART', 20, '#121212', true)} alt="ADD TO CART" inlineSize="fill" aspectRatio="5/1" loading="eager" />
               </s-box>
             </s-button>
-          </s-stack>
         )}
         {checkoutState.message ? (
           <s-text color={checkoutState.status === "error"
