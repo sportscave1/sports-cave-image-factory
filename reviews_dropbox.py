@@ -39,7 +39,7 @@ class ReviewDropboxStorage:
     def put(self,name,data):
         # Hash-derived filenames never overwrite an existing revision.
         import re
-        if not re.fullmatch(r'[a-f0-9]{64}-(?:original\.(?:jpg|png|webp|mp4|webm)|(?:320|1280)\.webp|poster-(?:320|1280)\.webp)',name):raise ValueError('Invalid review asset name.')
+        if not re.fullmatch(r'[a-f0-9]{64}-(?:original\.(?:jpg|png|webp|mp4|webm)|(?:320|640|1280)\.webp|poster-(?:320|640|1280)\.webp|display-640-v1\.webp)',name):raise ValueError('Invalid review asset name.')
         path=self.context['root']+'/'+name
         metadata=dbx.get_metadata_if_exists(self.context['token'],path,missing_only=True)
         if not metadata:

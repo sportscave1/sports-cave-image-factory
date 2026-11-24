@@ -49,6 +49,15 @@ class DropboxMediaTests(unittest.TestCase):
             result=storage.put(name,data);upload.assert_not_called();self.assertEqual(result['size'],len(data))
         with patch('dropbox_integration.get_metadata_if_exists',return_value={**metadata,'content_hash':'0'*64}):
             with self.assertRaises(ValueError):storage.put(name,data)
+    def test_carousel_filenames_are_bounded_to_the_expected_webp_variants(self):
+        body=b'synthetic display bytes'
+        storage=ReviewDropboxStorage({'token':'fixture','root':'/Sportscave Team Folder/03_ASSETS/Reviews'})
+        metadata={'id':'id:reviewfixture','rev':'a1','size':len(body),'content_hash':content_hash(body)}
+        with patch('dropbox_integration.get_metadata_if_exists',return_value=metadata):
+            for suffix in ('640.webp','poster-640.webp','display-640-v1.webp'):
+                self.assertEqual(storage.put('f'*64+'-'+suffix,body)['size'],len(body))
+            for name in ('../640.webp','f'*64+'-640.png','f'*64+'-other.webp'):
+                with self.assertRaises(ValueError):storage.put(name,body)
     def test_video_has_original_plus_webp_posters(self):
         storage=Mock();storage.put.return_value=REF
         with patch('reviews_media.video_poster',return_value=photo()):value=save_owned(b'\x00\x00\x00\x18ftypmp42fixture','video',storage)
