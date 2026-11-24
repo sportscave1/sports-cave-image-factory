@@ -40,6 +40,10 @@ Evidence: local `artifacts/reviews-table-responsive-20261124/` contains `benchma
 
 ## Phase 3 — live release acceptance
 
+Completed: runtime commit `d27a75ce2a58a9bf2fb932bb226c7fb26ef386d7` is Live on the canonical primary and both existing supporting services. Signed-in live checks at 1440px, 881px and 390px confirmed no horizontal overflow, 80px labelled Open/Edit controls and approximately 44px phone button height. Open loaded the review details, Edit loaded the existing empty review text, and both were closed without saving. Next/Previous changed the first review UUID and returned to the original UUID. The total remains 209 and E Maddock remains published with four stars and no review text. Final browser console errors were empty and viewport override was reset.
+
+Final authenticated reload-to-first-row samples were 5239/4719ms, versus 5145/5179ms before. Two samples with browser-control/network overhead do not establish a meaningful startup speed improvement; roughly five seconds of total reload time remains the Phase 4 target. Local next-page rendering was 488ms and cached rows remained available during a delayed outage. Live proof and timings are in `artifacts/reviews-table-responsive-20261124/live-results.json` and `live-readable-proof.jpg`.
+
 Release through the existing Git main / Render services, keeping the canonical primary identity. Verify the precise release commit is Live, then test the actual signed-in OS at a wide desktop size, the reported 881px width and a phone size. Confirm product clamping, visible Open/Edit labels, no horizontal overflow, Open/Edit dialogs and next/previous navigation. Close editors without saving during layout acceptance. Check that E Maddock's prior correction remains rating-only and that published totals remain 209. Record live timing and proof screenshots with the release evidence and Studio status.
 
 Rollback if necessary is a focused reversal of this presentation/pagination change on the current branch; preserve the existing editor, audit data, unread notifications and unrelated account-extension release. No database migration, service replacement or theme publication is involved.
