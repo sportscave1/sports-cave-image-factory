@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+import re
 import tempfile
 import threading
 import unittest
@@ -16,9 +17,12 @@ from static_asset_compression import StaticAssetCompression, encoding_quality
 class PublicBundleTests(unittest.IsolatedAsyncioTestCase):
     def test_installed_framework_entrypoint_is_found(self):
         installed = PublicBundleCache()
-        candidates = list((installed.root / "js").glob("index.*.js"))
-        self.assertEqual(len(candidates), 1)
-        self.assertEqual(installed.source("/static/js/" + candidates[0].name), candidates[0])
+        html = (installed.root.parent / "index.html").read_text(encoding="utf-8")
+        entrypoint = re.search(r'<script[^>]+src="\./static/js/([^"]+)"', html)
+        self.assertIsNotNone(entrypoint)
+        name = entrypoint.group(1)
+        self.assertTrue((installed.root / "js" / name).is_file())
+        self.assertEqual(installed.source("/static/js/" + name), installed.root / "js" / name)
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

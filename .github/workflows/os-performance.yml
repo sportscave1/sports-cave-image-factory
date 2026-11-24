@@ -47,3 +47,4 @@ jobs:
         with:
           name: os-performance-evidence
           path: .tmp-startup-phase4/
+          include-hidden-files: true
