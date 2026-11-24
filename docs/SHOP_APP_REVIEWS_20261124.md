@@ -29,4 +29,14 @@ Disable the named workflow and set `sc_review_settings.shop_app_connection.enabl
 
 Primary references: [Shop review management and Flow trigger](https://help.shopify.com/en/manual/online-sales-channels/shop/product-reviews/manage), [Flow testing](https://help.shopify.com/en/manual/shopify-flow/manage/test-workflow), [Flow plan capabilities](https://help.shopify.com/en/manual/shopify-flow), [restricted review syndication program](https://shopify.dev/docs/apps/build/metaobjects/standard-review-metaobject).
 
-Release and final observed status are recorded below after rollout.
+## Released state
+
+Source commit `b5b19e205e336662e8e4ffcfd620fae3ba1fbe6d` was pushed to main and observed Live on the existing primary, webhook service and CRM worker. No infrastructure, service identity, plan or secrets changed. The source migration constraint is validated and permits shop_app.
+
+Shopify app version **shop-reviews-incoming-20261124** (version `1263752019969`) was released successfully. Uploaded exactly one minified asset, `assets/sc-customer-reviews.js`, to current live theme `190889230643` with nodelete and an explicit single-file filter. Fresh storefront readback matches the released asset, 21,433 bytes; the prior source matched the live minified widget before patching.
+
+The named Shopify Flow workflow visibly shows **Active**, trigger **Shop Review Published**, and **Not recently run**. Production OS Reviews > Import reviews > Shop app reviews visibly shows **Active · Shopify Flow inbox**, with a successful sync timestamp and the limitations above. The normal worker has repeatedly advanced the inbox watermark with last_error null; its latest checked success was **16:08:40 AEDT**. The inbox is empty because no genuine new Shop publication event occurred during this release. This is a healthy active connection, not a claim of an observed live customer-event import.
+
+Final validation: **71 Python tests passed**, plus **three current AU/US/count browser tests passed**. The two standalone form browser cases were not enabled in that widget run and are not counted; existing backend form/upload/Dropbox regressions were included. Published count remained **209** throughout, approximately **4.82/5**. No review, customer email, reward or discount was created for the Shop simulation. Existing customer account form, Dropbox upload handling and email publications were preserved.
+
+Proof: `artifacts/shop-app-connection-20261124/flow-active.jpg`. Additional untracked local evidence retains the original/released widget and OS connection screenshot. The first genuine Shop review still needs to confirm the live trigger/action execution; keep that distinction when reporting end-to-end delivery.
