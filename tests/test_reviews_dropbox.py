@@ -31,7 +31,7 @@ class DropboxMediaTests(unittest.TestCase):
         storage.put.side_effect=lambda name,body:(calls.append((name,body)) or {**REF,'size':len(body),'sha256':hashlib.sha256(body).hexdigest()})
         value=save_owned(data,'image',storage)
         self.assertEqual(calls[0][1],data);self.assertTrue(calls[0][0].endswith('-original.png'))
-        self.assertEqual(len(calls),3);self.assertEqual(value['storage']['provider'],'dropbox')
+        self.assertEqual(len(calls),4);self.assertEqual(value['storage']['provider'],'dropbox')
         for name,body in calls[1:]:
             self.assertTrue(name.endswith('.webp'))
             with Image.open(io.BytesIO(body)) as im:self.assertEqual(im.format,'WEBP');self.assertLessEqual(im.width,1280)
@@ -52,7 +52,7 @@ class DropboxMediaTests(unittest.TestCase):
     def test_video_has_original_plus_webp_posters(self):
         storage=Mock();storage.put.return_value=REF
         with patch('reviews_media.video_poster',return_value=photo()):value=save_owned(b'\x00\x00\x00\x18ftypmp42fixture','video',storage)
-        self.assertEqual(value['storage']['video_format'],'mp4');self.assertEqual(len(value['storage']['posters']),2)
+        self.assertEqual(value['storage']['video_format'],'mp4');self.assertEqual(len(value['storage']['posters']),3)
         self.assertTrue(storage.put.call_args_list[0].args[0].endswith('-original.mp4'))
     def test_original_images_and_legacy_r2_cannot_be_public_sources(self):
         with self.assertRaises(ValueError):asset(OWNED['storage'],'original','image')

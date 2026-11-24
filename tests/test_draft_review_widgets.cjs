@@ -8,8 +8,8 @@ for(const country of ['AU','US'])test(`draft ${country}: one initial request, st
   const page=await browser.newPage({viewport:{width:390,height:844}}),requests=[],errors=[];
   page.on('pageerror',e=>errors.push(e.message));let failMore=true;
   const ids=['f0a533af-ce9f-4114-845d-dc003032c337','d69b0463-04bc-412c-948a-1636353b3528','4c91276a-636b-4eae-944a-d9912d65900e','013c8326-eeb9-41c0-8a3a-07ee648bcf2a'];
-  const row=(id,index)=>({id:'fixture-'+index,legacy_id:id,reviewer_name:'Fixture '+index,title:'Synthetic edition',body:'Synthetic review body for testing',rating:5,media:[{kind:'image',url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=1280',thumbnail_url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=320'}]});
-  const featured=ids.map(row),archive=Array.from({length:5},(_,i)=>row(ids[0],i+10));
+  const row=(id,index)=>({id:'fixture-'+index,legacy_id:id,reviewer_name:'Fixture '+index,title:'Synthetic edition',body:'Synthetic review body for testing',rating:5,media:[{kind:'image',url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=1280',thumbnail_url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=320',carousel_url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=640'}]});
+  const featured=ids.map(row),archive=Array.from({length:5},(_,i)=>row(ids[0],i+10));archive[0].created_at='2026-01-02T00:00:00+00:00';archive[0].source_verified=true;
   await page.route('**/*',async route=>{
    const url=new URL(route.request().url());
    if(url.hostname==='fixture.example')return route.fulfill({contentType:'text/html',body:'<!doctype html><html></html>'});
@@ -27,6 +27,10 @@ for(const country of ['AU','US'])test(`draft ${country}: one initial request, st
   const started=Date.now();await page.addScriptTag({content:fs.readFileSync(process.env.REVIEW_DRAFT_WIDGET_SOURCE,'utf8')});
   await page.waitForFunction(()=>document.querySelector('[data-review-archive]').children.length===5);
   assert.ok(Date.now()-started<1500);assert.equal(requests.length,1);
+  assert.equal(await page.locator('[data-review-archive] time').count(),country==='AU'?1:0);
+  assert.equal(await page.locator('[data-review-archive] .sc-reviews__verified').count(),1);
+  assert.match(await page.locator('.sc-reviews__thumbnail img').first().getAttribute('srcset'),/640w/);
+  assert.doesNotMatch(await page.locator('.sc-reviews__thumbnail img').first().getAttribute('srcset'),/1280w/);
   const expected=country==='AU'?['Fixture 0','Fixture 1','Fixture 2','Fixture 3']:['Fixture 1','Fixture 3','Fixture 0','Fixture 2'];
   assert.deepEqual((await page.locator('.sc-reviews__card .sc-reviews__name').allTextContents()).slice(0,4),expected);
   await page.locator('[data-review-more]').click();await page.getByRole('button',{name:'Retry loading reviews'}).waitFor();

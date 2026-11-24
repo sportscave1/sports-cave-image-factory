@@ -31,15 +31,15 @@ class DraftReviewMethods {
       try {
         const url = new URL(value);
         return url.origin === 'https://sports-cave-image-factory.onrender.com' &&
-          /^\/reviews\/media\/[a-f0-9-]+$/.test(url.pathname) && ['320','1280'].includes(url.searchParams.get('size')) ? url.href : '';
+          /^\/reviews\/media\/[a-f0-9-]+$/.test(url.pathname) && ['320','640','1280'].includes(url.searchParams.get('size')) ? url.href : '';
       } catch { return ''; }
     };
     return reviews.map(review => ({id: featured ? review.legacy_id || review.id : review.id,
       name: review.reviewer_name, title: review.title, body: review.body, rating: review.rating,
-      date: review.created_at, product: review.product_title, verified: review.verified_purchase,
+      date: review.created_at, product: review.product_title, verified: review.verified_purchase || review.source_verified,
       media: (review.media || []).filter(media => media.kind === 'image').map(media => ({
         full: owned(media.url), thumb: owned(media.thumbnail_url), width: media.width, height: media.height,
-        srcset: `${owned(media.thumbnail_url)} 320w, ${owned(media.url)} 1280w`
+        srcset: owned(media.carousel_url) ? `${owned(media.thumbnail_url)} 320w, ${owned(media.carousel_url)} 640w` : `${owned(media.thumbnail_url)} 320w`
       })).filter(media => media.full && media.thumb)}));
   }
 

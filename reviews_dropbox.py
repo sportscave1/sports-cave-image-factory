@@ -62,7 +62,7 @@ class ReviewDropboxStorage:
 
 def asset(storage,size='1280',kind='image'):
     if not isinstance(storage,dict) or storage.get('provider')!='dropbox':raise ValueError('Media has not been transferred to Dropbox.')
-    if size not in ('320','1280','original'):raise ValueError('Invalid review media size.')
+    if size not in ('320','640','1280','original'):raise ValueError('Invalid review media size.')
     if kind=='video' and size=='original':
         if storage.get('video_format') not in ('mp4','webm'):raise ValueError('Unsupported review video format.')
         return storage['original'],'video/'+storage['video_format']

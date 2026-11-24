@@ -85,11 +85,15 @@ async def review_media(identity:str,request:Request):
         from reviews_public_cache import load
         settings=await run_in_threadpool(load,store,('settings',),store.settings)
         if not settings['enabled']:return Response(status_code=404)
-        media=await run_in_threadpool(load,store,('media',identity),lambda:store.q("""SELECT m.kind,m.storage FROM sc_review_media m JOIN sc_reviews r ON r.id=m.review_id
-            WHERE m.id=%s AND m.status='COPIED' AND m.approved=true AND r.status='PUBLISHED'""",(identity,),True))
+        from reviews_display_media import public_media
+        media=await run_in_threadpool(load,store,('media',identity),lambda:public_media(store,identity))
         if not media:return Response(status_code=404)
         from reviews_dropbox import asset,ReviewDropboxStorage
-        ref,mime=asset(media['storage'],request.query_params.get('size','original' if media['kind']=='video' else '1280'),media['kind'])
+        size=request.query_params.get('size','original' if media['kind']=='video' else '1280')
+        if size=='640' and not (media['storage'].get('posters' if media['kind']=='video' else 'variants') or {}).get('640'):
+            from reviews_display_media import ensure_carousel
+            media={**media,'storage':await run_in_threadpool(ensure_carousel,store,identity,media)}
+        ref,mime=asset(media['storage'],size,media['kind'])
         total=ref['size'];start=0;end=total-1;partial=False
         headers={'Cache-Control':'public,max-age=300','Referrer-Policy':'no-referrer','Accept-Ranges':'bytes',
           'ETag':'"'+ref['sha256']+'"','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'*',
@@ -190,7 +194,7 @@ def form_html(title,token=None,reward=None):
     return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Share your review | Sports Cave</title>'+html+'</html>'
 
 PUBLIC_FORM_HEADERS={'Cache-Control':'no-store','Referrer-Policy':'no-referrer',
- 'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors https://www.sportscaveshop.com https://sportscaveshop.com https://sportscave-nb.myshopify.com"}
+ 'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors https://www.sportscaveshop.com https://sportscaveshop.com https://sportscave-nb.myshopify.com https://admin.shopify.com https://online-store-web.shopifyapps.com"}
 
 @router.get('/reviews/write',response_class=HTMLResponse)
 async def storefront_form(request:Request):

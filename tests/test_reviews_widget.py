@@ -59,6 +59,9 @@ class WidgetSQLTests(unittest.TestCase):
         self.assertNotIn(identities[5],[r['id'] for r in au['featured']])
         self.assertEqual(au['featured'][0]['legacy_id'],FEATURED[0])
         self.assertTrue(au['featured'][0]['media'][0]['thumbnail_url'].endswith('?size=320'))
+        self.assertTrue(au['featured'][0]['media'][0]['carousel_url'].endswith('?size=640'))
+        self.assertTrue(au['reviews'][0]['source_verified']);self.assertFalse(au['reviews'][0]['verified_purchase'])
+        self.assertIsNotNone(au['reviews'][0]['created_at'])
         self.assertNotIn('source_review_id',au['featured'][0]);self.assertEqual(sum(c for _,c in au['histogram']),9)
         with patch.object(store,'connect',side_effect=connect) as connection:
             projection(store,'https://fixture.example','AU',settings={'verified':True})

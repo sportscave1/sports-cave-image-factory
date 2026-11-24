@@ -71,11 +71,11 @@ def webp_variants(data,prefix=''):
     result={}
     with Image.open(io.BytesIO(data)) as original:
         image=ImageOps.exif_transpose(original).convert('RGBA' if 'A' in original.getbands() else 'RGB')
-        for size in (320,1280):
+        for size in (320,640,1280):
             frame=image.copy();frame.thumbnail((size,size),Image.Resampling.LANCZOS)
             for quality in (82,76,70):
                 out=io.BytesIO();frame.save(out,'WEBP',quality=quality,method=6)
-                if len(out.getvalue())<=(40000 if size==320 else 250000):break
+                if len(out.getvalue())<={320:40000,640:90000,1280:250000}[size]:break
             result[str(size)]={'data':out.getvalue(),'width':frame.width,'height':frame.height,'suffix':prefix+str(size)+'.webp'}
     return result
 
