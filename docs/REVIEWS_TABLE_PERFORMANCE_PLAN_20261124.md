@@ -17,6 +17,7 @@ Implemented and tested:
 
 - Correct Next/Previous to request a full rerun; the old fragment-scoped rerun was invalid outside a fragment. Pagination remains 25 displayed rows plus one sentinel record.
 - Preserve existing bounded background read pool, per-session cache and last-good data. No added resize observers, polling timers, database queries or provider calls.
+- If a refresh fails, show an explicit Retry reviews action alongside the retained rows. Recovery does not require changing filters or reloading the whole OS.
 - Real browser test against a synthetic loopback-only Streamlit fixture at 1920, 1440, 1366, 1024, 881, 750, 430, 390, 375 and 320px widths, including sidebar effects. Assert no horizontal overflow, two-line product text, readable full button labels and bounded row height. Check Open, Edit/save, pagination, resize cache reuse, one-second delayed storage failure and subsequent recovery.
 - Nineteen focused Python tests passed; 28 database-dependent cases were intentionally skipped in this presentation-only regression run. The real browser scenario passed across all ten widths and interaction/failure checks. Compilation, diff and canonical Render topology checks passed.
 
@@ -31,7 +32,7 @@ Synthetic localhost fixture, headless Edge, 25 rendered reviews from 52 fabricat
 | Long review content block at 881px, excluding native actions | 774px high | 137px high |
 | Main-content DOM elements | 1893 | 1535, about 19% fewer |
 
-Separate final ten-width run: first 25 rows in 1723–2076ms, median 2037.5ms; next page 554ms; last-good rows confirmed still present 82ms after starting a delayed failure. All ten sizes had no horizontal overflow; no JavaScript page exceptions. Resizing reused one table read and one summary read rather than requesting new data. Final row containers measured 67–225px high across the tested sizes.
+Separate final ten-width run: first 25 rows in 2009–2086ms, median 2050ms; next page 488ms; last-good rows confirmed still present 63ms after starting a delayed failure. All ten sizes had no horizontal overflow; no JavaScript page exceptions. Resizing reused one table read and one summary read rather than requesting new data. Final row containers measured 67–225px high across the tested sizes.
 
 Production read-only SQL measurement: the actual first-page ordering uses `sc_reviews_received_page`, returns 26 rows, hits 12 shared buffers with zero reads, and executes in 0.401ms (planning 1.383ms). The database is not the observed first-load bottleneck. Before deployment, two authenticated live reload-to-first-row checks measured 5145/5179ms, including browser-control and network overhead. Do not equate the ~2s localhost fixture with the live app's total startup time.
 

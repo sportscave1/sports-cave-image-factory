@@ -183,7 +183,9 @@ def overview(store,user):
             if product and not matched:return []
             return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
         rows,activity=load(('table',signature,offset),table)
-        if activity=='ERROR':st.caption('Reviews could not refresh. Last resolved rows remain visible.')
+        if activity=='ERROR':
+            st.caption('Reviews could not refresh. Last resolved rows remain visible.')
+            if st.button('Retry reviews',key='reviews-retry'):changed('table');st.rerun()
         st.html('<div class="rv-heading"><div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DETAILS','STATUS'))+'</div><span>ACTIONS</span></div>')
         if rows is not None:
             for r in rows[:25]:

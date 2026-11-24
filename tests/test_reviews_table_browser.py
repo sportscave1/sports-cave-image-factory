@@ -76,7 +76,7 @@ def test_responsive_table_actions_latency_and_recovery():
             expect(page.locator('.rv-row')).to_have_count(25)
             page.get_by_text('Simulate storage failure',exact=True).click()
             page.get_by_text('Simulate slow storage',exact=True).click()
-            page.get_by_role('button',name='Refresh fixture',exact=True).click()
+            page.get_by_role('button',name='Retry reviews',exact=True).click()
             expect(page.get_by_text('Reviews could not refresh. Last resolved rows remain visible.',exact=True)).to_be_hidden(timeout=10000)
             assert not errors,errors
             result={'layouts':metrics,'next_page_ms':next_ms,'last_good_retained_ms':retained_ms,'console_errors':errors,'read_calls_before_resize':initial}
