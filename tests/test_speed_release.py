@@ -26,5 +26,6 @@ class SpeedReleaseChecks(unittest.TestCase):
                               'tests/test_marketplace_accounts.py',
                               'tests/test_marketplace_media.py',
                               'tests/test_marketplace_notifications.py',
-                              'tests/test_marketplace_collation.py'])
+                              'tests/test_marketplace_collation.py',
+                              'tests/test_recovery_revision_cache.py'])
         self.assertEqual(int(result), 0)

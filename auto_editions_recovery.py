@@ -13,6 +13,7 @@ from pathlib import Path
 import uuid
 
 from worker_diagnostics import explain
+from recovery_revision_cache import source_snapshot
 
 ACTOR = 'automatic:backlog-recovery-v1'
 EVENT = 'backlog_recovery_attempt'
@@ -66,7 +67,8 @@ def fix_revision(category):
     else:
         files += ['scripts/studio/auto_editions_local.py']
     root = Path(__file__).parent
-    return digest({name: hashlib.sha256((root/name).read_bytes()).hexdigest() for name in files})
+    from recovery_revision_cache import file_digest
+    return digest({name: file_digest(root/name) for name in files})
 
 
 def native_fix_available(runtime):
@@ -335,6 +337,7 @@ def temporary_admission(error):
             or getattr(getattr(error,'response',None),'status_code',None) in (429,500,502,503,504))
 
 
+@source_snapshot()
 def plan(connect, config):
     """Full authoritative backlog; independent of the 50-row UI pagination."""
     with connect() as conn, conn.cursor() as cur:
