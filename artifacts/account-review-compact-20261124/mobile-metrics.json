@@ -1,0 +1,35 @@
+{
+  "empty390": {
+    "dialog": {
+      "bottom": 844.6567077636719,
+      "clientHeight": 580,
+      "height": 580.421630859375,
+      "scrollHeight": 580,
+      "top": 264.2350769042969,
+      "width": 375.4029846191406
+    },
+    "uploadLabels": 1,
+    "viewport": {
+      "height": 845,
+      "width": 390
+    }
+  },
+  "selected375": {
+    "dialog": {
+      "bottom": 667.7014999389648,
+      "clientHeight": 560,
+      "clientWidth": 360,
+      "height": 559.8582153320312,
+      "scrollHeight": 560,
+      "scrollWidth": 360,
+      "top": 107.8432846069336,
+      "width": 360.3582153320313
+    },
+    "viewport": {
+      "height": 668,
+      "width": 375
+    }
+  },
+  "selectedFiles": 5,
+  "oneNativeUploadControl": true
+}
