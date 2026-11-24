@@ -63,6 +63,9 @@ class WidgetSQLTests(unittest.TestCase):
         with patch.object(store,'connect',side_effect=connect) as connection:
             projection(store,'https://fixture.example','AU',settings={'verified':True})
             self.assertEqual(connection.call_count,1)
+        with patch('supabase_backend.read_connection',return_value=store.db()) as pooled:
+            result=projection(ReviewsStore(),'https://fixture.example','AU',settings={'verified':True})
+            self.assertEqual(len(result['reviews']),5);pooled.assert_called_once_with()
 
 
 if __name__=='__main__':unittest.main()

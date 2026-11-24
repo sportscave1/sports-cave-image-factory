@@ -20,17 +20,28 @@ def projection(store, origin, country='AU', offset=0, settings=None):
         order="CASE WHEN right(COALESCE(r.source_review_id,''),36)<>%s AND (right(COALESCE(r.source_review_id,''),36)=ANY(%s) OR COALESCE(NULLIF(r.product_title,''),r.title||' '||r.body) ~* %s) THEN 0 ELSE 1 END,"+order
         args.extend(['f0a533af-ce9f-4114-845d-dc003032c337',US_IDS,US_TERMS])
     settings=settings or store.settings()
-    with store.db() as conn:
-        def query(sql,args=()):return conn.execute(sql,args).fetchall()
-        archive=query('SELECT '+FIELDS+' FROM sc_reviews r WHERE '+VISIBLE+' ORDER BY '+order+' LIMIT 6 OFFSET %s',(*args,offset))
-        more=len(archive)>5;archive=archive[:5]
-        featured=[]
-        if offset==0:
-            featured=query('SELECT '+FIELDS+' FROM sc_reviews r WHERE '+VISIBLE+" AND ((r.source='judgeme' AND right(r.source_review_id,36)=ANY(%s)) OR r.source='sports_cave') AND EXISTS (SELECT 1 FROM sc_review_media m WHERE m.review_id=r.id AND m.kind='image' AND m.status='COPIED' AND m.approved=true AND m.storage->>'provider'='dropbox') ORDER BY array_position(%s::text[],right(r.source_review_id,36)) NULLS LAST,r.created_at DESC,r.id DESC LIMIT 30",(EXCLUDED,FEATURED,FEATURED))
-        combined={str(r['id']):r for r in archive+featured}
-        media=[] if not combined else query("SELECT id,review_id,storage FROM sc_review_media WHERE review_id=ANY(%s::uuid[]) AND kind='image' AND status='COPIED' AND approved=true AND storage->>'provider'='dropbox' ORDER BY created_at,id",(list(combined),))
-        histogram=query("SELECT rating,count(*) AS count FROM sc_reviews WHERE status='PUBLISHED' AND (product_id IS NOT NULL OR review_type='STORE') GROUP BY rating") if offset==0 else []
-        totals=conn.execute("SELECT published,published_rating FROM sc_review_totals WHERE scope='all'").fetchone() or {}
+    archive_sql='SELECT '+FIELDS+',row_number() OVER (ORDER BY '+order+') AS position FROM sc_reviews r WHERE '+VISIBLE+' ORDER BY position LIMIT 6 OFFSET %s'
+    archive_args=(*args[1:],args[0],offset)
+    featured_sql='SELECT '+FIELDS+',0 AS position FROM sc_reviews r WHERE false'
+    featured_args=()
+    if offset==0:
+        featured_sql='SELECT '+FIELDS+",row_number() OVER (ORDER BY array_position(%s::text[],right(r.source_review_id,36)) NULLS LAST,r.created_at DESC,r.id DESC) AS position FROM sc_reviews r WHERE "+VISIBLE+" AND ((r.source='judgeme' AND right(r.source_review_id,36)=ANY(%s)) OR r.source='sports_cave') AND EXISTS (SELECT 1 FROM sc_review_media m WHERE m.review_id=r.id AND m.kind='image' AND m.status='COPIED' AND m.approved=true AND m.storage->>'provider'='dropbox') ORDER BY position LIMIT 30"
+        featured_args=(FEATURED,EXCLUDED,FEATURED)
+    histogram_sql="(SELECT COALESCE(jsonb_agg(h),'[]'::jsonb) FROM (SELECT rating,count(*) AS count FROM sc_reviews WHERE status='PUBLISHED' AND (product_id IS NOT NULL OR review_type='STORE') GROUP BY rating) h)" if offset==0 else "'[]'::jsonb"
+    sql='WITH archive AS ('+archive_sql+'),featured AS ('+featured_sql+'''),media AS (
+        SELECT id,review_id,storage,created_at FROM sc_review_media WHERE review_id IN (SELECT id FROM archive UNION SELECT id FROM featured)
+        AND kind='image' AND status='COPIED' AND approved=true AND storage->>'provider'='dropbox')
+        SELECT (SELECT COALESCE(jsonb_agg(a ORDER BY a.position),'[]'::jsonb) FROM archive a) AS archive,
+        (SELECT COALESCE(jsonb_agg(f ORDER BY f.position),'[]'::jsonb) FROM featured f) AS featured,
+        (SELECT COALESCE(jsonb_agg(m ORDER BY m.created_at,m.id),'[]'::jsonb) FROM media m) AS media,
+        '''+histogram_sql+''' AS histogram,(SELECT to_jsonb(t) FROM sc_review_totals t WHERE scope='all') AS totals'''
+    if store.connect:context=store.db()
+    else:
+        from supabase_backend import read_connection
+        context=read_connection()
+    with context as conn:data=conn.execute(sql,(*archive_args,*featured_args)).fetchone()
+    archive=data['archive'];more=len(archive)>5;archive=archive[:5]
+    featured=data['featured'];media=data['media'];histogram=data['histogram'];totals=data['totals'] or {}
     count=int(totals.get('published',0));summary={'count':count,'average':float(totals.get('published_rating',0))/count if count else None}
     by_review={}
     for item in media:
