@@ -56,16 +56,36 @@ class DeliveryCacheTests(unittest.TestCase):
         CACHE.invalidate();images.rows.clear();images.bytes=0
         output=io.BytesIO();Image.new('RGB',(20,20),'red').save(output,'WEBP');body=output.getvalue()
         ref={'provider':'dropbox','id':'id:syntheticdelivery','rev':'a1','size':len(body),'sha256':hashlib.sha256(body).hexdigest()}
-        store=Mock();store.connect='fixture';store.settings.return_value={'enabled':True};store.q.return_value={'kind':'image','storage':{'provider':'dropbox','variants':{'320':ref}}}
+        store=Mock();store.connect='fixture';store.settings.return_value={'enabled':True};store.q.return_value={'kind':'image','storage':{'provider':'dropbox','variants':{'320':ref,'640':ref}}}
         storage=Mock();storage.open.return_value.iter_chunks.return_value=[body]
         app=FastAPI();app.include_router(router);client=TestClient(app)
         url='/reviews/media/'+'c'*32+'?size=320'
         with patch('reviews_http.ReviewsStore',return_value=store),patch('reviews_http.allow_rate',return_value=True),patch('reviews_dropbox.ReviewDropboxStorage',return_value=storage):
             self.assertEqual(client.get(url).content,body);self.assertEqual(client.get(url).content,body)
             storage.open.assert_called_once()
+            delivery=url.replace('size=320','size=640&delivery=dropbox')
+            with patch('reviews_display_media.temporary_display_link',return_value='https://dl.dropboxusercontent.com/apitl/synthetic'):
+                response=client.get(delivery,follow_redirects=False)
+                self.assertEqual(response.status_code,307);self.assertNotIn('etag',response.headers)
+            CACHE.invalidate()
+            with patch('reviews_display_media.temporary_display_link',side_effect=ValueError('unavailable')):
+                self.assertEqual(client.get(delivery).content,body)
             CACHE.invalidate();store.q.return_value=None
             self.assertEqual(client.get(url).status_code,404)
             storage.open.assert_called_once()
+    def test_temporary_delivery_checks_pinned_receipt_and_dropbox_host(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from reviews_display_media import temporary_display_link
+        ref={'provider':'dropbox','id':'id:synthetic','rev':'a1','size':10,'sha256':'f'*64}
+        result=SimpleNamespace(metadata=SimpleNamespace(id=ref['id'],rev='a1',size=10),link='https://dl.dropboxusercontent.com/apitl/synthetic')
+        client=Mock();client.files_get_temporary_link.return_value=result
+        with patch('reviews_dropbox.ReviewDropboxStorage',return_value=SimpleNamespace(context={'client':client})):
+            self.assertEqual(temporary_display_link(ref),result.link)
+            result.metadata.rev='b2'
+            with self.assertRaises(ValueError):temporary_display_link(ref)
+            result.metadata.rev='a1';result.link='https://unrelated.example/image'
+            with self.assertRaises(ValueError):temporary_display_link(ref)
 
 
 if __name__=='__main__':unittest.main()

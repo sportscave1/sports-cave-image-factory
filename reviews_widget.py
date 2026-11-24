@@ -57,7 +57,7 @@ def projection(store, origin, country='AU', offset=0, settings=None):
         variants=item['storage'].get('variants') or {}
         if not variants.get('320') or not variants.get('1280'):continue
         base=origin+'/reviews/media/'+str(item['id'])
-        by_review.setdefault(str(item['review_id']),[]).append({'kind':'image','url':base+'?size=1280','thumbnail_url':base+'?size=320','carousel_url':base+'?size=640','poster_url':base+'?size=1280','width':variants['1280'].get('width',1280),'height':variants['1280'].get('height',1280)})
+        by_review.setdefault(str(item['review_id']),[]).append({'kind':'image','url':base+'?size=1280','thumbnail_url':base+'?size=320','carousel_url':base+'?size=640&delivery=dropbox','poster_url':base+'?size=1280','width':variants['1280'].get('width',1280),'height':variants['1280'].get('height',1280)})
     def public(row):
         legacy=str(row.get('source_review_id') or '')[-36:]
         return {'id':str(row['id']),'legacy_id':legacy if row['source']=='judgeme' and re.fullmatch('[a-f0-9-]{36}',legacy) else str(row['id']),
