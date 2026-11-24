@@ -1,0 +1,62 @@
+[
+  {
+    "width": 1440,
+    "geometry": {
+      "buttons": [
+        {
+          "h": 36,
+          "text": "Open",
+          "w": 79.99253845214844
+        },
+        {
+          "h": 36,
+          "text": "Edit",
+          "w": 79.99253845214844
+        }
+      ],
+      "height": 77.68656921386719,
+      "overflow": false,
+      "productWidth": 175
+    }
+  },
+  {
+    "width": 881,
+    "geometry": {
+      "buttons": [
+        {
+          "h": 36,
+          "text": "Open",
+          "w": 79.99253845214844
+        },
+        {
+          "h": 36,
+          "text": "Edit",
+          "w": 79.99253845214844
+        }
+      ],
+      "height": 231.6716461181641,
+      "overflow": false,
+      "productWidth": 510
+    }
+  },
+  {
+    "width": 390,
+    "geometry": {
+      "buttons": [
+        {
+          "h": 43.99253845214844,
+          "text": "Open",
+          "w": 79.99253845214844
+        },
+        {
+          "h": 43.99253845214844,
+          "text": "Edit",
+          "w": 79.99253845214844
+        }
+      ],
+      "height": 243.6716461181641,
+      "overflow": false,
+      "productWidth": 287
+    }
+  }
+]
