@@ -36,7 +36,7 @@ class ReviewsStore(Store):
     def aggregate(self,product=None):
         row=self.q('SELECT published,published_rating FROM sc_review_totals WHERE scope=%s',(product or 'all',),True) or {}
         n=int(row.get('published',0));return {'count':n,'average':float(row.get('published_rating',0))/n if n else None}
-    def rows(self,*,status='all',search='',product='',rating=0,source='',since=None,offset=0,limit=25,sort='newest',public=False):
+    def rows(self,*,status='all',search='',product='',rating=0,source='',since=None,offset=0,limit=25,sort='newest',public=False,received_first=False):
         limit=max(1,min(50,int(limit)));offset=max(0,min(50000,int(offset)));clauses=[];args=[]
         if public:clauses.extend(["status='PUBLISHED'","(product_id IS NOT NULL OR review_type='STORE')"])
         elif status=='all':clauses.append("status<>'SPAM'")
@@ -51,6 +51,7 @@ class ReviewsStore(Store):
         if since:clauses.append('created_at>=%s');args.append(since)
         order={'newest':'created_at DESC,id DESC','highest':'rating DESC,created_at DESC,id DESC','lowest':'rating ASC,created_at DESC,id DESC'}
         if sort not in order:raise ValueError('Invalid review sort.')
+        if received_first and not public and sort=='newest':order['newest']='notification_received_at DESC NULLS LAST,created_at DESC,id DESC'
         fields="id,review_type,product_id,product_title,product_image,product_url,reviewer_name,rating,title,body,created_at,verified_purchase,merchant_reply,status,(source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known,(source_metadata->>'shop_app'='true') AS shop_verified" if public else '*'
         return self.q('SELECT '+fields+' FROM sc_reviews WHERE '+' AND '.join(clauses)+' ORDER BY '+order[sort]+' LIMIT %s OFFSET %s',(*args,limit+1,offset))
     def get_review(self,identity):return self.q('SELECT * FROM sc_reviews WHERE id=%s',(str(uuid.UUID(str(identity))),),True)

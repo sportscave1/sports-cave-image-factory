@@ -28,6 +28,7 @@ SEARCH_INDEX_PATH = "/api/os/top-bar/search-index"
 NOTIFICATIONS_PATH = "/api/os/top-bar/notifications"
 ORDER_STATUS_PATH = "/api/os/top-bar/order-status"
 EMAIL_STATUS_PATH = "/api/os/top-bar/email-status"
+REVIEW_STATUS_PATH = "/api/os/top-bar/review-status"
 DAILY_PLANNER_STATUS_PATH = "/api/os/top-bar/daily-planner-status"
 REPAIR_REQUESTS_PATH = "/api/os/top-bar/repair-requests"
 ORDER_SUMMARY_DISPLAY_CACHE_TTL_SECONDS = 10.0
@@ -958,6 +959,18 @@ async def top_bar_email_status(request: Request):
     return _json({"ok": True, **result})
 
 
+async def top_bar_review_status(request: Request):
+    claims=_claims(request)
+    if not claims or 'Reviews' not in set(claims.get('allowed_routes') or ()):
+        return _json({'ok':False,'error':'Access not approved.'},403)
+    try:
+        from reviews_notifications import status
+        result=await run_in_threadpool(status,claims)
+        return _json({'ok':True,**result})
+    except Exception:
+        return _json({'ok':False,'error':'Review status unavailable.'},503)
+
+
 def _daily_planner_timer_mirror(timer):
     timer = dict(timer or {})
     if not timer.get("id"):
@@ -1098,6 +1111,7 @@ TOP_BAR_ROUTE_HANDLERS = (
     (NOTIFICATIONS_PATH, top_bar_notifications, ("GET",)),
     (ORDER_STATUS_PATH, top_bar_order_status, ("GET",)),
     (EMAIL_STATUS_PATH, top_bar_email_status, ("GET",)),
+    (REVIEW_STATUS_PATH, top_bar_review_status, ("GET",)),
     (DAILY_PLANNER_STATUS_PATH, top_bar_daily_planner_status, ("GET",)),
     (REPAIR_REQUESTS_PATH, top_bar_repair_requests, ("GET", "POST", "PATCH")),
 )

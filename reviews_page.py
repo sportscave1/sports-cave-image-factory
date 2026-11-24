@@ -148,7 +148,7 @@ def overview(store,user):
         def table():
             matched=store.match_product({'product_handle':product,'product_title':product}) if product else None
             if product and not matched:return []
-            return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset)
+            return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
         rows,activity=load(('table',signature,offset),table)
         if activity=='ERROR':st.caption('Reviews could not refresh. Last resolved rows remain visible.')
         head,actions=st.columns([12,1])
@@ -163,7 +163,24 @@ def overview(store,user):
             previous,next_page=st.columns(2)
             if previous.button('Previous',disabled=offset==0):state()['offset']=max(0,offset-25);st.rerun(scope='fragment')
             if next_page.button('Next',disabled=len(rows)<=25):state()['offset']=offset+25;st.rerun(scope='fragment')
+            if activity=='READY' and rows:
+                acknowledge_visible(store,user,rows[:25])
         elif activity=='LOADING':st.caption('Loading reviews…')
+
+
+def acknowledge_visible(store,user,rows):
+    import json
+    from reviews_notifications import mark_visible,scope
+    actor_scope=scope(user.get('id'));identities=tuple(str(row['id']) for row in rows)
+    key=('seen',actor_scope,identities)
+    receipt,activity=load(key,lambda:mark_visible(user,identities,store),ttl=3600)
+    if activity!='READY' or not receipt or not receipt.get('marked'):return
+    emitted=state().setdefault('seen_receipts',[])
+    if key in emitted:return
+    emitted.append(key);del emitted[:-48]
+    import streamlit.components.v1 as components
+    payload=json.dumps(receipt).replace('</','<\\/')
+    components.html('<script>window.parent.dispatchEvent(new CustomEvent("sc-reviews-seen",{detail:'+payload+'}));</script>',height=0,width=0)
 
 @st.fragment
 def importer(store,user):
@@ -306,5 +323,5 @@ def render_page(user,navigate=lambda _:None,*,store=None):
         except (ValueError,PermissionError) as exc:st.warning(str(exc))
         except Exception:st.warning('Reviews could not complete this operation. Retry when storage is available.')
         with st.container(key='reviews-poll'):
-            if st.button('Refresh reviews',key='reviews-refresh'):pass
+            if st.button('Refresh reviews',key='reviews-refresh'):changed('table','summary');st.rerun()
         refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))

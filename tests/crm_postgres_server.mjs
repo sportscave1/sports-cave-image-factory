@@ -15,6 +15,7 @@ await db.exec(readFileSync('migrations/20261002152512_reviews_v1.sql','utf8'));
 await db.exec(readFileSync('migrations/20261124090000_reviews_media_collection.sql','utf8'));
 await db.exec(readFileSync('migrations/20261124100000_reviews_dropbox_media.sql','utf8'));
 await db.exec(readFileSync('migrations/20261124045635_shop_app_reviews.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20261124051302_review_notifications.sql','utf8'));
 await db.exec(readFileSync('migrations/20261005145500_crm_automation_reporting_indexes.sql','utf8'));
 await db.exec(`CREATE TABLE edition_orders(id bigserial primary key,shopify_customer_id text,customer_email text,edition_number int,edition_total int,product_title text,variant_title text,certificate_file_url text,shopify_order_name text);`);
 await db.exec(readFileSync('migrations/20261005061015_crm_automation_publication_jobs.sql','utf8'));

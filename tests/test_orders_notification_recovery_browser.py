@@ -8,6 +8,7 @@ from playwright.sync_api import sync_playwright, expect
 SOURCE = (Path(__file__).resolve().parents[1] / 'components/sports_cave_top_bar/index.html').read_text(encoding='utf-8')
 SIDEBAR = '''<div id="sidebar-host"><section data-testid="stSidebar" style="width:280px;position:fixed;left:0;top:120px">
 <div class="st-key-sidebar-row-orders"><div data-testid="stButton"><button><p>Orders</p></button></div></div>
+<div class="st-key-sidebar-row-reviews"><div data-testid="stButton"><button><p>Reviews</p></button></div></div>
 </section></div>'''
 
 
@@ -48,16 +49,23 @@ def fixture(value=None, viewport=None, **settings):
             elif route.request.url.endswith('/notifications'):
                 state['notification_calls'] += 1
                 route.fulfill(json={'ok':True, 'notifications':[]})
+            elif route.request.url.endswith('/review-status'):
+                state['review_calls'] = state.get('review_calls', 0) + 1
+                if state.get('review_hold'):
+                    state.setdefault('held_review_routes', []).append(route)
+                    return
+                route.fulfill(status=503 if state.get('review_fail') else 200, json={
+                    'ok':True,'unread_count':state.get('reviews',0),'checked_at':state.get('review_time',1),'latest_arrival':'fixture'})
             else:
                 route.fulfill(json={})
         page.route('**/*', respond)
         page.clock.install()
-        page.goto('http://fixture.test/?page=orders')
+        page.goto('http://fixture.test/?page='+initial['currentRouteKey'])
         try:
             yield page, state
             assert not errors
         finally:
-            for held in state.get('held_routes', []):
+            for held in state.get('held_routes', []) + state.get('held_review_routes', []):
                 try:
                     held.abort()
                 except Exception:

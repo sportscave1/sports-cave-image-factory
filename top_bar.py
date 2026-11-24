@@ -10,6 +10,7 @@ from pathlib import Path
 import os_accounts
 from app_search import build_app_index
 import top_bar_security
+from reviews_notifications import scope as review_notification_scope
 from daily_planner import PLANNER_WINDOW_PATH
 
 
@@ -126,6 +127,9 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "repairSections": repair_sections_for_user(user),
         "repairCurrentSection": repair_section_for_route(current_route),
         "orderStatusUrl": "/api/os/top-bar/order-status",
+        "reviewStatusUrl": "/api/os/top-bar/review-status",
+        "reviewsEnabled": "Reviews" in allowed_routes,
+        "reviewsScope": review_notification_scope(user.get('id')) if 'Reviews' in allowed_routes else '',
         "emailStatusUrl": "/api/os/top-bar/email-status",
         "emailEventsUrl": "/api/os/top-bar/email-events",
         "dailyPlannerStatusUrl": "/api/os/top-bar/daily-planner-status",
