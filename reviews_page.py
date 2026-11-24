@@ -17,16 +17,25 @@ STYLE_REVIEW='''<style>
 .st-key-sc-reviews [data-testid="stVerticalBlock"]{gap:8px}.st-key-sc-reviews button:focus-visible{outline:2px solid #b99232;outline-offset:2px}
 .st-key-reviews-tabs button,.st-key-reviews-status button{border:0!important;border-radius:0!important;background:transparent!important;border-bottom:2px solid transparent!important}
 .st-key-reviews-tabs button[kind="segmented_controlActive"],.st-key-reviews-status button[kind="segmented_controlActive"]{border-bottom-color:#b99232!important;color:#171820!important}
-.rv-row,.rv-head{display:grid;grid-template-columns:1.1fr 1.2fr .5fr 2.3fr .7fr .6fr .65fr;gap:12px;align-items:center;min-width:0}
-.rv-row{font-size:13px;padding:12px 0;border-bottom:1px solid #eae6df}.rv-row>div{min-width:0;overflow-wrap:anywhere}.rv-head{font-size:10px;color:#777;padding:10px 0;border-bottom:1px solid #eae6df}
+.rv-row,.rv-head{display:grid;grid-template-columns:minmax(100px,1fr) minmax(180px,1.7fr) 82px minmax(180px,2fr) 86px 82px;gap:12px;align-items:center;min-width:0}
+.rv-row{grid-template-areas:"customer product stars copy meta status";font-size:13px;line-height:1.4;padding:8px 0}.rv-row>div{min-width:0;word-break:normal;overflow-wrap:break-word}.rv-head{font-size:10px;color:#777;padding:10px 0}
+.rv-customer{grid-area:customer}.rv-product{grid-area:product}.rv-stars{grid-area:stars}.rv-copy{grid-area:copy}.rv-meta{grid-area:meta}.rv-status{grid-area:status}
 .rv-row small{display:block;color:#73737a;font-size:11px;margin-top:4px}.rv-stars{color:#947021;letter-spacing:1px;white-space:nowrap}
 .rv-product{display:flex;gap:8px;align-items:center}.rv-product img{width:42px;height:42px;object-fit:contain;flex:none;border-radius:4px}
-.rv-pill{display:inline-block;background:#eff0ee;padding:4px 7px;border-radius:5px;font-size:11px}.rv-pill.published{color:#28763a;background:#edf6ee}.rv-pill.pending{background:#faf3df;color:#806421}
-.st-key-reviews-table{padding:12px;border:1px solid #e9e6e0;border-radius:12px;background:white;min-width:0}
+.rv-product-name,.rv-copy b,.rv-copy small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.4;min-width:0}.rv-copy b{-webkit-line-clamp:1}.rv-product-name{flex:1}.rv-meta{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#73737a;white-space:nowrap}.rv-empty{color:#73737a;font-size:12px}
+.rv-pill{display:inline-block;background:#eff0ee;padding:4px 7px;border-radius:5px;font-size:11px;white-space:nowrap}.rv-pill.published{color:#28763a;background:#edf6ee}.rv-pill.pending{background:#faf3df;color:#806421}
+.st-key-reviews-table{padding:12px;border:1px solid #e9e6e0;border-radius:12px;background:white;min-width:0;container-type:inline-size;container-name:review-list}
+.rv-heading,[class*="st-key-rv-entry-"]{display:grid!important;grid-template-columns:minmax(0,1fr) 168px;gap:12px!important;align-items:center;min-width:0}.rv-heading{border-bottom:1px solid #eae6df;font-size:10px;color:#777}.rv-heading>span{text-align:right}
+[class*="st-key-rv-entry-"]{border-bottom:1px solid #eae6df;padding:4px 0}[class*="st-key-rv-entry-"]>div{min-width:0}
+.st-key-reviews-table [class*="st-key-rv-actions-"]{display:flex!important;flex-wrap:nowrap!important;gap:8px!important;justify-content:flex-end!important}
+.st-key-reviews-table [class*="st-key-rv-actions-"] button{min-width:80px!important;width:80px!important;min-height:36px!important;padding:4px 10px!important;white-space:nowrap!important}
+.st-key-reviews-table [class*="st-key-rv-actions-"] button p{display:block!important;visibility:visible!important;font-size:13px!important;white-space:nowrap!important;margin:0!important}
 .st-key-reviews-poll{display:none}.st-key-sc-reviews [data-testid="stHorizontalBlock"]{min-width:0}
-@media(max-width:1000px){.rv-row,.rv-head{grid-template-columns:1fr 1fr .5fr 2fr .65fr}.rv-date,.rv-source{display:none}}
+@container review-list (max-width:1050px){.rv-heading{display:none!important}[class*="st-key-rv-entry-"]{grid-template-columns:minmax(0,1fr);gap:4px!important;padding:10px 0}.rv-row{grid-template-columns:minmax(0,1fr) 86px;grid-template-areas:"customer stars" "product product" "copy copy" "meta status";gap:7px;padding:0}.rv-meta{flex-direction:row;flex-wrap:wrap;white-space:normal;gap:4px 12px}.rv-status{justify-self:end}.rv-product img{width:36px;height:36px}.rv-product-name{max-width:100%}.rv-copy:has(.rv-empty){display:none}}
+@container review-list (max-width:850px){.st-key-reviews-filters [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important}.st-key-reviews-filters [data-testid="stColumn"]{flex:1 1 120px!important;min-width:110px!important;width:auto!important}.st-key-reviews-filters [data-testid="stColumn"]:first-child{flex-basis:100%!important}}
+@container review-list (max-width:500px){[class*="st-key-rv-entry-"]{padding:12px 0}.st-key-reviews-table [class*="st-key-rv-actions-"] button{min-height:44px!important}.rv-product-name{font-size:13px}.rv-stars{font-size:12px}}
 .st-key-reviews-tabs [data-testid="stWidgetLabel"],.st-key-reviews-status [data-testid="stWidgetLabel"]{display:none}
-@media(max-width:640px){[data-testid="stMainBlockContainer"]:has(.st-key-sc-reviews){padding-left:12px!important;padding-right:12px!important}.rv-head{display:none}.rv-row{grid-template-columns:1fr 1fr}.rv-copy{grid-column:1/-1}.rv-product img{width:32px;height:32px}.rv-stars{font-size:12px}.st-key-sc-reviews [data-testid="stHorizontalBlock"]{flex-wrap:wrap}.st-key-sc-reviews [data-testid="stColumn"]{min-width:0!important}.st-key-reviews-filters [data-testid="stColumn"]{flex:1 1 120px!important;min-width:120px!important}.st-key-reviews-filters [data-testid="stColumn"]:first-child{flex-basis:100%!important}}
+@media(max-width:640px){[data-testid="stMainBlockContainer"]:has(.st-key-sc-reviews){padding-left:12px!important;padding-right:12px!important}.st-key-sc-reviews [data-testid="stColumn"]{min-width:0!important}}
 </style>'''
 
 def state():return st.session_state.setdefault('reviews_state',{})
@@ -67,9 +76,12 @@ def kpi_html(data=None):
 
 def row_html(r):
     from crm_campaign_html import email_image_url
-    image=email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
-    product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" width="42" height="42">' if image else '')+escape('Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match')
-    return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Imported','csv':'CSV','sports_cave':'Sports Cave','shop_app':'Shop app'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
+    from reviews_widget import product_thumbnail
+    image=product_thumbnail(r) or email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
+    name='Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match'
+    product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" decoding="async" width="42" height="42">' if image else '')+'<span class="rv-product-name" title="'+escape(name,quote=True)+'">'+escape(name)+'</span>'
+    copy=('<b>'+escape(r['title'])+'</b>' if r['title'] else '')+('<small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small>' if r['body'] else '')
+    return '<div class="rv-row"><div class="rv-customer">'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy">'+(copy or '<span class="rv-empty">Rating only</span>')+'</div><div class="rv-meta"><span>'+escape(at)+'</span><span>'+escape({'judgeme':'Imported','csv':'CSV','sports_cave':'Sports Cave','shop_app':'Shop app'}[r['source']])+'</span></div><div class="rv-status"><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
 
 @st.dialog('Review',width='large')
 def detail(store,user,identity):
@@ -172,20 +184,18 @@ def overview(store,user):
             return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
         rows,activity=load(('table',signature,offset),table)
         if activity=='ERROR':st.caption('Reviews could not refresh. Last resolved rows remain visible.')
-        head,actions=st.columns([10,2])
-        head.html('<div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DATE','SOURCE','STATUS'))+'</div>')
-        actions.html('<div class="rv-head">ACTIONS</div>')
+        st.html('<div class="rv-heading"><div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DETAILS','STATUS'))+'</div><span>ACTIONS</span></div>')
         if rows is not None:
             for r in rows[:25]:
-                content,action=st.columns([10,2])
-                content.html(row_html(r))
-                open_action,edit_action=action.columns(2)
-                if open_action.button('Open',key='review_'+str(r['id']),help='Open review and actions',icon=':material/more_horiz:'):detail(store,user,r['id'])
-                if edit_action.button('Edit',key='review_edit_'+str(r['id']),help='Edit review text',icon=':material/edit:'):edit_review(store,user,r['id'])
+                with st.container(key='rv-entry-'+str(r['id'])):
+                    st.html(row_html(r))
+                    with st.container(key='rv-actions-'+str(r['id']),horizontal=True,horizontal_alignment='right',gap='small'):
+                        if st.button('Open',key='review_'+str(r['id']),help='Open review and actions',width=80):detail(store,user,r['id'])
+                        if st.button('Edit',key='review_edit_'+str(r['id']),help='Edit review text',width=80):edit_review(store,user,r['id'])
             if not rows:st.caption('No reviews match these filters.')
             previous,next_page=st.columns(2)
-            if previous.button('Previous',disabled=offset==0):state()['offset']=max(0,offset-25);st.rerun(scope='fragment')
-            if next_page.button('Next',disabled=len(rows)<=25):state()['offset']=offset+25;st.rerun(scope='fragment')
+            if previous.button('Previous',disabled=offset==0):state()['offset']=max(0,offset-25);st.rerun()
+            if next_page.button('Next',disabled=len(rows)<=25):state()['offset']=offset+25;st.rerun()
             if activity=='READY' and rows:
                 acknowledge_visible(store,user,rows[:25])
         elif activity=='LOADING':st.caption('Loading reviews…')
