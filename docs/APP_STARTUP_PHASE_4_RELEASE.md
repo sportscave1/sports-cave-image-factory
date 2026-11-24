@@ -87,3 +87,49 @@ compressed assets, validators and startup logs. Do not test customer mutations.
 Record deployment IDs and verification in a separate release receipt after
 observing the result. Authenticated production Home/Orders timings remain
 unverified unless a signed-in live measurement is explicitly recorded there.
+
+## Live release and measured follow-up
+
+Runtime a6ec215cd87705454d22b03dda2b51261102f2d6 is the final production
+revision, following the initial dddc13be rollout. See
+APP_STARTUP_PHASE_4_LIVE.json for deployment IDs, timestamps, source hashes,
+public HTTP checks, browser samples and sanitized startup logs.
+
+The final live check found that anonymous opening unnecessarily called account
+bootstrap discovery. Missing tokens now fail closed immediately; invalid or
+expired tokens cannot trigger bootstrap discovery. Valid signed user tokens
+still fetch the current active account and verify session version; valid legacy
+tokens retain existing bootstrap rules. Eighteen tests exercise real signatures,
+expiry, revoked/inactive/mismatched accounts, lookup outages and legacy/session
+behavior. Submitted sign-in still performs the required account discovery.
+
+The app, webhook and SEO worker deployments use the exact runtime revision.
+The existing suspended daily cron remains suspended. Public health, shell,
+identity/gzip/Brotli body parity, immutable cache policy, weak ETags/304, ranges
+and HEAD checks passed. Live browsers rendered sign-in without app exceptions
+or page errors; no credentials were entered or customer workflows exercised.
+
+| Live anonymous check, Australia to Oregon | Before auth follow-up | Final |
+| --- | ---: | ---: |
+| Fresh browser median, three samples | 4.428 s | 4.259 s |
+| Cached reload, one sample | 3.021 s | 2.756 s |
+| Server anonymous authentication check | 1,279–1,433 ms | 0.07–0.08 ms |
+| Cached frontend bundle transfer | 0 | 0 |
+
+The small browser differences are not a robust end-to-end speed claim. The
+server lookup cost was removed, while network/framework rendering remains
+material. A sub-2.5 s production cold opening has not been demonstrated.
+Authenticated live Home/Orders were not measured.
+
+GitHub OS performance CI passed on the exact final runtime revision:
+123 checks and 22 subtests plus browser/JavaScript budgets, on Linux/Python3.12
+and Streamlit1.67. Reviews CI passed too. The extended Orders gate passed;
+its Orders sources are unchanged by the subsequent anonymous-auth guard.
+The collection gate exposed a pre-existing Node VM harness missing FormData;
+the test-only repair passed all 82 native tests and types locally. Final
+collection rerun also passed, including its full duplicate Orders/Inbox gate;
+the exact run IDs are recorded in the live receipt.
+
+Required deployment migrations and SEO setup retain their fail-closed ordering.
+Final server process lifecycle readiness was 42.913 s; this is deployment
+startup, distinct from opening the already-running standard-plan application.
