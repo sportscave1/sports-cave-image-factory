@@ -15,7 +15,8 @@ def temporary_display_link(ref):
     if metadata.id!=ref['id'] or metadata.rev!=ref['rev'] or metadata.size!=ref['size']:
         raise ValueError('Dropbox display revision changed.')
     url=urlsplit(result.link)
-    if url.scheme!='https' or url.hostname!='dl.dropboxusercontent.com' or url.username or url.password:
+    host=url.hostname or ''
+    if url.scheme!='https' or not (host=='dl.dropboxusercontent.com' or host.endswith('.dl.dropboxusercontent.com')) or url.username or url.password:
         raise ValueError('Invalid Dropbox display URL.')
     return result.link
 

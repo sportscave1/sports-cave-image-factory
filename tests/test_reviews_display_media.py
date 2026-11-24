@@ -82,9 +82,13 @@ class DeliveryCacheTests(unittest.TestCase):
         client=Mock();client.files_get_temporary_link.return_value=result
         with patch('reviews_dropbox.ReviewDropboxStorage',return_value=SimpleNamespace(context={'client':client})):
             self.assertEqual(temporary_display_link(ref),result.link)
+            result.link='https://regional.dl.dropboxusercontent.com/apitl/synthetic'
+            self.assertEqual(temporary_display_link(ref),result.link)
             result.metadata.rev='b2'
             with self.assertRaises(ValueError):temporary_display_link(ref)
             result.metadata.rev='a1';result.link='https://unrelated.example/image'
+            with self.assertRaises(ValueError):temporary_display_link(ref)
+            result.link='https://dl.dropboxusercontent.com.unrelated.example/image'
             with self.assertRaises(ValueError):temporary_display_link(ref)
 
 
