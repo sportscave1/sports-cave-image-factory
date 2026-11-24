@@ -75,20 +75,37 @@ function prodigiLibraryImage(scope,plan,text,visible) {
   return tile.disabled?null:tile;
 }
 async function prodigiUploadedEditor(plan,editor,picker,wait,pin,text,visible) {
-  let selected=false,authSince=null;
-  return wait(()=>{
+  let attempts=0,lastSelectAt=null,authSince=null,busySince=null,imageSeen=false,uploading=false;
+  const selectionError='Prodigi image selection did not finish after the verified library image became ready.';
+  try{return await wait(()=>{
     pin();
     const library=picker(),loaded=editor();
     if(!library)return loaded&&text(loaded).includes('Uploaded image:')&&loaded;
-    // Some uploads remain in the library instead of auto-selecting their result.
-    // Select only this handoff's unique filename/dimensions, once, without upload.
+    // A completed library tile can appear before the uploader settles. Clicking
+    // during that transition can be ignored by the supplier's selection handler.
     if(/Invalid JWT token|Error code:\s*401/i.test(text(library))){
       if(authSince===null)authSince=Date.now();
       if(Date.now()-authSince>=20000)throw Error('Prodigi image library authentication expired before image selection.');
     }else authSince=null;
-    if(!selected){const image=prodigiLibraryImage(library,plan,text,visible);if(image){image.click();selected=true;}}
+    const image=prodigiLibraryImage(library,plan,text,visible),now=Date.now();
+    uploading=Array.from(library.querySelectorAll('button')).some(e=>visible(e)&&/^Uploading(?:\.{3}|…)?$/i.test(text(e)));
+    if(image)imageSeen=true;
+    if(image&&uploading){
+      if(busySince===null)busySince=now;
+      if(now-busySince>=60000)throw Error('Prodigi image library stayed busy after the uploaded image became available.');
+    }else busySince=null;
+    // Retry only selection of the same exact image, with bounded spacing. No
+    // additional file transfer or Save occurs here; every pass rechecks identity.
+    if(image&&!uploading&&attempts<3&&(lastSelectAt===null||now-lastSelectAt>=5000)){
+      image.click();attempts++;lastSelectAt=now;
+    }
+    if(attempts>=3&&now-lastSelectAt>=30000)throw Error(selectionError);
     return null;
-  },600000);
+  },600000);}catch(error){
+    if(!['The expected Prodigi control did not finish loading.','Prodigi did not reach the expected upload state.'].includes(error.message))throw error;
+    throw Error(imageSeen?selectionError:uploading?'Prodigi image upload did not finish within the allowed time.':
+      'The uploaded image did not become available in the Prodigi picker.');
+  }
 }
 function prodigiRemovePoint(canvas) {
   // Prodigi draws its trash affordance on a separate, transparent public canvas.

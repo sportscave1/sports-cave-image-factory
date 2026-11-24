@@ -17,6 +17,9 @@ ERRORS = {
     'Prodigi did not reach the expected upload state.',
     'Prodigi image library authentication expired before image selection.',
     'The uploaded image did not become available in the Prodigi picker.',
+    'Prodigi image upload did not finish within the allowed time.',
+    'Prodigi image library stayed busy after the uploaded image became available.',
+    'Prodigi image selection did not finish after the verified library image became ready.',
     'The pinned JPG is unavailable.',
     'Pinned artwork transfer interrupted.',
     'Failed to fetch',
@@ -28,9 +31,9 @@ ERRORS = {
 STAGES = {'download','open','signin','readiness','row','editor','picker','transfer','uploaded','orientation','permit'}
 
 
-def reusable_asset(provider, filename, snap):
+def reusable_asset(provider, filename, snap, *, assets=None):
     """A name alone is insufficient: verify metadata and the original JPG bytes."""
-    matches = [a for a in provider.assets()
+    matches = [a for a in (provider.assets() if assets is None else assets)
                if a.get('name') in (filename, filename.removesuffix('.jpg'))]
     if not matches:
         return None
@@ -44,6 +47,24 @@ def reusable_asset(provider, filename, snap):
     if not re.fullmatch(r'[A-Za-z0-9-]{1,100}', str(asset.get('id', ''))):
         raise ValueError('The previous uploaded JPG identity is invalid.')
     return str(asset['id']) if browser.verify_file(asset['url'], snap['output']) else None
+
+
+def reusable_upload(provider, value, receipt, previous, snap):
+    """Retain a completed upload across later pre-Save page-opening failures."""
+    names=[receipt['filename']]
+    if previous.get('source_sha256')==snap['output']['sha256']:
+        names.append(previous.get('filename'))
+    prefix=f'SC-{value["allocation_id"]}-{snap["job_id"][:16]}-'
+    for row in reversed((value.get('browser_history') or [])[-8:]):
+        if (row.get('started') is False and row.get('last_stage') in STAGES
+                and row.get('source_sha256',snap['output']['sha256'])==snap['output']['sha256']):
+            names.append(row.get('filename'))
+    assets=provider.assets()
+    for name in dict.fromkeys(names):
+        if not isinstance(name,str) or not re.fullmatch(re.escape(prefix)+r'[a-f0-9]{8}\.jpg',name):continue
+        asset_id=reusable_asset(provider,name,snap,assets=assets)
+        if asset_id:return name,asset_id
+    return receipt['filename'],None
 
 
 def recover(user):
@@ -104,15 +125,16 @@ def recover_one(key):
         if (browser.has_existing_artwork(item) or (item.get('assets') or []) != receipt.get('empty_slots', [])
                 or browser.business(order, item['id']) != receipt.get('before')):
             return False
-        asset_id = reusable_asset(provider, receipt['filename'], snap)
+        filename,asset_id = reusable_upload(provider,value,receipt,previous,snap)
         attempts = previous.get('attempts', 0) + 1
         recovery = dict(attempts=attempts, retry_at=(datetime.now(timezone.utc) +
             timedelta(seconds=min(900, 60 * 2 ** min(attempts - 1, 4)))).isoformat(),
-            source_sha256=snap['output']['sha256'], filename=receipt['filename'],
+            source_sha256=snap['output']['sha256'], filename=filename,
             asset_id=asset_id, before=deepcopy(receipt['before']),
             empty_slots=deepcopy(receipt.get('empty_slots', [])))
         value['browser_history'] = (value.get('browser_history', []) + [
-            {k:receipt.get(k) for k in ('claimed_at','filename','started','last_stage','client_error')}])[-8:]
+            {**{k:receipt.get(k) for k in ('claimed_at','filename','started','last_stage','client_error')},
+             'source_sha256':snap['output']['sha256']}])[-8:]
         # Removing the old token and recording the replacement proof commit together.
         value.pop('browser'); value.pop('last_failure', None)
         value.update(upload_recovery=recovery, status=browser.WAITING,

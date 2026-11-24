@@ -53,8 +53,8 @@ test('lost finish acknowledgement retains the exact Save completion and retries 
  assert(sent.every(body=>JSON.stringify(body.evidence)===JSON.stringify(pending.ordersCompletion.evidence)));
  assert(sent.every(body=>body.key===pending.key&&body.token===pending.token));
 });
-test('full recovered page flow selects the verified original, fits and Saves once with no file transfer',async()=>{
- let listener,editorOpen=false,pickerOpen=false,loaded=false,permits=0,saves=0,selects=0;
+for(const ignoredClicks of [0,1])test('full recovered page flow Saves once with no file transfer, ignored selections: '+ignoredClicks,async()=>{
+ let listener,editorOpen=false,pickerOpen=false,loaded=false,permits=0,saves=0,selects=0,clock=0;
  const node=textContent=>({textContent,isConnected:true,getClientRects:()=>[{}],getAttribute:()=>null});
  const button=(name,click)=>({...node(name),disabled:false,click});
  const upload=button('Upload',()=>editorOpen=true),add=button('Add image',()=>pickerOpen=true),
@@ -62,19 +62,19 @@ test('full recovered page flow selects the verified original, fits and Saves onc
  const caption=node(plan.filename.replace('.jpg',''));
  const image={...tile(),...node(caption.textContent+' 4200x5940px jpg'),querySelector:()=>caption,
   querySelectorAll:()=>[{getAttribute:()=> 'https://live-services.pwinty.com/image-library/image/asset-id/thumbnail/small'}],
-  click(){selects++;loaded=true;pickerOpen=false;}};
+  click(){selects++;if(selects<=ignoredClicks)return;loaded=true;pickerOpen=false;}};
  const editor={...node('GLOBAL-CFP-A2'),get textContent(){return 'GLOBAL-CFP-A2 '+(loaded?'Uploaded image: 4200x5940px':'');},
   querySelectorAll:s=>s==='h1,h2'?[node('Image Editor')]:s==='button'?[add,fit,save]:[]};
  const picker={...node('Select image'),querySelectorAll:s=>s==='h1,h2'?[node('Select image')]:s==='button[data-test^="image-library-tile-"]'?[image]:[]};
  const row={...node(''),querySelector:s=>s==='[data-test="line-item-preview-88"]'?{}:null,
   querySelectorAll:s=>s==='*'?[node('GLOBAL-CFP-A2')]:s==='button'?[upload]:[]};
  const document={querySelector:()=>node('fixture'),querySelectorAll:s=>s==='[role="dialog"]'?[...(editorOpen?[editor]:[]),...(pickerOpen?[picker]:[])]:s==='h1'?[node('99')]:s==='table tbody tr'?[row]:[]};
- const ctx=vm.createContext({document,URL,Date,setTimeout:fn=>queueMicrotask(fn),location:{href:'https://dashboard.prodigi.com/orders/99/detail',pathname:'/orders/99/detail'},
+ const ctx=vm.createContext({document,URL,Date:{now:()=>clock},setTimeout:(fn,ms)=>{clock+=ms;queueMicrotask(fn);},location:{href:'https://dashboard.prodigi.com/orders/99/detail',pathname:'/orders/99/detail'},
   chrome:{runtime:{id:'paired',onMessage:{addListener:f=>listener=f},sendMessage:async m=>{assert.equal(m.type,'prodigi:permit');permits++;return{permitted:true};}}}});
  vm.runInContext(fs.readFileSync(require.resolve('../windows-upload-companion/prodigi-page.js'),'utf8'),ctx);
  const result=await new Promise(resolve=>listener({type:'prodigi:upload',plan:{...plan,sha256:'a'.repeat(64),environment:'live',order_url:ctx.location.href,
   order_id:'99',reference:'fixture',item_id:'88',exact_item:true,sku:'GLOBAL-CFP-A2',colour:''}},{id:'paired'},resolve));
- assert.equal(result.saved,true);assert.equal(selects,1);assert.equal(permits,1);assert.equal(saves,1);
+ assert.equal(result.saved,true);assert.equal(selects,ignoredClicks+1);assert.equal(permits,1);assert.equal(saves,1);
 });
 test('worker preserves completed QA evidence when all finish responses are lost',async()=>{
  const storage={staffQueueCredential:'paired'},qaPlan={kind:'qa',environment:'live',order_id:'99',

@@ -71,6 +71,9 @@ def test_missing_library_original_uses_fresh_same_item_upload(waiting):
     ('signin','Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.'),
     ('readiness','The exact Prodigi order page did not become ready; check its loading or sign-in state.'),
     ('picker','The expected Prodigi control did not finish loading.'),
+    ('uploaded','Prodigi image upload did not finish within the allowed time.'),
+    ('uploaded','Prodigi image library stayed busy after the uploaded image became available.'),
+    ('uploaded','Prodigi image selection did not finish after the verified library image became ready.'),
     ('transfer','Pinned artwork transfer interrupted.'),
     ('permit','The draft changed before Save.'),
 ])
@@ -157,3 +160,63 @@ def test_changed_library_asset_between_claim_and_permit_stays_unconsumed(waiting
 def test_one_bad_recovery_does_not_cancel_other_ready_orders(waiting,monkeypatch):
     monkeypatch.setattr(recovery,'recover_one',lambda _:(_ for _ in ()).throw(RuntimeError('Synthetic dependency unavailable')))
     assert recovery.recover({'id':'owner'})==0
+
+
+@pytest.fixture
+def page_retry(waiting):
+    store,provider,original,resolver=waiting
+    original_assets=deepcopy(provider.assets());provider.assets=lambda:[]
+    assert recovery.recover({'id':'owner'})==1
+    second=browser.claim(exact_item_supported=True,upload_recovery_supported=True)
+    assert second['filename']!=original['filename']
+    browser.finish(KEY,second['token'],'open',error='The woken order page did not expose its identity.')
+    value=prep.read(1)
+    # Reproduce the legacy recovery losing the older filename after a page-only
+    # attempt. The completed original now exists only in the retained history.
+    value['upload_recovery'].update(filename=second['filename'],
+        retry_at=(datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat())
+    write(store,value);provider.assets=lambda:deepcopy(original_assets)
+    return store,provider,original,second,original_assets
+
+
+@pytest.mark.parametrize('legacy',[False,True])
+def test_late_original_upload_survives_intervening_page_failure_without_reset(page_retry,legacy):
+    store,provider,original,second,assets=page_retry
+    if legacy:
+        value=prep.read(1);value['browser_history'][0].pop('source_sha256',None);write(store,value)
+    reads=[];provider.assets=lambda:reads.append('assets') or deepcopy(assets)
+    assert recovery.recover({'id':'owner'})==1
+    assert reads==['assets'] # One listing covers the bounded receipt history.
+    assert prep.read(1)['upload_recovery']['filename']==original['filename']
+    plan=browser.claim(exact_item_supported=True,upload_recovery_supported=True)
+    assert plan['filename']==original['filename'] and plan['library_asset_id']=='asset-id'
+    assert plan['fresh_empty_item'] is True and plan['token'] not in (original['token'],second['token'])
+    assert browser.finish(KEY,second['token'])['status']=='Handoff unavailable'
+    with pytest.raises(PermissionError):browser.permit(KEY,second['token'],second['sha256'])
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+    with pytest.raises(ValueError):browser.permit(KEY,plan['token'],plan['sha256'])
+    assert not provider.writes
+
+
+@pytest.mark.parametrize('change',['allocation','job','source','consumed'])
+def test_upload_history_cannot_claim_another_source_or_consumed_receipt(page_retry,change):
+    store,provider,_,_,assets=page_retry;value=prep.read(1);row=value['browser_history'][0]
+    if change=='allocation':row['filename']=row['filename'].replace('SC-1-','SC-2-')
+    if change=='job':row['filename']='SC-1-another-source-aaaaaaaa.jpg'
+    if change=='source':row['source_sha256']='f'*64
+    if change=='consumed':row['started']=True
+    write(store,value)
+    assert recovery.recover({'id':'owner'})==1
+    assert prep.read(1)['upload_recovery']['asset_id'] is None and not provider.writes
+
+
+@pytest.mark.parametrize('change',['duplicate','bytes','dimensions','hash'])
+def test_historical_original_still_requires_unique_metadata_and_full_checksum(page_retry,monkeypatch,change):
+    _,provider,_,_,assets=page_retry
+    if change=='duplicate':assets.append(deepcopy(assets[0]))
+    if change=='bytes':assets[0]['sizeBytes']+=1
+    if change=='dimensions':assets[0]['dimensions']['widthPx']+=1
+    if change=='hash':monkeypatch.setattr(browser,'verify_file',lambda *_:(_ for _ in ()).throw(ValueError('Checksum mismatch')))
+    provider.assets=lambda:deepcopy(assets)
+    assert recovery.recover({'id':'owner'})==0
+    assert prep.read(1)['browser']['started'] is False and not provider.writes

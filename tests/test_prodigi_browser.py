@@ -151,10 +151,17 @@ def test_checksum_mismatch_cannot_become_ready(handoff,monkeypatch):
 
 
 @pytest.mark.parametrize('changed',[False,True])
-def test_missing_page_identity_reports_only_an_independently_unchanged_pre_save_draft(handoff,changed):
+@pytest.mark.parametrize('stage,error',[
+    ('open','The woken order page did not expose its identity.'),
+    ('uploaded','Prodigi image upload did not finish within the allowed time.'),
+    ('uploaded','Prodigi image library stayed busy after the uploaded image became available.'),
+    ('uploaded','Prodigi image selection did not finish after the verified library image became ready.'),
+    ('uploaded','The uploaded image did not become available in the Prodigi picker.'),
+])
+def test_pre_save_wait_reports_only_an_independently_unchanged_draft(handoff,changed,stage,error):
     _,provider,_=handoff;plan=browser.claim()
     if changed:provider.data['recipient']={'name':'Changed synthetic recipient'}
-    assert browser.finish(KEY,plan['token'],'open',error='The woken order page did not expose its identity.')['status']=='Needs review'
+    assert browser.finish(KEY,plan['token'],stage,error=error)['status']=='Needs review'
     value=sandbox.list_tests()[0]
     assert ('saved draft is unchanged' in value['message']) is not changed
     assert value['browser']['started'] is False and not provider.writes
