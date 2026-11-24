@@ -24,7 +24,7 @@ def sql_fixture():
             pytest.fail("LOCAL_APP_DATA_SQL_MODULES must point to the installed pinned fixture dependencies.")
         pytest.skip("Optional local SQL fixture: install the pinned dependencies from the Phase 2 report.")
     import subprocess
-    source = subprocess.check_output(["git","show","HEAD:supabase_backend.py"],cwd=ROOT,
+    source = subprocess.check_output(["git","show","333d9a9d481bb96c0c84fb42bbfa80a8a7f26d35:supabase_backend.py"],cwd=ROOT,
                                      text=True,encoding="utf-8")
     old = functions(source,db)
     before = allocation_sql(old["list_hybrid_order_rows"],db)

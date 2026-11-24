@@ -1,0 +1,49 @@
+name: OS Home Orders performance
+on:
+  push:
+    branches: [main, 'codex/task/core-phase-1-app-startup-performance-*']
+    paths: ['app.py', 'home_fast.py', 'orders_page.py', 'display_snapshot.py', 'supabase_backend.py', 'sports_cave_server.py', 'startup_performance.py', 'static_asset_compression.py', 'public_bundle_cache.py', 'requirements.txt', 'scripts/benchmark*.py', 'scripts/check_os_performance.py', 'scripts/startup_fixture_server.py', 'scripts/local_pg_latency.py', 'tests/test_*performance*.py', 'tests/test_public_bundle_cache.py', 'tests/test_static_asset_compression.py', 'tests/test_page_loading_progressive.py', 'tests/fixtures/*measurement.py', 'tests/fixtures/data_performance_server.mjs', '.github/workflows/os-performance.yml']
+  pull_request:
+    paths: ['app.py', 'home_fast.py', 'orders_page.py', 'display_snapshot.py', 'supabase_backend.py', 'sports_cave_server.py', 'startup_performance.py', 'static_asset_compression.py', 'public_bundle_cache.py', 'requirements.txt', 'scripts/benchmark*.py', 'scripts/check_os_performance.py', 'scripts/startup_fixture_server.py', 'scripts/local_pg_latency.py', 'tests/test_*performance*.py', 'tests/test_public_bundle_cache.py', 'tests/test_static_asset_compression.py', 'tests/test_page_loading_progressive.py', 'tests/fixtures/*measurement.py', 'tests/fixtures/data_performance_server.mjs', '.github/workflows/os-performance.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-performance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+      LOCAL_APP_DATA_SQL_MODULES: /tmp/os-performance-sql/node_modules
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements.txt pytest pytest-subtests
+      - name: Disposable PostgreSQL engine, no production connection
+        run: npm install --prefix /tmp/os-performance-sql --ignore-scripts @electric-sql/pglite@0.6.0 @electric-sql/pglite-socket@0.3.0
+      - name: Home Orders SQL transport and permission contracts
+        run: python -m pytest -q tests/test_page_loading_progressive.py tests/test_app_data_performance_sql.py tests/test_startup_performance.py tests/test_startup_database_timings.py tests/test_static_asset_compression.py tests/test_public_bundle_cache.py tests/test_os_performance_budgets.py tests/test_database_read_pool.py tests/test_orders_bounded_reader.py tests/test_orders_v20.py tests/test_home_fast_panels.py tests/test_home_status_performance.py tests/test_home_shell_lazy.py tests/test_workspace_display_cache.py
+      - name: Client shell and Orders state contracts
+        run: |
+          node tests/test_top_bar_requests.cjs
+          node tests/test_home_shell_component.cjs
+          node tests/test_orders_live_feed.cjs
+          node tests/test_orders_grid_ui.cjs
+      - name: Real browser, isolated synthetic fixtures
+        run: |
+          google-chrome --version
+          python scripts/benchmark_app_startup.py --browser-channel chrome --samples 3 --slow-samples 1 --restart-samples 1 --out .tmp-startup-phase4/ci-startup.json
+          python scripts/benchmark_page_loading.py --browser-channel chrome --samples 1 --out .tmp-startup-phase4/ci-pages.json
+          python scripts/check_os_performance.py --startup .tmp-startup-phase4/ci-startup.json --pages .tmp-startup-phase4/ci-pages.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: os-performance-evidence
+          path: .tmp-startup-phase4/

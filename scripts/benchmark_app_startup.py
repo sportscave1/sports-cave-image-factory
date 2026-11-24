@@ -103,8 +103,9 @@ def fixture_server(runtime, *, fixture="startup_measurement"):
                 child.wait(timeout=8)
 
 
-def browser_sample(browser, url, *, slow=False):
-    context = browser.new_context(viewport=dict(width=1440, height=1000), service_workers="block")
+def browser_sample(browser, url, *, slow=False, gzip_only=False):
+    context = browser.new_context(viewport=dict(width=1440, height=1000), service_workers="block",
+                                  extra_http_headers={"Accept-Encoding": "gzip"} if gzip_only else {})
     context.add_init_script(OBSERVER)
     errors, external_requests = [], []
     # Do not use Playwright routing: it disables the browser HTTP cache.
@@ -160,7 +161,7 @@ def browser_sample(browser, url, *, slow=False):
             raise AssertionError("A fresh browser must really download frontend bundles.")
         for asset in cold["assets"]:
             headers = cold["assetHeaders"].get(asset["path"], {})
-            if asset["decodedBytes"] > 1024 and headers.get("encoding") != "gzip":
+            if asset["decodedBytes"] > 1024 and headers.get("encoding") not in {"gzip", "br"}:
                 raise AssertionError("Large framework bundle was not compressed.")
             if "immutable" not in headers.get("cacheControl", ""):
                 raise AssertionError("Framework bundle lost its immutable cache policy.")
@@ -191,18 +192,19 @@ def browser_sample(browser, url, *, slow=False):
 def run(args):
     from playwright.sync_api import sync_playwright
     result = dict(scope="Offline framework/transport fixture; not production Home/Orders end-to-end",
+                  gzip_only=args.gzip_only, browser_channel=args.browser_channel,
                   simulated_auth_ms=40, simulated_data_miss_ms=120,
                   versions={name:importlib.metadata.version(name) for name in ["streamlit","starlette","uvicorn","playwright"]},
                   source_sha256={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest()
                     for name in ["app.py","sports_cave_server.py","supabase_backend.py","startup_performance.py",
-                                 "static_asset_compression.py","scripts/benchmark_app_startup.py",
+                                 "static_asset_compression.py","public_bundle_cache.py","scripts/benchmark_app_startup.py",
                                  "scripts/startup_fixture_server.py","tests/fixtures/startup_measurement.py"]},
                   normal=[], slow=[], restarts=[])
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="startup-fixture-", dir=args.out.parent) as directory:
         runtime = Path(directory)
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=[
+            browser = p.chromium.launch(headless=True, channel=args.browser_channel, args=[
                 "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
                 "--proxy-server=http://127.0.0.1:1", "--proxy-bypass-list=127.0.0.1;localhost"])
             try:
@@ -211,12 +213,12 @@ def run(args):
                     for key, count in [("normal",args.samples),("slow",args.slow_samples)]:
                         for i in range(count):
                             print(f"{key} sample {i+1}/{count}", flush=True)
-                            result[key].append(browser_sample(browser,url,slow=key=="slow"))
+                            result[key].append(browser_sample(browser,url,slow=key=="slow",gzip_only=args.gzip_only))
                     result["server_log"] = log.read_text(encoding="utf-8")
                 for i in range(args.restart_samples):
                     print(f"server restart {i+1}/{args.restart_samples}", flush=True)
                     with fixture_server(runtime) as (url, healthy, log):
-                        sample = browser_sample(browser,url)
+                        sample = browser_sample(browser,url,gzip_only=args.gzip_only)
                         result["restarts"].append(dict(serverHealthyMs=healthy, firstBrowser=sample["cold"],
                             serverAndBrowserMs=round(healthy+sample["cold"]["usableMs"],3)))
             finally:
@@ -241,6 +243,8 @@ if __name__ == "__main__":
     parser.add_argument("--slow-samples", type=int, default=3)
     parser.add_argument("--restart-samples", type=int, default=3)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--browser-channel", default=None)
+    parser.add_argument("--gzip-only", action="store_true", help="Measure the previous transport on identical source")
     args = parser.parse_args()
     if args.samples < 1 or args.slow_samples < 0 or args.restart_samples < 0:
         parser.error("Use positive samples and non-negative slow/restart samples.")

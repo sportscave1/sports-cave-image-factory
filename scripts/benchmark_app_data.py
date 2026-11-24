@@ -164,7 +164,7 @@ def run(args):
     from zoneinfo import ZoneInfo
 
     before_source = args.before.read_text(encoding="utf-8") if args.before else subprocess.check_output(
-        ["git","show","HEAD:supabase_backend.py"], cwd=ROOT, text=True, encoding="utf-8")
+        ["git","show","333d9a9d481bb96c0c84fb42bbfa80a8a7f26d35:supabase_backend.py"], cwd=ROOT, text=True, encoding="utf-8")
     # Capture actual production allocation SQL using the existing SQL-aware fake.
     old = functions(before_source, db)
     old_sql, old_params = allocation_sql(old["list_hybrid_order_rows"], db)
@@ -172,7 +172,7 @@ def run(args):
     evidence = dict(scope="Synthetic local PostgreSQL/WASM SQL parity and plans; not production latency",
         source_sha256=hashlib.sha256((ROOT/"supabase_backend.py").read_bytes()).hexdigest(),
         baseline_sha256=hashlib.sha256(before_source.encode()).hexdigest(), certificates=args.certificates,
-        baseline_source="explicit local pre-Phase-2 snapshot" if args.before else "HEAD:supabase_backend.py",
+        baseline_source="explicit local pre-Phase-2 snapshot" if args.before else "333d9a9d:supabase_backend.py",
         harness_sha256={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in (
             "scripts/benchmark_app_data.py","scripts/local_pg_latency.py","tests/fixtures/data_performance_server.mjs")},
         test_dependencies={name:json.loads((args.modules/name/"package.json").read_text(encoding="utf-8"))["version"]

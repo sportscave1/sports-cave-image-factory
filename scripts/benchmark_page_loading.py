@@ -45,7 +45,7 @@ def run(args):
     with tempfile.TemporaryDirectory(prefix="page-loading-",dir=args.out.parent) as folder:
         with fixture_server(Path(folder),fixture="page_loading_measurement") as (url,healthy,log):
             with sync_playwright() as p:
-                browser=p.chromium.launch(headless=True,args=[
+                browser=p.chromium.launch(headless=True,channel=args.browser_channel,args=[
                     "--proxy-server=http://127.0.0.1:1","--proxy-bypass-list=127.0.0.1;localhost",
                     "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"])
                 try:
@@ -164,6 +164,7 @@ if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out",required=True,type=Path)
     parser.add_argument("--samples",type=int,default=3)
+    parser.add_argument("--browser-channel",default=None)
     args=parser.parse_args()
     if args.samples<1:parser.error("Use a positive sample count.")
     run(args)

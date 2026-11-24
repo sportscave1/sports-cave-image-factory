@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import unittest
@@ -607,9 +608,15 @@ class DailyPlannerOverhaulContractTests(unittest.TestCase):
         self.assertIn('id="sc-os-planner-timer-pill"', source)
         self.assertIn("BroadcastChannel(\"sports-cave-daily-planner\")", source)
         self.assertIn("scSportsCavePlannerTimerState", source)
-        self.assertEqual(1, source.count("setInterval(() =>"))
+        # Companion queue rotation has its own timer. Count the guarded planner
+        # countdown specifically, rather than every unrelated toolbar interval.
+        self.assertIn("if (!state.plannerCountdownStarted)", source)
+        self.assertEqual(1, len(re.findall(
+            r"setInterval\(\(\) => \{\s*updatePlannerMirror\(\);\s*"
+            r"reconcileDocumentRoute\(\);\s*\}, 1000\)", source)))
         self.assertIn("updatePlannerMirror();", source)
-        self.assertIn("schedulePlannerStatus(30000)", source)
+        self.assertIn("schedulePlannerStatus(PLANNER_STATUS_REFRESH_MS)", source)
+        self.assertRegex(source, r"PLANNER_STATUS_REFRESH_MS\s*=\s*30000")
         self.assertIn("openDailyPlanner({focusActive:true})", source)
         self.assertIn("plannerChannel?.close()", source)
         self.assertIn("parentWindow.navigator.locks.request", source)
