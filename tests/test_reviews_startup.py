@@ -24,7 +24,7 @@ def test_initial_completion_window_is_capped_and_cached_refresh_never_waits():
     state={'reviews_cache':{key:{'future':future}}}
     with patch('reviews_cache.wait') as wait:
         settle_initial(state,[key],timeout=30)
-        wait.assert_called_once_with([future],timeout=.25)
+        wait.assert_called_once_with([future],timeout=.5)
         state['reviews_good']={key:[]};wait.reset_mock()
         settle_initial(state,[key]);wait.assert_not_called()
     future.set_result([])

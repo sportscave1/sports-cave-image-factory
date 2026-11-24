@@ -13,7 +13,7 @@ Account validation logs were approximately 150ms. The read path used fresh trans
 - Start only the current authorised Reviews Overview reads before shell/sidebar rendering. Reuse the same per-session filter/page cache; other tabs and routes do not prefetch.
 - Borrow the existing exclusive bounded OS database read pool for private rows, summary and unread count, with its four-second deadline and stale-connection handling. Writes remain transactional. No new pool, service or result sharing across users.
 - Read summary totals and the exact rolling UTC 30-day slice in one SQL statement. Public review order and query path are unchanged.
-- Allow one capped 250ms initial completion window. Cached refreshes never wait; slow storage retains the existing asynchronous fallback and last-good rows. No new timer or faster polling.
+- Allow one capped 500ms initial completion window. Cached refreshes never wait; slow storage retains the existing asynchronous fallback and last-good rows. No new timer or faster polling. The initial 250ms trial reduced median live rows to 3103ms and resolved summary to 3178ms, but missed normal 283–471ms reads and incurred an avoidable rerun; the final cap follows that measured range.
 - Skip seen-receipt work for historical rows without arrival notifications. New active arrivals still use per-account visible-review receipts.
 - Log bounded read queue/execution durations without customer data.
 

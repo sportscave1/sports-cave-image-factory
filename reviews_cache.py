@@ -2,11 +2,10 @@
 from time import monotonic
 from crm_campaign_home_cache import POOL,CAPACITY
 from time import perf_counter
-import logging
 from concurrent.futures import wait
 
 
-def settle_initial(state,keys,timeout=.25):
+def settle_initial(state,keys,timeout=.5):
     """One bounded completion window, only where no resolved value exists.
 
     Cached refreshes never wait. Slow storage still uses the existing bounded
@@ -14,7 +13,7 @@ def settle_initial(state,keys,timeout=.25):
     """
     cache=state.get('reviews_cache',{});good=state.get('reviews_good',{})
     pending=[cache[key]['future'] for key in keys if key in cache and key not in good and not cache[key]['future'].done()]
-    if pending:wait(pending,timeout=min(.25,max(0,timeout)))
+    if pending:wait(pending,timeout=min(.5,max(0,timeout)))
 
 def read(state,key,load,ttl=60):
     cache=state.setdefault('reviews_cache',{});good=state.setdefault('reviews_good',{})
@@ -28,7 +27,7 @@ def read(state,key,load,ttl=60):
                 try:return load()
                 finally:
                     CAPACITY.release()
-                    logging.getLogger(__name__).info('PERF reviews stage=%s queue_ms=%.1f duration_ms=%.1f',key[0],(started-queued)*1000,(perf_counter()-started)*1000)
+                    print('PERF reviews stage=%s queue_ms=%.1f duration_ms=%.1f' % (key[0],(started-queued)*1000,(perf_counter()-started)*1000),flush=True)
             try:future=POOL.submit(work)
             except RuntimeError:CAPACITY.release();return good.get(key),'ERROR'
             entry=cache[key]={'future':future,'completed':None}
