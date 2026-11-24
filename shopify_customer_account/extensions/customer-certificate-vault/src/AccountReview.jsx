@@ -2,7 +2,7 @@
 import {collectionThumbnail} from './collection-image-utils.js';
 import {useEffect,useRef,useState} from 'preact/hooks';
 import {reviewProductId, secondProductImage, REVIEW_IMAGE_QUERY} from './account-review-utils.js';
-import {fileFromDropEvent,inputValue,isAllowedReviewPhoto} from './vault-utils.js';
+import {inputValue} from './vault-utils.js';
 export function AccountReview({prompt, certificate, request, api, reviewStatus = "ready", onRetryReview = () => {}}) {
   const [submitted,setSubmitted]=useState(false);
   const onSubmitted=()=>setSubmitted(true);
@@ -16,15 +16,19 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
   const [photoError, setPhotoError] = useState("");
   const [submitState, setSubmitState] = useState({status: "idle", message: ""});
   const modalId = "collector-review-modal";
-  const readerRef = useRef(null);
+  const [previews,setPreviews]=useState({});
   const modalRef = useRef(null);
 
   useEffect(() => {
-
-    return () => {
-      if (readerRef.current?.readyState === 1) readerRef.current.abort();
-    };
-  }, []);
+    let active=true;const readers=[];setPreviews({});
+    files.forEach((file,index)=>{
+      if(!file.type.startsWith('image/') || file.size>5*1024*1024)return;
+      const reader=new FileReader();readers.push(reader);
+      reader.onload=()=>{if(active)setPreviews(value=>({...value,[index]:String(reader.result || '')}));};
+      reader.readAsDataURL(file);
+    });
+    return ()=>{active=false;readers.forEach(reader=>{if(reader.readyState===1)reader.abort();});};
+  },[files]);
 
   useEffect(() => {
     let active = true;
@@ -132,7 +136,7 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
               </s-stack>
             </s-grid>
           </s-box>
-          {files.map((file,index)=><s-stack key={index} direction="inline" gap="small"><s-text>{file.name}</s-text><s-button onClick={()=>setFiles(files.filter((_,i)=>i!==index))}>Remove</s-button></s-stack>)}
+          {files.map((file,index)=><s-stack key={index} direction="inline" gap="small"><s-stack gap="small-400">{previews[index]?<s-image src={previews[index]} alt={`Selected review photo ${file.name}`} aspectRatio="4/3" objectFit="contain" />:null}<s-text>{file.name}</s-text></s-stack><s-button onClick={()=>setFiles(files.filter((_,i)=>i!==index))}>Remove</s-button></s-stack>)}
           {submitState.message ? (
             <s-banner tone={submitState.status === "error" ? "critical" : "success"}>
               {submitState.message}

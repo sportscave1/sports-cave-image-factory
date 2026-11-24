@@ -1,6 +1,7 @@
 """Prepare only the existing OS duplicate's review asset; never publish a theme."""
 import argparse
 import json
+import re
 from html import escape
 from pathlib import Path
 
@@ -14,21 +15,25 @@ def prepare(source):
     body=methods.split('class DraftReviewMethods {',1)[1].rsplit('}',1)[0]
     start=min(source.index('  async nativeFeed('),source.index('  async nativePage('))
     end=source.index('  renderMedia() {',start)
-    result=source[:start]+body+'\n'+source[end:]
+    result=source[:start].rstrip()+'\n\n'+body.strip('\n').rstrip()+'\n\n'+source[end:]
     result=result.replace("first.full.includes('__1777871865832-ultimatemancavedecor__')", "review.id === '813945ea-267e-4f52-ab71-3a2c528ce98f' || first.full.includes('__1777871865832-ultimatemancavedecor__')")
     result=result.replace("this.querySelector('[data-review-form-host]').replaceChildren(frame);", """const status = node('p', '', 'Loading review form…');
         status.setAttribute('role', 'status');
         frame.addEventListener('load', () => { status.hidden = true; }, {once:true});
         this.querySelector('[data-review-form-host]').replaceChildren(status, frame);""")
-    result=result.replace('        this.archive.append(row);', """        if (!picture && review.productThumb) {
-          const thumbnail = node(review.productUrl ? 'a' : 'span', 'sc-reviews__row-photo');
-          if (review.productUrl) thumbnail.href = review.productUrl;
-          const image = node('img');
-          image.src = review.productThumb; image.alt = 'Product reviewed: ' + (review.product || 'Sports Cave edition');
-          image.width = 68; image.height = 68; image.loading = 'lazy'; image.decoding = 'async'; image.style.objectFit = 'contain';
-          thumbnail.append(image); row.append(thumbnail);
-        }
-        this.archive.append(row);""")
+    if "if (!picture && review.productThumb)" not in result:
+        result=result.replace('        this.archive.append(row);', """        if (!picture && review.productThumb) {
+              const thumbnail = node(review.productUrl ? 'a' : 'span', 'sc-reviews__row-photo');
+              if (review.productUrl) thumbnail.href = review.productUrl;
+              const image = node('img');
+              image.src = review.productThumb; image.alt = 'Product reviewed: ' + (review.product || 'Sports Cave edition');
+              image.width = 68; image.height = 68; image.loading = 'lazy'; image.decoding = 'async'; image.style.objectFit = 'contain';
+              thumbnail.append(image); row.append(thumbnail);
+            }
+            this.archive.append(row);""")
+    repeated="review.id === '813945ea-267e-4f52-ab71-3a2c528ce98f' || "
+    while repeated+repeated in result:result=result.replace(repeated+repeated,repeated)
+    result=result.replace("thumbnail.setAttribute('aria-label', 'View review photo');", "thumbnail.setAttribute('aria-label', picture.video ? 'View review video' : 'View review photo');")
     return result
 
 

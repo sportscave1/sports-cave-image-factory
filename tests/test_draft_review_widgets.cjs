@@ -9,7 +9,7 @@ for(const country of ['AU','US'])test(`draft ${country}: one initial request, st
   page.on('pageerror',e=>errors.push(e.message));let failMore=true;
   const ids=['f0a533af-ce9f-4114-845d-dc003032c337','d69b0463-04bc-412c-948a-1636353b3528','4c91276a-636b-4eae-944a-d9912d65900e','013c8326-eeb9-41c0-8a3a-07ee648bcf2a'];
   const row=(id,index)=>({id:'fixture-'+index,legacy_id:id,reviewer_name:'Fixture '+index,title:'Synthetic edition',body:'Synthetic review body for testing',rating:5,media:[{kind:'image',url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=1280',thumbnail_url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=320',carousel_url:'https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=640'}]});
-  const featured=ids.map(row),archive=Array.from({length:5},(_,i)=>row(ids[0],i+10));archive[0].created_at='2026-01-02T00:00:00+00:00';archive[0].source_verified=true;archive[1].media=[];archive[1].product_thumbnail_url='https://cdn.shopify.com/s/files/black-frame.jpg?width=136&format=webp';archive[1].product_url='https://www.sportscaveshop.com/products/fixture';
+  const featured=ids.map(row),archive=Array.from({length:5},(_,i)=>row(ids[0],i+10));archive[0].created_at='2026-01-02T00:00:00+00:00';archive[0].source_verified=true;archive[1].media=[];archive[1].product_thumbnail_url='https://cdn.shopify.com/s/files/black-frame.jpg?width=136&format=webp';archive[1].product_url='https://www.sportscaveshop.com/products/fixture';archive[2].media[0].kind='video';archive[2].media[0].url='https://sports-cave-image-factory.onrender.com/reviews/media/aaaa?size=original';
   await page.route('**/*',async route=>{
    const url=new URL(route.request().url());
    if(url.hostname==='fixture.example')return route.fulfill({contentType:'text/html',body:'<!doctype html><html></html>'});
@@ -38,7 +38,7 @@ for(const country of ['AU','US'])test(`draft ${country}: one initial request, st
   assert.equal(await page.locator('[data-review-archive] > *').count(),5);
   failMore=false;await page.locator('[data-review-more]').click();await page.waitForFunction(()=>document.querySelector('[data-review-archive]').children.length===6);
   assert.equal(await page.locator('[data-review-more]').isVisible(),false);
-  assert.equal(await page.locator('video').count(),0);assert.deepEqual(errors,[]);
+  assert.equal(await page.locator('video').count(),0);await page.getByRole('button',{name:'View review video',exact:true}).click();await page.locator('video').waitFor();assert.match(await page.locator('video').getAttribute('src'),/size=original/);assert.deepEqual(errors,[]);
  }finally{await browser.close()}
 });
 

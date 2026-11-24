@@ -46,11 +46,11 @@ def projection(store, origin, country='AU', offset=0, settings=None):
         featured_args=(FEATURED,EXCLUDED,FEATURED)
     histogram_sql="(SELECT COALESCE(jsonb_agg(h),'[]'::jsonb) FROM (SELECT rating,count(*) AS count FROM sc_reviews WHERE status='PUBLISHED' AND (product_id IS NOT NULL OR review_type='STORE') GROUP BY rating) h)" if offset==0 else "'[]'::jsonb"
     sql='WITH archive AS ('+archive_sql+'),featured AS ('+featured_sql+'''),media AS (
-        SELECT id,review_id,storage,created_at FROM sc_review_media WHERE review_id IN (SELECT id FROM archive UNION SELECT id FROM featured)
-        AND kind='image' AND status='COPIED' AND approved=true AND storage->>'provider'='dropbox')
+        SELECT id,review_id,kind,storage,created_at FROM sc_review_media WHERE review_id IN (SELECT id FROM archive UNION SELECT id FROM featured)
+        AND (kind='image' OR (kind='video' AND review_id IN (SELECT id FROM sc_reviews WHERE source='sports_cave'))) AND status='COPIED' AND approved=true AND storage->>'provider'='dropbox')
         SELECT (SELECT COALESCE(jsonb_agg(a ORDER BY a.position),'[]'::jsonb) FROM archive a) AS archive,
         (SELECT COALESCE(jsonb_agg(f ORDER BY f.position),'[]'::jsonb) FROM featured f) AS featured,
-        (SELECT COALESCE(jsonb_agg(m ORDER BY m.created_at,m.id),'[]'::jsonb) FROM media m) AS media,
+        (SELECT COALESCE(jsonb_agg(m ORDER BY m.kind,m.created_at,m.id),'[]'::jsonb) FROM media m) AS media,
         '''+histogram_sql+''' AS histogram,(SELECT to_jsonb(t) FROM sc_review_totals t WHERE scope='all') AS totals'''
     if store.connect:context=store.db()
     else:
@@ -63,11 +63,11 @@ def projection(store, origin, country='AU', offset=0, settings=None):
     by_review={}
     for item in media:
         from reviews_public_cache import CACHE
-        CACHE.put((store.connect,('media',str(item['id']))),{'kind':'image','storage':item['storage']},30)
-        variants=item['storage'].get('variants') or {}
+        CACHE.put((store.connect,('media',str(item['id']))),{'kind':item['kind'],'storage':item['storage']},30)
+        variants=item['storage'].get('posters' if item['kind']=='video' else 'variants') or {}
         if not variants.get('320') or not variants.get('1280'):continue
         base=origin+'/reviews/media/'+str(item['id'])
-        by_review.setdefault(str(item['review_id']),[]).append({'kind':'image','url':base+'?size=1280','thumbnail_url':base+'?size=320','carousel_url':base+'?size=640','poster_url':base+'?size=1280','width':variants['1280'].get('width',1280),'height':variants['1280'].get('height',1280)})
+        by_review.setdefault(str(item['review_id']),[]).append({'kind':item['kind'],'url':base+('?size=original' if item['kind']=='video' else '?size=1280'),'thumbnail_url':base+'?size=320','carousel_url':base+'?size=640','poster_url':base+'?size=1280','width':variants['1280'].get('width',1280),'height':variants['1280'].get('height',1280)})
     def public(row):
         legacy=str(row.get('source_review_id') or '')[-36:]
         return {'id':str(row['id']),'legacy_id':legacy if row['source']=='judgeme' and re.fullmatch('[a-f0-9-]{36}',legacy) else str(row['id']),

@@ -40,6 +40,19 @@ class NativeAccount(unittest.TestCase):
    response=client.post('/review',data={'review_reference':'signed','rating':'5','reviewer_name':'Synthetic buyer','body':'My native uploaded review','display_consent':'yes'},files=[('media',('fixture.jpg',b'fixture','image/jpeg'))],headers={'X-Sports-Cave-Request':'customer-account-extension'})
   self.assertEqual(response.status_code,200);legacy.assert_not_called();identity=response.json()['review_id'];self.assertEqual(self.store.media(identity)[0]['status'],'QUEUED')
 
+ def test_only_approved_native_video_is_exposed_in_widget(self):
+  import json
+  from reviews_widget import projection
+  self.store.save_settings(ADMIN,{'enabled':True});shop,row=self.context()
+  with patch('collector_vault._resolve_review_reference',return_value=row):native=submit(self.store,shop,self.order()['customer']['id'],'signed',{'rating':5,'body':'Native video review','reviewer_name':'Synthetic'},[])['review_id']
+  self.store.moderate(ADMIN,native,status='PUBLISHED')
+  legacy=self.store.q("INSERT INTO sc_reviews(source,source_review_id,product_id,reviewer_name,rating,body,status,dedupe_key) VALUES('judgeme',%s,%s,'Legacy',5,'Hidden legacy video','PUBLISHED',%s) RETURNING id",(self.prefix+'video',self.pid,self.prefix+'video'),True)['id']
+  storage={'provider':'dropbox','video_format':'mp4','original':{},'posters':{str(w):{'width':w,'height':w} for w in (320,640,1280)}}
+  for identity in (native,legacy):self.store.q("INSERT INTO sc_review_media(review_id,kind,source_url,status,approved,consent,storage,object_key,sha256,size_bytes) VALUES(%s,'video',%s,'COPIED',true,true,%s::jsonb,'fixture','synthetic',10)",(identity,'native:'+str(identity),json.dumps(storage)))
+  data=projection(self.store,'https://fixture.example')
+  rows={str(r['id']):r for r in data['reviews']};self.assertEqual(rows[str(native)]['media'][0]['kind'],'video');self.assertTrue(rows[str(native)]['media'][0]['url'].endswith('size=original'));self.assertEqual(rows[str(legacy)]['media'],[])
+  self.store.moderate(ADMIN,native,status='ARCHIVED')
+
 class ProductThumbnail(unittest.TestCase):
  def test_small_first_product_image_uses_shopify_cdn_only(self):
   from reviews_widget import product_thumbnail
