@@ -51,7 +51,7 @@ class ReviewsStore(Store):
         if since:clauses.append('created_at>=%s');args.append(since)
         order={'newest':'created_at DESC,id DESC','highest':'rating DESC,created_at DESC,id DESC','lowest':'rating ASC,created_at DESC,id DESC'}
         if sort not in order:raise ValueError('Invalid review sort.')
-        fields="id,review_type,product_id,product_title,product_image,product_url,reviewer_name,rating,title,body,created_at,verified_purchase,merchant_reply,status,(source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known" if public else '*'
+        fields="id,review_type,product_id,product_title,product_image,product_url,reviewer_name,rating,title,body,created_at,verified_purchase,merchant_reply,status,(source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known,(source_metadata->>'shop_app'='true') AS shop_verified" if public else '*'
         return self.q('SELECT '+fields+' FROM sc_reviews WHERE '+' AND '.join(clauses)+' ORDER BY '+order[sort]+' LIMIT %s OFFSET %s',(*args,limit+1,offset))
     def get_review(self,identity):return self.q('SELECT * FROM sc_reviews WHERE id=%s',(str(uuid.UUID(str(identity))),),True)
     def products(self,search=''):

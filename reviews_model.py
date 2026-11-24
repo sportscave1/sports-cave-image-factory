@@ -6,7 +6,7 @@ from html.parser import HTMLParser
 from datetime import datetime, timezone
 from crm_logic import date, now
 
-SOURCES=('csv','judgeme','sports_cave')
+SOURCES=('csv','judgeme','sports_cave','shop_app')
 STATUSES=('PENDING','PUBLISHED','ARCHIVED','SPAM')
 FIELDS=('source_review_id','product_id','product_handle','product_url','product_sku','product_title','reviewer_name','email','rating','title','body','created_at','source_verified','merchant_reply','status','curated','picture_urls','video_urls','review_type','merchant_reply_at')
 ALIASES={'source_review_id':('review_id','id','metaobject_handle'),'product_id':('shopify_product_id','product_external_id'),

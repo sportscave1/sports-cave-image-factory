@@ -4,6 +4,9 @@ from reviews_store import ReviewsStore
 
 def tick(store=None):
     store=store or ReviewsStore()
+    from reviews_shop import tick as tick_shop
+    try:tick_shop(store)
+    except Exception:logging.getLogger(__name__).warning('shop_review_cycle_unavailable')
     from reviews_media import tick_media
     tick_media(store)
     from reviews_reward_delivery import tick as tick_reward

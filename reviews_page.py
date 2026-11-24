@@ -69,7 +69,7 @@ def row_html(r):
     from crm_campaign_html import email_image_url
     image=email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
     product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" width="42" height="42">' if image else '')+escape('Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match')
-    return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Imported','csv':'CSV','sports_cave':'Sports Cave'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
+    return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Imported','csv':'CSV','sports_cave':'Sports Cave','shop_app':'Shop app'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
 
 @st.dialog('Review',width='large')
 def detail(store,user,identity):
@@ -140,7 +140,7 @@ def overview(store,user):
             search=a.text_input('Search reviews',label_visibility='collapsed',placeholder='Search reviews…',key='rv_search')
             product=b.text_input('Product',placeholder='Product name / handle',label_visibility='collapsed',key='rv_product')
             rating=c.selectbox('Rating',range(6),format_func=lambda n:str(n)+' stars' if n else 'All ratings',label_visibility='collapsed')
-            source=d.selectbox('Source',['','csv','judgeme','sports_cave'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Imported','sports_cave':'Sports Cave'}[v],label_visibility='collapsed')
+            source=d.selectbox('Source',['','csv','judgeme','sports_cave','shop_app'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Imported','sports_cave':'Sports Cave','shop_app':'Shop app'}[v],label_visibility='collapsed')
             period=e.selectbox('Date',[0,30,90],format_func=lambda n:str(n)+' days' if n else 'All dates',label_visibility='collapsed')
         signature=(labels[status],search,product,rating,source,period)
         if state().get('filters')!=signature:state()['filters']=signature;state()['offset']=0
@@ -168,7 +168,7 @@ def overview(store,user):
 @st.fragment
 def importer(store,user):
     from reviews_import import read_csv,preview
-    connections()
+    connections(store)
     st.caption('Media source: Dropbox · 03_ASSETS / Reviews · originals plus WebP display copies')
     st.subheader('Import file')
     st.download_button('Download CSV template','source_review_id,review_type,product_id,product_handle,reviewer_name,email,rating,title,body,review_date,status,picture_urls,video_urls,reply\nfixture-1,product,,example-product,Collector,,5,Great print,Looks great on my wall,2026-01-01,Published,,,\n',file_name='sports-cave-reviews-template.csv',mime='text/csv')
@@ -208,8 +208,16 @@ def importer(store,user):
             changed('table','summary','sources')
     if activity=='ERROR':st.caption('Import history could not refresh.')
 
-def connections():
+def connections(store):
     st.subheader('Connections')
+    row,_=load(('shop_connection',),lambda:store.q("SELECT value FROM sc_review_settings WHERE key='shop_app_connection'",one=True))
+    shop=(row or {}).get('value',{})
+    with st.expander('Shop app reviews'):
+        st.caption('Active · Shopify Flow inbox' if shop.get('enabled') and shop.get('last_success') and not shop.get('last_error') else 'Sync needs attention' if shop.get('last_error') else 'Waiting for setup / first sync')
+        st.write('Published written Shop reviews are matched to purchased products and imported automatically. Rating-only entries and deleted products are skipped. Shop imports do not issue upload rewards.')
+        if shop.get('last_success'):st.caption('Last successful sync: '+shop['last_success'])
+        st.caption('This incoming publication feed does not mirror later Shop deletions or backfill historical Shop reviews. Full two-way syndication requires Shopify program approval.')
+        st.link_button('Open Shop reviews','https://admin.shopify.com/store/sportscave-nb/apps/shop-72/merchant/reviews')
     providers=(('ⓕ Facebook','Facebook Page reviews / recommendations'),('Ⓖ Google Reviews','Google Business Profile reviews'),('E Etsy','Etsy shop reviews'),('ebay eBay','eBay seller feedback'),('★ Trustpilot','Trustpilot business reviews'))
     columns=st.columns(5)
     for column,(label,description) in zip(columns,providers):
