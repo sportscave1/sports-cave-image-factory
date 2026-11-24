@@ -17,6 +17,16 @@ def require(user):
 def actor(user):return str(user.get('id') or user.get('email') or 'staff')[:200]
 
 class ReviewsStore(Store):
+    def _read_query(self,operation,sql,args=(),one=False):
+        # Production reads borrow an exclusive, bounded OS read-pool lease.
+        # Injected test stores retain their disposable transaction adapter.
+        if self.connect:return self.q(sql,args,one)
+        from supabase_backend import _run_read_operation
+        def select(cur):
+            cur.execute(sql,args)
+            return cur.fetchone() if one else cur.fetchall()
+        return _run_read_operation(operation,select,deadline_seconds=4)[0]
+
     def settings(self):
         row=self.q("SELECT value FROM sc_review_settings WHERE key='display'",one=True)
         return display_settings(row['value'] if row else {})
@@ -26,11 +36,12 @@ class ReviewsStore(Store):
         from reviews_public_cache import CACHE
         CACHE.invalidate()
     def summary(self):
-        r=self.q("SELECT * FROM sc_review_totals WHERE scope='all'",one=True) or {}
         # Exact rolling UTC 30 days: complete UTC days plus one indexed boundary slice.
         start=now()-timedelta(days=30)
-        count=self.q("""SELECT COALESCE((SELECT sum(total) FROM sc_review_days WHERE day>(%s AT TIME ZONE 'UTC')::date),0)+
-          (SELECT count(*) FROM sc_reviews WHERE status IN ('PENDING','PUBLISHED') AND source_metadata->>'date_known' IS DISTINCT FROM 'false' AND created_at>=%s AND created_at<((%s AT TIME ZONE 'UTC')::date+1)::timestamp AT TIME ZONE 'UTC') AS n""",(start,start,start),True)['n']
+        data=self._read_query('reviews.summary',"""SELECT COALESCE((SELECT to_jsonb(t) FROM sc_review_totals t WHERE scope='all'),'{}'::jsonb) AS totals,
+          COALESCE((SELECT sum(total) FROM sc_review_days WHERE day>(%s AT TIME ZONE 'UTC')::date),0)+
+          (SELECT count(*) FROM sc_reviews WHERE status IN ('PENDING','PUBLISHED') AND source_metadata->>'date_known' IS DISTINCT FROM 'false' AND created_at>=%s AND created_at<((%s AT TIME ZONE 'UTC')::date+1)::timestamp AT TIME ZONE 'UTC') AS n""",(start,start,start),True)
+        r=data['totals'] or {};count=data['n']
         total=int(r.get('total',0));return {'total':total,'average':float(r.get('rating_total',0))/total if total else None,
           'recent':int(count),'five_rate':100*int(r.get('fives',0))/total if total else None,'attention':int(r.get('attention',0))}
     def aggregate(self,product=None):
@@ -53,7 +64,9 @@ class ReviewsStore(Store):
         if sort not in order:raise ValueError('Invalid review sort.')
         if received_first and not public and sort=='newest':order['newest']='notification_received_at DESC NULLS LAST,created_at DESC,id DESC'
         fields="id,review_type,product_id,product_title,product_image,product_url,reviewer_name,rating,title,body,created_at,verified_purchase,merchant_reply,status,(source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known,(source_metadata->>'shop_app'='true') AS shop_verified" if public else '*'
-        return self.q('SELECT '+fields+' FROM sc_reviews WHERE '+' AND '.join(clauses)+' ORDER BY '+order[sort]+' LIMIT %s OFFSET %s',(*args,limit+1,offset))
+        sql='SELECT '+fields+' FROM sc_reviews WHERE '+' AND '.join(clauses)+' ORDER BY '+order[sort]+' LIMIT %s OFFSET %s'
+        values=(*args,limit+1,offset)
+        return self.q(sql,values) if public else self._read_query('reviews.table',sql,values)
     def get_review(self,identity):return self.q('SELECT * FROM sc_reviews WHERE id=%s',(str(uuid.UUID(str(identity))),),True)
     def products(self,search=''):
         return self.q("SELECT shopify_product_id,title,handle,image_url,online_store_url FROM shopify_products WHERE position(lower(%s) in lower(COALESCE(title,'')||' '||COALESCE(handle,'')))>0 ORDER BY title LIMIT 25",(str(search)[:150],))

@@ -1,0 +1,48 @@
+name: Reviews startup regression
+on:
+  push:
+    branches: [main]
+    paths: ['app.py', 'reviews*.py', 'tests/test_reviews*.py', 'tests/test_review*.py', 'tests/fixtures/reviews_table_layout.py', '.github/workflows/reviews-startup.yml']
+  pull_request:
+    paths: ['app.py', 'reviews*.py', 'tests/test_reviews*.py', 'tests/test_review*.py', 'tests/fixtures/reviews_table_layout.py', '.github/workflows/reviews-startup.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-reviews:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      REVIEWS_BROWSER_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Cache, permissions, layout and read-pool boundaries
+        run: python -m pytest -q tests/test_reviews_startup.py tests/test_database_read_pool.py tests/test_reviews.py tests/test_review_text_edits.py tests/test_review_notifications.py
+      - name: Application startup scope (separate Streamlit runtime)
+        run: python -m pytest -q tests/test_app_startup_scope_regression.py
+      - name: Start synthetic fixture without provider credentials
+        run: |
+          python -m streamlit run tests/fixtures/reviews_table_layout.py --server.address 127.0.0.1 --server.port 8543 --server.headless true --browser.gatherUsageStats false > fixture.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8543/_stcore/health; then exit 0; fi
+            sleep 1
+          done
+          cat fixture.log
+          exit 1
+      - name: Ten screen sizes, actions, pagination and outage recovery
+        run: python -m pytest -q tests/test_reviews_table_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviews-startup-evidence
+          path: |
+            artifacts/reviews-table-responsive-20261124/
+            fixture.log

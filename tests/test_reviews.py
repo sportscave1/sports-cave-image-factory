@@ -94,7 +94,7 @@ store.summary.assert_not_called();store.imports.assert_not_called();store.settin
 '''
         app=AppTest.from_string(script).run()
         self.assertEqual(len(app.exception),0);self.assertEqual(app.title[0].value,'Reviews')
-        self.assertEqual(app.session_state['read_groups'],['summary','table'])
+        self.assertEqual(set(app.session_state['read_groups']),{'summary','table'})
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class DatabaseTests(unittest.TestCase):

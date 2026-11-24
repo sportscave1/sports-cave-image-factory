@@ -2,6 +2,7 @@
 import ast
 import base64
 import json
+import os
 from pathlib import Path
 from time import perf_counter
 from urllib.parse import urlsplit
@@ -16,7 +17,8 @@ def test_responsive_table_actions_latency_and_recovery():
     EVIDENCE.mkdir(parents=True,exist_ok=True)
     metrics=[];errors=[]
     with sync_playwright() as runtime:
-        browser=runtime.chromium.launch(channel='msedge',headless=True)
+        channel=os.getenv('REVIEWS_BROWSER_CHANNEL','msedge')
+        browser=runtime.chromium.launch(headless=True,**({'channel':channel} if channel!='chromium' else {}))
         context=browser.new_context()
         def route(request):
             host=urlsplit(request.request.url).hostname
@@ -31,6 +33,7 @@ def test_responsive_table_actions_latency_and_recovery():
                 expect(page.locator('.rv-row')).to_have_count(25,timeout=15000)
                 elapsed=round((perf_counter()-started)*1000)
                 assert page.get_by_test_id('stException').count()==0
+                expect(page.locator('[class*="st-key-rv-entry-"]').first.get_by_role('button',name='Edit',exact=True)).to_be_visible()
                 values=page.locator('[class*="st-key-rv-entry-"]').first.evaluate('''el=>({
                   width:el.clientWidth,height:el.getBoundingClientRect().height,overflow:el.scrollWidth>el.clientWidth+1,
                   columns:getComputedStyle(el).gridTemplateColumns,

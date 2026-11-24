@@ -6,7 +6,7 @@ from html import escape
 import hashlib
 import streamlit as st
 from reviews_store import ReviewsStore,require
-from reviews_cache import read,invalidate
+from reviews_cache import read,invalidate,settle_initial
 from reviews_model import FIELDS,auto_mapping,product_gid
 from crm_logic import now
 from crm_campaign_home import STYLE
@@ -43,6 +43,29 @@ def load(key,fn,ttl=60):
     value,activity=read(state(),key,fn,ttl);state().setdefault('activity',{})[key[0]]=activity
     return value,activity
 def changed(*groups):invalidate(state(),*groups)
+
+STATUS_LABELS={'All reviews':'all','Pending':'PENDING','Needs reply':'reply','Archived':'ARCHIVED'}
+
+
+def table_read(store,signature,offset):
+    status,search,product,rating,source,period=signature
+    matched=store.match_product({'product_handle':product,'product_title':product}) if product else None
+    if product and not matched:return []
+    return store.rows(status=status,search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
+
+
+def prefetch_overview(user,store=None):
+    """Queue only the authorised current view while the OS shell is built."""
+    require(user)
+    if st.session_state.get('reviews-tabs','Overview')!='Overview':return
+    store=store or ReviewsStore()
+    signature=(STATUS_LABELS.get(st.session_state.get('reviews-status'),'all'),
+      st.session_state.get('rv_search',''),st.session_state.get('rv_product',''),
+      st.session_state.get('rv_rating',0),st.session_state.get('rv_source',''),st.session_state.get('rv_period',0))
+    offset=state().get('offset',0) if state().get('filters')==signature else 0
+    read(state(),('table',signature,offset),lambda:table_read(store,signature,offset))
+    read(state(),('summary',),store.summary)
+    return (('table',signature,offset),('summary',))
 
 def refresh_pending_reads(pending):
     # Streamlit owns this timer so hidden tabs do not lose a one-shot JS refresh.
@@ -166,23 +189,19 @@ def overview(store,user):
         st.html(kpi_html(value))
         if activity=='ERROR':st.caption('Statistics could not refresh. Last resolved values remain visible.')
     with st.container(key='reviews-table'):
-        labels={'All reviews':'all','Pending':'PENDING','Needs reply':'reply','Archived':'ARCHIVED'}
+        labels=STATUS_LABELS
         status=st.segmented_control('Review status',list(labels),default='All reviews',key='reviews-status') or 'All reviews'
         with st.container(key='reviews-filters'):
             a,b,c,d,e=st.columns([2,1.5,1,1,1])
             search=a.text_input('Search reviews',label_visibility='collapsed',placeholder='Search reviews…',key='rv_search')
             product=b.text_input('Product',placeholder='Product name / handle',label_visibility='collapsed',key='rv_product')
-            rating=c.selectbox('Rating',range(6),format_func=lambda n:str(n)+' stars' if n else 'All ratings',label_visibility='collapsed')
-            source=d.selectbox('Source',['','csv','judgeme','sports_cave','shop_app'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Imported','sports_cave':'Sports Cave','shop_app':'Shop app'}[v],label_visibility='collapsed')
-            period=e.selectbox('Date',[0,30,90],format_func=lambda n:str(n)+' days' if n else 'All dates',label_visibility='collapsed')
+            rating=c.selectbox('Rating',range(6),format_func=lambda n:str(n)+' stars' if n else 'All ratings',label_visibility='collapsed',key='rv_rating')
+            source=d.selectbox('Source',['','csv','judgeme','sports_cave','shop_app'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Imported','sports_cave':'Sports Cave','shop_app':'Shop app'}[v],label_visibility='collapsed',key='rv_source')
+            period=e.selectbox('Date',[0,30,90],format_func=lambda n:str(n)+' days' if n else 'All dates',label_visibility='collapsed',key='rv_period')
         signature=(labels[status],search,product,rating,source,period)
         if state().get('filters')!=signature:state()['filters']=signature;state()['offset']=0
         offset=state().get('offset',0)
-        def table():
-            matched=store.match_product({'product_handle':product,'product_title':product}) if product else None
-            if product and not matched:return []
-            return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
-        rows,activity=load(('table',signature,offset),table)
+        rows,activity=load(('table',signature,offset),lambda:table_read(store,signature,offset))
         if activity=='ERROR':
             st.caption('Reviews could not refresh. Last resolved rows remain visible.')
             if st.button('Retry reviews',key='reviews-retry'):changed('table');st.rerun()
@@ -206,7 +225,9 @@ def overview(store,user):
 def acknowledge_visible(store,user,rows):
     import json
     from reviews_notifications import mark_visible,scope
-    actor_scope=scope(user.get('id'));identities=tuple(str(row['id']) for row in rows)
+    identities=tuple(str(row['id']) for row in rows if row.get('notification_received_at') is not None and row.get('status') in ('PENDING','PUBLISHED'))
+    if not identities:return
+    actor_scope=scope(user.get('id'))
     key=('seen',actor_scope,identities)
     receipt,activity=load(key,lambda:mark_visible(user,identities,store),ttl=3600)
     if activity!='READY' or not receipt or not receipt.get('marked'):return
@@ -345,13 +366,16 @@ def request_automation(store,user,navigate):
 
 def render_page(user,navigate=lambda _:None,*,store=None):
     require(user);store=store or ReviewsStore()
+    initial_keys=prefetch_overview(user,store)
     st.html(STYLE+STYLE_REVIEW)
     with st.container(key='sc-reviews'):
         st.title('Reviews');st.caption('Manage customer reviews and storefront social proof.')
         tab=st.segmented_control('Reviews area',['Overview','Import reviews','Collect & reward','Display'],default='Overview',key='reviews-tabs') or 'Overview'
         state()['activity']={}
         try:
-            if tab=='Overview':overview(store,user)
+            if tab=='Overview':
+                settle_initial(state(),initial_keys or ())
+                overview(store,user)
             elif tab=='Import reviews':importer(store,user)
             elif tab=='Collect & reward':collection(store,user,navigate)
             else:display(store,user,navigate)

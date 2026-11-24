@@ -118,6 +118,9 @@ class AppStartupScopeRegressionTests(unittest.TestCase):
                 )
 
         local_names = {argument.arg for argument in main_node.args.args}
+        for node in ast.walk(main_node):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                local_names.update(alias.asname or alias.name.split('.')[0] for alias in node.names)
         local_names.update(
             node.id
             for node in ast.walk(main_node)

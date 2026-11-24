@@ -16,7 +16,7 @@ def status(claims, store=None):
         return {'unread_count':0,'checked_at':time.time()}
     actor=str(claims.get('sub') or '');scope(actor)
     store=store or ReviewsStore()
-    row=store.q("""SELECT count(*) FILTER (WHERE NOT EXISTS(
+    row=store._read_query('reviews.unread',"""SELECT count(*) FILTER (WHERE NOT EXISTS(
       SELECT 1 FROM sc_review_seen s WHERE s.actor_id=%s AND s.review_id=r.id)) AS count,
       max(notification_received_at) AS latest_arrival FROM sc_reviews r
       WHERE r.notification_received_at IS NOT NULL AND r.status IN ('PENDING','PUBLISHED')
