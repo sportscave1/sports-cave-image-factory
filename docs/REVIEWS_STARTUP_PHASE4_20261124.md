@@ -25,4 +25,25 @@ Account validation logs were approximately 150ms. The read path used fresh trans
 - Isolated browser CI added, with synthetic data and blocked external transport. No provider credentials, real emails, review writes or theme changes during testing.
 - Canonical Render topology validation and diff checks passed. No infrastructure changes or database migration.
 
-Live acceptance results will be recorded after rollout using the same 25-interaction protocol. These measurements are observed timings, not a guarantee for every network or cold service start.
+## Live acceptance
+
+Runtime `0116e7c878e17a352e4f267cd57a0d1cd381d6dd` is Live on the canonical primary and both existing supporting services. Later CI-only commits use `[skip render]` and do not change executable application source.
+
+Repeated the same 25-interaction protocol after rollout:
+
+| Authenticated browser measurement | Before median | Final median |
+|---|---:|---:|
+| Reload to first review rows, five samples | 4850ms | 3170ms (35% faster) |
+| Reload to resolved summary, same five samples | 6866ms | 3248ms (53% faster) |
+| Ten search/clear changes | 692ms | 711ms |
+| Ten next/previous changes | 2026ms | 2069ms |
+
+Final rows: 3427/3131/3204/2931/3170ms. Final resolved summary: 3521/3265/3239/2959/3248ms. No five-second outlier remained in these five samples. Warm search and page timings do not show a meaningful improvement; the gain is initial startup. Pagination measurements include native button scrolling through 25 rows and browser-control overhead. Avoid treating them as server-only timings. Full reload still takes about three seconds over this connection; it is not instant.
+
+Final live instrumentation: summary 142–152ms, table approximately 283–285ms, queue 0.1–0.8ms on reloads; one filtered query 148ms. These are full pooled read durations, including network transfer, not pure SQL timings. The initial 1.2s completion-timer dependency is avoided for those normal reads. No schema/index change is warranted by this evidence.
+
+The signed-in OS retained total 209 and rating 4.8. Open and Edit dialogs loaded and were closed without saving. E Maddock remains published with four stars and no title/body. Live widths 1440/881/390px had no row overflow, visible 80px Open/Edit buttons and 44px phone actions. No browser JavaScript errors. Temporary viewport override reset. The table CSS and row markup remain identical.
+
+Final synthetic ten-width run after restarting the local server: median first rows 364ms, next page 402ms, retained last-good rows 86ms after triggering a delayed failure. Synthetic and live evidence are separate. Saved measurements and screenshot: `artifacts/reviews-startup-phase4-20261124/`; loopback browser screenshots: `artifacts/reviews-table-responsive-20261124/`.
+
+CI uses the Ubuntu 24.04 runner's installed Chrome, avoiding a redundant browser download. The initial setup attempts were superseded. Final [CI run 45344725569](https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45344725569) passed all steps, including startup/read-pool/access tests, application scope, ten-width browser/actions/outage recovery and evidence upload, on commit `30affc1ab827a2b904d7804cd0351c757a481cc8`. These measurements are observations, not a guarantee for every network or cold service start.
