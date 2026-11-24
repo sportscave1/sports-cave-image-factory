@@ -1,6 +1,8 @@
 """Public projection and token-only review form, mounted on the existing server."""
 from html import escape
 import json
+import asyncio
+from functools import wraps
 from fastapi import APIRouter,Request,Response
 from fastapi.responses import HTMLResponse,JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -11,6 +13,14 @@ from crm_onsite import allow_rate
 from crm_http import bounded_body
 
 router=APIRouter()
+_UPLOADS=asyncio.Semaphore(2)
+
+def bounded_upload(handler):
+    # Bound peak multipart memory while large originals transfer to Dropbox.
+    @wraps(handler)
+    async def limited(*args,**kwargs):
+        async with _UPLOADS:return await handler(*args,**kwargs)
+    return limited
 
 @router.get('/reviews/widget')
 async def storefront_widget(request:Request):
@@ -129,12 +139,14 @@ async def review_form(token:str,request:Request):
         if row['review_id']:return HTMLResponse(FORM_STYLE+'<main><h1>Thank you</h1><p>Your review has been received.</p></main>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
         product=await run_in_threadpool(store.match_product,{'product_id':row['product_id']})
         if not product:raise ValueError()
-        html=form_html(product['title'],reward=store.collection_settings())
-        return HTMLResponse(html,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"})
+        from reviews_storefront_form import storefront_html,form_headers
+        html=storefront_html(product,None)
+        return HTMLResponse(html,headers=form_headers({**PUBLIC_FORM_HEADERS,'Content-Security-Policy':PUBLIC_FORM_HEADERS['Content-Security-Policy'].split('frame-ancestors')[0]+"frame-ancestors 'none'"}))
     except ValueError:return HTMLResponse(FORM_STYLE+'<main><h1>Review link unavailable</h1><p>This link is invalid or expired.</p></main>',status_code=400)
     except Exception:return Response(status_code=503)
 
 @router.post('/reviews/request/{token}')
+@bounded_upload
 async def review_submit(token:str,request:Request):
     if not allow_rate('review-submit:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
     try:
@@ -164,7 +176,7 @@ async def read_submission(request):
             total=0
             async for part in request.stream():
                 total+=len(part)
-                if total>65*1024*1024:raise MultiPartException('Upload exceeds 65 MB.')
+                if total>251*1024*1024:raise MultiPartException('Upload is too large.')
                 yield part
         try:form=await MultiPartParser(request.headers,limited_stream(),max_files=5,max_fields=10).parse()
         except MultiPartException:raise ValueError('Invalid or oversized upload.') from None
@@ -175,7 +187,8 @@ async def read_submission(request):
                     if key!='media':raise ValueError('Invalid file field.')
                     if not value.filename:continue
                     kind='video' if (value.content_type or '').startswith('video/') else 'image'
-                    limit=50*1024*1024 if kind=='video' else 10*1024*1024
+                    from reviews_media import MAX_VIDEO_BYTES,MAX_IMAGE_BYTES
+                    limit=MAX_VIDEO_BYTES if kind=='video' else MAX_IMAGE_BYTES
                     data=await value.read(limit+1)
                     if len(data)>limit:raise ValueError('Media exceeds file size limit.')
                     uploads.append({'data':data,'kind':kind})
@@ -185,17 +198,11 @@ async def read_submission(request):
         fields=parse_qs((await bounded_body(request,24000)).decode('utf-8'),keep_blank_values=True)
     else:raise ValueError('Unsupported form format.')
     if any(len(v)!=1 for v in fields.values()):raise ValueError('Duplicate form field.')
+    from reviews_media import MAX_TOTAL_BYTES
+    if sum(len(u['data']) for u in uploads)>MAX_TOTAL_BYTES:raise ValueError('Upload is too large.')
     payload={k:v[0] for k,v in fields.items()};payload['display_consent']=payload.get('display_consent')=='yes'
     return payload,uploads
 
-def form_html(title,token=None,reward=None):
-    html=FORM_STYLE+'<main><h1>Share your review</h1><p>'+escape(title)+'</p><form method="post" enctype="multipart/form-data"><label>Rating<select name="rating" required>'+''.join('<option value="'+str(n)+'">'+str(n)+' stars</option>' for n in (5,4,3,2,1))+'</select></label><label>Display name<input name="reviewer_name" maxlength="120" required></label><label>Title<input name="title" maxlength="200"></label><label>Review<textarea name="body" maxlength="5000" required rows="5"></textarea></label><label>Photos or video (optional)<input type="file" name="media" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" multiple></label><p>Up to 5 files: images up to 10 MB each, one video up to 50 MB, 65 MB total. Files are reviewed before display.</p><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label><label><input type="checkbox" name="display_consent" value="yes" required>Display my review, attached media and chosen name publicly</label><button type="submit">Submit review</button></form></main>'
-    if token:html=html.replace('<label>Rating','<input type="hidden" name="form_token" value="'+escape(token,quote=True)+'">'+'<label>Rating')
-    html=html.replace('<h1>Share your review</h1>','<p>SPORTS CAVE Â· COLLECT. CELEBRATE. KEEP FOREVER.</p><h1>Share your review</h1>')
-    if reward and reward.get('rewards_enabled'):
-        text=f"<p>Once approved, eligible verified buyers receive {int(reward['image_percent'])}% for a photo or {int(reward['video_percent'])}% for a video. One reward per order, valid for 30 days. Your rating never affects the reward.</p>"
-        html=html.replace('<label>Photos or video',text+'<label>Photos or video')
-    return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Share your review | Sports Cave</title>'+html+'</html>'
 
 PUBLIC_FORM_HEADERS={'Cache-Control':'no-store','Referrer-Policy':'no-referrer',
  'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors https://www.sportscaveshop.com https://sportscaveshop.com https://sportscave-nb.myshopify.com https://admin.shopify.com https://online-store-web.shopifyapps.com"}
@@ -216,6 +223,7 @@ async def storefront_form(request:Request):
     except Exception:return Response(status_code=503)
 
 @router.post('/reviews/write',response_class=HTMLResponse)
+@bounded_upload
 async def storefront_submit(request:Request):
     if not allow_rate('review-write-submit:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
     try:

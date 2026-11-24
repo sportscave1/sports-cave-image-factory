@@ -40,7 +40,7 @@ def submit(store,token,payload,uploads):
     existing=store.q('SELECT id FROM sc_reviews WHERE dedupe_key=%s',(key,),True)
     if existing:return str(existing['id'])
     from reviews_media import save_owned
-    media=[{**save_owned(u['data'],u['kind']),'kind':u['kind']} for u in uploads]
+    media=[{**save_owned(u['data'],u['kind'],defer_processing=True),'kind':u['kind']} for u in uploads]
     with store.db() as conn:
         row=conn.execute('''INSERT INTO sc_reviews(source,source_review_id,product_id,product_title,product_handle,product_image,product_url,
           reviewer_name,rating,title,body,status,verified_purchase,dedupe_key,review_type)
@@ -50,6 +50,6 @@ def submit(store,token,payload,uploads):
            (mapped or {}).get('online_store_url',''),item['reviewer_name'],item['rating'],item['title'],item['body'],key,'PRODUCT' if product else 'STORE')).fetchone()
         for m in media:
             conn.execute('''INSERT INTO sc_review_media(review_id,kind,source_url,object_key,sha256,size_bytes,mime_type,status,consent,storage)
-              VALUES(%s,%s,%s,%s,%s,%s,%s,'COPIED',true,%s::jsonb) ON CONFLICT DO NOTHING''',
-              (row['id'],m['kind'],'native:'+m['sha256'],m['object_key'],m['sha256'],m['size_bytes'],m['mime_type'],json.dumps(m['storage'])))
+              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,true,%s::jsonb) ON CONFLICT DO NOTHING''',
+              (row['id'],m['kind'],'native:'+m['sha256'],m['object_key'],m['sha256'],m['size_bytes'],m['mime_type'],'QUEUED' if m['storage'].get('processing')=='pending' else 'COPIED',json.dumps(m['storage'])))
     return str(row['id'])

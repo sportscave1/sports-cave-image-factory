@@ -58,7 +58,7 @@ def submit(store,token,payload,uploads=None):
     if not product:raise ValueError('Review product is unavailable.')
     policy=store.settings();state='PUBLISHED' if policy['moderation']=='publish_all' else 'PENDING'
     from reviews_media import save_owned
-    media=[{**save_owned(u['data'],u['kind']),'kind':u['kind']} for u in uploads]
+    media=[{**save_owned(u['data'],u['kind'],defer_processing=True),'kind':u['kind']} for u in uploads]
     with store.db() as conn:
         locked=conn.execute('SELECT * FROM sc_review_tokens WHERE token_hash=%s FOR UPDATE',(row['token_hash'],)).fetchone()
         if not locked or date(locked['expires_at'])<now():raise ValueError('Review link is invalid or expired.')
@@ -71,8 +71,8 @@ def submit(store,token,payload,uploads=None):
         conn.execute('UPDATE sc_review_tokens SET review_id=%s WHERE token_hash=%s',(result['id'],row['token_hash']))
         for m in media:
             conn.execute("""INSERT INTO sc_review_media(review_id,kind,source_url,object_key,sha256,size_bytes,mime_type,status,consent,storage)
-              VALUES(%s,%s,%s,%s,%s,%s,%s,'COPIED',true,%s::jsonb) ON CONFLICT DO NOTHING""",
-              (result['id'],m['kind'],'native:'+m['sha256'],m['object_key'],m['sha256'],m['size_bytes'],m['mime_type'],json.dumps(m.get('storage',{}))))
+              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,true,%s::jsonb) ON CONFLICT DO NOTHING""",
+              (result['id'],m['kind'],'native:'+m['sha256'],m['object_key'],m['sha256'],m['size_bytes'],m['mime_type'],'QUEUED' if m['storage'].get('processing')=='pending' else 'COPIED',json.dumps(m.get('storage',{}))))
         return str(result['id'])
 
 def prepare_email(content,row,enrollment,shop,store):

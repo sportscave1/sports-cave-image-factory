@@ -43,17 +43,17 @@ class ReviewDropboxStorage:
         path=self.context['root']+'/'+name
         metadata=dbx.get_metadata_if_exists(self.context['token'],path,missing_only=True)
         if not metadata:
-            metadata=dbx.upload_stream(self.context['token'],path,io.BytesIO(data),size=len(data),conflict='cancel',max_bytes=50*1024*1024)
+            metadata=dbx.upload_stream(self.context['token'],path,io.BytesIO(data),size=len(data),conflict='cancel',max_bytes=150*1024*1024)
             if not metadata:metadata=dbx.get_file_metadata(self.context['token'],path)
         if metadata.get('content_hash')!=content_hash(data):raise ValueError('Dropbox review bytes could not be verified.')
         return {**receipt(metadata,data),'path':metadata.get('path_display') or path}
     def open(self,value,start=0,end=None):
         # Reuse the OS's revision-pinned, size-checked Range transport only.
-        return MarketplaceDropboxStorage(context=self.context,http=self.http).open(value,start,end,limit=50*1024*1024)
+        return MarketplaceDropboxStorage(context=self.context,http=self.http).open(value,start,end,limit=150*1024*1024)
 
     def verify(self,value):
         from marketplace_dropbox import validate_receipt
-        validate_receipt(value,50*1024*1024)
+        validate_receipt(value,150*1024*1024)
         meta=dbx.get_file_metadata(self.context['token'],value['id'])
         path=dbx.normalize_dropbox_path(meta.get('path_display') or meta.get('path_lower'))
         if not dbx.path_is_within_root(path,self.context['root']) or meta.get('id')!=value['id'] or meta.get('rev')!=value['rev'] or meta.get('size')!=value['size']:

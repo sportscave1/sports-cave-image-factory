@@ -41,22 +41,22 @@ for(const country of ['AU','US'])test(`draft ${country}: one initial request, st
  }finally{await browser.close()}
 });
 
-test('collection-style form keeps inputs after failure and uploads photo/video once to OS',{skip:!process.env.REVIEW_FORM_FIXTURE||!process.env.REVIEW_PLAYWRIGHT_MODULE},async()=>{
+for(const buyer of [false,true])test('collection-style '+(buyer?'buyer':'storefront')+' form keeps inputs after failure and uploads photo/video once to OS',{skip:!process.env.REVIEW_FORM_FIXTURE||!process.env.REVIEW_PLAYWRIGHT_MODULE},async()=>{
  const {chromium}=require(process.env.REVIEW_PLAYWRIGHT_MODULE),browser=await chromium.launch({channel:'msedge',headless:true});
  try{
   const page=await browser.newPage({viewport:{width:390,height:844}});let posts=0,body='';
   await page.route('**/*',async route=>{
    if(route.request().method()==='POST'){posts++;body=route.request().postDataBuffer().toString();return route.fulfill({status:posts===1?400:200,contentType:'text/html',body:'<h1>Thank you</h1>'})}
-   return route.fulfill({contentType:'text/html',body:fs.readFileSync(process.env.REVIEW_FORM_FIXTURE,'utf8')});
+   return route.fulfill({contentType:'text/html',body:fs.readFileSync(process.env.REVIEW_FORM_FIXTURE,'utf8').replace('value="synthetic-token"',buyer?'value=""':'value="synthetic-token"')});
   });
   await page.goto('https://fixture.example/reviews/write?product=1');
-  await page.getByRole('radio',{name:'4 stars',exact:true}).check();
+  assert.equal(await page.getByRole('radio',{name:'5 stars',exact:true}).isChecked(),true);await page.getByRole('radio',{name:'4 stars',exact:true}).check();
   await page.getByLabel('Name',{exact:true}).fill('Synthetic collector');await page.getByLabel('Your review',{exact:true}).fill('This synthetic edition looks great on the wall.');
   await page.locator('input[type=file]').setInputFiles([{name:'fixture.png',mimeType:'image/png',buffer:Buffer.from('synthetic photo')},{name:'fixture.webm',mimeType:'video/webm',buffer:Buffer.from('synthetic video')}]);
-  await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Submit review'}).click();await page.getByRole('status').filter({hasText:'not submitted'}).waitFor();
+  assert.equal(await page.getByRole('checkbox').count(),0);await page.getByRole('button',{name:'Submit review'}).click();await page.getByRole('status').filter({hasText:'not submitted'}).waitFor();
   assert.equal(await page.getByLabel('Your review',{exact:true}).inputValue(),'This synthetic edition looks great on the wall.');
   await page.getByRole('button',{name:'Submit review'}).click();await page.getByRole('heading',{name:'Thank you for your review'}).waitFor();
-  assert.equal(posts,2);assert.match(body,/name="form_token"/);assert.match(body,/fixture.webm/);assert.match(body,/fixture.png/);
+  assert.equal(posts,2);assert.equal(/name="form_token"/.test(body),!buyer);assert.match(body,/fixture.webm/);assert.match(body,/fixture.png/);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  }finally{await browser.close()}
 });

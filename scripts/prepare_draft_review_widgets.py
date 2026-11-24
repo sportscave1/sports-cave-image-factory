@@ -18,11 +18,8 @@ def prepare(source):
     result=result.replace("first.full.includes('__1777871865832-ultimatemancavedecor__')", "review.id === '813945ea-267e-4f52-ab71-3a2c528ce98f' || first.full.includes('__1777871865832-ultimatemancavedecor__')")
     result=result.replace("this.querySelector('[data-review-form-host]').replaceChildren(frame);", """const status = node('p', '', 'Loading review form…');
         status.setAttribute('role', 'status');
-        const fallback = node('a', '', 'Open review form in a new tab');
-        fallback.href = url.href; fallback.target = '_blank'; fallback.rel = 'noopener noreferrer';
-        fallback.style.cssText = 'display:block;color:inherit;margin:0 0 12px;text-decoration:underline';
         frame.addEventListener('load', () => { status.hidden = true; }, {once:true});
-        this.querySelector('[data-review-form-host]').replaceChildren(status, fallback, frame);""")
+        this.querySelector('[data-review-form-host]').replaceChildren(status, frame);""")
     return result
 
 

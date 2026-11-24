@@ -9,6 +9,10 @@ from urllib.parse import urlsplit
 import requests
 from crm_tracking import public_https
 
+MAX_IMAGE_BYTES=25*1024*1024
+MAX_VIDEO_BYTES=150*1024*1024
+MAX_TOTAL_BYTES=250*1024*1024
+
 IMPORT_HOSTS={'judgeme.imgix.net','images.judge.me','cdn.judge.me','s3.amazonaws.com','cdn.shopify.com'}
 
 def media_references(value,kind):
@@ -28,7 +32,7 @@ def media_references(value,kind):
     return result
 
 def validate_file(data,kind):
-    limit=50*1024*1024 if kind=='video' else 10*1024*1024
+    limit=MAX_VIDEO_BYTES if kind=='video' else MAX_IMAGE_BYTES
     if not data or len(data)>limit:raise ValueError('Media exceeds the file size limit.')
     if kind=='image':
         from PIL import Image
@@ -48,7 +52,7 @@ def download(url,kind,session=None,*,preserve_original=False):
     allowed=IMPORT_HOSTS|{h.strip().lower() for h in os.getenv('REVIEW_MEDIA_IMPORT_HOSTS','').split(',') if h.strip()}
     if not public_https(url) or parts.hostname not in allowed:raise ValueError('Media host is not approved for import.')
     if parts.hostname=='s3.amazonaws.com' and not parts.path.startswith('/me.judge.review-images/'):raise ValueError('Unsupported Judge.me media path.')
-    client=session or requests.Session();limit=50*1024*1024 if kind=='video' else 10*1024*1024
+    client=session or requests.Session();limit=MAX_VIDEO_BYTES if kind=='video' else MAX_IMAGE_BYTES
     try:
         with client.get(url,stream=True,timeout=(3,20),allow_redirects=False) as response:
             if response.status_code!=200:raise ValueError()
@@ -98,13 +102,17 @@ def prepare_assets(data,kind):
         with Image.open(io.BytesIO(data)) as im:mime,extension={'JPEG':('image/jpeg','.jpg'),'PNG':('image/png','.png'),'WEBP':('image/webp','.webp')}[im.format]
     return mime,extension
 
-def save_owned(data,kind,storage=None):
+def save_owned(data,kind,storage=None,*,defer_processing=False):
     from reviews_dropbox import ReviewDropboxStorage
     mime,extension=prepare_assets(data,kind);body=bytes(data);digest=hashlib.sha256(body).hexdigest()
     storage=storage or ReviewDropboxStorage()
     # Original MUST be durably received by Dropbox before any display processing.
     original=storage.put(digest+'-original'+extension,body)
     source={'provider':'dropbox','original':original}
+    if kind=='video':source['video_format']=extension.lstrip('.')
+    if defer_processing:
+        source['processing']='pending'
+        return {'object_key':original['id'],'sha256':digest,'size_bytes':len(body),'mime_type':mime,'storage':source}
     preview=video_poster(body,extension) if kind=='video' else body
     variants=webp_variants(preview,'poster-' if kind=='video' else '')
     group='posters' if kind=='video' else 'variants';source[group]={}
@@ -121,7 +129,15 @@ def tick_media(store):
         if not row:return None
         claim=conn.execute("UPDATE sc_review_media SET attempts=attempts+1,lease_until=now()+interval '5 minutes' WHERE id=%s RETURNING attempts",(row['id'],)).fetchone()['attempts']
     try:
-        body,_,_=download(row['source_url'],row['kind'],preserve_original=True);owned=save_owned(body,row['kind'])
+        if row['source_url'].startswith('native:'):
+            from reviews_dropbox import ReviewDropboxStorage
+            storage=ReviewDropboxStorage();ref=row['storage']['original'];storage.verify(ref)
+            stream=storage.open(ref)
+            try:body=b''.join(stream.iter_chunks())
+            finally:stream.close()
+            if hashlib.sha256(body).hexdigest()!=row['sha256']:raise ValueError('Original review bytes changed.')
+        else:body,_,_=download(row['source_url'],row['kind'],preserve_original=True)
+        owned=save_owned(body,row['kind'])
         store.q("""UPDATE sc_review_media SET object_key=%s,sha256=%s,size_bytes=%s,mime_type=%s,storage=%s::jsonb,
           status='COPIED',lease_until=NULL,error_code=NULL WHERE id=%s AND attempts=%s""",
           (owned['object_key'],owned['sha256'],owned['size_bytes'],owned['mime_type'],json.dumps(owned['storage']),row['id'],claim))
