@@ -36,9 +36,24 @@ def elapsed_ready(page):
     return page.evaluate("window.__pageMeasure.ready-window.__pageMeasure.started")
 
 
+def assert_orders_style_layout(page, *, mobile=False):
+    state=page.evaluate("""() => {
+      const style=[...document.querySelectorAll('[data-testid="stMarkdownContainer"] > style')]
+        .find(s=>s.textContent.includes('.st-key-orders_search_text'));
+      const owner=style?.closest('[data-testid="stElementContainer"]');
+      const main=document.querySelector('[data-testid="stMainBlockContainer"]');
+      return {owned:!!owner, height:owner?.getBoundingClientRect().height,
+        padding:parseFloat(getComputedStyle(main).paddingTop)};
+    }""")
+    assert state["owned"], "Orders CSS escaped its fragment-owned element"
+    assert state["height"]==0, "Orders CSS reserved a blank layout slot"
+    assert state["padding"]==(78 if mobile else 72), "Orders CSS did not apply"
+    return state
+
+
 def run(args):
     from playwright.sync_api import sync_playwright
-    sources=["app.py","home_fast.py","display_snapshot.py","orders_page.py"]
+    sources=["app.py","home_fast.py","display_snapshot.py","orders_page.py","orders_page.css"]
     hashes={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in sources}
     results=[]
     args.out.parent.mkdir(parents=True,exist_ok=True)
@@ -85,7 +100,10 @@ def run(args):
                                         record["search_full_app_reruns"]=int(page.locator("#fixture-runs").inner_text())-int(prior_runs)
                                         if mode=="after":
                                             assert record["search_full_app_reruns"]==0
+                                            record["orders_styles"]=assert_orders_style_layout(page)
                                     page.set_viewport_size(dict(width=390,height=844))
+                                    if route=="Orders" and mode=="after":
+                                        record["mobile_orders_styles"]=assert_orders_style_layout(page,mobile=True)
                                     assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
                                     assert not page.get_by_test_id("stException").count(),page.get_by_test_id("stException").all_inner_texts()
                                     assert not errors,errors

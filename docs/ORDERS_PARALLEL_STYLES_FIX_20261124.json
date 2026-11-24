@@ -1,0 +1,175 @@
+{
+  "scope": "Actual Home/Orders loading functions with synthetic read/presentation; not production TTI",
+  "source_sha256": {
+    "app.py": "476db521022f83c4bb7a6d06355710eb4e056f6c5ca0d9b3ff81dc1a90763245",
+    "home_fast.py": "7c3cf3f621a45c2a6fc02aa02637ab314ba2a692ee657b893c7435a06a724802",
+    "display_snapshot.py": "e38d3048d13a44ac29922dc41f98ceec971d460bd41279086fbdad52cdb75fd2",
+    "orders_page.py": "797e27fa2756ec7a162d0049f218eeaec132c25eb5a3f0e5f88401063fed7f3f",
+    "orders_page.css": "c05532397af98ffcda35c97ba6e7d83dc3f65bc62945387fcc3c3949dbd12971"
+  },
+  "results": [
+    {
+      "mode": "before",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 1148.3,
+      "full_app_runs_for_navigation": 2
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 1219.6,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 392.5,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 3175.7,
+      "full_app_runs_for_navigation": 2,
+      "search_ms": 2771.6,
+      "search_full_app_reruns": 1
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 414.8,
+      "full_app_runs_for_navigation": 1
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 746,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 417.9,
+      "search_full_app_reruns": 0,
+      "orders_styles": {
+        "owned": true,
+        "height": 0,
+        "padding": 72
+      },
+      "mobile_orders_styles": {
+        "owned": true,
+        "height": 0,
+        "padding": 78
+      }
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 1877,
+      "full_app_runs_for_navigation": 1,
+      "previous_rows_visible_during_search": true,
+      "search_ms": 1536.2,
+      "search_full_app_reruns": 0,
+      "orders_styles": {
+        "owned": true,
+        "height": 0,
+        "padding": 72
+      },
+      "mobile_orders_styles": {
+        "owned": true,
+        "height": 0,
+        "padding": 78
+      }
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "departure_ms": 186
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "departure_ms": 196
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "check": "failure_retry",
+      "reads": 2,
+      "completion_full_app_reruns": 0
+    }
+  ],
+  "summary": [
+    {
+      "mode": "before",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "n": 1,
+      "median_ms": 1148.3,
+      "range_ms": [
+        1148.3,
+        1148.3
+      ]
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "n": 1,
+      "median_ms": 1219.6,
+      "range_ms": [
+        1219.6,
+        1219.6
+      ]
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "n": 1,
+      "median_ms": 3175.7,
+      "range_ms": [
+        3175.7,
+        3175.7
+      ]
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "n": 1,
+      "median_ms": 414.8,
+      "range_ms": [
+        414.8,
+        414.8
+      ]
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "n": 1,
+      "median_ms": 746,
+      "range_ms": [
+        746,
+        746
+      ]
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "n": 1,
+      "median_ms": 1877,
+      "range_ms": [
+        1877,
+        1877
+      ]
+    }
+  ],
+  "server_log": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 521.221, \"stage\": \"fixture_imports_done\", \"stage_ms\": 521.221}\nINFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 521.997, \"stage\": \"fixture_assembled\", \"stage_ms\": 0.777}\nINFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 777.337, \"stage\": \"lifespan_ready\", \"stage_ms\": 255.339}\nINFO:public_bundle_cache:public_bundle_warm entries=86 compressed_bytes=4293694 elapsed_ms=380.6\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.207, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.068, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.002, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.1, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.235, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.021, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.902, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.548, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.172, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.018, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.1, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.361, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.285, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.523, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=False limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.38, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.187, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.911, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 6.016, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 6.047, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.445, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.153, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.109, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.463, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.138, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.826, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.21, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.665, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.212, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.248, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.233, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.696, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.151, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.716, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.632, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.455, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.615, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.53, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.522, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.616, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.883, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=True limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.729, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.185, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.043, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.079, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.378, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.113, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.439, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=False limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.547, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.572, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.641, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.328, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.417, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.977, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.925, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.35, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.457, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.08, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.79, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.549, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.101, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.695, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.763, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.358, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.305, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.955, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.87, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 6.383, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.692, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.323, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.207, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 6.577, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.604, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.944, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=True limit=75 source=supabase\nPERF Orders page entry\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.557, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.295, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.179, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.093, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.93, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.715, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.314, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.67, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.215, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.055, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.082, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.391, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.102, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.565, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=False limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.413, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.515, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.441, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.426, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.578, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.378, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.348, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.084, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.343, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.452, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.814, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.705, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 16.471, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.504, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.835, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.508, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.137, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.261, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.646, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.899, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.78, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.991, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.614, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.65, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.482, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 7.623, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.567, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.509, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.156, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.407, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.174, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=True limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.537, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.138, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.995, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.114, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.421, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.213, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.069, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=False limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.348, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.543, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.798, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.704, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.976, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.885, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.308, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.3, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.081, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.439, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.464, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.801, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.794, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.047, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.159, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 3.004, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.961, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.515, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.867, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.827, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.178, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.201, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.993, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.629, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.399, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.299, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 6.464, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.561, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.858, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 6.023, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.713, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=True limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.729, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.14, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.001, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.088, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.391, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.067, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.084, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.616, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.32, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.164, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.089, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.231, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.09, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.46, \"stage\": \"bundle\", \"status\": 200}\nPERF Orders page entry\nPERF Orders cache miss query=False limit=75 source=supabase\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.375, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.649, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.853, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.77, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 4.981, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.39, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.513, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.368, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.479, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.587, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 5.468, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 2.367, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.876, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.641, \"stage\": \"document\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.188, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.038, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 0.091, \"stage\": \"websocket_accept\"}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.686, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.372, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.587, \"stage\": \"bundle\", \"status\": 200}\nWARNING:display_snapshot:display_snapshot_refresh_failed type=RuntimeError\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.794, \"stage\": \"bundle\", \"status\": 200}\nINFO:startup_performance:PERF_TRANSPORT {\"duration_ms\": 1.59, \"stage\": \"bundle\", \"status\": 200}\n",
+  "regression": {
+    "before": "Both desktop and mobile parallel-fragment style tests failed with the reported outside-container exception",
+    "after": "Both actual-renderer tests passed",
+    "focused_tests": "104 passed, 16 subtests",
+    "javascript": "14 native Orders tests plus shell checks passed"
+  }
+}

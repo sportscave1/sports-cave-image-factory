@@ -2883,8 +2883,8 @@ def _render_mobile_orders(rows):
     refunded_cards = [f'.st-key-orders-mobile-card-{_mobile_unit_id(row)} p'
                       for row in rows if order_refunds.state(row).get('closed')]
     if refunded_cards:
-        st.html('<style>' + ','.join(refunded_cards) +
-                '{color:#8b929a;text-decoration:line-through;}</style>')
+        st.markdown('<style>' + ','.join(refunded_cards) +
+                    '{color:#8b929a;text-decoration:line-through;}</style>', unsafe_allow_html=True)
     import auto_editions_runtime
     for row in rows:
         unit = _mobile_unit_id(row)
@@ -3061,9 +3061,11 @@ def _wait_for_snapshot_load():
 
 def _render_orders_styles():
     # The existing form key scopes every rule to Orders, including outer padding.
-    # Style-only HTML uses Streamlit's event container, reserving no layout slot.
+    # Keep the style delta in this workspace. st.html routes style-only output
+    # to the global event container, which a parallel fragment cannot write to.
     if getattr(st, "__name__", "") == "streamlit":
-        st.html((Path(__file__).parent / "orders_page.css").read_text(encoding="utf-8"))
+        st.markdown((Path(__file__).parent / "orders_page.css").read_text(encoding="utf-8"),
+                    unsafe_allow_html=True)
 
 
 def render_page(selection_guard=None, *, progressive=False):

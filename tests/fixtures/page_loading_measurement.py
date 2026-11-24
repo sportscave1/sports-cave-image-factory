@@ -79,7 +79,8 @@ if route=="Home":
     home.panel(st,user,date(2026,11,24),"Saved Home section",load_home,show_home)
 elif route=="Orders":
     source=source_file("orders_page.py")
-    ns=dict(st=st,time=time,FutureTimeoutError=FutureTimeoutError,user_scope=user_scope,
+    ns=dict(st=st,time=time,Path=Path,__file__=str(ROOT/"orders_page.py"),
+        FutureTimeoutError=FutureTimeoutError,user_scope=user_scope,
         _ORDERS_LOAD_EXECUTOR=executor,_perf_log=lambda *a,**k:None)
     tree=ast.parse(source)
     for node in tree.body:
@@ -89,7 +90,7 @@ elif route=="Orders":
             for name in node.targets:
                 if isinstance(name,ast.Name):ns[name.id]=value
     names={"_start_snapshot_load","_consume_snapshot_load","_render_orders_loading_fragment",
-           "_wait_for_snapshot_load","render_page","_render_orders_search_form"}
+           "_wait_for_snapshot_load","render_page","_render_orders_search_form","_render_orders_styles"}
     nodes=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in names]
     def ensure():
         for key,value in [(ns["ROWS_KEY"],[]),(ns["META_KEY"],{}),(ns["SNAPSHOT_LOADED_KEY"],False)]:
@@ -109,7 +110,7 @@ elif route=="Orders":
         st.html(f'<span id="orders-ready" data-runs="{st.session_state["full_runs"]}" '
                 f'data-row-count="{len(st.session_state.get(ns["ROWS_KEY"],[]))}" '
                 f'data-query="{st.session_state.get(ns["LOADED_QUERY_KEY"],"")}">{stats["orders"]}</span>')
-    ns.update(_ensure_state=ensure,_render_orders_styles=lambda:None,
+    ns.update(_ensure_state=ensure,
         _async_orders_load_supported=lambda:True,_read_orders_snapshot=read,
         _apply_snapshot_payload=apply,_record_snapshot_load_error=error,
         _render_orders_data_area=data,_render_orders_supabase_live_refresh=lambda:None,
