@@ -58,4 +58,3 @@ def test_reviews_only_permission_keeps_shared_poll_and_refreshes_open_list():
         assert page.evaluate('window.reviewRefreshes')==1
         assert state['calls']==0
         assert state['review_calls']==3
-

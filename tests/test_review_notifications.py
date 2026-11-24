@@ -76,4 +76,3 @@ class ReceiptTests(unittest.TestCase):
     def test_private_arrival_order_preserves_public_date_order(self):
         identity=self.insert()
         self.assertEqual(str(self.store.rows(received_first=True)[0]['id']),identity)
-
