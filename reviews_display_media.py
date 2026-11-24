@@ -3,22 +3,6 @@ from copy import deepcopy
 import hashlib
 import io
 import json
-from urllib.parse import urlsplit
-
-
-def temporary_display_link(ref):
-    from reviews_dropbox import ReviewDropboxStorage
-    from marketplace_dropbox import validate_receipt
-    validate_receipt(ref,1024*1024)
-    result=ReviewDropboxStorage().context['client'].files_get_temporary_link(ref['id'])
-    metadata=result.metadata
-    if metadata.id!=ref['id'] or metadata.rev!=ref['rev'] or metadata.size!=ref['size']:
-        raise ValueError('Dropbox display revision changed.')
-    url=urlsplit(result.link)
-    host=url.hostname or ''
-    if url.scheme!='https' or not (host=='dl.dropboxusercontent.com' or host.endswith('.dl.dropboxusercontent.com')) or url.username or url.password:
-        raise ValueError('Invalid Dropbox display URL.')
-    return result.link
 
 
 def public_media(store,identity):

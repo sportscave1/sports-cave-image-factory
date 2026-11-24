@@ -98,14 +98,6 @@ async def review_media(identity:str,request:Request):
         headers={'Cache-Control':'public,max-age=300','Referrer-Policy':'no-referrer','Accept-Ranges':'bytes',
           'ETag':'"'+ref['sha256']+'"','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'*',
           'Access-Control-Expose-Headers':'Content-Length,Content-Range,Accept-Ranges,ETag'}
-        if request.method=='GET' and size=='640' and media['kind']=='image' and request.query_params.get('delivery')=='dropbox' and not request.headers.get('range'):
-            from reviews_display_media import temporary_display_link
-            from fastapi.responses import RedirectResponse
-            try:
-                link=await run_in_threadpool(load,store,('dropbox-display',identity,ref['sha256']),lambda:temporary_display_link(ref),900)
-                return RedirectResponse(link,status_code=307,headers={'Cache-Control':'public,max-age=300','Referrer-Policy':'no-referrer','Access-Control-Allow-Origin':'*'})
-            except Exception:
-                pass
         if request.headers.get('if-none-match')==headers['ETag'] and not request.headers.get('range'):return Response(status_code=304,headers=headers)
         if request.headers.get('range'):
             import re
