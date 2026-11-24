@@ -50,3 +50,25 @@ authenticated production timing.
 OS performance CI now includes both layout tests and the real CSS browser
 path. Final commit, CI and live deployment verification are recorded in the
 release receipt after deployment. No production data is used in fixtures.
+
+## Live verification
+
+Runtime 8aa51daaf74c4f976856dc265265bdd12d74fe24 is live on the existing
+primary app, webhook and SEO worker services. Main OS performance CI passed
+125 tests and 22 subtests, plus JavaScript and real-browser checks.
+
+The actual signed-in Sports Cave OS window was refreshed after deployment.
+Orders displayed its table successfully. A nonmatching search completed without
+the layout exception, and clearing the search restored the normal table.
+No fulfilment or supplier actions were invoked, no orders were changed, and
+no credentials were entered.
+Only verification booleans are saved; no customer data/screenshots were copied
+to the repository.
+
+Primary health endpoints and webhook health returned 200. The checked primary
+logs after 10:52:35 UTC contained no Orders page-render failure or layout-context
+exception. Exact deployment IDs, CI states and the read-only UI checks are in
+ORDERS_PARALLEL_STYLES_FIX_20261124_LIVE.json.
+
+The extended Orders QA release gate also passed on the exact runtime revision:
+GitHub Actions 45378263449. No performance changes were rolled back.

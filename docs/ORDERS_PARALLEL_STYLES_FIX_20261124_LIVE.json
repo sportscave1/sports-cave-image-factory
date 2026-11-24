@@ -1,0 +1,88 @@
+{
+  "task": "20261124-a55b7bbe",
+  "runtime_commit": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+  "previous_runtime": "a6ec215cd87705454d22b03dda2b51261102f2d6",
+  "ci": {
+    "id": 45377850717,
+    "status": "completed",
+    "conclusion": "success",
+    "sha": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+    "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45377850717"
+  },
+  "main_performance_ci": {
+    "id": 45378263137,
+    "status": "completed",
+    "conclusion": "success",
+    "sha": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+    "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45378263137"
+  },
+  "orders_qa_ci": {
+    "id": 45378263449,
+    "status": "completed",
+    "conclusion": "success",
+    "sha": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+    "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45378263449"
+  },
+  "deployments": [
+    {
+      "service": "srv-d8kl4on7f7vs73dvavv0",
+      "id": "dep-dc2mmvgae00c73du80lg",
+      "status": "live",
+      "sha": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+      "createdAt": "2026-11-24T10:48:30.401051Z",
+      "finishedAt": "2026-11-24T10:51:41.290435Z"
+    },
+    {
+      "service": "srv-d9146onlk1mc739nrm7g",
+      "id": "dep-dc2mmvgae00c73du82lg",
+      "status": "live",
+      "sha": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+      "createdAt": "2026-11-24T10:48:30.568611Z",
+      "finishedAt": "2026-11-24T10:50:13.908174Z"
+    },
+    {
+      "service": "srv-d9ujm9navr4c73amurgg",
+      "id": "dep-dc2mmvgae00c73du8310",
+      "status": "live",
+      "sha": "8aa51daaf74c4f976856dc265265bdd12d74fe24",
+      "createdAt": "2026-11-24T10:48:30.625203Z",
+      "finishedAt": "2026-11-24T10:49:49.157663Z"
+    }
+  ],
+  "live_ui": {
+    "method": "Native read-only interaction with user's already signed-in Sports Cave OS window",
+    "orders_table_visible": true,
+    "search_form_visible": true,
+    "nonmatching_search_completed_without_layout_error": true,
+    "normal_unfiltered_view_restored": true,
+    "layout_error": false,
+    "page_failure": false,
+    "credentials_entered": false,
+    "order_mutations_performed": false,
+    "customer_data_saved_to_repository": false
+  },
+  "health": {
+    "primary_stcore": 200,
+    "primary_healthz": 200,
+    "webhook_healthz": 200
+  },
+  "orders_error_scan": {
+    "count": 0,
+    "hasMore": false,
+    "startTime": "2026-11-24T10:52:35Z",
+    "timestamps": []
+  },
+  "preserved_performance": {
+    "parallel_fragment": true,
+    "progressive_completion": true,
+    "pooled_reads": true,
+    "brotli": true,
+    "auth_fast_path": true,
+    "other_performance_runtime_files_unchanged": true
+  },
+  "regression": {
+    "before": "Both actual desktop/mobile fragment style tests fail on previous runtime",
+    "after": "125 CI tests and 22 subtests pass with real CSS browser path; local 104 tests/16 subtests and 14 Orders JavaScript tests pass"
+  },
+  "verified_at_utc": "2026-11-24T11:03:34Z"
+}
