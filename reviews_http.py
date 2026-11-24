@@ -25,7 +25,7 @@ async def storefront_widget(request:Request):
         offset=int(request.query_params.get('offset','0'))
         if not 0<=offset<=50000:return Response(status_code=400)
         origin=str(request.base_url).rstrip('/')
-        data=await run_in_threadpool(load,store,('widget-v1',origin,country,offset),lambda:projection(store,origin,country,offset))
+        data=await run_in_threadpool(load,store,('widget-v1',origin,country,offset),lambda:projection(store,origin,country,offset,settings))
         return JSONResponse(jsonable_encoder(data),headers={'Access-Control-Allow-Origin':'*','Cache-Control':'public,max-age=30','X-Content-Type-Options':'nosniff'})
     except (ValueError,TypeError):return Response(status_code=400)
     except Exception:return Response(status_code=503)
@@ -183,7 +183,7 @@ async def read_submission(request):
 def form_html(title,token=None,reward=None):
     html=FORM_STYLE+'<main><h1>Share your review</h1><p>'+escape(title)+'</p><form method="post" enctype="multipart/form-data"><label>Rating<select name="rating" required>'+''.join('<option value="'+str(n)+'">'+str(n)+' stars</option>' for n in (5,4,3,2,1))+'</select></label><label>Display name<input name="reviewer_name" maxlength="120" required></label><label>Title<input name="title" maxlength="200"></label><label>Review<textarea name="body" maxlength="5000" required rows="5"></textarea></label><label>Photos or video (optional)<input type="file" name="media" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" multiple></label><p>Up to 5 files: images up to 10 MB each, one video up to 50 MB, 65 MB total. Files are reviewed before display.</p><label class="trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label><label><input type="checkbox" name="display_consent" value="yes" required>Display my review, attached media and chosen name publicly</label><button type="submit">Submit review</button></form></main>'
     if token:html=html.replace('<label>Rating','<input type="hidden" name="form_token" value="'+escape(token,quote=True)+'">'+'<label>Rating')
-    html=html.replace('<h1>Share your review</h1>','<p>SPORTS CAVE · COLLECT. CELEBRATE. KEEP FOREVER.</p><h1>Share your review</h1>')
+    html=html.replace('<h1>Share your review</h1>','<p>SPORTS CAVE Â· COLLECT. CELEBRATE. KEEP FOREVER.</p><h1>Share your review</h1>')
     if reward and reward.get('rewards_enabled'):
         text=f"<p>Once approved, eligible verified buyers receive {int(reward['image_percent'])}% for a photo or {int(reward['video_percent'])}% for a video. One reward per order, valid for 30 days. Your rating never affects the reward.</p>"
         html=html.replace('<label>Photos or video',text+'<label>Photos or video')

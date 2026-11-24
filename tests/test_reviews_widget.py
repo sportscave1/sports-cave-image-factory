@@ -60,6 +60,9 @@ class WidgetSQLTests(unittest.TestCase):
         self.assertEqual(au['featured'][0]['legacy_id'],FEATURED[0])
         self.assertTrue(au['featured'][0]['media'][0]['thumbnail_url'].endswith('?size=320'))
         self.assertNotIn('source_review_id',au['featured'][0]);self.assertEqual(sum(c for _,c in au['histogram']),9)
+        with patch.object(store,'connect',side_effect=connect) as connection:
+            projection(store,'https://fixture.example','AU',settings={'verified':True})
+            self.assertEqual(connection.call_count,1)
 
 
 if __name__=='__main__':unittest.main()
