@@ -1,0 +1,2484 @@
+{
+  "runtime_commit": "dddc13be9d813660a063e7c585a9cf4d4a12dcaf",
+  "test_harness_commit": "3e649eada803de3742b5c979c0d350823dec9afb",
+  "primary": {
+    "service": "srv-d8kl4on7f7vs73dvavv0",
+    "id": "dep-dc2m83m7bikc73fsqfcg",
+    "status": "live",
+    "sha": "dddc13be9d813660a063e7c585a9cf4d4a12dcaf",
+    "finishedAt": "2026-11-24T10:19:54.065565Z"
+  },
+  "webhooks": {
+    "service": "srv-d9146onlk1mc739nrm7g",
+    "id": "dep-dc2m83m7bikc73fsqhd0",
+    "status": "live",
+    "sha": "dddc13be9d813660a063e7c585a9cf4d4a12dcaf",
+    "finishedAt": "2026-11-24T10:18:21.93667Z"
+  },
+  "seo_worker": {
+    "service": "srv-d9ujm9navr4c73amurgg",
+    "id": "dep-dc2m83m7bikc73fsqhog",
+    "status": "live",
+    "sha": "dddc13be9d813660a063e7c585a9cf4d4a12dcaf",
+    "finishedAt": "2026-11-24T10:18:13.398132Z"
+  },
+  "cron": {
+    "id": "crn-d9ujqvvqj5pc73fpe0ag",
+    "state": "suspended",
+    "action": "Preserved existing suspension; not run, resumed or deployed"
+  },
+  "performance_ci": {
+    "id": 45372812167,
+    "status": "completed",
+    "conclusion": "success",
+    "sha": "dddc13be9d813660a063e7c585a9cf4d4a12dcaf",
+    "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45372812167"
+  },
+  "main_ci_at_observation": [
+    {
+      "id": 45373253635,
+      "name": "Orders QA release gate",
+      "branch": "main",
+      "status": "in_progress",
+      "conclusion": null,
+      "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45373253635"
+    },
+    {
+      "id": 45373253675,
+      "name": "Collection and certificate release gate",
+      "branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45373253675"
+    },
+    {
+      "id": 45373253587,
+      "name": "OS Home Orders performance",
+      "branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45373253587"
+    },
+    {
+      "id": 45373253631,
+      "name": "Reviews startup regression",
+      "branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45373253631"
+    },
+    {
+      "id": 45372812167,
+      "name": "OS Home Orders performance",
+      "branch": "codex/task/core-phase-1-app-startup-performance-measuremen-20261124-564ab6e2",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/sportscave1/sports-cave-image-factory/actions/runs/45372812167"
+    }
+  ],
+  "error_scan": {
+    "count": 0,
+    "hasMore": false,
+    "entries": []
+  },
+  "startup_logs": [
+    {
+      "timestamp": "2026-11-24T10:19:10.970695664Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 4972.843, \"stage\": \"route_imports_done\", \"stage_ms\": 4972.843}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:10.988482539Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 4990.496, \"stage\": \"application_assembled\", \"stage_ms\": 17.653}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:11.079566701Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 5081.885, \"stage\": \"deployment_migrations_start\", \"stage_ms\": 91.389}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:11.828438667Z",
+      "message": "INFO:public_bundle_cache:public_bundle_warm entries=213 compressed_bytes=6285892 elapsed_ms=840.7"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:36.507138563Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 30507.32, \"stage\": \"deployment_migrations_done\", \"stage_ms\": 25425.434}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:36.507158564Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 30507.487, \"stage\": \"seo_storage_start\", \"stage_ms\": 0.168}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.576955451Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40579.217, \"stage\": \"seo_storage_done\", \"stage_ms\": 10071.73}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.576986652Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40579.387, \"stage\": \"vault_readiness_start\", \"stage_ms\": 0.17}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.577315501Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40579.657, \"stage\": \"vault_readiness_done\", \"stage_ms\": 0.269}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.577324401Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40579.767, \"stage\": \"quiz_reconciler_start\", \"stage_ms\": 0.11}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.580440244Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40582.816, \"stage\": \"quiz_reconciler_done\", \"stage_ms\": 3.049}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.580697821Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40583.063, \"stage\": \"crm_reconciler_start\", \"stage_ms\": 0.247}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.594678514Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40596.937, \"stage\": \"crm_reconciler_done\", \"stage_ms\": 13.874}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.595392863Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40597.717, \"stage\": \"thumbnail_warmup_start\", \"stage_ms\": 0.78}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.634917878Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40637.108, \"stage\": \"thumbnail_warmup_done\", \"stage_ms\": 39.391}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.63537031Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40637.314, \"stage\": \"editions_worker_start\", \"stage_ms\": 0.206}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.640126457Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40642.076, \"stage\": \"editions_worker_done\", \"stage_ms\": 4.762}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.640140117Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40642.188, \"stage\": \"order_tracking_worker_start\", \"stage_ms\": 0.112}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.693190382Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40694.495, \"stage\": \"order_tracking_worker_done\", \"stage_ms\": 52.307}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.693238654Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40695.639, \"stage\": \"read_pool_warmup_start\", \"stage_ms\": 1.144}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.863090646Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40864.79, \"stage\": \"read_pool_warmup_done\", \"stage_ms\": 169.15}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:46.863108316Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 40864.964, \"stage\": \"listener_dispatch\", \"stage_ms\": 0.174}"
+    },
+    {
+      "timestamp": "2026-11-24T10:19:49.132250814Z",
+      "message": "INFO:startup_performance:PERF_BOOT {\"elapsed_ms\": 43134.299, \"stage\": \"lifespan_ready\", \"stage_ms\": 2269.336}"
+    }
+  ],
+  "limitations": [
+    "Synthetic timings are not authenticated live Home/Orders TTI.",
+    "Live browser check uses a new anonymous session, no credentials submitted.",
+    "Existing deployment migrations and SEO readiness remain synchronous; observed process lifespan readiness was 43.134 seconds after process start, distinct from opening the already-running app."
+  ],
+  "live_before": {
+    "scope": "Public unauthenticated shell/health/assets only, no business workflows or customer data",
+    "utc": "2026-11-24T10:15:21Z",
+    "passed": true,
+    "checks": [
+      {
+        "path": "/_stcore/health",
+        "status": 200,
+        "elapsed_ms": 486.37,
+        "encoding": "br",
+        "content_length": "7",
+        "cache_control": "no-store",
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/healthz",
+        "status": 200,
+        "elapsed_ms": 201.7,
+        "encoding": "br",
+        "content_length": "7",
+        "cache_control": "no-store",
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/healthz",
+        "status": 200,
+        "elapsed_ms": 878.19,
+        "encoding": "br",
+        "content_length": "126",
+        "cache_control": null,
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/",
+        "status": 200,
+        "elapsed_ms": 313.74,
+        "encoding": "br",
+        "content_length": "2639",
+        "cache_control": "no-cache",
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 211.78,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 255.74,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 213.42,
+        "encoding": "gzip",
+        "content_length": "7840",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 502.39,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 218.9,
+        "encoding": "br",
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 210.57,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 209.12,
+        "encoding": "gzip",
+        "content_length": "7840",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 194.78,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 206,
+        "elapsed_ms": 202.71,
+        "encoding": "br",
+        "content_length": "82",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "\"65e5c7b04e38d5f734d17beed63eb71e\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 415.03,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 197.46,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 401.6,
+        "encoding": "gzip",
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 290.33,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 326.83,
+        "encoding": "br",
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 229.89,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 332.21,
+        "encoding": "gzip",
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 187.37,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 206,
+        "elapsed_ms": 204.42,
+        "encoding": "br",
+        "content_length": "87",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "\"6485bff9cf55654963f14ea0554a16a9\"",
+        "server_timing": null
+      }
+    ],
+    "head_passed": true
+  },
+  "live_after": {
+    "scope": "Public unauthenticated shell/health/assets only, no business workflows or customer data",
+    "utc": "2026-11-24T10:21:18Z",
+    "passed": true,
+    "checks": [
+      {
+        "path": "/_stcore/health",
+        "status": 200,
+        "elapsed_ms": 659.93,
+        "encoding": "br",
+        "content_length": "7",
+        "cache_control": "no-store",
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/healthz",
+        "status": 200,
+        "elapsed_ms": 318.72,
+        "encoding": "br",
+        "content_length": "7",
+        "cache_control": "no-store",
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/healthz",
+        "status": 200,
+        "elapsed_ms": 596.44,
+        "encoding": "br",
+        "content_length": "127",
+        "cache_control": null,
+        "etag": null,
+        "server_timing": null
+      },
+      {
+        "path": "/",
+        "status": 200,
+        "elapsed_ms": 210.67,
+        "encoding": "br",
+        "content_length": "2639",
+        "cache_control": "no-cache",
+        "etag": null,
+        "server_timing": "os_headers;dur=4.339"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 313.29,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.276"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 199.38,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.704"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 279.42,
+        "encoding": "gzip",
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.542"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 320.06,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=2.076"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 327.44,
+        "encoding": "br",
+        "content_length": "7070",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.448"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 198.95,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.061"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 200,
+        "elapsed_ms": 210.24,
+        "encoding": "br",
+        "content_length": "7070",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.338"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 304,
+        "elapsed_ms": 229.66,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.493"
+      },
+      {
+        "path": "/static/css/index.C1JORDN2.css",
+        "status": 206,
+        "elapsed_ms": 313.6,
+        "encoding": "br",
+        "content_length": "82",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "\"a93e8e669901e22c000a50b8319356ce\"",
+        "server_timing": "os_headers;dur=1.153"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 485.46,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=1.419"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 194.65,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=1.182"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 390.97,
+        "encoding": "gzip",
+        "content_length": null,
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=1.338"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 208.98,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=1.329"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 355.57,
+        "encoding": "br",
+        "content_length": "135401",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=2.055"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 187.13,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=2.489"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 200,
+        "elapsed_ms": 271.95,
+        "encoding": "br",
+        "content_length": "135401",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "W/\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=8.593"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 304,
+        "elapsed_ms": 185.72,
+        "encoding": null,
+        "content_length": null,
+        "cache_control": null,
+        "etag": "\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=2.046"
+      },
+      {
+        "path": "/static/js/index.DormvYxC.js",
+        "status": 206,
+        "elapsed_ms": 493.18,
+        "encoding": "br",
+        "content_length": "87",
+        "cache_control": "public, immutable, max-age=31536000",
+        "etag": "\"1012131eb878e2917439e8b742219fdc\"",
+        "server_timing": "os_headers;dur=2.007"
+      }
+    ],
+    "head_passed": true
+  },
+  "live_signin_browser": {
+    "scope": "Unauthenticated live Sign in only; no credentials submitted or authenticated pages accessed",
+    "samples": [
+      {
+        "cached_reload": false,
+        "ready_ms": 4428.199999999255,
+        "bundles": [
+          {
+            "path": "/static/js/emotion-is-prop-valid.esm.CkL99N7j.js",
+            "transfer_bytes": 4796,
+            "encoded_bytes": 4496
+          },
+          {
+            "path": "/static/js/rolldown-runtime.BCiCTKAo.js",
+            "transfer_bytes": 959,
+            "encoded_bytes": 659
+          },
+          {
+            "path": "/static/js/index.DormvYxC.js",
+            "transfer_bytes": 135701,
+            "encoded_bytes": 135401
+          },
+          {
+            "path": "/static/js/loglevel.DMC__dHv.js",
+            "transfer_bytes": 1622,
+            "encoded_bytes": 1322
+          },
+          {
+            "path": "/static/js/emotion-styled.browser.esm.DdOkyKg_.js",
+            "transfer_bytes": 8691,
+            "encoded_bytes": 8391
+          },
+          {
+            "path": "/static/js/emotion-react.browser.esm.Dz233AqG.js",
+            "transfer_bytes": 1018,
+            "encoded_bytes": 718
+          },
+          {
+            "path": "/static/js/src.ClCGuae5.js",
+            "transfer_bytes": 792,
+            "encoded_bytes": 492
+          },
+          {
+            "path": "/static/js/react-dom.Dzbslgj4.js",
+            "transfer_bytes": 41080,
+            "encoded_bytes": 40780
+          },
+          {
+            "path": "/static/js/types.DosXGzv6.js",
+            "transfer_bytes": 368,
+            "encoded_bytes": 68
+          },
+          {
+            "path": "/static/js/opacities.Blb4Ho7_.js",
+            "transfer_bytes": 8129,
+            "encoded_bytes": 7829
+          },
+          {
+            "path": "/static/js/isSymbol.CmW3dkoN.js",
+            "transfer_bytes": 685,
+            "encoded_bytes": 385
+          },
+          {
+            "path": "/static/js/toString.tRXNBxtF.js",
+            "transfer_bytes": 571,
+            "encoded_bytes": 271
+          },
+          {
+            "path": "/static/js/protobuf.D55wl0P7.js",
+            "transfer_bytes": 86861,
+            "encoded_bytes": 86561
+          },
+          {
+            "path": "/static/js/isArrayLikeObject.B3Zf3PTL.js",
+            "transfer_bytes": 3932,
+            "encoded_bytes": 3632
+          },
+          {
+            "path": "/static/js/isArrayLike.Crw2F5li.js",
+            "transfer_bytes": 672,
+            "encoded_bytes": 372
+          },
+          {
+            "path": "/static/js/merge.UVaQM33U.js",
+            "transfer_bytes": 2875,
+            "encoded_bytes": 2575
+          },
+          {
+            "path": "/static/js/_isIterateeCall.BUStsXAd.js",
+            "transfer_bytes": 800,
+            "encoded_bytes": 500
+          },
+          {
+            "path": "/static/js/_baseFlatten.IOj0lc7G.js",
+            "transfer_bytes": 568,
+            "encoded_bytes": 268
+          },
+          {
+            "path": "/static/js/utils.ob4wbeQt.js",
+            "transfer_bytes": 13760,
+            "encoded_bytes": 13460
+          },
+          {
+            "path": "/static/js/last.DfjdtCRp.js",
+            "transfer_bytes": 495,
+            "encoded_bytes": 195
+          },
+          {
+            "path": "/static/js/UriUtil.CZTdJmE_.js",
+            "transfer_bytes": 6408,
+            "encoded_bytes": 6108
+          },
+          {
+            "path": "/static/js/useCrossOriginAttribute.bh_PwhC9.js",
+            "transfer_bytes": 499,
+            "encoded_bytes": 199
+          },
+          {
+            "path": "/static/js/useFloatingOverlay.DbDkOVFr.js",
+            "transfer_bytes": 15179,
+            "encoded_bytes": 14879
+          },
+          {
+            "path": "/static/js/useEmotionTheme.CMOlE5Fg.js",
+            "transfer_bytes": 382,
+            "encoded_bytes": 82
+          },
+          {
+            "path": "/static/js/styled-components.XLtagUku.js",
+            "transfer_bytes": 21157,
+            "encoded_bytes": 20857
+          },
+          {
+            "path": "/static/js/lib.DTkPmFNq.js",
+            "transfer_bytes": 1278,
+            "encoded_bytes": 978
+          },
+          {
+            "path": "/static/js/Tooltip.BGkP9bdt.js",
+            "transfer_bytes": 2834,
+            "encoded_bytes": 2534
+          },
+          {
+            "path": "/static/js/lib.BsvoAB7F.js",
+            "transfer_bytes": 1653,
+            "encoded_bytes": 1353
+          },
+          {
+            "path": "/static/js/lib.BRCtjBvA.js",
+            "transfer_bytes": 984,
+            "encoded_bytes": 684
+          },
+          {
+            "path": "/static/js/ErrorElement.CdpA6bz6.js",
+            "transfer_bytes": 2673,
+            "encoded_bytes": 2373
+          },
+          {
+            "path": "/static/js/preload-helper.CRzLMJPS.js",
+            "transfer_bytes": 1025,
+            "encoded_bytes": 725
+          },
+          {
+            "path": "/static/js/space-separated-tokens.tMK6mh18.js",
+            "transfer_bytes": 6601,
+            "encoded_bytes": 6301
+          },
+          {
+            "path": "/static/js/_baseProperty.BV6HSwpm.js",
+            "transfer_bytes": 350,
+            "encoded_bytes": 50
+          },
+          {
+            "path": "/static/js/_baseEach.PLhpSRgM.js",
+            "transfer_bytes": 1176,
+            "encoded_bytes": 876
+          },
+          {
+            "path": "/static/js/_baseIsEqual.sdZCjgvS.js",
+            "transfer_bytes": 1774,
+            "encoded_bytes": 1474
+          },
+          {
+            "path": "/static/js/StreamlitMarkdown.oOG-xoxw.js",
+            "transfer_bytes": 65497,
+            "encoded_bytes": 65197
+          },
+          {
+            "path": "/static/js/Icon.D6z6tTSi.js",
+            "transfer_bytes": 1299,
+            "encoded_bytes": 999
+          },
+          {
+            "path": "/static/js/FlexContext.BkFprQkj.js",
+            "transfer_bytes": 876,
+            "encoded_bytes": 576
+          },
+          {
+            "path": "/static/js/utils.BJVSE7F9.js",
+            "transfer_bytes": 656,
+            "encoded_bytes": 356
+          },
+          {
+            "path": "/static/js/DynamicIcon.DBX1tTbE.js",
+            "transfer_bytes": 1999,
+            "encoded_bytes": 1699
+          },
+          {
+            "path": "/static/js/useCollection.DU7tSg4K.js",
+            "transfer_bytes": 12641,
+            "encoded_bytes": 12341
+          },
+          {
+            "path": "/static/js/useDescription.BB3ShmHg.js",
+            "transfer_bytes": 1678,
+            "encoded_bytes": 1378
+          },
+          {
+            "path": "/static/js/useLabel.BAkLcsHg.js",
+            "transfer_bytes": 711,
+            "encoded_bytes": 411
+          },
+          {
+            "path": "/static/js/Text.RYl_ExSr.js",
+            "transfer_bytes": 821,
+            "encoded_bytes": 521
+          },
+          {
+            "path": "/static/js/shim.DT7uHSse.js",
+            "transfer_bytes": 764,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/LiveAnnouncer.CRX7YBAA.js",
+            "transfer_bytes": 1840,
+            "encoded_bytes": 1540
+          },
+          {
+            "path": "/static/js/NumberFormatter.nhsGk7J2.js",
+            "transfer_bytes": 1056,
+            "encoded_bytes": 756
+          },
+          {
+            "path": "/static/js/number.CgCAQqZj.js",
+            "transfer_bytes": 799,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/ProgressBar.BbP4hvQX.js",
+            "transfer_bytes": 1022,
+            "encoded_bytes": 722
+          },
+          {
+            "path": "/static/js/BaseButton.GsR4p1Eu.js",
+            "transfer_bytes": 949,
+            "encoded_bytes": 649
+          },
+          {
+            "path": "/static/js/useResizeObserver.CWV4GVHX.js",
+            "transfer_bytes": 870,
+            "encoded_bytes": 570
+          },
+          {
+            "path": "/static/js/FormClearHelper.uMwNzhNQ.js",
+            "transfer_bytes": 673,
+            "encoded_bytes": 373
+          },
+          {
+            "path": "/static/js/useTimeout.odDhD3su.js",
+            "transfer_bytes": 644,
+            "encoded_bytes": 344
+          },
+          {
+            "path": "/static/js/index.esm.CnlgfcEa.js",
+            "transfer_bytes": 1332,
+            "encoded_bytes": 1032
+          },
+          {
+            "path": "/static/js/ContentCopy.esm.C1nEcpQW.js",
+            "transfer_bytes": 723,
+            "encoded_bytes": 423
+          },
+          {
+            "path": "/static/js/Check.esm.SwE3eUIH.js",
+            "transfer_bytes": 677,
+            "encoded_bytes": 377
+          },
+          {
+            "path": "/static/js/Toolbar.IoDGB_NU.js",
+            "transfer_bytes": 1411,
+            "encoded_bytes": 1111
+          },
+          {
+            "path": "/static/js/useRequiredContext.fKi1tqMI.js",
+            "transfer_bytes": 498,
+            "encoded_bytes": 198
+          },
+          {
+            "path": "/static/js/useCopyToClipboard.Cdni2W2w.js",
+            "transfer_bytes": 689,
+            "encoded_bytes": 389
+          },
+          {
+            "path": "/static/css/index.C1JORDN2.css",
+            "transfer_bytes": 7370,
+            "encoded_bytes": 7070
+          },
+          {
+            "path": "/static/js/IFrame.DoeBhz7M.js",
+            "transfer_bytes": 1804,
+            "encoded_bytes": 1504
+          },
+          {
+            "path": "/static/js/IFrameUtil.PlC_b34Z.js",
+            "transfer_bytes": 633,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/rehype-raw.DgJ5HSkU.js",
+            "transfer_bytes": 52954,
+            "encoded_bytes": 52654
+          },
+          {
+            "path": "/static/js/hastscript.BRLGlqm4.js",
+            "transfer_bytes": 1694,
+            "encoded_bytes": 1394
+          },
+          {
+            "path": "/static/js/web-namespaces.BxZ_GhEx.js",
+            "transfer_bytes": 422,
+            "encoded_bytes": 122
+          },
+          {
+            "path": "/static/js/remark-emoji.CE8lxIK6.js",
+            "transfer_bytes": 2190,
+            "encoded_bytes": 1890
+          },
+          {
+            "path": "/static/js/lib.CQXimEhy.js",
+            "transfer_bytes": 53441,
+            "encoded_bytes": 53141
+          },
+          {
+            "path": "/static/js/TextInput.MPWivlu9.js",
+            "transfer_bytes": 4467,
+            "encoded_bytes": 4167
+          },
+          {
+            "path": "/static/js/Input.gDbGmgmu.js",
+            "transfer_bytes": 1001,
+            "encoded_bytes": 701
+          },
+          {
+            "path": "/static/js/TextField.DdIhIiQe.js",
+            "transfer_bytes": 1113,
+            "encoded_bytes": 813
+          },
+          {
+            "path": "/static/js/Autocomplete.egUn8L68.js",
+            "transfer_bytes": 445,
+            "encoded_bytes": 145
+          },
+          {
+            "path": "/static/js/useFormValidation.D2i_isRP.js",
+            "transfer_bytes": 1812,
+            "encoded_bytes": 1512
+          },
+          {
+            "path": "/static/js/useFormReset.Dsqx1XhY.js",
+            "transfer_bytes": 550,
+            "encoded_bytes": 250
+          },
+          {
+            "path": "/static/js/useField.CsWac_7E.js",
+            "transfer_bytes": 576,
+            "encoded_bytes": 276
+          },
+          {
+            "path": "/static/js/useTextField.bKQiMZTR.js",
+            "transfer_bytes": 1139,
+            "encoded_bytes": 839
+          },
+          {
+            "path": "/static/js/ErrorOutline.esm.DyT67HL2.js",
+            "transfer_bytes": 741,
+            "encoded_bytes": 441
+          },
+          {
+            "path": "/static/js/Cancel.esm.B65EWHgo.js",
+            "transfer_bytes": 764,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/WidgetLabel.C381QnN0.js",
+            "transfer_bytes": 694,
+            "encoded_bytes": 394
+          },
+          {
+            "path": "/static/js/styled-components.kM4tXvFQ.js",
+            "transfer_bytes": 799,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/InputInstructions.aWDQxtQS.js",
+            "transfer_bytes": 893,
+            "encoded_bytes": 593
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIcon.DIAPaBJl.js",
+            "transfer_bytes": 649,
+            "encoded_bytes": 349
+          },
+          {
+            "path": "/static/js/useBasicWidgetState.8xeaSejc.js",
+            "transfer_bytes": 1046,
+            "encoded_bytes": 746
+          },
+          {
+            "path": "/static/js/inputUtils.CnlRnOxS.js",
+            "transfer_bytes": 402,
+            "encoded_bytes": 102
+          },
+          {
+            "path": "/static/js/useDebouncedCallback.By9MfI_m.js",
+            "transfer_bytes": 629,
+            "encoded_bytes": 329
+          },
+          {
+            "path": "/static/js/requiredField.CNcKXcSP.js",
+            "transfer_bytes": 398,
+            "encoded_bytes": 98
+          },
+          {
+            "path": "/static/js/useUpdateUiValue.Crj2LZcQ.js",
+            "transfer_bytes": 633,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/Checkbox.CaT4asBe.js",
+            "transfer_bytes": 4400,
+            "encoded_bytes": 4100
+          },
+          {
+            "path": "/static/js/useSlot.CXZFle1D.js",
+            "transfer_bytes": 574,
+            "encoded_bytes": 274
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIconInline.COAzYW2l.js",
+            "transfer_bytes": 582,
+            "encoded_bytes": 282
+          },
+          {
+            "path": "/static/js/checkboxIndicatorStyles.Cz7_ncjO.js",
+            "transfer_bytes": 757,
+            "encoded_bytes": 457
+          }
+        ],
+        "errors": []
+      },
+      {
+        "cached_reload": true,
+        "ready_ms": 3020.7999999998137,
+        "bundles": [
+          {
+            "path": "/static/js/index.DormvYxC.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 135401
+          },
+          {
+            "path": "/static/js/rolldown-runtime.BCiCTKAo.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 659
+          },
+          {
+            "path": "/static/js/emotion-is-prop-valid.esm.CkL99N7j.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 4496
+          },
+          {
+            "path": "/static/js/emotion-styled.browser.esm.DdOkyKg_.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 8391
+          },
+          {
+            "path": "/static/js/loglevel.DMC__dHv.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1322
+          },
+          {
+            "path": "/static/js/react-dom.Dzbslgj4.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 40780
+          },
+          {
+            "path": "/static/js/emotion-react.browser.esm.Dz233AqG.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 718
+          },
+          {
+            "path": "/static/js/src.ClCGuae5.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 492
+          },
+          {
+            "path": "/static/js/opacities.Blb4Ho7_.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 7829
+          },
+          {
+            "path": "/static/js/types.DosXGzv6.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 68
+          },
+          {
+            "path": "/static/js/protobuf.D55wl0P7.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 86561
+          },
+          {
+            "path": "/static/js/isSymbol.CmW3dkoN.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 385
+          },
+          {
+            "path": "/static/js/toString.tRXNBxtF.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 271
+          },
+          {
+            "path": "/static/js/isArrayLike.Crw2F5li.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 372
+          },
+          {
+            "path": "/static/js/_isIterateeCall.BUStsXAd.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 500
+          },
+          {
+            "path": "/static/js/isArrayLikeObject.B3Zf3PTL.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 3632
+          },
+          {
+            "path": "/static/js/merge.UVaQM33U.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 2575
+          },
+          {
+            "path": "/static/js/_baseFlatten.IOj0lc7G.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 268
+          },
+          {
+            "path": "/static/js/last.DfjdtCRp.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 195
+          },
+          {
+            "path": "/static/js/utils.ob4wbeQt.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 13460
+          },
+          {
+            "path": "/static/js/UriUtil.CZTdJmE_.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 6108
+          },
+          {
+            "path": "/static/js/useCrossOriginAttribute.bh_PwhC9.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 199
+          },
+          {
+            "path": "/static/js/useEmotionTheme.CMOlE5Fg.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 82
+          },
+          {
+            "path": "/static/js/styled-components.XLtagUku.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 20857
+          },
+          {
+            "path": "/static/js/useFloatingOverlay.DbDkOVFr.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 14879
+          },
+          {
+            "path": "/static/js/Tooltip.BGkP9bdt.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 2534
+          },
+          {
+            "path": "/static/js/lib.DTkPmFNq.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 978
+          },
+          {
+            "path": "/static/js/lib.BRCtjBvA.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 684
+          },
+          {
+            "path": "/static/js/lib.BsvoAB7F.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1353
+          },
+          {
+            "path": "/static/js/space-separated-tokens.tMK6mh18.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 6301
+          },
+          {
+            "path": "/static/js/ErrorElement.CdpA6bz6.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 2373
+          },
+          {
+            "path": "/static/js/preload-helper.CRzLMJPS.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 725
+          },
+          {
+            "path": "/static/js/StreamlitMarkdown.oOG-xoxw.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 65197
+          },
+          {
+            "path": "/static/js/_baseIsEqual.sdZCjgvS.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1474
+          },
+          {
+            "path": "/static/js/_baseProperty.BV6HSwpm.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 50
+          },
+          {
+            "path": "/static/js/_baseEach.PLhpSRgM.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 876
+          },
+          {
+            "path": "/static/js/utils.BJVSE7F9.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 356
+          },
+          {
+            "path": "/static/js/FlexContext.BkFprQkj.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 576
+          },
+          {
+            "path": "/static/js/Icon.D6z6tTSi.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 999
+          },
+          {
+            "path": "/static/js/DynamicIcon.DBX1tTbE.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1699
+          },
+          {
+            "path": "/static/js/useDescription.BB3ShmHg.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1378
+          },
+          {
+            "path": "/static/js/Text.RYl_ExSr.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 521
+          },
+          {
+            "path": "/static/js/shim.DT7uHSse.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/useCollection.DU7tSg4K.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 12341
+          },
+          {
+            "path": "/static/js/useLabel.BAkLcsHg.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 411
+          },
+          {
+            "path": "/static/js/LiveAnnouncer.CRX7YBAA.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1540
+          },
+          {
+            "path": "/static/js/NumberFormatter.nhsGk7J2.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 756
+          },
+          {
+            "path": "/static/js/number.CgCAQqZj.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/ProgressBar.BbP4hvQX.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 722
+          },
+          {
+            "path": "/static/js/BaseButton.GsR4p1Eu.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 649
+          },
+          {
+            "path": "/static/js/FormClearHelper.uMwNzhNQ.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 373
+          },
+          {
+            "path": "/static/js/useTimeout.odDhD3su.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 344
+          },
+          {
+            "path": "/static/js/useResizeObserver.CWV4GVHX.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 570
+          },
+          {
+            "path": "/static/js/index.esm.CnlgfcEa.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1032
+          },
+          {
+            "path": "/static/js/Check.esm.SwE3eUIH.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 377
+          },
+          {
+            "path": "/static/js/ContentCopy.esm.C1nEcpQW.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 423
+          },
+          {
+            "path": "/static/js/Toolbar.IoDGB_NU.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1111
+          },
+          {
+            "path": "/static/js/useCopyToClipboard.Cdni2W2w.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 389
+          },
+          {
+            "path": "/static/js/useRequiredContext.fKi1tqMI.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 198
+          },
+          {
+            "path": "/static/css/index.C1JORDN2.css",
+            "transfer_bytes": 0,
+            "encoded_bytes": 7070
+          },
+          {
+            "path": "/static/js/IFrame.DoeBhz7M.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1504
+          },
+          {
+            "path": "/static/js/IFrameUtil.PlC_b34Z.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/rehype-raw.DgJ5HSkU.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 52654
+          },
+          {
+            "path": "/static/js/hastscript.BRLGlqm4.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1394
+          },
+          {
+            "path": "/static/js/web-namespaces.BxZ_GhEx.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 122
+          },
+          {
+            "path": "/static/js/remark-emoji.CE8lxIK6.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1890
+          },
+          {
+            "path": "/static/js/lib.CQXimEhy.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 53141
+          },
+          {
+            "path": "/static/js/TextInput.MPWivlu9.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 4167
+          },
+          {
+            "path": "/static/js/Input.gDbGmgmu.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 701
+          },
+          {
+            "path": "/static/js/TextField.DdIhIiQe.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 813
+          },
+          {
+            "path": "/static/js/Autocomplete.egUn8L68.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 145
+          },
+          {
+            "path": "/static/js/useFormValidation.D2i_isRP.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 1512
+          },
+          {
+            "path": "/static/js/useTextField.bKQiMZTR.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 839
+          },
+          {
+            "path": "/static/js/useField.CsWac_7E.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 276
+          },
+          {
+            "path": "/static/js/useFormReset.Dsqx1XhY.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 250
+          },
+          {
+            "path": "/static/js/ErrorOutline.esm.DyT67HL2.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 441
+          },
+          {
+            "path": "/static/js/Cancel.esm.B65EWHgo.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/WidgetLabel.C381QnN0.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 394
+          },
+          {
+            "path": "/static/js/styled-components.kM4tXvFQ.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIcon.DIAPaBJl.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 349
+          },
+          {
+            "path": "/static/js/useBasicWidgetState.8xeaSejc.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 746
+          },
+          {
+            "path": "/static/js/InputInstructions.aWDQxtQS.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 593
+          },
+          {
+            "path": "/static/js/inputUtils.CnlRnOxS.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 102
+          },
+          {
+            "path": "/static/js/useDebouncedCallback.By9MfI_m.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 329
+          },
+          {
+            "path": "/static/js/requiredField.CNcKXcSP.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 98
+          },
+          {
+            "path": "/static/js/useUpdateUiValue.Crj2LZcQ.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/Checkbox.CaT4asBe.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 4100
+          },
+          {
+            "path": "/static/js/useSlot.CXZFle1D.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 274
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIconInline.COAzYW2l.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 282
+          },
+          {
+            "path": "/static/js/checkboxIndicatorStyles.Cz7_ncjO.js",
+            "transfer_bytes": 0,
+            "encoded_bytes": 457
+          }
+        ],
+        "errors": []
+      },
+      {
+        "cached_reload": false,
+        "ready_ms": 5392.799999999814,
+        "bundles": [
+          {
+            "path": "/static/js/loglevel.DMC__dHv.js",
+            "transfer_bytes": 1622,
+            "encoded_bytes": 1322
+          },
+          {
+            "path": "/static/js/rolldown-runtime.BCiCTKAo.js",
+            "transfer_bytes": 959,
+            "encoded_bytes": 659
+          },
+          {
+            "path": "/static/js/emotion-is-prop-valid.esm.CkL99N7j.js",
+            "transfer_bytes": 4796,
+            "encoded_bytes": 4496
+          },
+          {
+            "path": "/static/js/emotion-styled.browser.esm.DdOkyKg_.js",
+            "transfer_bytes": 8691,
+            "encoded_bytes": 8391
+          },
+          {
+            "path": "/static/js/index.DormvYxC.js",
+            "transfer_bytes": 135701,
+            "encoded_bytes": 135401
+          },
+          {
+            "path": "/static/js/react-dom.Dzbslgj4.js",
+            "transfer_bytes": 41080,
+            "encoded_bytes": 40780
+          },
+          {
+            "path": "/static/js/toString.tRXNBxtF.js",
+            "transfer_bytes": 571,
+            "encoded_bytes": 271
+          },
+          {
+            "path": "/static/js/opacities.Blb4Ho7_.js",
+            "transfer_bytes": 8129,
+            "encoded_bytes": 7829
+          },
+          {
+            "path": "/static/js/isSymbol.CmW3dkoN.js",
+            "transfer_bytes": 685,
+            "encoded_bytes": 385
+          },
+          {
+            "path": "/static/js/src.ClCGuae5.js",
+            "transfer_bytes": 792,
+            "encoded_bytes": 492
+          },
+          {
+            "path": "/static/js/types.DosXGzv6.js",
+            "transfer_bytes": 368,
+            "encoded_bytes": 68
+          },
+          {
+            "path": "/static/js/emotion-react.browser.esm.Dz233AqG.js",
+            "transfer_bytes": 1018,
+            "encoded_bytes": 718
+          },
+          {
+            "path": "/static/js/protobuf.D55wl0P7.js",
+            "transfer_bytes": 86861,
+            "encoded_bytes": 86561
+          },
+          {
+            "path": "/static/js/isArrayLike.Crw2F5li.js",
+            "transfer_bytes": 672,
+            "encoded_bytes": 372
+          },
+          {
+            "path": "/static/js/merge.UVaQM33U.js",
+            "transfer_bytes": 2875,
+            "encoded_bytes": 2575
+          },
+          {
+            "path": "/static/js/_isIterateeCall.BUStsXAd.js",
+            "transfer_bytes": 800,
+            "encoded_bytes": 500
+          },
+          {
+            "path": "/static/js/_baseFlatten.IOj0lc7G.js",
+            "transfer_bytes": 568,
+            "encoded_bytes": 268
+          },
+          {
+            "path": "/static/js/isArrayLikeObject.B3Zf3PTL.js",
+            "transfer_bytes": 3932,
+            "encoded_bytes": 3632
+          },
+          {
+            "path": "/static/js/last.DfjdtCRp.js",
+            "transfer_bytes": 495,
+            "encoded_bytes": 195
+          },
+          {
+            "path": "/static/js/UriUtil.CZTdJmE_.js",
+            "transfer_bytes": 6408,
+            "encoded_bytes": 6108
+          },
+          {
+            "path": "/static/js/utils.ob4wbeQt.js",
+            "transfer_bytes": 13760,
+            "encoded_bytes": 13460
+          },
+          {
+            "path": "/static/js/Tooltip.BGkP9bdt.js",
+            "transfer_bytes": 2834,
+            "encoded_bytes": 2534
+          },
+          {
+            "path": "/static/js/useEmotionTheme.CMOlE5Fg.js",
+            "transfer_bytes": 382,
+            "encoded_bytes": 82
+          },
+          {
+            "path": "/static/js/styled-components.XLtagUku.js",
+            "transfer_bytes": 21157,
+            "encoded_bytes": 20857
+          },
+          {
+            "path": "/static/js/useFloatingOverlay.DbDkOVFr.js",
+            "transfer_bytes": 15179,
+            "encoded_bytes": 14879
+          },
+          {
+            "path": "/static/js/useCrossOriginAttribute.bh_PwhC9.js",
+            "transfer_bytes": 499,
+            "encoded_bytes": 199
+          },
+          {
+            "path": "/static/js/lib.BRCtjBvA.js",
+            "transfer_bytes": 984,
+            "encoded_bytes": 684
+          },
+          {
+            "path": "/static/js/lib.DTkPmFNq.js",
+            "transfer_bytes": 1278,
+            "encoded_bytes": 978
+          },
+          {
+            "path": "/static/js/lib.BsvoAB7F.js",
+            "transfer_bytes": 1653,
+            "encoded_bytes": 1353
+          },
+          {
+            "path": "/static/js/space-separated-tokens.tMK6mh18.js",
+            "transfer_bytes": 6601,
+            "encoded_bytes": 6301
+          },
+          {
+            "path": "/static/js/ErrorElement.CdpA6bz6.js",
+            "transfer_bytes": 2673,
+            "encoded_bytes": 2373
+          },
+          {
+            "path": "/static/js/StreamlitMarkdown.oOG-xoxw.js",
+            "transfer_bytes": 65497,
+            "encoded_bytes": 65197
+          },
+          {
+            "path": "/static/js/_baseIsEqual.sdZCjgvS.js",
+            "transfer_bytes": 1774,
+            "encoded_bytes": 1474
+          },
+          {
+            "path": "/static/js/preload-helper.CRzLMJPS.js",
+            "transfer_bytes": 1025,
+            "encoded_bytes": 725
+          },
+          {
+            "path": "/static/js/_baseProperty.BV6HSwpm.js",
+            "transfer_bytes": 350,
+            "encoded_bytes": 50
+          },
+          {
+            "path": "/static/js/FlexContext.BkFprQkj.js",
+            "transfer_bytes": 876,
+            "encoded_bytes": 576
+          },
+          {
+            "path": "/static/js/utils.BJVSE7F9.js",
+            "transfer_bytes": 656,
+            "encoded_bytes": 356
+          },
+          {
+            "path": "/static/js/_baseEach.PLhpSRgM.js",
+            "transfer_bytes": 1176,
+            "encoded_bytes": 876
+          },
+          {
+            "path": "/static/js/Icon.D6z6tTSi.js",
+            "transfer_bytes": 1299,
+            "encoded_bytes": 999
+          },
+          {
+            "path": "/static/js/DynamicIcon.DBX1tTbE.js",
+            "transfer_bytes": 1999,
+            "encoded_bytes": 1699
+          },
+          {
+            "path": "/static/js/useDescription.BB3ShmHg.js",
+            "transfer_bytes": 1678,
+            "encoded_bytes": 1378
+          },
+          {
+            "path": "/static/js/LiveAnnouncer.CRX7YBAA.js",
+            "transfer_bytes": 1840,
+            "encoded_bytes": 1540
+          },
+          {
+            "path": "/static/js/Text.RYl_ExSr.js",
+            "transfer_bytes": 821,
+            "encoded_bytes": 521
+          },
+          {
+            "path": "/static/js/useLabel.BAkLcsHg.js",
+            "transfer_bytes": 711,
+            "encoded_bytes": 411
+          },
+          {
+            "path": "/static/js/shim.DT7uHSse.js",
+            "transfer_bytes": 764,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/useCollection.DU7tSg4K.js",
+            "transfer_bytes": 12641,
+            "encoded_bytes": 12341
+          },
+          {
+            "path": "/static/js/NumberFormatter.nhsGk7J2.js",
+            "transfer_bytes": 1056,
+            "encoded_bytes": 756
+          },
+          {
+            "path": "/static/js/number.CgCAQqZj.js",
+            "transfer_bytes": 799,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/ProgressBar.BbP4hvQX.js",
+            "transfer_bytes": 1022,
+            "encoded_bytes": 722
+          },
+          {
+            "path": "/static/js/BaseButton.GsR4p1Eu.js",
+            "transfer_bytes": 949,
+            "encoded_bytes": 649
+          },
+          {
+            "path": "/static/js/useTimeout.odDhD3su.js",
+            "transfer_bytes": 644,
+            "encoded_bytes": 344
+          },
+          {
+            "path": "/static/js/FormClearHelper.uMwNzhNQ.js",
+            "transfer_bytes": 673,
+            "encoded_bytes": 373
+          },
+          {
+            "path": "/static/js/useResizeObserver.CWV4GVHX.js",
+            "transfer_bytes": 870,
+            "encoded_bytes": 570
+          },
+          {
+            "path": "/static/js/Toolbar.IoDGB_NU.js",
+            "transfer_bytes": 1411,
+            "encoded_bytes": 1111
+          },
+          {
+            "path": "/static/js/ContentCopy.esm.C1nEcpQW.js",
+            "transfer_bytes": 723,
+            "encoded_bytes": 423
+          },
+          {
+            "path": "/static/js/useRequiredContext.fKi1tqMI.js",
+            "transfer_bytes": 498,
+            "encoded_bytes": 198
+          },
+          {
+            "path": "/static/js/useCopyToClipboard.Cdni2W2w.js",
+            "transfer_bytes": 689,
+            "encoded_bytes": 389
+          },
+          {
+            "path": "/static/js/Check.esm.SwE3eUIH.js",
+            "transfer_bytes": 677,
+            "encoded_bytes": 377
+          },
+          {
+            "path": "/static/js/index.esm.CnlgfcEa.js",
+            "transfer_bytes": 1332,
+            "encoded_bytes": 1032
+          },
+          {
+            "path": "/static/css/index.C1JORDN2.css",
+            "transfer_bytes": 7370,
+            "encoded_bytes": 7070
+          },
+          {
+            "path": "/static/js/IFrame.DoeBhz7M.js",
+            "transfer_bytes": 1804,
+            "encoded_bytes": 1504
+          },
+          {
+            "path": "/static/js/IFrameUtil.PlC_b34Z.js",
+            "transfer_bytes": 633,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/rehype-raw.DgJ5HSkU.js",
+            "transfer_bytes": 52954,
+            "encoded_bytes": 52654
+          },
+          {
+            "path": "/static/js/hastscript.BRLGlqm4.js",
+            "transfer_bytes": 1694,
+            "encoded_bytes": 1394
+          },
+          {
+            "path": "/static/js/web-namespaces.BxZ_GhEx.js",
+            "transfer_bytes": 422,
+            "encoded_bytes": 122
+          },
+          {
+            "path": "/static/js/remark-emoji.CE8lxIK6.js",
+            "transfer_bytes": 2190,
+            "encoded_bytes": 1890
+          },
+          {
+            "path": "/static/js/lib.CQXimEhy.js",
+            "transfer_bytes": 53441,
+            "encoded_bytes": 53141
+          },
+          {
+            "path": "/static/js/TextInput.MPWivlu9.js",
+            "transfer_bytes": 4467,
+            "encoded_bytes": 4167
+          },
+          {
+            "path": "/static/js/Input.gDbGmgmu.js",
+            "transfer_bytes": 1001,
+            "encoded_bytes": 701
+          },
+          {
+            "path": "/static/js/TextField.DdIhIiQe.js",
+            "transfer_bytes": 1113,
+            "encoded_bytes": 813
+          },
+          {
+            "path": "/static/js/Autocomplete.egUn8L68.js",
+            "transfer_bytes": 445,
+            "encoded_bytes": 145
+          },
+          {
+            "path": "/static/js/useFormValidation.D2i_isRP.js",
+            "transfer_bytes": 1812,
+            "encoded_bytes": 1512
+          },
+          {
+            "path": "/static/js/useTextField.bKQiMZTR.js",
+            "transfer_bytes": 1139,
+            "encoded_bytes": 839
+          },
+          {
+            "path": "/static/js/useField.CsWac_7E.js",
+            "transfer_bytes": 576,
+            "encoded_bytes": 276
+          },
+          {
+            "path": "/static/js/useFormReset.Dsqx1XhY.js",
+            "transfer_bytes": 550,
+            "encoded_bytes": 250
+          },
+          {
+            "path": "/static/js/Cancel.esm.B65EWHgo.js",
+            "transfer_bytes": 764,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/ErrorOutline.esm.DyT67HL2.js",
+            "transfer_bytes": 741,
+            "encoded_bytes": 441
+          },
+          {
+            "path": "/static/js/WidgetLabel.C381QnN0.js",
+            "transfer_bytes": 694,
+            "encoded_bytes": 394
+          },
+          {
+            "path": "/static/js/styled-components.kM4tXvFQ.js",
+            "transfer_bytes": 799,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIcon.DIAPaBJl.js",
+            "transfer_bytes": 649,
+            "encoded_bytes": 349
+          },
+          {
+            "path": "/static/js/useBasicWidgetState.8xeaSejc.js",
+            "transfer_bytes": 1046,
+            "encoded_bytes": 746
+          },
+          {
+            "path": "/static/js/inputUtils.CnlRnOxS.js",
+            "transfer_bytes": 402,
+            "encoded_bytes": 102
+          },
+          {
+            "path": "/static/js/InputInstructions.aWDQxtQS.js",
+            "transfer_bytes": 893,
+            "encoded_bytes": 593
+          },
+          {
+            "path": "/static/js/useDebouncedCallback.By9MfI_m.js",
+            "transfer_bytes": 629,
+            "encoded_bytes": 329
+          },
+          {
+            "path": "/static/js/useUpdateUiValue.Crj2LZcQ.js",
+            "transfer_bytes": 633,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/requiredField.CNcKXcSP.js",
+            "transfer_bytes": 398,
+            "encoded_bytes": 98
+          },
+          {
+            "path": "/static/js/Checkbox.CaT4asBe.js",
+            "transfer_bytes": 4400,
+            "encoded_bytes": 4100
+          },
+          {
+            "path": "/static/js/useSlot.CXZFle1D.js",
+            "transfer_bytes": 574,
+            "encoded_bytes": 274
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIconInline.COAzYW2l.js",
+            "transfer_bytes": 582,
+            "encoded_bytes": 282
+          }
+        ],
+        "errors": []
+      },
+      {
+        "cached_reload": false,
+        "ready_ms": 3973.7000000001863,
+        "bundles": [
+          {
+            "path": "/static/js/emotion-styled.browser.esm.DdOkyKg_.js",
+            "transfer_bytes": 8691,
+            "encoded_bytes": 8391
+          },
+          {
+            "path": "/static/js/loglevel.DMC__dHv.js",
+            "transfer_bytes": 1622,
+            "encoded_bytes": 1322
+          },
+          {
+            "path": "/static/js/emotion-is-prop-valid.esm.CkL99N7j.js",
+            "transfer_bytes": 4796,
+            "encoded_bytes": 4496
+          },
+          {
+            "path": "/static/js/rolldown-runtime.BCiCTKAo.js",
+            "transfer_bytes": 959,
+            "encoded_bytes": 659
+          },
+          {
+            "path": "/static/js/index.DormvYxC.js",
+            "transfer_bytes": 135701,
+            "encoded_bytes": 135401
+          },
+          {
+            "path": "/static/js/emotion-react.browser.esm.Dz233AqG.js",
+            "transfer_bytes": 1018,
+            "encoded_bytes": 718
+          },
+          {
+            "path": "/static/js/react-dom.Dzbslgj4.js",
+            "transfer_bytes": 41080,
+            "encoded_bytes": 40780
+          },
+          {
+            "path": "/static/js/types.DosXGzv6.js",
+            "transfer_bytes": 368,
+            "encoded_bytes": 68
+          },
+          {
+            "path": "/static/js/opacities.Blb4Ho7_.js",
+            "transfer_bytes": 8129,
+            "encoded_bytes": 7829
+          },
+          {
+            "path": "/static/js/isSymbol.CmW3dkoN.js",
+            "transfer_bytes": 685,
+            "encoded_bytes": 385
+          },
+          {
+            "path": "/static/js/protobuf.D55wl0P7.js",
+            "transfer_bytes": 86861,
+            "encoded_bytes": 86561
+          },
+          {
+            "path": "/static/js/src.ClCGuae5.js",
+            "transfer_bytes": 792,
+            "encoded_bytes": 492
+          },
+          {
+            "path": "/static/js/isArrayLike.Crw2F5li.js",
+            "transfer_bytes": 672,
+            "encoded_bytes": 372
+          },
+          {
+            "path": "/static/js/_isIterateeCall.BUStsXAd.js",
+            "transfer_bytes": 800,
+            "encoded_bytes": 500
+          },
+          {
+            "path": "/static/js/toString.tRXNBxtF.js",
+            "transfer_bytes": 571,
+            "encoded_bytes": 271
+          },
+          {
+            "path": "/static/js/last.DfjdtCRp.js",
+            "transfer_bytes": 495,
+            "encoded_bytes": 195
+          },
+          {
+            "path": "/static/js/merge.UVaQM33U.js",
+            "transfer_bytes": 2875,
+            "encoded_bytes": 2575
+          },
+          {
+            "path": "/static/js/_baseFlatten.IOj0lc7G.js",
+            "transfer_bytes": 568,
+            "encoded_bytes": 268
+          },
+          {
+            "path": "/static/js/utils.ob4wbeQt.js",
+            "transfer_bytes": 13760,
+            "encoded_bytes": 13460
+          },
+          {
+            "path": "/static/js/isArrayLikeObject.B3Zf3PTL.js",
+            "transfer_bytes": 3932,
+            "encoded_bytes": 3632
+          },
+          {
+            "path": "/static/js/UriUtil.CZTdJmE_.js",
+            "transfer_bytes": 6408,
+            "encoded_bytes": 6108
+          },
+          {
+            "path": "/static/js/useCrossOriginAttribute.bh_PwhC9.js",
+            "transfer_bytes": 499,
+            "encoded_bytes": 199
+          },
+          {
+            "path": "/static/js/styled-components.XLtagUku.js",
+            "transfer_bytes": 21157,
+            "encoded_bytes": 20857
+          },
+          {
+            "path": "/static/js/useEmotionTheme.CMOlE5Fg.js",
+            "transfer_bytes": 382,
+            "encoded_bytes": 82
+          },
+          {
+            "path": "/static/js/Tooltip.BGkP9bdt.js",
+            "transfer_bytes": 2834,
+            "encoded_bytes": 2534
+          },
+          {
+            "path": "/static/js/lib.DTkPmFNq.js",
+            "transfer_bytes": 1278,
+            "encoded_bytes": 978
+          },
+          {
+            "path": "/static/js/useFloatingOverlay.DbDkOVFr.js",
+            "transfer_bytes": 15179,
+            "encoded_bytes": 14879
+          },
+          {
+            "path": "/static/js/lib.BRCtjBvA.js",
+            "transfer_bytes": 984,
+            "encoded_bytes": 684
+          },
+          {
+            "path": "/static/js/space-separated-tokens.tMK6mh18.js",
+            "transfer_bytes": 6601,
+            "encoded_bytes": 6301
+          },
+          {
+            "path": "/static/js/lib.BsvoAB7F.js",
+            "transfer_bytes": 1653,
+            "encoded_bytes": 1353
+          },
+          {
+            "path": "/static/js/ErrorElement.CdpA6bz6.js",
+            "transfer_bytes": 2673,
+            "encoded_bytes": 2373
+          },
+          {
+            "path": "/static/js/preload-helper.CRzLMJPS.js",
+            "transfer_bytes": 1025,
+            "encoded_bytes": 725
+          },
+          {
+            "path": "/static/js/_baseIsEqual.sdZCjgvS.js",
+            "transfer_bytes": 1774,
+            "encoded_bytes": 1474
+          },
+          {
+            "path": "/static/js/_baseProperty.BV6HSwpm.js",
+            "transfer_bytes": 350,
+            "encoded_bytes": 50
+          },
+          {
+            "path": "/static/js/utils.BJVSE7F9.js",
+            "transfer_bytes": 656,
+            "encoded_bytes": 356
+          },
+          {
+            "path": "/static/js/StreamlitMarkdown.oOG-xoxw.js",
+            "transfer_bytes": 65497,
+            "encoded_bytes": 65197
+          },
+          {
+            "path": "/static/js/_baseEach.PLhpSRgM.js",
+            "transfer_bytes": 1176,
+            "encoded_bytes": 876
+          },
+          {
+            "path": "/static/js/Icon.D6z6tTSi.js",
+            "transfer_bytes": 1299,
+            "encoded_bytes": 999
+          },
+          {
+            "path": "/static/js/DynamicIcon.DBX1tTbE.js",
+            "transfer_bytes": 1999,
+            "encoded_bytes": 1699
+          },
+          {
+            "path": "/static/js/FlexContext.BkFprQkj.js",
+            "transfer_bytes": 876,
+            "encoded_bytes": 576
+          },
+          {
+            "path": "/static/js/useLabel.BAkLcsHg.js",
+            "transfer_bytes": 711,
+            "encoded_bytes": 411
+          },
+          {
+            "path": "/static/js/useCollection.DU7tSg4K.js",
+            "transfer_bytes": 12641,
+            "encoded_bytes": 12341
+          },
+          {
+            "path": "/static/js/useDescription.BB3ShmHg.js",
+            "transfer_bytes": 1678,
+            "encoded_bytes": 1378
+          },
+          {
+            "path": "/static/js/LiveAnnouncer.CRX7YBAA.js",
+            "transfer_bytes": 1840,
+            "encoded_bytes": 1540
+          },
+          {
+            "path": "/static/js/shim.DT7uHSse.js",
+            "transfer_bytes": 764,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/Text.RYl_ExSr.js",
+            "transfer_bytes": 821,
+            "encoded_bytes": 521
+          },
+          {
+            "path": "/static/js/NumberFormatter.nhsGk7J2.js",
+            "transfer_bytes": 1056,
+            "encoded_bytes": 756
+          },
+          {
+            "path": "/static/js/ProgressBar.BbP4hvQX.js",
+            "transfer_bytes": 1022,
+            "encoded_bytes": 722
+          },
+          {
+            "path": "/static/js/useTimeout.odDhD3su.js",
+            "transfer_bytes": 644,
+            "encoded_bytes": 344
+          },
+          {
+            "path": "/static/js/useResizeObserver.CWV4GVHX.js",
+            "transfer_bytes": 870,
+            "encoded_bytes": 570
+          },
+          {
+            "path": "/static/js/BaseButton.GsR4p1Eu.js",
+            "transfer_bytes": 949,
+            "encoded_bytes": 649
+          },
+          {
+            "path": "/static/js/number.CgCAQqZj.js",
+            "transfer_bytes": 799,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/FormClearHelper.uMwNzhNQ.js",
+            "transfer_bytes": 673,
+            "encoded_bytes": 373
+          },
+          {
+            "path": "/static/js/index.esm.CnlgfcEa.js",
+            "transfer_bytes": 1332,
+            "encoded_bytes": 1032
+          },
+          {
+            "path": "/static/js/useCopyToClipboard.Cdni2W2w.js",
+            "transfer_bytes": 689,
+            "encoded_bytes": 389
+          },
+          {
+            "path": "/static/js/useRequiredContext.fKi1tqMI.js",
+            "transfer_bytes": 498,
+            "encoded_bytes": 198
+          },
+          {
+            "path": "/static/js/ContentCopy.esm.C1nEcpQW.js",
+            "transfer_bytes": 723,
+            "encoded_bytes": 423
+          },
+          {
+            "path": "/static/js/Toolbar.IoDGB_NU.js",
+            "transfer_bytes": 1411,
+            "encoded_bytes": 1111
+          },
+          {
+            "path": "/static/js/Check.esm.SwE3eUIH.js",
+            "transfer_bytes": 677,
+            "encoded_bytes": 377
+          },
+          {
+            "path": "/static/css/index.C1JORDN2.css",
+            "transfer_bytes": 7370,
+            "encoded_bytes": 7070
+          },
+          {
+            "path": "/static/js/IFrame.DoeBhz7M.js",
+            "transfer_bytes": 1804,
+            "encoded_bytes": 1504
+          },
+          {
+            "path": "/static/js/IFrameUtil.PlC_b34Z.js",
+            "transfer_bytes": 633,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/rehype-raw.DgJ5HSkU.js",
+            "transfer_bytes": 52954,
+            "encoded_bytes": 52654
+          },
+          {
+            "path": "/static/js/hastscript.BRLGlqm4.js",
+            "transfer_bytes": 1694,
+            "encoded_bytes": 1394
+          },
+          {
+            "path": "/static/js/web-namespaces.BxZ_GhEx.js",
+            "transfer_bytes": 422,
+            "encoded_bytes": 122
+          },
+          {
+            "path": "/static/js/remark-emoji.CE8lxIK6.js",
+            "transfer_bytes": 2190,
+            "encoded_bytes": 1890
+          },
+          {
+            "path": "/static/js/lib.CQXimEhy.js",
+            "transfer_bytes": 53441,
+            "encoded_bytes": 53141
+          },
+          {
+            "path": "/static/js/TextInput.MPWivlu9.js",
+            "transfer_bytes": 4467,
+            "encoded_bytes": 4167
+          },
+          {
+            "path": "/static/js/Input.gDbGmgmu.js",
+            "transfer_bytes": 1001,
+            "encoded_bytes": 701
+          },
+          {
+            "path": "/static/js/TextField.DdIhIiQe.js",
+            "transfer_bytes": 1113,
+            "encoded_bytes": 813
+          },
+          {
+            "path": "/static/js/Autocomplete.egUn8L68.js",
+            "transfer_bytes": 445,
+            "encoded_bytes": 145
+          },
+          {
+            "path": "/static/js/useField.CsWac_7E.js",
+            "transfer_bytes": 576,
+            "encoded_bytes": 276
+          },
+          {
+            "path": "/static/js/useTextField.bKQiMZTR.js",
+            "transfer_bytes": 1139,
+            "encoded_bytes": 839
+          },
+          {
+            "path": "/static/js/useFormValidation.D2i_isRP.js",
+            "transfer_bytes": 1812,
+            "encoded_bytes": 1512
+          },
+          {
+            "path": "/static/js/useFormReset.Dsqx1XhY.js",
+            "transfer_bytes": 550,
+            "encoded_bytes": 250
+          },
+          {
+            "path": "/static/js/ErrorOutline.esm.DyT67HL2.js",
+            "transfer_bytes": 741,
+            "encoded_bytes": 441
+          },
+          {
+            "path": "/static/js/Cancel.esm.B65EWHgo.js",
+            "transfer_bytes": 764,
+            "encoded_bytes": 464
+          },
+          {
+            "path": "/static/js/WidgetLabel.C381QnN0.js",
+            "transfer_bytes": 694,
+            "encoded_bytes": 394
+          },
+          {
+            "path": "/static/js/styled-components.kM4tXvFQ.js",
+            "transfer_bytes": 799,
+            "encoded_bytes": 499
+          },
+          {
+            "path": "/static/js/useBasicWidgetState.8xeaSejc.js",
+            "transfer_bytes": 1046,
+            "encoded_bytes": 746
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIcon.DIAPaBJl.js",
+            "transfer_bytes": 649,
+            "encoded_bytes": 349
+          },
+          {
+            "path": "/static/js/InputInstructions.aWDQxtQS.js",
+            "transfer_bytes": 893,
+            "encoded_bytes": 593
+          },
+          {
+            "path": "/static/js/inputUtils.CnlRnOxS.js",
+            "transfer_bytes": 402,
+            "encoded_bytes": 102
+          },
+          {
+            "path": "/static/js/requiredField.CNcKXcSP.js",
+            "transfer_bytes": 398,
+            "encoded_bytes": 98
+          },
+          {
+            "path": "/static/js/useDebouncedCallback.By9MfI_m.js",
+            "transfer_bytes": 629,
+            "encoded_bytes": 329
+          },
+          {
+            "path": "/static/js/useUpdateUiValue.Crj2LZcQ.js",
+            "transfer_bytes": 633,
+            "encoded_bytes": 333
+          },
+          {
+            "path": "/static/js/Checkbox.CaT4asBe.js",
+            "transfer_bytes": 4400,
+            "encoded_bytes": 4100
+          },
+          {
+            "path": "/static/js/useSlot.CXZFle1D.js",
+            "transfer_bytes": 574,
+            "encoded_bytes": 274
+          },
+          {
+            "path": "/static/js/WidgetLabelHelpIconInline.COAzYW2l.js",
+            "transfer_bytes": 582,
+            "encoded_bytes": 282
+          },
+          {
+            "path": "/static/js/checkboxIndicatorStyles.Cz7_ncjO.js",
+            "transfer_bytes": 757,
+            "encoded_bytes": 457
+          }
+        ],
+        "errors": []
+      }
+    ]
+  },
+  "live_signin_summary": {
+    "fresh_samples": 3,
+    "fresh_median_ms": 4428.199999999255,
+    "cached_reload_ms": 3020.7999999998137,
+    "scope": "Australia client to Oregon production, anonymous Sign in; not a before/after speed claim or authenticated Home/Orders measurement"
+  },
+  "runtime_source_sha256": {
+    "app.py": "86ca9ce4fc69e7c4537f487654c14d9d83326b1f2de2fb81476f0f132e30d658",
+    "sports_cave_server.py": "c4db775ac463c07776c9ea802f49e015c251295cf8d293dfee2cbd9d3968f418",
+    "supabase_backend.py": "6228dc760a3d53508c494315f35641e2df9bfba6e3e1e390bd16f85aadb146c3",
+    "startup_performance.py": "e9fda08149349e7292f6e9b79afe9bece49ca3e1fa8ba70e7db74b48d2d39ef5",
+    "static_asset_compression.py": "bb0617feffa057da7a95ec20d09d525f8b106043c08f54d055caea7d35335c69",
+    "public_bundle_cache.py": "f2572c7ca17e9c08759112f5fc16dd73bd7295c0ca672869adcbf6e566a64377",
+    "scripts/benchmark_app_startup.py": "3872e380d88327fd31f93462cf91163ccd95d7e951f04644cd3118caf18dc018",
+    "scripts/startup_fixture_server.py": "56966a28d5523ed99d24eaacb4e3940e5c850195f5e95a9c1bc8d0b8e02ba258",
+    "tests/fixtures/startup_measurement.py": "d1b8c9eea1985d8c7d34477edab6e7ccb000de898fe6ea533424c497feaf2d03"
+  }
+}

@@ -8033,6 +8033,11 @@ def is_app_authenticated():
         return False
 
     token = current_auth_cookie()
+    if not token:
+        # A new anonymous browser cannot authenticate without a token. Render
+        # sign-in immediately; account discovery belongs to submitted sign-in
+        # or a cryptographically validated legacy session.
+        return False
     valid, _reason, payload = sc_auth.validate_user_auth_token(
         token,
         password=get_app_password(),
@@ -8050,14 +8055,13 @@ def is_app_authenticated():
         clear_auth_cookie()
         return False
 
-    # Bootstrap/legacy account discovery is only needed by the login gate.
-    status = _account_system_status()
     legacy_valid, _legacy_reason = sc_auth.validate_auth_token(
         token,
         password=get_app_password(),
         extra_secret=get_auth_extra_secret(),
     )
     if legacy_valid:
+        status = _account_system_status()
         admin = status.get("admin") or {}
         if admin and os_accounts.account_is_active(admin) and not status.get("available"):
             _set_authenticated_user(admin)
