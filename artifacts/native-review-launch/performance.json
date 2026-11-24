@@ -1,0 +1,48 @@
+{
+  "lighthouse": "13.6.0",
+  "time": "2026-11-24T03:54:30.500Z",
+  "performance": 70,
+  "fcp_ms": 375.563,
+  "lcp_ms": 4946.1720000000005,
+  "tbt_ms": 1,
+  "cls": 0,
+  "bytes": 4413241,
+  "judge_requests": 0,
+  "warnings": [
+    "The page loaded too slowly to finish within the time limit. Results may be incomplete."
+  ],
+  "largest_resources": [
+    {
+      "url": "https://www.sportscaveshop.com/cdn/shop/files/EMAIL_GIF_GLITCH_1-1.gif",
+      "bytes": 696074
+    },
+    {
+      "url": "https://www.sportscaveshop.com/cdn/shopifycloud/checkout-web/assets/c1/6ec9a0fa.D7fKZKSJ.js",
+      "bytes": 379983
+    },
+    {
+      "url": "https://www.googletagmanager.com/gtag/js",
+      "bytes": 201399
+    },
+    {
+      "url": "https://www.googletagmanager.com/gtag/js",
+      "bytes": 201126
+    },
+    {
+      "url": "https://www.googletagmanager.com/gtag/js",
+      "bytes": 173225
+    },
+    {
+      "url": "https://www.googletagmanager.com/gtag/js",
+      "bytes": 173213
+    },
+    {
+      "url": "https://www.googletagmanager.com/gtag/js",
+      "bytes": 159685
+    },
+    {
+      "url": "https://connect.facebook.net/signals/config/1158699336263893",
+      "bytes": 122637
+    }
+  ]
+}
