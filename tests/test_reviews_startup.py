@@ -1,6 +1,9 @@
 """Startup boundaries: synthetic state only; no provider transport."""
 import ast
 import subprocess
+import inspect
+import os
+import uuid
 from concurrent.futures import Future
 from unittest.mock import Mock,patch
 import pytest
@@ -78,3 +81,33 @@ def test_private_read_pool_adapter_and_single_summary_query():
         cursor.execute.assert_called_once()
     with patch.object(store,'q',return_value=[]) as q,patch('supabase_backend._run_read_operation') as pool:
         store.rows(public=True);q.assert_called_once();pool.assert_not_called()
+
+
+def test_fragment_rechecks_access_before_any_read_and_clears_the_table():
+    authorize=Mock(return_value={})
+    with patch.object(page,'require',side_effect=PermissionError),patch.object(page,'read') as read,patch.object(page.st,'warning') as warning:
+        inspect.unwrap(page.overview)(Mock(),{'id':'old-account'},authorize)
+        authorize.assert_called_once();read.assert_not_called();warning.assert_called_once()
+
+
+def test_pagination_callback_updates_before_render_and_clamps_previous():
+    session={'reviews_state':{'offset':25}}
+    with patch.object(page.st,'session_state',session):
+        page.move_page(25);assert session['reviews_state']['offset']==50
+        page.move_page(-75);assert session['reviews_state']['offset']==0
+
+
+@pytest.mark.skipif(os.getenv('CRM_TEST_POSTGRES')!='1',reason='Disposable PostgreSQL required')
+def test_compact_projection_keeps_identical_markup_and_full_editor_record():
+    from tests.crm_db_fixture import connect
+    store=ReviewsStore(connect);identity=str(uuid.uuid4())
+    try:
+        store.q("INSERT INTO sc_reviews(id,source,reviewer_name,rating,dedupe_key,title,body,source_metadata) VALUES(%s,'csv',%s,4,%s,'Synthetic title',%s,jsonb_build_object('large_provider_payload',repeat('private',2000),'date_known',false))",(identity,identity,identity,'Synthetic review text '+('🏏'*400)))
+        full=store.get_review(identity)
+        compact=next(r for r in store.rows(overview=True,search=identity) if str(r['id'])==identity)
+        assert page.row_html(full)==page.row_html(compact)
+        assert len(compact['body'])==161
+        assert compact['source_metadata']=={'date_known':False}
+        assert 'email' not in compact and 'dedupe_key' not in compact
+        assert len(full['body'])>161 and 'large_provider_payload' in full['source_metadata']
+    finally:store.q('DELETE FROM sc_reviews WHERE id=%s',(identity,))

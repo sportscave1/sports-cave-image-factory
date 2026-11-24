@@ -13903,7 +13903,8 @@ def render_selected_page(current_page):
         def reviews_navigate(route):
             set_current_page(route, source="reviews")
             st.rerun()
-        reviews_page.render_page(current_os_user(), reviews_navigate)
+        reviews_page.render_page(current_os_user(), reviews_navigate,
+            authorize=lambda: _refresh_session_account_if_due(current_os_user(),max_age_seconds=AUTH_REVALIDATE_SECONDS))
     elif current_page in os_accounts.crm_navigation.ROUTES:
         import crm_page
         def crm_navigate(route):

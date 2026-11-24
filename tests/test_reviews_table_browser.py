@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright,expect
 
 ROOT=Path(__file__).resolve().parents[1]
-EVIDENCE=ROOT/'artifacts/reviews-table-responsive-20261124'
+EVIDENCE=ROOT/os.getenv('REVIEWS_BROWSER_EVIDENCE_DIR','artifacts/reviews-table-responsive-20261124')
 URL='http://127.0.0.1:8543'
 
 
@@ -58,6 +58,7 @@ def test_responsive_table_actions_latency_and_recovery():
             next_ms=round((perf_counter()-start)*1000)
             page.get_by_role('button',name='Previous',exact=True).click()
             expect(page.locator('.rv-customer').first).to_have_text('Synthetic collector 1')
+            expect(page.get_by_text('Shell runs: 1',exact=True)).to_be_visible()
             page.locator('[class*="st-key-rv-actions-"]').first.get_by_role('button',name='Open',exact=True).click()
             expect(page.get_by_role('dialog')).to_be_visible()
             expect(page.get_by_role('button',name='Save reply',exact=True)).to_be_visible()
@@ -70,6 +71,16 @@ def test_responsive_table_actions_latency_and_recovery():
             page.get_by_role('button',name='Save changes',exact=True).click()
             expect(page.get_by_role('dialog')).to_be_hidden()
             expect(page.locator('.rv-copy').first).to_contain_text('Synthetic corrected review text')
+            page.get_by_text('Simulate slow storage',exact=True).click()
+            # A brand-new slow filter has no last-good rows. Its fragment must
+            # install completion delivery instead of staying on Loading forever.
+            page.get_by_role('textbox',name='Search reviews',exact=True).fill('collector 26')
+            page.get_by_role('textbox',name='Search reviews',exact=True).press('Enter')
+            expect(page.locator('.rv-customer').first).to_have_text('Synthetic collector 26',timeout=10000)
+            page.get_by_text('Simulate slow storage',exact=True).click()
+            page.get_by_role('textbox',name='Search reviews',exact=True).fill('')
+            page.get_by_role('textbox',name='Search reviews',exact=True).press('Enter')
+            expect(page.locator('.rv-customer').first).to_have_text('Synthetic collector 1')
             page.get_by_text('Simulate slow storage',exact=True).click()
             page.get_by_text('Simulate storage failure',exact=True).click()
             start=perf_counter();page.get_by_role('button',name='Refresh fixture',exact=True).click()

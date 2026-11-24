@@ -47,7 +47,7 @@ class ReviewsStore(Store):
     def aggregate(self,product=None):
         row=self.q('SELECT published,published_rating FROM sc_review_totals WHERE scope=%s',(product or 'all',),True) or {}
         n=int(row.get('published',0));return {'count':n,'average':float(row.get('published_rating',0))/n if n else None}
-    def rows(self,*,status='all',search='',product='',rating=0,source='',since=None,offset=0,limit=25,sort='newest',public=False,received_first=False):
+    def rows(self,*,status='all',search='',product='',rating=0,source='',since=None,offset=0,limit=25,sort='newest',public=False,received_first=False,overview=False):
         limit=max(1,min(50,int(limit)));offset=max(0,min(50000,int(offset)));clauses=[];args=[]
         if public:clauses.extend(["status='PUBLISHED'","(product_id IS NOT NULL OR review_type='STORE')"])
         elif status=='all':clauses.append("status<>'SPAM'")
@@ -64,6 +64,8 @@ class ReviewsStore(Store):
         if sort not in order:raise ValueError('Invalid review sort.')
         if received_first and not public and sort=='newest':order['newest']='notification_received_at DESC NULLS LAST,created_at DESC,id DESC'
         fields="id,review_type,product_id,product_title,product_image,product_url,reviewer_name,rating,title,body,created_at,verified_purchase,merchant_reply,status,(source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known,(source_metadata->>'shop_app'='true') AS shop_verified" if public else '*'
+        if overview and not public:
+            fields="id,source,review_type,product_title,product_image,reviewer_name,rating,title,left(body,161) AS body,created_at,verified_purchase,status,notification_received_at,jsonb_strip_nulls(jsonb_build_object('date_known',source_metadata->'date_known')) AS source_metadata"
         sql='SELECT '+fields+' FROM sc_reviews WHERE '+' AND '.join(clauses)+' ORDER BY '+order[sort]+' LIMIT %s OFFSET %s'
         values=(*args,limit+1,offset)
         return self.q(sql,values) if public else self._read_query('reviews.table',sql,values)

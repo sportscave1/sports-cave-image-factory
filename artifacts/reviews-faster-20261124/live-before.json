@@ -1,0 +1,71 @@
+{
+  "reload": [
+    {
+      "reload_return_ms": 378,
+      "rows_ms": 3288,
+      "ready_ms": 3361
+    },
+    {
+      "reload_return_ms": 256,
+      "rows_ms": 3292,
+      "ready_ms": 3463
+    },
+    {
+      "reload_return_ms": 296,
+      "rows_ms": 3053,
+      "ready_ms": 3142
+    },
+    {
+      "reload_return_ms": 279,
+      "rows_ms": 3531,
+      "ready_ms": 3611
+    },
+    {
+      "reload_return_ms": 378,
+      "rows_ms": 2927,
+      "ready_ms": 3004
+    }
+  ],
+  "pages": [
+    {
+      "mode": "next",
+      "ms": 2324
+    },
+    {
+      "mode": "previous",
+      "ms": 1684
+    },
+    {
+      "mode": "next",
+      "ms": 2097
+    },
+    {
+      "mode": "previous",
+      "ms": 2177
+    },
+    {
+      "mode": "next",
+      "ms": 1931
+    },
+    {
+      "mode": "previous",
+      "ms": 2153
+    },
+    {
+      "mode": "next",
+      "ms": 2022
+    },
+    {
+      "mode": "previous",
+      "ms": 1302
+    },
+    {
+      "mode": "next",
+      "ms": 1319
+    },
+    {
+      "mode": "previous",
+      "ms": 1376
+    }
+  ]
+}

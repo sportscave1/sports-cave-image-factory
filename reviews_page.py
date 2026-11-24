@@ -51,7 +51,7 @@ def table_read(store,signature,offset):
     status,search,product,rating,source,period=signature
     matched=store.match_product({'product_handle':product,'product_title':product}) if product else None
     if product and not matched:return []
-    return store.rows(status=status,search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True)
+    return store.rows(status=status,search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True,overview=True)
 
 
 def prefetch_overview(user,store=None):
@@ -181,9 +181,22 @@ def edit_review(store,user,identity):
         st.session_state.pop(version_key,None);changed('table','summary');st.rerun()
 
 
-def overview(store,user):
-    # Filters must rerun the page so its completion poll observes newly queued
-    # reads. A fragment-only rerun leaves the previously idle poll disabled.
+def move_page(step):
+    state()['offset']=max(0,state().get('offset',0)+step)
+
+
+@st.fragment
+def overview(store,user,authorize=None):
+    # Revalidate through the same OS policy on every partial rerun. Never let a
+    # fragment keep using an account whose access has expired or been removed.
+    try:
+        user=authorize() if authorize else user
+        require(user)
+    except PermissionError:
+        st.warning('Your Reviews access could not be verified. Please sign in again.')
+        return
+    state()['activity']={}
+    settle_initial(state(),prefetch_overview(user,store) or ())
     with st.container(key='reviews-summary'):
         value,activity=load(('summary',),store.summary)
         st.html(kpi_html(value))
@@ -204,7 +217,7 @@ def overview(store,user):
         rows,activity=load(('table',signature,offset),lambda:table_read(store,signature,offset))
         if activity=='ERROR':
             st.caption('Reviews could not refresh. Last resolved rows remain visible.')
-            if st.button('Retry reviews',key='reviews-retry'):changed('table');st.rerun()
+            st.button('Retry reviews',key='reviews-retry',on_click=changed,args=('table',))
         st.html('<div class="rv-heading"><div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DETAILS','STATUS'))+'</div><span>ACTIONS</span></div>')
         if rows is not None:
             for r in rows[:25]:
@@ -215,11 +228,14 @@ def overview(store,user):
                         if st.button('Edit',key='review_edit_'+str(r['id']),help='Edit review text',width=80):edit_review(store,user,r['id'])
             if not rows:st.caption('No reviews match these filters.')
             previous,next_page=st.columns(2)
-            if previous.button('Previous',disabled=offset==0):state()['offset']=max(0,offset-25);st.rerun()
-            if next_page.button('Next',disabled=len(rows)<=25):state()['offset']=offset+25;st.rerun()
+            previous.button('Previous',disabled=offset==0,on_click=move_page,args=(-25,))
+            next_page.button('Next',disabled=len(rows)<=25,on_click=move_page,args=(25,))
             if activity=='READY' and rows:
                 acknowledge_visible(store,user,rows[:25])
         elif activity=='LOADING':st.caption('Loading reviews…')
+    # Register completion delivery inside the owning fragment as well: a slow
+    # filter refresh must not inherit a disabled timer from the preceding view.
+    refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))
 
 
 def acknowledge_visible(store,user,rows):
@@ -364,9 +380,9 @@ def request_automation(store,user,navigate):
                     st.query_params['automation']=str(row['id']);navigate('CRM Automations')
             st.caption('Opens the existing Email Automation editor as a draft. Publishing and delivery keep the existing consent and send guards.')
 
-def render_page(user,navigate=lambda _:None,*,store=None):
+def render_page(user,navigate=lambda _:None,*,store=None,authorize=None):
     require(user);store=store or ReviewsStore()
-    initial_keys=prefetch_overview(user,store)
+    prefetch_overview(user,store)
     st.html(STYLE+STYLE_REVIEW)
     with st.container(key='sc-reviews'):
         st.title('Reviews');st.caption('Manage customer reviews and storefront social proof.')
@@ -374,8 +390,7 @@ def render_page(user,navigate=lambda _:None,*,store=None):
         state()['activity']={}
         try:
             if tab=='Overview':
-                settle_initial(state(),initial_keys or ())
-                overview(store,user)
+                overview(store,user,authorize)
             elif tab=='Import reviews':importer(store,user)
             elif tab=='Collect & reward':collection(store,user,navigate)
             else:display(store,user,navigate)
@@ -383,4 +398,4 @@ def render_page(user,navigate=lambda _:None,*,store=None):
         except Exception:st.warning('Reviews could not complete this operation. Retry when storage is available.')
         with st.container(key='reviews-poll'):
             if st.button('Refresh reviews',key='reviews-refresh'):changed('table','summary');st.rerun()
-        refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))
+        if tab!='Overview':refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))

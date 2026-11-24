@@ -10,6 +10,7 @@ from reviews_page import changed
 from tests.test_crm import ADMIN
 
 st.set_page_config(layout='wide',page_title='Reviews table · synthetic local test')
+st.session_state['fixture_shell_runs']=st.session_state.get('fixture_shell_runs',0)+1
 with st.sidebar:st.title('Sports Cave OS');st.caption('Synthetic offline fixture')
 if 'layout_rows' not in st.session_state:
     st.session_state.layout_rows=[dict(id='00000000-0000-0000-0000-'+str(i+1).zfill(12),source='csv',review_type='PRODUCT',
@@ -45,5 +46,6 @@ with st.container(key='fixture-controls'):
     st.checkbox('Simulate storage failure',key='simulate_failure')
     if st.button('Refresh fixture'):changed('table');st.rerun()
     st.caption('SQL/provider calls simulated; no live access')
+    st.caption('Shell runs: '+str(st.session_state['fixture_shell_runs']))
     st.code(str(calls))
     st.caption('Offset: '+str(st.session_state.get('reviews_state',{}).get('offset')))
