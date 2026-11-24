@@ -711,7 +711,7 @@ function CertificateViewer({certificate, api, apiBaseUrl, country, offerLoader, 
 }
 
 function FramedCertificatePreview({certificate, previewUrl, color}) {
-  return <s-grid gridTemplateColumns="@container (inline-size > 520px) 'minmax(0, 1fr)', 'min(100%, clamp(160px, calc(100dvh - 440px), 340px))'" justifyContent="center" alignItems="center">
+  return <s-grid gridTemplateColumns="@container (inline-size > 520px) 'minmax(0, 1fr)', 'min(100%, clamp(160px, calc(100dvh - 472px), 340px))'" justifyContent="center" alignItems="center">
     <s-box borderRadius="large" overflow="hidden">
     {["Black", "Oak", "White"].map(frame => (
       <s-box key={frame} display={frame === color ? "auto" : "none"} accessibilityVisibility={frame === color ? "visible" : "hidden"}>
@@ -724,6 +724,14 @@ function FramedCertificatePreview({certificate, previewUrl, color}) {
     ))}
     </s-box>
   </s-grid>;
+}
+
+// Native account typography has no font-size control. Inline vectors keep these
+// two purchase labels crisp at the requested sizes without another network load.
+function framePurchaseLabel(text, size, color, centered = false) {
+  const safe = String(text).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[char]));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40" viewBox="0 0 200 40"><text x="${centered ? 100 : 0}" y="28" text-anchor="${centered ? 'middle' : 'start'}" font-family="Arial,Helvetica,sans-serif" font-size="${size}" font-weight="700" fill="${color}">${safe}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function FramedCertificateOffer({
@@ -777,7 +785,9 @@ function FramedCertificateOffer({
           </s-badge>
         ) : (
           <s-stack gap="base">
-            <s-heading>{price}</s-heading>
+            <s-heading><s-box inlineSize="200px" maxInlineSize="100%" blockSize="40px">
+              <s-image src={framePurchaseLabel(price, 32, '#f5f3ed')} alt={price} inlineSize="fill" aspectRatio="5/1" loading="eager" />
+            </s-box></s-heading>
             <s-button
               inlineSize="fill"
               variant="primary"
@@ -786,7 +796,9 @@ function FramedCertificateOffer({
               disabled={!selected?.variant_id || !price}
               loading={checkoutState.status === "adding"}
             >
-              <s-box paddingBlock="small" minBlockSize="32px"><s-text type="strong">ADD TO CART · {price}</s-text></s-box>
+              <s-box inlineSize="200px" maxInlineSize="100%" blockSize="40px">
+                <s-image src={framePurchaseLabel('ADD TO CART', 20, '#121212', true)} alt="ADD TO CART" inlineSize="fill" aspectRatio="5/1" loading="eager" />
+              </s-box>
             </s-button>
           </s-stack>
         )}
