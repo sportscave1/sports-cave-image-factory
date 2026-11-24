@@ -1,0 +1,42 @@
+{
+  "live": {
+    "score": 42,
+    "warnings": [
+      "The page loaded too slowly to finish within the time limit. Results may be incomplete."
+    ],
+    "fcp_ms": 378,
+    "lcp_ms": 3618,
+    "blocking_ms": 1272,
+    "cls": 0.0368866338880226,
+    "bytes": 5027387
+  },
+  "draft": {
+    "score": 70,
+    "warnings": [
+      "The page loaded too slowly to finish within the time limit. Results may be incomplete.",
+      "The page may not be loading as expected because your test URL (https://www.sportscaveshop.com/pages/reviews?preview_theme_id=190889230643) was redirected to https://www.sportscaveshop.com/pages/reviews. Try testing the second URL directly."
+    ],
+    "fcp_ms": 386,
+    "lcp_ms": 5466,
+    "blocking_ms": 27,
+    "cls": 7.179758224042289e-06,
+    "bytes": 5032568
+  },
+  "draft-final": {
+    "score": 71,
+    "warnings": [
+      "The page loaded too slowly to finish within the time limit. Results may be incomplete.",
+      "The page may not be loading as expected because your test URL (https://www.sportscaveshop.com/pages/reviews?preview_theme_id=190889230643) was redirected to https://www.sportscaveshop.com/pages/reviews. Try testing the second URL directly."
+    ],
+    "fcp_ms": 381,
+    "lcp_ms": 5217,
+    "blocking_ms": 14,
+    "cls": 7.179758224042289e-06,
+    "bytes": 5018850
+  },
+  "delivery_experiment": {
+    "score": 69,
+    "selected": false,
+    "reason": "Cached OS delivery scored 71 and was retained."
+  }
+}
