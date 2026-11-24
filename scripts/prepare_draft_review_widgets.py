@@ -20,6 +20,15 @@ def prepare(source):
         status.setAttribute('role', 'status');
         frame.addEventListener('load', () => { status.hidden = true; }, {once:true});
         this.querySelector('[data-review-form-host]').replaceChildren(status, frame);""")
+    result=result.replace('        this.archive.append(row);', """        if (!picture && review.productThumb) {
+          const thumbnail = node(review.productUrl ? 'a' : 'span', 'sc-reviews__row-photo');
+          if (review.productUrl) thumbnail.href = review.productUrl;
+          const image = node('img');
+          image.src = review.productThumb; image.alt = 'Product reviewed: ' + (review.product || 'Sports Cave edition');
+          image.width = 68; image.height = 68; image.loading = 'lazy'; image.decoding = 'async'; image.style.objectFit = 'contain';
+          thumbnail.append(image); row.append(thumbnail);
+        }
+        this.archive.append(row);""")
     return result
 
 

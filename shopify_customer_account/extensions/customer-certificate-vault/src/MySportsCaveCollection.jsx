@@ -1068,10 +1068,10 @@ async function performVaultRequest(api, apiBaseUrl, path, options = {}) {
       signal: options.signal,
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        ...(options.body instanceof FormData ? {} : {"Content-Type": "application/json"}),
         "X-Sports-Cave-Request": "customer-account-extension",
       },
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: options.body instanceof FormData ? options.body : options.body ? JSON.stringify(options.body) : undefined,
     });
     let payload = {};
     try {

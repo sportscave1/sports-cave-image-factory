@@ -151,7 +151,9 @@ def advance(engine,enrollment):
     # Preserve slot identity; publication changes cannot replay accepted steps.
     receipts=engine.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s AND NOT test_send',(enrollment['id'],))
     if any(r['status'] in ('SUBMITTING','UNCERTAIN') for r in receipts):return
-    accepted={r['step_index'] for r in receipts if r['status']=='ACCEPTED'}
+    # A review received on the account page completes only its request slot.
+    # It is not an email acceptance and must not stop later product/collection steps.
+    accepted={r['step_index'] for r in receipts if r['status']=='ACCEPTED' or (r['status']=='BLOCKED' and r.get('error_code')=='review_already_received')}
     steps=deepcopy(enrollment['steps']);slots={s['step_id']:i for i,s in enumerate(steps)}
     for step in row['steps']:
         if step['step_id'] not in slots:slots[step['step_id']]=len(steps);steps.append(step)

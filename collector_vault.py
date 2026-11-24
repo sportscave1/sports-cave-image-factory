@@ -1163,7 +1163,7 @@ def lookup_judgeme_product(shopify_product_id, *, force=False, request_get=None)
     return value
 
 
-def _reviewed_keys(owner_hash):
+def _reviewed_keys(owner_hash,customer=None):
     with supabase_backend.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1175,7 +1175,7 @@ def _reviewed_keys(owner_hash):
                 """,
                 (owner_hash,),
             )
-            return {
+            legacy = {
                 (
                     _canonical_gid("Order", row.get("shopify_order_id")),
                     _canonical_gid("Product", row.get("shopify_product_id")),
@@ -1183,12 +1183,18 @@ def _reviewed_keys(owner_hash):
                 for row in (cur.fetchall() or [])
             }
 
+            if not customer:return legacy
+            cur.execute("SELECT order_id AS shopify_order_id,product_id AS shopify_product_id FROM sc_reviews WHERE source='sports_cave' AND customer_id=%s AND order_id IS NOT NULL",(str(customer),))
+            return legacy | {(_canonical_gid('Order',r.get('shopify_order_id')),_canonical_gid('Product',r.get('shopify_product_id'))) for r in (cur.fetchall() or [])}
+
 
 def review_prompt(rows, shopify_customer_id, *, allow_purchased=False):
-    if not rows or not _judgeme_configured():
-        return None
+    if not rows:return None
+    from reviews_store import ReviewsStore
+    native_store=ReviewsStore()
     try:
-        reviewed = _reviewed_keys(customer_hash(shopify_customer_id))
+        if not native_store.settings()['enabled']:return None
+        reviewed = _reviewed_keys(customer_hash(shopify_customer_id),shopify_customer_id)
     except Exception as error:
         _log_optional_feature_unavailable("reviews", error)
         return None
@@ -1203,10 +1209,8 @@ def review_prompt(rows, shopify_customer_id, *, allow_purchased=False):
             continue
         if (order_id, product_id) in reviewed:
             continue
-        judge_product = lookup_judgeme_product(product_id)
-        if not judge_product:
-            return None
         try:
+            if not native_store.match_product({"product_id":product_id}):continue
             public = _certificate_public_row(row)
         except Exception as error:
             LOGGER.warning(

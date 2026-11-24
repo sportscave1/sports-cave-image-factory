@@ -14,8 +14,18 @@ EXCLUDED = '0af86c4c-bda9-5e9a-9070-0414339b5cd8'
 US_IDS = ['d69b0463-04bc-412c-948a-1636353b3528', '013c8326-eeb9-41c0-8a3a-07ee648bcf2a',
           '3cea26d2-792c-42c7-a283-48e1d8cf5c54', 'c1fc64d3-bd69-4401-b510-24e30112cc97']
 US_TERMS = r'\m(nba|wnba|nfl|mlb|nhl|nascar|basketball|baseball|super bowl|kyle larson|don mattingly|babe ruth|shohei ohtani|aaron judge|ohtani|kobe|jordan|stephen curry|steph curry|lebron|wilt chamberlain|muhammad ali|mike tyson|tiger woods|tom brady|patrick mahomes|inter miami)\M'
-FIELDS = "r.id,r.source,r.source_review_id,r.review_type,r.product_title,r.reviewer_name,r.rating,r.title,r.body,r.created_at,r.verified_purchase,r.source_verified,(r.source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known"
+FIELDS = "r.id,r.source,r.source_review_id,r.review_type,r.product_title,r.product_image,r.product_url,r.reviewer_name,r.rating,r.title,r.body,r.created_at,r.verified_purchase,r.source_verified,(r.source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known"
 VISIBLE = "r.status='PUBLISHED' AND (r.product_id IS NOT NULL OR r.review_type='STORE') AND right(COALESCE(r.source_review_id,''),36)<>%s"
+
+
+def product_thumbnail(row):
+    from urllib.parse import urlsplit,urlunsplit,parse_qsl,urlencode
+    value=row.get('product_image') or ''
+    u=urlsplit(value)
+    if row.get('review_type')!='PRODUCT' or u.scheme!='https' or u.hostname not in ('cdn.shopify.com','www.sportscaveshop.com','sportscaveshop.com'):return ''
+    args={k:v for k,v in parse_qsl(u.query) if k not in ('width','height','format','quality','crop')}
+    args.update(width='136',height='136',format='webp',quality='75')
+    return urlunsplit((u.scheme,u.netloc,u.path,urlencode(args),''))
 
 
 def projection(store, origin, country='AU', offset=0, settings=None):
@@ -62,7 +72,7 @@ def projection(store, origin, country='AU', offset=0, settings=None):
         legacy=str(row.get('source_review_id') or '')[-36:]
         return {'id':str(row['id']),'legacy_id':legacy if row['source']=='judgeme' and re.fullmatch('[a-f0-9-]{36}',legacy) else str(row['id']),
                 'reviewer_name':PUBLIC_NAMES.get(str(row['id']),row['reviewer_name']) if row['source']=='judgeme' else row['reviewer_name'],'rating':row['rating'],'title':row['title'],'body':row['body'],
-                'product_title':row['product_title'],'created_at':row['created_at'] if settings.get('date',True) and row['date_known'] else None,
+                'product_title':row['product_title'],'product_thumbnail_url':product_thumbnail(row),'product_url':row.get('product_url') or '', 'created_at':row['created_at'] if settings.get('date',True) and row['date_known'] else None,
                 'verified_purchase':bool(settings['verified'] and row['verified_purchase']),
                 'source_verified':bool(settings['verified'] and row['source']=='judgeme' and (row['source_verified'] or IMPORTED_VERIFIED.get(legacy) is True or str(row['id']) in CONFIRMED_IMPORT_IDS)),
                 'media':by_review.get(str(row['id']),[])}

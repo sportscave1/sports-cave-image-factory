@@ -220,9 +220,11 @@ class Engine:
                         context['_lifecycle_products']=recommend(self.store,self.shop,content['document'],context.get('_lifecycle_orders',[]),self.clock(),
                             new_since=context.get('_lifecycle_last_purchase') if content['trigger']=='win_back' and 'lifecycle-new-editions' in content['document'].get('tags',[]) else None)
                 if content.get('review_request'):
-                    from reviews_submission import prepare_email
+                    from reviews_submission import prepare_email,ReviewAlreadyReceived
                     from reviews_store import ReviewsStore
-                    content=prepare_email(content,row,enrollment,self.shop,ReviewsStore(self.store.connect))
+                    try:content=prepare_email(content,row,enrollment,self.shop,ReviewsStore(self.store.connect))
+                    except ReviewAlreadyReceived:
+                        self.store.finish_send(row,'BLOCKED','review_already_received');return True
                 from crm_abandoned_checkout import needs_items,complete
                 if needs_items(content['document']):context['_checkout']=complete(self.shop,context.get('_checkout'))
                 from crm_recovery_discount import prepare as prepare_discount,selection as discount_selection

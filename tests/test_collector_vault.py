@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch,Mock
 
 from PIL import Image
 from starlette.applications import Starlette
@@ -237,6 +237,10 @@ class CollectorVaultAuthenticationTests(unittest.TestCase):
 
 
 class CollectorVaultEligibilityTests(unittest.TestCase):
+    def setUp(self):
+        native=Mock();native.settings.return_value={'enabled':True};native.match_product.return_value={'title':'Synthetic native product'}
+        guard=patch('reviews_store.ReviewsStore',return_value=native);guard.start();self.addCleanup(guard.stop)
+
     def _order(self, shipment_status, *, display="FULFILLED", fulfillment_status="SUCCESS"):
         return {
             "id": "gid://shopify/Order/44",

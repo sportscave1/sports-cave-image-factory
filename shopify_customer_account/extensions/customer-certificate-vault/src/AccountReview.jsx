@@ -6,13 +6,13 @@ import {fileFromDropEvent,inputValue,isAllowedReviewPhoto} from './vault-utils.j
 export function AccountReview({prompt, certificate, request, api, reviewStatus = "ready", onRetryReview = () => {}}) {
   const [submitted,setSubmitted]=useState(false);
   const onSubmitted=()=>setSubmitted(true);
-  const [rating, setRating] = useState(0);
+  const [rating, setRating] = useState(5);
   const [name, setName] = useState("");
   const [setupImage, setSetupImage] = useState(null);
   const productId = reviewProductId(prompt, certificate);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [photo, setPhoto] = useState(null);
+  const [files,setFiles]=useState([]);
   const [photoError, setPhotoError] = useState("");
   const [submitState, setSubmitState] = useState({status: "idle", message: ""});
   const modalId = "collector-review-modal";
@@ -40,28 +40,9 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
   };
 
   const handlePhoto = (event) => {
-    const file = fileFromDropEvent(event);
-    const validation = isAllowedReviewPhoto(file);
-    if (!validation.ok) {
-      setPhoto(null);
-      setPhotoError(validation.error);
-      return;
-    }
-    const reader = new FileReader();
-    readerRef.current = reader;
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      setPhoto({
-        name: file.name,
-        mime_type: file.type,
-        size: file.size,
-        base64: dataUrl.split(",", 2)[1] || "",
-        preview: dataUrl,
-      });
-      setPhotoError("");
-      };
-    reader.onerror = () => setPhotoError("Photo could not be read.");
-    reader.readAsDataURL(file);
+    const selected=Array.from(event?.files || event?.detail?.files || event?.currentTarget?.files || event?.target?.files || []);
+    if(selected.length>5 || selected.filter(f=>f.type.startsWith('video/')).length>1 || selected.some(f=>f.size>(f.type.startsWith('video/')?150:25)*1024*1024) || selected.reduce((n,f)=>n+f.size,0)>250*1024*1024){setPhotoError('Choose up to five files, including one video. A selected file is too large.');return;}
+    setPhotoError('');setFiles(selected);
   };
 
   const submitReview = async () => {
@@ -79,21 +60,10 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
     }
     setSubmitState({status: "submitting", message: ""});
     try {
-      await request("/api/collector-vault/review", {
-        method: "POST",
-        body: {
-          review_reference: prompt.reference,
-          rating,
-          reviewer_name: name.trim(),
-          title,
-          body,
-          photo: photo ? {
-            mime_type: photo.mime_type,
-            filename: photo.name,
-            base64: photo.base64,
-          } : null,
-        },
-      });
+      const data=new FormData();
+      for(const [key,value] of Object.entries({review_reference:prompt.reference,rating:String(rating),reviewer_name:name.trim(),title,body,display_consent:'yes'}))data.append(key,value);
+      for(const file of files)data.append('media',file,file.name);
+      await request('/api/collector-vault/review',{method:'POST',body:data});
       setSubmitState({status: "submitted", message: "Review submitted ✓"});
       onSubmitted();
     } catch (error) {
@@ -138,6 +108,13 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
           <s-divider />
           <s-text type="strong">Your rating</s-text>
           <StarRating rating={rating} onChange={chooseRating} />
+          <s-text-field label="Name" value={name} maxLength={120} required
+            onInput={(event) => setName(inputValue(event))}></s-text-field>
+          <s-text-field label="Review title (optional)" value={title} maxLength={120}
+            onInput={(event) => setTitle(inputValue(event))}></s-text-field>
+          <s-text-area label="Your review" placeholder="What stands out now that it’s on your wall?"
+            value={body} minLength={10} maxLength={2000} required rows={3}
+            onInput={(event) => setBody(inputValue(event))}></s-text-area>
           <s-box border="base" borderRadius="large" padding="base" background="subdued">
             <s-grid gridTemplateColumns="minmax(0, 0.9fr) minmax(0, 1.1fr)" gap="base" alignItems="center">
               <s-image src={setupImage?.url || collectionThumbnail(certificate?.purchased_image_url, 480)} alt={setupImage?.altText || "Your edition in a room"} aspectRatio="1.25" objectFit="cover" loading="lazy" />
@@ -146,37 +123,16 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
                 <s-text>Start with the whole wall, then move in on your edition number.</s-text>
                 <s-text type="strong">Add photo/video (optional)</s-text>
                 <s-drop-zone
-                  label="Add photo"
-                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  label="Add photo/video (optional)"
+                  multiple
+                  accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
                   error={photoError}
                   onInput={handlePhoto}
                 ></s-drop-zone>
-                <s-button href="https://www.sportscaveshop.com/pages/reviews#judgeme_review_widget" target="_blank">Add video</s-button>
-                <s-text color="subdued">For video, open Write a review in the new tab and finish your review there.</s-text>
               </s-stack>
             </s-grid>
           </s-box>
-          <s-text-field label="Name" value={name} maxLength={120} required
-            onInput={(event) => setName(inputValue(event))}></s-text-field>
-          <s-text-field label="Review title (optional)" value={title} maxLength={120}
-            onInput={(event) => setTitle(inputValue(event))}></s-text-field>
-          <s-text-area label="Your review" placeholder="What stands out now that it’s on your wall?"
-            value={body} minLength={10} maxLength={2000} required rows={3}
-            onInput={(event) => setBody(inputValue(event))}></s-text-area>
-          {photo ? (
-            <s-stack gap="small">
-              <s-image
-                src={photo.preview}
-                alt={`Selected review photo ${photo.name}`}
-                aspectRatio="16/9"
-                objectFit="contain"
-              ></s-image>
-              <s-stack direction="inline" gap="small" alignItems="center">
-                <s-text>{photo.name}</s-text>
-                <s-button onClick={() => setPhoto(null)}>Remove photo</s-button>
-              </s-stack>
-            </s-stack>
-          ) : null}
+          {files.map((file,index)=><s-stack key={index} direction="inline" gap="small"><s-text>{file.name}</s-text><s-button onClick={()=>setFiles(files.filter((_,i)=>i!==index))}>Remove</s-button></s-stack>)}
           {submitState.message ? (
             <s-banner tone={submitState.status === "error" ? "critical" : "success"}>
               {submitState.message}
@@ -187,7 +143,7 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
           slot="primary-action"
           variant="primary"
           onClick={submitReview}
-          disabled={!prompt || submitted}
+          disabled={!prompt || submitted || submitState.status === "submitting"}
           loading={submitState.status === "submitting"}
         >
           Submit review
