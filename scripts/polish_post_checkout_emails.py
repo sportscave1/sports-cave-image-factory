@@ -26,7 +26,7 @@ def polish(flow):
   else:
    title='Make it a pair.';subject='What belongs beside your edition?'
    intro='Your next sporting moment is waiting. Find an edition to sit beside your favourite.'
-   extra='';link='';label='';reward=''
+   extra='';link='https://www.sportscaveshop.com/collections/all-sports-wall-art';label='Explore editions';reward=''
   button=('<p><a href="'+escape(link,quote=True)+'" style="display:inline-block;background:#d4a54c;color:#171717;padding:14px 28px;border-radius:6px;text-decoration:none;font-weight:700">'+label+'</a></p>') if link else ''
   html='<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 24px;font-family:Arial,Helvetica,sans-serif;color:#222;background:#fff"><p style="font-size:11px;letter-spacing:2px;color:#806526">YOUR SPORT. YOUR MOMENT. YOUR CAVE.</p><h1 style="font-family:Georgia,serif;font-size:30px;line-height:36px;font-weight:400">'+title+'</h1><p style="font-size:16px;line-height:24px">'+intro+'</p>'+extra+button+reward+'<p style="font-size:14px;line-height:21px">The Sports Cave team</p></td></tr></table>'
   doc['content'].update(subject=subject,headline=title,intro=intro.replace('<br>',' '),preheader='Share your review, photo or video.' if review else 'Your sport. Your moment. Your cave.',cta_label=label,cta_url=link,body='',secondary='',ps='')
