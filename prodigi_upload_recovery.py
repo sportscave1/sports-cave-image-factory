@@ -21,6 +21,7 @@ ERRORS = {
     'Pinned artwork transfer interrupted.',
     'Failed to fetch',
     'The exact Prodigi order page did not become ready; check its loading or sign-in state.',
+    'The woken order page did not expose its identity.',
     'Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.',
     'The draft changed before Save.',
 }

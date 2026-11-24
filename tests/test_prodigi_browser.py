@@ -150,6 +150,16 @@ def test_checksum_mismatch_cannot_become_ready(handoff,monkeypatch):
     assert not sandbox.list_tests()[0]['browser'].get('verified')
 
 
+@pytest.mark.parametrize('changed',[False,True])
+def test_missing_page_identity_reports_only_an_independently_unchanged_pre_save_draft(handoff,changed):
+    _,provider,_=handoff;plan=browser.claim()
+    if changed:provider.data['recipient']={'name':'Changed synthetic recipient'}
+    assert browser.finish(KEY,plan['token'],'open',error='The woken order page did not expose its identity.')['status']=='Needs review'
+    value=sandbox.list_tests()[0]
+    assert ('saved draft is unchanged' in value['message']) is not changed
+    assert value['browser']['started'] is False and not provider.writes
+
+
 def test_staff_recheck_reads_uncertain_save_without_another_upload_or_permit(handoff,monkeypatch):
     _,provider,_=handoff;plan=browser.claim()
     allowed=[]

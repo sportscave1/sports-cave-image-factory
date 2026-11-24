@@ -372,19 +372,21 @@ test('product repair opens only the pinned draft, without downloading artwork or
  }
 });
 
-test('product Reset reloads its exact owned tab after extension reload invalidated the old receiver',async()=>{
+test('product Reset replaces its invalidated receiver and selects once on the same exact order',async()=>{
  const {context,storage,calls}=setup();let loaded=false;const events=[];
  const url='https://dashboard.prodigi.com/orders/99/detail';storage.ordersWorkerTabs={[url]:9};
  context.chrome.tabs.get=async id=>({id,url});
- context.chrome.tabs.reload=async()=>{events.push('reload');loaded=true;};
+ context.chrome.tabs.reload=()=>assert.fail('Preserve the unidentified previous page');
+ context.chrome.tabs.update=async(id,options)=>{assert.equal(id,9);assert.equal(options.active,true);};
+ context.chrome.tabs.create=async options=>{assert.equal(options.url,url);events.push('fresh-page');loaded=true;return{id:10,url};};
  context.chrome.tabs.sendMessage=async(id,message)=>{
   if(!loaded)throw Error('Receiving end does not exist');
   if(message.type==='prodigi:ready')return{ready:true,page_instance:'new-extension-context'};
-  assert.equal(message.type,'prodigi:product');events.push('select-product');return{stage:'product-readback'};
+  assert.equal(message.type,'prodigi:product');assert.equal(id,10);events.push('select-product');return{stage:'product-readback'};
  };
  context.plan={kind:'product',environment:'live',order_id:'99',item_id:'88',order_url:url,key:'product:prodigi_prepare:1',token:'b'.repeat(43),sha256:'a'.repeat(64),reference:'fixture',sku:'GLOBAL-CFP-A1',colour:'Black'};
  await vm.runInContext('prodigiBrowserRun(plan)',context);
- assert.deepEqual(events,['reload','select-product']);assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
+ assert.deepEqual(events,['fresh-page','select-product']);assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
 });
 for(const withCatalogueTab of [true,false])test('blank-product page flow with catalogue tab '+withCatalogueTab+' selects only after permit',async()=>{
  const listeners=[],events=[];let dialogOpen=false,selected=false,inputValue='';

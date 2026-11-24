@@ -67,6 +67,7 @@ def test_missing_library_original_uses_fresh_same_item_upload(waiting):
 @pytest.mark.parametrize('stage,error',[
     ('download','The pinned JPG is unavailable.'),
     ('open','Failed to fetch'),
+    ('open','The woken order page did not expose its identity.'),
     ('signin','Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.'),
     ('readiness','The exact Prodigi order page did not become ready; check its loading or sign-in state.'),
     ('picker','The expected Prodigi control did not finish loading.'),
@@ -93,6 +94,22 @@ def test_changed_or_consumed_work_is_never_recovered(waiting,change):
     if change=='intent':value['write_intent']=True
     if change=='hidden':value['hidden']=True
     if change=='unknown':value['browser']['client_error']='Unknown error'
+    write(store,value)
+    assert recovery.recover({'id':'owner'})==0
+    assert prep.read(1).get('browser') and not provider.writes
+
+
+@pytest.mark.parametrize('change',['recipient','quantity','artwork','shipping','source','save','submission'])
+def test_legacy_missing_page_identity_never_bypasses_saved_order_guards(waiting,change):
+    store,provider,_,_=waiting;value=prep.read(1)
+    value['browser'].update(last_stage='open',client_error='The woken order page did not expose its identity.')
+    if change=='recipient':provider.data['recipient']={'name':'Changed synthetic recipient'}
+    if change=='quantity':provider.data['items'][0]['quantity']=2
+    if change=='artwork':provider.data['items'][0]['assets']=[{'url':'unexpected.jpg'}]
+    if change=='shipping':provider.data['shippingMethod']='Express'
+    if change=='source':value['snapshot']['output']['sha256']='f'*64
+    if change=='save':value['browser']['started']=True
+    if change=='submission':value['submission']={'status':'submitted'}
     write(store,value)
     assert recovery.recover({'id':'owner'})==0
     assert prep.read(1).get('browser') and not provider.writes

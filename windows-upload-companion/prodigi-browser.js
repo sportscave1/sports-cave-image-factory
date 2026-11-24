@@ -40,13 +40,14 @@ function prodigiSignInRequired() {
   return Object.assign(Error('Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.'),
     {code:'PRODIGI_SIGNIN_REQUIRED',prodigiStage:'signin'});
 }
-async function prodigiWorkerTab(plan,replaceStale=false) {
+async function prodigiWorkerTab(plan,replaceStale=false,expectedTabId) {
   // Reuse only tabs this worker created. Never navigate or claim a user's tab.
   const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
   const id=saved[plan.order_url];
   if(Number.isInteger(id)) {
     try {const tab=await chrome.tabs.get(id);
       if(prodigiLoginAddress(tab.url,plan.order_url))throw prodigiSignInRequired();
+      if(replaceStale&&id!==expectedTabId)throw Error('The worker order tab ownership changed before fresh-page recovery.');
       if(replaceStale&&!prodigiOrderAddress(tab.url,plan.order_url))throw Error('The worker order tab changed before fresh-page recovery.');
       if(!replaceStale&&prodigiOrderAddress(tab.url,plan.order_url))return {...tab,ordersReused:true};
     } catch(error) {if(replaceStale||error.code==='PRODIGI_SIGNIN_REQUIRED')throw error;}
@@ -103,16 +104,30 @@ async function prodigiWaitForPage(tab,refresh=false,attempts=60,orderUrl) {
   }
   if(refresh&&tab.ordersReused){
     try{previousPage=(await probe())?.page_instance;}catch(error){if(error.prodigiOwnershipLost)throw error;}
-    if(woke&&!previousPage){
+    if(typeof previousPage!=='string'||!previousPage){
+      previousPage=undefined;
       for(let n=0;n<5&&!previousPage;n++){
-        try{previousPage=(await probe())?.page_instance;}catch(error){if(error.prodigiOwnershipLost)throw error;}
+        try{const identity=(await probe())?.page_instance;
+          if(typeof identity==='string'&&identity)previousPage=identity;
+        }catch(error){if(error.prodigiOwnershipLost)throw error;}
+        if(!previousPage&&n>=2&&!woke&&orderUrl){await prodigiWakeOwnedTab(tab,orderUrl);woke=true;}
         if(!previousPage)await ordersDelay(1000);
       }
-      if(!previousPage)throw Error('The woken order page did not expose its identity.');
+      // A frozen/orphaned content script cannot prove a reload is a new page.
+      // Preserve it and let the authorised caller use one fresh owned context.
+      if(!previousPage)return false;
     }
     // The image library can leave allowed filter parameters in the owned tab.
     // QA pins the clean detail URL; a reload alone would preserve those filters.
-    if(orderUrl&&tab.url!==orderUrl)await chrome.tabs.update(tab.id,{url:orderUrl});
+    let current=tab;
+    if(orderUrl){
+      const saved=(await chrome.storage.local.get('ordersWorkerTabs')).ordersWorkerTabs||{};
+      current=await chrome.tabs.get(tab.id);
+      if(saved[orderUrl]===tab.id&&prodigiLoginAddress(current.url,orderUrl))throw prodigiSignInRequired();
+      if(saved[orderUrl]!==tab.id||!prodigiOrderAddress(current.url,orderUrl))
+        throw Error('The worker order tab changed before refresh.');
+    }
+    if(orderUrl&&current.url!==orderUrl)await chrome.tabs.update(tab.id,{url:orderUrl});
     else await chrome.tabs.reload(tab.id);
     reloaded=true;
   }
@@ -134,7 +149,7 @@ async function prodigiReadyOwnedPage(plan,tab,refresh,attempts){
   const allowed=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true)||
     plan.selected_empty_product===true||plan.fresh_empty_item===true||plan.replace_artwork===true;
   if(!allowed||!tab.ordersReused)return null;
-  const fresh=await prodigiWorkerTab(plan,true);
+  const fresh=await prodigiWorkerTab(plan,true,tab.id);
   if(prodigiBrowserTransfer)prodigiBrowserTransfer.tab=fresh.id;
   if(await prodigiWaitForPage(fresh,false,attempts,plan.order_url))return fresh;
   return null;

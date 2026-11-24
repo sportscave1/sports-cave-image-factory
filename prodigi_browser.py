@@ -569,6 +569,13 @@ def _finish(key,read_receipt,stage,client_error=''):
             if not value['browser']['started'] or current_business!=expected_business:
                 from prodigi_product_browser import changed_fields
                 value['browser']['readback_changed_fields']=changed_fields(expected_business,current_business)
+                if (value['browser']['started'] is False and stage in ('open','readiness')
+                        and client_error in ('The woken order page did not expose its identity.',
+                            'The exact Prodigi order page did not become ready; check its loading or sign-in state.')
+                        and business(order,item['id'])==before
+                        and not has_existing_artwork(item)
+                        and (item.get('assets') or [])==value['browser'].get('empty_slots',[])):
+                    raise ValueError('The supplier page stopped responding before artwork Save. The saved draft is unchanged; safe recovery is pending.')
                 raise ValueError('Supplier order changed or Save was not permitted. Review this exact draft.')
             if value['browser'].get('companion_sha256')!=snap['output']['sha256']:
                 raise ValueError('The paired companion source checksum was not confirmed.')
