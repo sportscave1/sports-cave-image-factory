@@ -95,6 +95,7 @@ class DropboxHttpTests(unittest.TestCase):
     def test_video_ranges_and_poster_are_served_from_dropbox_without_private_ids(self):
         from reviews_http import router
         r=self.insert();storage={'provider':'dropbox','video_format':'mp4','original':REF,'posters':{'320':{**REF,'width':320,'height':180},'1280':{**REF,'width':1280,'height':720}}}
+        for value in storage['posters'].values():value['sha256']=hashlib.sha256(b'x'*100).hexdigest()
         m=self.store.q("INSERT INTO sc_review_media(review_id,kind,source_url,object_key,sha256,size_bytes,status,approved,storage) VALUES(%s,'video','fixture','id:reviewfixture',%s,100,'COPIED',true,%s::jsonb) RETURNING id",(r['id'],'f'*64,json.dumps(storage)),True)
         from reviews_routing import PublicReviews
         self.store.save_settings(ADMIN,{'enabled':True});app=PublicReviews(FastAPI())

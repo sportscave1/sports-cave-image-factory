@@ -39,4 +39,33 @@ class CarouselMediaTests(unittest.TestCase):
         storage.put.assert_not_called();storage.open.return_value.close.assert_called_once()
 
 
+class DeliveryCacheTests(unittest.TestCase):
+    def test_cache_is_bounded_and_expires(self):
+        from reviews_display_cache import ImageCache
+        clock=Mock(return_value=0);cache=ImageCache(byte_limit=5,limit=2,clock=clock)
+        cache.put('a',b'123');cache.put('b',b'45');self.assertEqual(cache.bytes,5)
+        cache.put('c',b'67');self.assertIsNone(cache.get('a'));self.assertLessEqual(cache.bytes,5)
+        clock.return_value=901;self.assertIsNone(cache.get('c'))
+    def test_image_is_downloaded_once_but_hidden_media_still_returns_404(self):
+        from unittest.mock import patch
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from reviews_http import router
+        from reviews_public_cache import CACHE
+        from reviews_display_cache import CACHE as images
+        CACHE.invalidate();images.rows.clear();images.bytes=0
+        output=io.BytesIO();Image.new('RGB',(20,20),'red').save(output,'WEBP');body=output.getvalue()
+        ref={'provider':'dropbox','id':'id:syntheticdelivery','rev':'a1','size':len(body),'sha256':hashlib.sha256(body).hexdigest()}
+        store=Mock();store.connect='fixture';store.settings.return_value={'enabled':True};store.q.return_value={'kind':'image','storage':{'provider':'dropbox','variants':{'320':ref}}}
+        storage=Mock();storage.open.return_value.iter_chunks.return_value=[body]
+        app=FastAPI();app.include_router(router);client=TestClient(app)
+        url='/reviews/media/'+'c'*32+'?size=320'
+        with patch('reviews_http.ReviewsStore',return_value=store),patch('reviews_http.allow_rate',return_value=True),patch('reviews_dropbox.ReviewDropboxStorage',return_value=storage):
+            self.assertEqual(client.get(url).content,body);self.assertEqual(client.get(url).content,body)
+            storage.open.assert_called_once()
+            CACHE.invalidate();store.q.return_value=None
+            self.assertEqual(client.get(url).status_code,404)
+            storage.open.assert_called_once()
+
+
 if __name__=='__main__':unittest.main()

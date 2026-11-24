@@ -110,6 +110,10 @@ async def review_media(identity:str,request:Request):
             partial=True;headers['Content-Range']=f'bytes {start}-{end}/{total}'
         headers['Content-Length']=str(end-start+1)
         if request.method=='HEAD':return Response(status_code=206 if partial else 200,media_type=mime,headers=headers)
+        if mime=='image/webp' and not partial:
+            from reviews_display_cache import display_bytes
+            body=await run_in_threadpool(display_bytes,ref,ReviewDropboxStorage())
+            return Response(body,media_type=mime,headers=headers)
         stream=await run_in_threadpool(ReviewDropboxStorage().open,ref,start,end)
         return StreamingResponse(stream.iter_chunks(),status_code=206 if partial else 200,media_type=mime,headers=headers,background=BackgroundTask(stream.close))
     except ValueError:return Response(status_code=404)

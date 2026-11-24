@@ -62,6 +62,10 @@ class WidgetSQLTests(unittest.TestCase):
         self.assertTrue(au['featured'][0]['media'][0]['carousel_url'].endswith('?size=640'))
         self.assertTrue(au['reviews'][0]['source_verified']);self.assertFalse(au['reviews'][0]['verified_purchase'])
         self.assertIsNotNone(au['reviews'][0]['created_at'])
+        with patch.dict('reviews_widget.PUBLIC_NAMES',{identities[0]:'Public fixture name'}):
+            public=projection(store,'https://fixture.example','AU')
+            self.assertEqual(public['reviews'][0]['reviewer_name'],'Public fixture name')
+            self.assertEqual(store.get_review(identities[0])['reviewer_name'],'Fixture 0')
         self.assertNotIn('source_review_id',au['featured'][0]);self.assertEqual(sum(c for _,c in au['histogram']),9)
         with patch.object(store,'connect',side_effect=connect) as connection:
             projection(store,'https://fixture.example','AU',settings={'verified':True})

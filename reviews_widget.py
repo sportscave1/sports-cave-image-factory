@@ -3,7 +3,10 @@ import re
 import json
 from pathlib import Path
 
-IMPORTED_VERIFIED=json.loads((Path(__file__).resolve().parent/'shopify/reviews/imported-review-verification.json').read_text(encoding='utf-8'))['reviews']
+IMPORTED=json.loads((Path(__file__).resolve().parent/'shopify/reviews/imported-review-verification.json').read_text(encoding='utf-8'))
+IMPORTED_VERIFIED=IMPORTED['reviews']
+CONFIRMED_IMPORT_IDS=frozenset(IMPORTED.get('native_review_ids',[]))
+PUBLIC_NAMES=IMPORTED.get('public_display_names',{})
 
 # Public provider identities preserve the existing storefront's editorial order.
 FEATURED = ['f0a533af-ce9f-4114-845d-dc003032c337', 'd69b0463-04bc-412c-948a-1636353b3528', '813945ea-267e-4f52-ab71-3a2c528ce98f', '013c8326-eeb9-41c0-8a3a-07ee648bcf2a', 'feaf0032-af79-4e0f-ac04-1b6c7667f1e3', '82212abb-7957-46ff-a819-fea0c3ab6e5e', '3cea26d2-792c-42c7-a283-48e1d8cf5c54', '89dc61f0-b911-4f63-b9cc-611b81d7ba38', 'b5a0d0bd-b2ef-4b09-8932-c5412f4c57b2', '13ba01ac-03d1-40e9-97ef-b2febe31c0dc', '45104666-957d-4e50-b8ee-b313b4a0c991', '4c91276a-636b-4eae-944a-d9912d65900e', 'd2c2044f-a1f3-40e1-9930-a7e4eb16411a', 'a1d66815-137b-410b-b3b3-83caa2ac7a83', 'dd0c3c88-1708-4019-b7a8-3a36aa5bc649', 'ab612dbd-b1f1-4892-aec2-ef554c893955', 'c1fc64d3-bd69-4401-b510-24e30112cc97']
@@ -58,10 +61,10 @@ def projection(store, origin, country='AU', offset=0, settings=None):
     def public(row):
         legacy=str(row.get('source_review_id') or '')[-36:]
         return {'id':str(row['id']),'legacy_id':legacy if row['source']=='judgeme' and re.fullmatch('[a-f0-9-]{36}',legacy) else str(row['id']),
-                'reviewer_name':row['reviewer_name'],'rating':row['rating'],'title':row['title'],'body':row['body'],
+                'reviewer_name':PUBLIC_NAMES.get(str(row['id']),row['reviewer_name']) if row['source']=='judgeme' else row['reviewer_name'],'rating':row['rating'],'title':row['title'],'body':row['body'],
                 'product_title':row['product_title'],'created_at':row['created_at'] if settings.get('date',True) and row['date_known'] else None,
                 'verified_purchase':bool(settings['verified'] and row['verified_purchase']),
-                'source_verified':bool(settings['verified'] and row['source']=='judgeme' and (row['source_verified'] or IMPORTED_VERIFIED.get(legacy) is True)),
+                'source_verified':bool(settings['verified'] and row['source']=='judgeme' and (row['source_verified'] or IMPORTED_VERIFIED.get(legacy) is True or str(row['id']) in CONFIRMED_IMPORT_IDS)),
                 'media':by_review.get(str(row['id']),[])}
     return {'reviews':[public(row) for row in archive],'featured':[public(row) for row in featured],
             'summary':summary,'histogram':[[n,next((int(r['count']) for r in histogram if r['rating']==n),0)] for n in (5,4,3,2,1)] if offset==0 else [],

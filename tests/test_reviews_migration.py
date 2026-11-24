@@ -144,8 +144,11 @@ class MigrationDatabaseTests(unittest.TestCase):
         self.assertEqual(self.store.q('SELECT status FROM sc_review_rewards WHERE review_id=%s',(identity,),True)['status'],'CANCELLED')
     def test_public_media_requires_review_publication_and_media_approval(self):
         from reviews_http import router
+        import hashlib
         r=self.insert(picture_urls='https://images.judge.me/a.jpg');m=self.store.media(r['id'])[0]
-        self.store.q("UPDATE sc_review_media SET status='COPIED',object_key='id:reviewfixture',sha256=%s,size_bytes=100,storage=%s::jsonb WHERE id=%s",('f'*64,json.dumps(OWNED['storage']),m['id']))
+        storage=json.loads(json.dumps(OWNED['storage']))
+        for value in storage['variants'].values():value['sha256']=hashlib.sha256(b'x'*100).hexdigest()
+        self.store.q("UPDATE sc_review_media SET status='COPIED',object_key='id:reviewfixture',sha256=%s,size_bytes=100,storage=%s::jsonb WHERE id=%s",('f'*64,json.dumps(storage),m['id']))
         self.store.save_settings(original.ADMIN,{'enabled':True});app=FastAPI();app.include_router(router)
         stream=Mock();stream.iter_chunks.side_effect=lambda:iter([b'x'*100])
         with patch('reviews_http.ReviewsStore',return_value=self.store),patch('reviews_dropbox.ReviewDropboxStorage.open',return_value=stream),TestClient(app) as client:
