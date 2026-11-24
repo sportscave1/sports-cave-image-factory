@@ -110,4 +110,10 @@ def test_compact_projection_keeps_identical_markup_and_full_editor_record():
         assert compact['source_metadata']=={'date_known':False}
         assert 'email' not in compact and 'dedupe_key' not in compact
         assert len(full['body'])>161 and 'large_provider_payload' in full['source_metadata']
+        for metadata in ("jsonb_build_object('date_known',null)","'{}'::jsonb"):
+            store.q('UPDATE sc_reviews SET source_metadata='+metadata+' WHERE id=%s',(identity,))
+            full=store.get_review(identity)
+            compact=next(r for r in store.rows(overview=True,search=identity) if str(r['id'])==identity)
+            assert page.row_html(full)==page.row_html(compact)
+            assert compact['source_metadata']==full['source_metadata']
     finally:store.q('DELETE FROM sc_reviews WHERE id=%s',(identity,))

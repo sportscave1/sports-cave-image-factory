@@ -65,7 +65,7 @@ class ReviewsStore(Store):
         if received_first and not public and sort=='newest':order['newest']='notification_received_at DESC NULLS LAST,created_at DESC,id DESC'
         fields="id,review_type,product_id,product_title,product_image,product_url,reviewer_name,rating,title,body,created_at,verified_purchase,merchant_reply,status,(source_metadata->>'date_known' IS DISTINCT FROM 'false') AS date_known,(source_metadata->>'shop_app'='true') AS shop_verified" if public else '*'
         if overview and not public:
-            fields="id,source,review_type,product_title,product_image,reviewer_name,rating,title,left(body,161) AS body,created_at,verified_purchase,status,notification_received_at,jsonb_strip_nulls(jsonb_build_object('date_known',source_metadata->'date_known')) AS source_metadata"
+            fields="id,source,review_type,product_title,product_image,reviewer_name,rating,title,left(body,161) AS body,created_at,verified_purchase,status,notification_received_at,CASE WHEN source_metadata ? 'date_known' THEN jsonb_build_object('date_known',source_metadata->'date_known') ELSE '{}'::jsonb END AS source_metadata"
         sql='SELECT '+fields+' FROM sc_reviews WHERE '+' AND '.join(clauses)+' ORDER BY '+order[sort]+' LIMIT %s OFFSET %s'
         values=(*args,limit+1,offset)
         return self.q(sql,values) if public else self._read_query('reviews.table',sql,values)
