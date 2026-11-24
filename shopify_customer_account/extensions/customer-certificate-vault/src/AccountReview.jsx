@@ -98,12 +98,14 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
         id={modalId}
         heading="Leave a review"
         accessibilityLabel={`Leave a review for ${prompt?.product_title || certificate?.product_title || "your edition"}`}
-        size="base"
+        size="max"
         padding="none"
       >
-        <s-box paddingInline="small" paddingBlock="none">
-        <s-stack gap="small-400">
+        <s-query-container>
+        <s-grid gridTemplateColumns="minmax(0, 1000px)" justifyContent="center" paddingInline="small" paddingBlock="none">
           {reviewStatus === "error" ? <s-banner tone="critical">Review options could not load. Please try again.<s-button onClick={onRetryReview}>Retry review</s-button></s-banner> : reviewStatus === "loading" ? <s-banner tone="info">Loading your review options…</s-banner> : !prompt ? <s-banner tone="info">There are no editions awaiting a review.</s-banner> : null}
+        <s-grid gridTemplateColumns="@container (inline-size > 500px) 'minmax(0, 1.15fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" gap="small-400" alignItems="start" maxInlineSize="1000px">
+        <s-stack gap="none">
           <s-text type="strong">{prompt?.product_title || certificate?.product_title}</s-text>
           <s-grid gridTemplateColumns="minmax(0, 1fr) 220px" gap="small" alignItems="center">
             <s-text>Your rating</s-text>
@@ -118,34 +120,47 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
           <s-text-area label="Your review"
             value={body} minLength={10} maxLength={2000} required rows={1}
             onInput={(event) => setBody(inputValue(event))}></s-text-area>
-          <s-stack gap="none">
-            <s-text type="strong">Show us your setup</s-text>
-            <s-text type="small" color="subdued">Start with the whole wall, then move in on your edition number.</s-text>
-            <s-image src={setupImage?.url || collectionThumbnail(certificate?.purchased_image_url, 480)} alt={setupImage?.altText || "Your edition in a room"} inlineSize="fill" aspectRatio="4" objectFit="cover" loading="lazy" borderRadius="base" />
-            {files.length ? <s-stack gap="small-400">
-              <s-grid gridTemplateColumns={`repeat(${files.length}, minmax(0, 1fr))`} gap="small">
-                {files.map((file,index)=><s-stack key={index} gap="none" alignItems="center">
-                  <s-box inlineSize="40px" blockSize="40px">{previews[index]?<s-image src={previews[index]} alt={`Selected review photo ${file.name}`} aspectRatio="1" objectFit="cover" />:<s-text type="small">{file.type.startsWith('video/')?'Video':'Photo'}</s-text>}</s-box>
-                  <s-text type="small">{file.name.length>9?file.name.slice(0,6)+'…':file.name}</s-text>
-                  <s-button accessibilityLabel={`Remove ${file.name}`} variant="tertiary" onClick={()=>setFiles(files.filter((_,i)=>i!==index))}>×</s-button>
-                </s-stack>)}
-              </s-grid>
-              <s-button onClick={()=>setFiles([])}>Change photo/video</s-button>
-            </s-stack> : <s-drop-zone
-              label="Add photo/video (optional)"
-              multiple
-              accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
-              error={photoError}
-              onInput={handlePhoto}
-            ></s-drop-zone>}
-          </s-stack>
           {submitState.message ? (
             <s-banner tone={submitState.status === "error" ? "critical" : "success"}>
               {submitState.message}
             </s-banner>
           ) : null}
         </s-stack>
-        </s-box>
+          <s-stack gap="none">
+          <s-stack gap="none">
+            <s-text type="strong">Show us your setup</s-text>
+            <s-text type="small" color="subdued">Start with your wall, then your edition number.</s-text>
+          </s-stack>
+            <s-grid gridTemplateColumns="minmax(0, 1fr) 100px" gap="small" alignItems="center">
+              <s-box inlineSize="100%" maxInlineSize="320px">
+                <s-image src={setupImage?.url || collectionThumbnail(certificate?.purchased_image_url, 480)} alt={setupImage?.altText || "Your edition in a room"} inlineSize="fill" aspectRatio="1" objectFit="contain" loading="lazy" borderRadius="base" />
+              </s-box>
+            {files.length ? <s-stack gap="small-400">
+              <s-stack gap="none">
+                {files.map((file,index)=><s-grid key={index} gridTemplateColumns="24px minmax(0, 1fr) 24px" gap="small-400" alignItems="center">
+                  <s-box inlineSize="24px" blockSize="24px">{previews[index]?<s-image src={previews[index]} alt={`Selected review photo ${file.name}`} aspectRatio="1" objectFit="contain" />:<s-text type="small">{file.type.startsWith('video/')?'▶':'▧'}</s-text>}</s-box>
+                  <s-text type="small">{file.name.length>9?file.name.slice(0,6)+'…':file.name}</s-text>
+                  <s-clickable accessibilityLabel={`Remove ${file.name}`} minBlockSize="24px" minInlineSize="24px" padding="none" onClick={()=>setFiles(files.filter((_,i)=>i!==index))}>×</s-clickable>
+                </s-grid>)}
+              </s-stack>
+              <s-clickable accessibilityLabel="Change photo/video" minBlockSize="28px" padding="none" onClick={()=>setFiles([])}><s-text type="small">Change files</s-text></s-clickable>
+            </s-stack> : <s-stack gap="small-400">
+              <s-box display="@container (inline-size > 500px) none, auto"><s-text type="small">Add photo/video (optional)</s-text></s-box>
+              <s-box inlineSize="100px">
+              <s-drop-zone
+              accessibilityLabel="Add photo/video (optional)"
+              multiple
+              accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
+              error={photoError}
+              onInput={handlePhoto}
+            ></s-drop-zone>
+              </s-box>
+            </s-stack>}
+            </s-grid>
+          </s-stack>
+        </s-grid>
+        </s-grid>
+        </s-query-container>
         <s-button
           slot="primary-action"
           variant="primary"
