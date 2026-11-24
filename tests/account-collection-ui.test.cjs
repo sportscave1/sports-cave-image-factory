@@ -151,6 +151,6 @@ test('mobile frame preview uses available viewport height and the description st
  const f=fixture();const tree=f.view();
  assert.ok(find(tree,n=>n.type==='s-text'&&n.children.includes('Your numbered certificate, professionally printed and framed.')));
  const preview=f.exports.FramedCertificatePreview({certificate:{},previewUrl:'https://fixture.test/asset?token=owner',color:'Black'});
- assert.match(preview.props.gridTemplateColumns,/100dvh - 440px/);
+ assert.match(preview.props.gridTemplateColumns,/100dvh - 472px/);
  assert.match(preview.props.gridTemplateColumns,/340px/);
 });
