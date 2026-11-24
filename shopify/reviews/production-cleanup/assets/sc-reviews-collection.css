@@ -1,0 +1,13 @@
+
+.sc-review-link{width:calc(100% - 80px);max-width:1440px;margin:0 auto 24px}
+.sc-review-link a{color:#e1b655;font-size:13px;text-decoration:underline;text-underline-offset:4px}
+/* Existing collection builder, compact cards and live totals. */
+@media(max-width:989px){
+}
+body.template-product .shopify-section:has(.sc-collector-faq){padding-bottom:0!important;margin-bottom:0!important}
+@media(max-width:989px){}
+body.template-product .sc-edition-journey--details-only{padding-bottom:0!important}
+@media(max-width:989px){}
+@media(min-width:990px){
+}
+/* Keep collection refresh clear in every selection state. */

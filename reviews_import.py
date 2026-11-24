@@ -1,10 +1,7 @@
-"""Bounded CSV preview and explicit official provider adapter; no dashboard scraping."""
+"""Bounded offline CSV preview and historical export normalization."""
 import csv
 import io
-import os
-import re
 from typing import Protocol
-import requests
 from reviews_model import auto_mapping,normalize
 
 class Provider(Protocol):
@@ -55,24 +52,10 @@ def preview(rows,mapping,store,source='csv',source_store='',published_only=False
     duplicates+=sum(i['dedupe_key'] in existing for i in items)
     return {'items':items,'ready':len(items)-len(existing),'duplicates':duplicates,'unresolved':unresolved,'invalid':invalid,'skipped':skipped,'media':sum(len(i['media']) for i in items)}
 
-class JudgeMe:
-    """Official server-side GET only. Reply syncing is not supported by list API."""
-    def __init__(self,env=None,session=None):
-        env=os.environ if env is None else env
-        self.token=env.get('JUDGEME_PRIVATE_API_TOKEN','').strip()
-        self.shop=env.get('SHOPIFY_STORE_DOMAIN','').strip().lower()
-        self.session=session or requests.Session()
-    @property
-    def configured(self):return bool(self.token and re.fullmatch(r'[a-z0-9][a-z0-9-]*\.myshopify\.com',self.shop))
-    def page(self,page):
-        if not self.configured:raise ValueError('Judge.me server credentials are not configured.')
-        try:
-            response=self.session.get('https://api.judge.me/api/v1/reviews',params={'api_token':self.token,'shop_domain':self.shop,'per_page':100,'page':int(page),'published':True},timeout=(3,10),allow_redirects=False)
-            if response.status_code!=200:raise ValueError()
-            data=response.json();rows=data['reviews']
-            if not isinstance(rows,list) or len(rows)>100:raise ValueError()
-            return rows
-        except Exception:raise RuntimeError('Judge.me could not return a valid review page.') from None
+class LegacyExport:
+    """Offline normalization for historical exports; no credentials or network API."""
+    def __init__(self, env=None):
+        self.shop=(env or {}).get('SHOPIFY_STORE_DOMAIN','').strip().lower()
     def normalize(self,row):
         reviewer=row.get('reviewer') or {}
         # Judge.me internal product_id is NOT a Shopify product ID.

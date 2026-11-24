@@ -69,7 +69,7 @@ def row_html(r):
     from crm_campaign_html import email_image_url
     image=email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
     product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" width="42" height="42">' if image else '')+escape('Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match')
-    return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Judge.me','csv':'CSV','sports_cave':'Sports Cave'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
+    return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Imported','csv':'CSV','sports_cave':'Sports Cave'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
 
 @st.dialog('Review',width='large')
 def detail(store,user,identity):
@@ -140,7 +140,7 @@ def overview(store,user):
             search=a.text_input('Search reviews',label_visibility='collapsed',placeholder='Search reviews…',key='rv_search')
             product=b.text_input('Product',placeholder='Product name / handle',label_visibility='collapsed',key='rv_product')
             rating=c.selectbox('Rating',range(6),format_func=lambda n:str(n)+' stars' if n else 'All ratings',label_visibility='collapsed')
-            source=d.selectbox('Source',['','csv','judgeme','sports_cave'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Judge.me','sports_cave':'Sports Cave'}[v],label_visibility='collapsed')
+            source=d.selectbox('Source',['','csv','judgeme','sports_cave'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Imported','sports_cave':'Sports Cave'}[v],label_visibility='collapsed')
             period=e.selectbox('Date',[0,30,90],format_func=lambda n:str(n)+' days' if n else 'All dates',label_visibility='collapsed')
         signature=(labels[status],search,product,rating,source,period)
         if state().get('filters')!=signature:state()['filters']=signature;state()['offset']=0
@@ -167,22 +167,9 @@ def overview(store,user):
 
 @st.fragment
 def importer(store,user):
-    from reviews_import import read_csv,preview,JudgeMe
-    st.subheader('Connected sources');provider=JudgeMe()
-    source,_=load(('sources',),lambda:store.q("SELECT value FROM sc_review_settings WHERE key='judgeme'",one=True))
-    verified=source and source['value'].get('verified')
-    st.write('Judge.me · '+('Last sync verified' if verified else 'Credentials configured · not verified' if provider.configured else 'Not connected'))
-    if verified:st.caption('Last sync · '+str(source['value'].get('last_sync','')))
-    sync,settings=st.columns([1,3])
-    if sync.button('Sync now',disabled=not provider.configured):store.enqueue_sync(user);changed('imports','sources');st.toast('Review sync queued')
-    with settings.popover('Settings'):
-        st.caption('Use the Judge.me Private API token in server configuration: JUDGEME_PRIVATE_API_TOKEN. The existing SHOPIFY_STORE_DOMAIN identifies the store. No credentials are stored in the browser or review records.')
+    from reviews_import import read_csv,preview
     connections()
-    report,_=load(('migration',),store.migration_summary,ttl=10)
-    if report:
-        st.caption(f"Judge.me migration · {report['published']} published reviews · {report['store_reviews']} store reviews · {report['unmatched']} products need matching · {report['media_copied']}/{report['media_total']} media files in Dropbox · {report['media_failed']} transfer failures")
     st.caption('Media source: Dropbox · 03_ASSETS / Reviews · originals plus WebP display copies')
-    st.caption('Keep Judge.me live until review counts, product matches, replies and every media copy are reconciled. CSV exports exclude videos; add those separately using a video_urls column.')
     st.subheader('Import file')
     st.download_button('Download CSV template','source_review_id,review_type,product_id,product_handle,reviewer_name,email,rating,title,body,review_date,status,picture_urls,video_urls,reply\nfixture-1,product,,example-product,Collector,,5,Great print,Looks great on my wall,2026-01-01,Published,,,\n',file_name='sports-cave-reviews-template.csv',mime='text/csv')
     uploaded=st.file_uploader('UTF-8 CSV · up to 10 MB / 10,000 rows',type=['csv'])
@@ -190,9 +177,9 @@ def importer(store,user):
         data=uploaded.getvalue();digest=hashlib.sha256(data).hexdigest();headers,raw=read_csv(data)
         safe_preview=[{k:v for k,v in row.items() if k in ('rating','title','body','review_title','review_body','status','curated','product_handle','review_date')} for row in raw[:5]]
         st.dataframe(safe_preview,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
-        source=st.selectbox('Import source',['csv','judgeme'],index=int('curated' in headers),format_func=lambda v:'Judge.me CSV' if v=='judgeme' else 'CSV')
+        source=st.selectbox('Import source',['csv','judgeme'],index=int('curated' in headers),format_func=lambda v:'Legacy export CSV' if v=='judgeme' else 'CSV')
         published_only=st.checkbox('Import published reviews only',value=source=='judgeme')
-        st.caption('Judge.me published exports use curated=ok. Hidden, pending and archived rows are excluded. Media copies run in the background; source URLs alone do not count as transferred files.')
+        st.caption('Legacy published exports use curated=ok. Hidden, pending and archived rows are excluded. Media copies run in the background; source URLs alone do not count as transferred files.')
         suggested=auto_mapping(headers);mapping={}
         with st.expander('Column mapping',expanded=True):
             columns=st.columns(3)

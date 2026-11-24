@@ -1,0 +1,9 @@
+/* Original mobile journey; desktop story and review presentation retained. */
+@media(max-width:989px){
+body #content#content#content .sc-edition-journey__tabs{display:flex!important;flex-direction:column}
+body #content#content#content .sc-legacy--desktop,body #content#content#content .sc-collector-faq{display:none!important}
+body #content#content#content .sc-edition-journey__tabs>.sc-edition-journey__details--mobile{display:block!important}
+}
+@media(max-width:989px){.sc-edition-journey__tabs .sc-collector-videos{order:5}}
+@media(min-width:990px){
+}

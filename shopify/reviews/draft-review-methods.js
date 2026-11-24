@@ -23,7 +23,9 @@ class DraftReviewMethods {
       owner.nativeRequests.set(country, entry);
       entry.request.catch(() => { if (owner.nativeRequests.get(country) === entry) owner.nativeRequests.delete(country); });
     }
-    return entry.request;
+    const data = await entry.request;
+    this.nativeSummary(data.summary);
+    return data;
   }
 
   nativeRows(reviews, featured = false) {
@@ -43,14 +45,19 @@ class DraftReviewMethods {
       })).filter(media => media.full && media.thumb)}));
   }
 
-  nativeApply(data, append = false) {
-    if (!this.controller || this.controller.signal.aborted) return;
-    if (data.summary.count) this.summary(Number(data.summary.average).toFixed(2), String(data.summary.count));
+  nativeSummary(summary) {
+    if (!Number.isSafeInteger(summary?.count) || summary.count < 0) return;
+    document.querySelectorAll('sc-customer-reviews').forEach(widget => widget.summary(Number(summary.average || 0).toFixed(2), String(summary.count)));
     document.querySelectorAll('.scx-review-text').forEach(target => {
       const rating = target.querySelector('strong'), count = target.querySelector('span:last-child');
-      if (rating) rating.textContent = Number(data.summary.average || 0).toFixed(1);
-      if (count) count.textContent = `${data.summary.count} reviews`;
+      if (rating) rating.textContent = Number(summary.average || 0).toFixed(1);
+      if (count) count.textContent = `${summary.count} reviews`;
     });
+  }
+
+  nativeApply(data, append = false) {
+    if (!this.controller || this.controller.signal.aborted) return;
+    this.nativeSummary(data.summary);
     if (!append) {
       this.renderCarousel(this.nativeRows(data.featured, true));
       if (this.querySelector('[data-review-histogram]')) this.renderHistogram(data.histogram, data.summary.count);

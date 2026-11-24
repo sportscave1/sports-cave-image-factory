@@ -63,7 +63,9 @@ def test_owned_purchase_review_does_not_require_carrier_delivery(monkeypatch):
     from tests.test_collector_vault import _certificate_row,CUSTOMER_A
     monkeypatch.setenv('COLLECTOR_VAULT_ASSET_SIGNING_SECRET',SECRET)
     row=_certificate_row()
-    with patch.object(vault,'_judgeme_configured',return_value=True), patch.object(vault,'_reviewed_keys',return_value=set()), patch.object(vault,'delivery_statuses',return_value={}), patch.object(vault,'lookup_judgeme_product',return_value={'id':'judge-product'}), patch.object(vault,'_resolve_certificate_reference',return_value=row):
+    with patch('reviews_store.ReviewsStore') as native, patch.object(vault,'_reviewed_keys',return_value=set()), patch.object(vault,'delivery_statuses',return_value={}), patch.object(vault,'_resolve_certificate_reference',return_value=row):
+        native.return_value.settings.return_value={'enabled':True}
+        native.return_value.match_product.return_value={'id':'fixture'}
         assert vault.review_prompt([row],CUSTOMER_A) is None
         prompt=vault.review_prompt([row],CUSTOMER_A,allow_purchased=True)
         assert prompt and vault._resolve_review_reference(prompt['reference'],CUSTOMER_A)==row

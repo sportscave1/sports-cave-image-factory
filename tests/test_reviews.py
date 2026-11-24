@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from crm_logic import now
 from reviews_model import normalize,auto_mapping,display_settings,product_gid
-from reviews_import import read_csv,preview,JudgeMe
+from reviews_import import read_csv,preview,LegacyExport
 from reviews_store import ReviewsStore
 from reviews_worker import tick
 from reviews_submission import issue,submit,token_row,prepare_email,MARKER
@@ -54,17 +54,10 @@ class ModelTests(unittest.TestCase):
         item=normalize({'rating':5,'body':'Dated','created_at':'2026-01-01'})
         self.assertEqual(item['created_at'],'2026-01-01T00:00:00+00:00')
     def test_judgeme_normalization_never_uses_internal_product_id_as_shopify(self):
-        p=JudgeMe({'JUDGEME_PRIVATE_API_TOKEN':'secret','SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'})
+        p=LegacyExport({'JUDGEME_PRIVATE_API_TOKEN':'secret','SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'})
         item=p.normalize({'id':42,'product_id':999,'rating':5,'body':'Nice','reviewer':{'name':'Fixture','email':'test@example.test'},'verified':True,'hidden':False})
         self.assertIsNone(item['product_id']);self.assertFalse(item['verified_purchase']);self.assertEqual(item['status'],'PUBLISHED')
         self.assertEqual(p.normalize({'id':43,'product_external_id':55,'rating':4,'body':'Good','hidden':False})['product_id'],'gid://shopify/Product/55')
-    def test_provider_is_official_read_only_bounded_and_redacts_errors(self):
-        session=Mock();session.get.return_value=Mock(status_code=200,json=lambda:{'reviews':[]})
-        p=JudgeMe({'JUDGEME_PRIVATE_API_TOKEN':'private-secret','SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'},session)
-        self.assertEqual(p.page(1),[]);kw=session.get.call_args.kwargs;self.assertEqual(kw['params']['per_page'],100);self.assertFalse(kw['allow_redirects'])
-        session.get.side_effect=RuntimeError('https://token/private-secret')
-        with self.assertRaises(RuntimeError) as err:p.page(2)
-        self.assertNotIn('private-secret',str(err.exception));self.assertEqual(session.post.call_count,0)
     def test_cache_retains_values_on_refresh_failure_and_invalidates_only_groups(self):
         state={};f=Future();f.set_result({'total':4,'average':4.5,'recent':4,'five_rate':50,'attention':0})
         state['reviews_cache']={('summary',):{'future':f,'completed':None},('table',):{'future':f,'completed':None}}
@@ -158,14 +151,12 @@ class DatabaseTests(unittest.TestCase):
         tick(self.store);r=self.store.q('SELECT cursor,status FROM sc_review_imports WHERE id=%s',(job['id'],),True)
         self.assertEqual(r,{'cursor':100,'status':'PENDING'});tick(self.store);tick(self.store)
         self.assertEqual(self.store.q('SELECT imported FROM sc_review_imports WHERE id=%s',(job['id'],),True)['imported'],205)
-    def test_provider_sync_idempotent_preserves_local_reply_and_moderation(self):
-        provider=Mock();provider.page.return_value=[{}];provider.normalize.return_value=self.item()
-        for i in range(2):
-            job=self.store.enqueue_sync(ADMIN);self.jobs.append(job['id']);tick(self.store,provider)
-            if i==0:
-                r=self.store.q('SELECT * FROM sc_reviews WHERE source_review_id=%s',(provider.normalize.return_value['source_review_id'],),True)
-                self.store.moderate(ADMIN,r['id'],reply='Local reply',status='ARCHIVED')
-        r=self.store.get_review(r['id']);self.assertEqual(r['merchant_reply'],'Local reply');self.assertEqual(r['status'],'ARCHIVED')
+    def test_retired_provider_job_is_terminal_without_network(self):
+        job=self.store.q("INSERT INTO sc_review_imports(source,label,actor) VALUES('judgeme_api','retired fixture','fixture') RETURNING id",one=True)
+        self.jobs.append(job['id'])
+        with patch('requests.Session.request',side_effect=AssertionError('No retired-provider requests')):
+            self.assertEqual(tick(self.store),job['id'])
+        self.assertEqual(self.store.q('SELECT status,error_code FROM sc_review_imports WHERE id=%s',(job['id'],),True),{'status':'FAILED','error_code':'provider_retired'})
     def test_csv_preview_invalid_duplicates_unresolved_no_raw_email(self):
         rows=[{'rating':'5','body':'Excellent','product_id':self.pid,'email':'test@example.test'}, {'rating':'5','body':'Excellent','product_id':self.pid,'email':'test@example.test'}, {'rating':'9','body':'Invalid'}, {'rating':'2','body':'Unknown product','review_type':'product'}]
         result=preview(rows,{},self.store);self.assertEqual((result['ready'],result['duplicates'],result['unresolved'],len(result['invalid'])),(2,1,1,1))
@@ -239,12 +230,6 @@ class DatabaseTests(unittest.TestCase):
         r=self.insert(product_id='gid://shopify/Product/0');self.assertIsNone(r['product_id'])
         self.store.moderate(ADMIN,r['id'],product=self.pid);r=self.store.get_review(r['id'])
         self.assertEqual(r['product_id'],self.pid);self.assertFalse(r['verified_purchase']);self.assertIsNone(r['order_id'])
-    def test_background_failure_is_bounded_retry_and_never_exposes_provider_details(self):
-        job=self.store.enqueue_sync(ADMIN);self.jobs.append(job['id']);provider=Mock();provider.page.side_effect=RuntimeError('PRIVATE TOKEN OR EMAIL')
-        with self.assertLogs('reviews_worker',level='WARNING') as logs:
-            for _ in range(3):tick(self.store,provider)
-        r=self.store.q('SELECT status,attempts,error_code FROM sc_review_imports WHERE id=%s',(job['id'],),True)
-        self.assertEqual(r,{'status':'FAILED','attempts':3,'error_code':'source_unavailable'});self.assertNotIn('PRIVATE',str(logs.output))
     def test_public_stars_read_does_not_load_review_bodies_and_cache_is_scoped(self):
         self.insert();self.store.save_settings(ADMIN,{'enabled':True})
         from reviews_http import router

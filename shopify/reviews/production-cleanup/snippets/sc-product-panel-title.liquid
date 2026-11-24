@@ -1,0 +1,295 @@
+{% doc %}
+Renders the existing product title and review summary inside the price panel.
+{% enddoc %}
+{% if template.name == 'product' %}
+{%- comment -%}
+  Sports Cave • Premium Product Titlebar with Reviews
+  Compact split title/reviews — no outer pill
+  - Cleans product title display
+  - Hides Wall Art from product title display
+  - Hides Limited Edition from product title display
+  - Original Montserrat font with soft-white #F5F2EA title colour
+  - Title left; clickable reviews stacked on right
+  - Mobile dark square cap matched to the attached price/edition bar
+  - Gold vertical divider; balanced 2-line title; prominent stacked reviews
+{%- endcomment -%}
+
+{%- assign scx_rating = 4.8 -%}
+{%- assign scx_review_count = 209 -%}
+
+{%- assign is_limited = false -%}
+{%- if product.tags contains 'Limited Edition'
+  or product.tags contains 'Limited'
+  or product.metafields.custom.limited_edition == true
+-%}
+  {%- assign is_limited = true -%}
+{%- endif -%}
+
+{%- assign title_clean = product.title | escape -%}
+{%- assign title_clean = title_clean
+  | replace: ' – Wall Art', ''
+  | replace: ' - Wall Art', ''
+  | replace: ' | Wall Art', ''
+  | replace: ': Wall Art', ''
+  | replace: ' Wall Art', ''
+  | replace: 'Wall Art', ''
+  | replace: ' – wall art', ''
+  | replace: ' - wall art', ''
+  | replace: ' | wall art', ''
+  | replace: ': wall art', ''
+  | replace: ' wall art', ''
+  | replace: 'wall art', ''
+  | replace: ' – WALL ART', ''
+  | replace: ' - WALL ART', ''
+  | replace: ' | WALL ART', ''
+  | replace: ': WALL ART', ''
+  | replace: ' WALL ART', ''
+  | replace: 'WALL ART', ''
+
+  | replace: ' – Limited Edition', ''
+  | replace: ' - Limited Edition', ''
+  | replace: ' | Limited Edition', ''
+  | replace: ': Limited Edition', ''
+  | replace: ' Limited Edition', ''
+  | replace: 'Limited Edition', ''
+  | replace: ' – limited edition', ''
+  | replace: ' - limited edition', ''
+  | replace: ' | limited edition', ''
+  | replace: ': limited edition', ''
+  | replace: ' limited edition', ''
+  | replace: 'limited edition', ''
+  | replace: ' – LIMITED EDITION', ''
+  | replace: ' - LIMITED EDITION', ''
+  | replace: ' | LIMITED EDITION', ''
+  | replace: ': LIMITED EDITION', ''
+  | replace: ' LIMITED EDITION', ''
+  | replace: 'LIMITED EDITION', ''
+
+  | replace: '  ', ' '
+  | replace: '  ', ' '
+  | strip
+-%}
+
+{%- comment -%}
+  Display-only mobile cleaning: remove decorative, space-delimited separators.
+  Keep punctuation within names (e.g. 50/50, #17, Spider-Man, O'Neal).
+  Desktop and the underlying Shopify product title remain unchanged.
+{%- endcomment -%}
+{%- assign title_mobile = title_clean
+  | replace: ' — ', ' '
+  | replace: ' – ', ' '
+  | replace: ' - ', ' '
+  | replace: ': ', ' '
+  | replace: ' | ', ' '
+  | replace: '  ', ' '
+  | replace: '  ', ' '
+  | strip
+-%}
+
+<section
+  id="scx-titlebar-{{ section.id }}-{{ product.id }}"
+  class="scx-titlebar"
+  role="region"
+  aria-label="Product title and customer reviews"
+  data-limited="{{ is_limited }}"
+  itemscope
+  itemtype="https://schema.org/Product">
+
+  <div class="scx-titlewrap">
+
+    <div class="scx-center">
+      <h1 class="scx-title" itemprop="name">
+        <span class="scx-title-desktop">{{ title_clean }}</span><span class="scx-title-mobile">{{ title_mobile }}</span>
+      </h1>
+
+    </div>
+
+    <div class="scx-side scx-right">
+      <button class="scx-review-inline" type="button" aria-label="Jump to customer reviews">
+        <span class="scx-stars" aria-hidden="true">★★★★★</span>
+        <span class="scx-review-text">
+          <strong>{{ scx_rating }}</strong>
+          <span>•</span>
+          <span>{{ scx_review_count }} reviews</span>
+        </span>
+      </button>
+    </div>
+
+  </div>
+</section>
+
+
+
+<script>
+(function () {
+  var ROOT_ID = 'scx-titlebar-{{ section.id }}-{{ product.id }}';
+  var root = document.getElementById(ROOT_ID);
+  if (!root || root.dataset.scxReady === '1') return;
+  root.dataset.scxReady = '1';
+
+
+  /* Match the actual left edge and rendered width of the price/edition widget.
+     Pixel-based measurement avoids hard-coded device-specific gutter guesses. */
+  var widthTarget = null;
+  var widthObserver = null;
+  var alignTimer = 0;
+
+  function fitMobileTitle() {
+    var title = root.querySelector('.scx-title');
+    var mobile = root.querySelector('.scx-title-mobile');
+    var desktop = root.querySelector('.scx-title-desktop');
+    if (!title || !mobile || !desktop) return;
+
+    title.style.removeProperty('font-size');
+    title.style.removeProperty('white-space');
+    title.style.removeProperty('text-wrap');
+    title.style.removeProperty('overflow-wrap');
+    mobile.textContent = mobile.dataset.scPlainTitle || mobile.textContent.trim();
+    if (!mobile.dataset.scPlainTitle) mobile.dataset.scPlainTitle = mobile.textContent;
+    if (!window.matchMedia('(max-width:749px)').matches) return;
+
+    var width = title.clientWidth;
+    if (width < 20) return;
+    var normalSize = parseFloat(getComputedStyle(title).fontSize);
+    if (!Number.isFinite(normalSize) || normalSize <= 0) return;
+
+    function lineFit(size, maxLines) {
+      title.style.fontSize = size.toFixed(3) + 'px';
+      var computed = getComputedStyle(title);
+      var lineHeight = parseFloat(computed.lineHeight) || size * 1.12;
+      return title.scrollHeight <= lineHeight * maxLines + 1.5 &&
+             title.scrollWidth <= title.clientWidth + 0.75;
+    }
+
+    // Short titles remain on ONE line at the regular size.
+    title.style.setProperty('white-space', 'nowrap');
+    title.style.setProperty('text-wrap', 'nowrap');
+    if (lineFit(normalSize, 1)) return;
+
+    // Use the original title to detect a separator, even though the mobile
+    // display has already removed decorative punctuation.
+    var source = desktop.textContent.replace(/\s+/g, ' ').trim();
+    var separator = /\s+(?:—|–|-|\|)\s+|:\s+/.exec(source);
+    if (separator) {
+      var before = source.slice(0, separator.index).trim();
+      var after = source.slice(separator.index + separator[0].length).trim();
+      // Strip any additional decorative separators without changing names
+      // such as Spider-Man, 50/50, O'Neal or number labels like #17.
+      var clean = function(part) {
+        return part.replace(/\s+(?:—|–|-|\|)\s+|:\s+/g, ' ').replace(/\s+/g, ' ').trim();
+      };
+      before = clean(before);
+      after = clean(after);
+      if (before && after) {
+        mobile.textContent = '';
+        var first = document.createElement('span');
+        var second = document.createElement('span');
+        first.textContent = before;
+        second.textContent = after;
+        first.style.display = second.style.display = 'block';
+        first.style.whiteSpace = second.style.whiteSpace = 'nowrap';
+        mobile.appendChild(first);
+        mobile.appendChild(second);
+        title.style.setProperty('white-space', 'normal');
+        title.style.setProperty('text-wrap', 'wrap');
+        // Allow modest reduction if the two meaningful phrases nearly fit.
+        // Don't shrink excessively to force a split that reads poorly.
+        var minPreferred = Math.max(10, normalSize * 0.82);
+        if (lineFit(normalSize, 2)) return;
+        if (lineFit(minPreferred, 2)) {
+          var lo = minPreferred, hi = normalSize;
+          for (var k = 0; k < 14; k++) {
+            var mid = (lo + hi) / 2;
+            if (lineFit(mid, 2)) lo = mid;
+            else hi = mid;
+          }
+          title.style.fontSize = (lo - 0.03).toFixed(2) + 'px';
+          return;
+        }
+        // Long phrase: don't force it into tiny text or let it overflow.
+        mobile.textContent = mobile.dataset.scPlainTitle;
+      }
+    }
+
+    // No suitable separator, or split phrases don't fit: natural balanced lines.
+    title.style.setProperty('white-space', 'normal');
+    title.style.setProperty('text-wrap', 'balance');
+    if (lineFit(normalSize, 2)) return;
+
+    var lower = 7;
+    if (!lineFit(lower, 2)) {
+      title.style.setProperty('overflow-wrap', 'anywhere');
+      if (!lineFit(lower, 2)) lower = 4;
+    }
+    if (!lineFit(lower, 2)) {
+      for (var fallback = lower - 0.25; fallback >= 1; fallback -= 0.25) {
+        if (lineFit(fallback, 2)) { lower = fallback; break; }
+      }
+    }
+    var upper = normalSize;
+    if (lineFit(lower, 2)) {
+      for (var i = 0; i < 16; i++) {
+        var midpoint = (lower + upper) / 2;
+        if (lineFit(midpoint, 2)) lower = midpoint;
+        else upper = midpoint;
+      }
+    }
+    title.style.fontSize = Math.max(1, lower - 0.08).toFixed(2) + 'px';
+  }
+
+  function requestAlign() {
+    if (alignTimer) cancelAnimationFrame(alignTimer);
+    alignTimer = requestAnimationFrame(function () {
+      alignTimer = 0;
+
+      fitMobileTitle();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', requestAlign, {once:true});
+  } else {
+    requestAlign();
+  }
+  window.addEventListener('load', requestAlign, {once:true});
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(requestAlign); }
+  window.addEventListener('resize', requestAlign, {passive:true});
+  window.addEventListener('orientationchange', requestAlign, {passive:true});
+  document.addEventListener('shopify:section:load', requestAlign);
+  if ('ResizeObserver' in window) { widthObserver = new ResizeObserver(requestAlign); widthObserver.observe(root.querySelector('.scx-center')); }
+
+  function stickyOffset() {
+    var el = document.querySelector('.shopify-section-header-sticky, .shopify-section-header, header[role="banner"], header.site-header, header.header');
+    if (!el) return 0;
+    var style = getComputedStyle(el);
+    var sticky = style.position === 'fixed' || style.position === 'sticky' || el.classList.contains('is-sticky');
+    return sticky ? Math.min(120, Math.round(el.getBoundingClientRect().height || 0)) : 0;
+  }
+
+  function getReviewsTarget() {
+    var selectors = [
+      'sc-customer-reviews', '#scx-reviews-anchor',
+    ];
+    for (var i = 0; i < selectors.length; i++) {
+      var target = document.querySelector(selectors[i]);
+      if (target) return target;
+    }
+    return null;
+  }
+
+  var button = root.querySelector('.scx-review-inline');
+  if (button) {
+    button.addEventListener('click', function () {
+      var target = getReviewsTarget();
+      if (!target) return;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - (stickyOffset() + 10);
+      window.scrollTo({ top: top, behavior: window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'auto' : 'smooth' });
+      target.classList.add('scx-reviews-target-highlight');
+      setTimeout(function () {
+        target.classList.remove('scx-reviews-target-highlight');
+      }, 1500);
+    });
+  }
+})();
+</script>
+{% endif %}

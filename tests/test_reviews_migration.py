@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import tests.test_reviews as original
 from reviews_model import normalize,auto_mapping
-from reviews_import import preview,JudgeMe
+from reviews_import import preview,LegacyExport
 from reviews_media import media_references,validate_file,download,tick_media
 from reviews_rewards import eligibility
 
@@ -30,7 +30,7 @@ class MigrationTests(unittest.TestCase):
         result=preview([raw,{**raw,'curated':'spam'},{**raw,'curated':'not-yet'},{**raw,'status':'Archived'}],mapped,store,'judgeme',published_only=True)
         self.assertEqual((result['ready'],result['skipped'],result['unresolved'],result['media']),(1,3,0,2))
     def test_api_curation_archive_and_nested_picture_urls(self):
-        p=JudgeMe({});raw={'id':42,'rating':5,'body':'Great','hidden':False,'curated':'spam'}
+        p=LegacyExport({});raw={'id':42,'rating':5,'body':'Great','hidden':False,'curated':'spam'}
         self.assertEqual(p.normalize(raw)['status'],'PENDING')
         self.assertEqual(p.normalize({**raw,'curated':'ok','hidden':True})['status'],'ARCHIVED')
         r=p.normalize({**raw,'curated':'ok','pictures':[{'urls':{'original':'https://images.judge.me/a.jpg'}}],'has_published_videos':True})
@@ -105,7 +105,7 @@ class MigrationDatabaseTests(unittest.TestCase):
         at=(now()-timedelta(days=2)).replace(microsecond=0).isoformat();shop='fixture.myshopify.com'
         raw={'source_review_id':self.prefix+'csv','product_id':self.pid,'rating':4,'body':'Same imported review','email':'collector@example.test','created_at':at,'status':'PUBLISHED'}
         first=normalize(raw,'judgeme',source_store=shop);self.created.append(raw['source_review_id'])
-        provider=JudgeMe({'SHOPIFY_STORE_DOMAIN':shop})
+        provider=LegacyExport({'SHOPIFY_STORE_DOMAIN':shop})
         api={'id':self.prefix+'api','product_external_id':self.pid,'product_id':123,'rating':4,'body':raw['body'],'created_at':at,'hidden':False,'reviewer':{'email':raw['email']}}
         second=provider.normalize(api)
         self.assertNotEqual(first['dedupe_key'],second['dedupe_key']);self.assertEqual(first['source_fingerprint'],second['source_fingerprint'])

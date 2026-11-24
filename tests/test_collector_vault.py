@@ -296,11 +296,6 @@ class CollectorVaultEligibilityTests(unittest.TestCase):
                 return_value={"gid://shopify/Order/44": True},
             ),
             patch.object(collector_vault, "_reviewed_keys", return_value=set()),
-            patch.object(
-                collector_vault,
-                "lookup_judgeme_product",
-                return_value={"id": "99", "external_id": "55"},
-            ),
         ):
             prompt = collector_vault.review_prompt([row], CUSTOMER_A)
         self.assertEqual(prompt["shopify_product_id"], "gid://shopify/Product/55")
@@ -434,7 +429,7 @@ class CollectorVaultReadinessTests(unittest.TestCase):
             readiness = collector_vault.collector_vault_readiness(
                 check_shopify=True
             )
-        self.assertEqual(readiness["judge_me_state"], "judge_me_configured")
+        self.assertEqual(readiness["reviews_state"], "sports_cave_os")
         self.assertEqual(
             readiness["framed_product_state"],
             "framed_product_draft",
@@ -461,7 +456,7 @@ class CollectorVaultReadinessTests(unittest.TestCase):
     def test_readiness_reports_missing_configuration(self):
         with patch.dict(os.environ, {}, clear=True):
             readiness = collector_vault.collector_vault_readiness()
-        self.assertEqual(readiness["judge_me_state"], "judge_me_not_configured")
+        self.assertEqual(readiness["reviews_state"], "sports_cave_os")
         self.assertEqual(
             readiness["framed_product_state"],
             "framed_product_not_configured",
@@ -667,50 +662,6 @@ class CollectorVaultReviewTests(unittest.TestCase):
         ):
             collector_vault.validate_review_photo(self._photo_payload())
 
-    def test_judgeme_submission_maps_by_stable_shopify_product_id(self):
-        captured = {}
-
-        class Response:
-            status_code = 200
-            content = b"{}"
-
-            @staticmethod
-            def json():
-                return {"review": {"id": 88}}
-
-        def post(url, **kwargs):
-            captured["url"] = url
-            captured.update(kwargs)
-            return Response()
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "JUDGEME_PRIVATE_API_TOKEN": "private-token",
-                    "JUDGEME_PUBLIC_API_TOKEN": "public-token",
-                    "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
-                },
-                clear=False,
-            ),
-            patch.object(
-                collector_vault,
-                "lookup_judgeme_product",
-                return_value={"id": "9", "external_id": "55"},
-            ),
-        ):
-            result = collector_vault._submit_judgeme_review(
-                _certificate_row(),
-                {"rating": 5, "review_body": "Looks superb on the wall.", "review_title": "Superb"},
-                name="Collector",
-                email="collector@example.com",
-                photo_upload={},
-                request_post=post,
-            )
-        self.assertEqual(captured["json"]["id"], "55")
-        self.assertNotIn("product_title", captured["json"])
-        self.assertNotIn("public-token", json.dumps(captured["json"]))
-        self.assertEqual(result["review_id"], "88")
 
     def test_review_text_is_plain_text_safe(self):
         cleaned = collector_vault._clean_review_text(
@@ -1193,12 +1144,12 @@ class CollectorVaultImplementationTests(unittest.TestCase):
         source = (
             Path(collector_vault.__file__).read_text(encoding="utf-8")
         )
-        reserve_source = source[
-            source.index("def _reserve_review_submission"):
-            source.index("def _upload_review_photo")
-        ]
-        self.assertIn("review_body=''", reserve_source)
-        self.assertNotIn("body, existing.get", reserve_source)
+        self.assertNotIn('def _submit_judgeme_review',source)
+        self.assertNotIn('def _reserve_review_submission',source)
+        wrapper=source[source.index('def submit_review('):source.index('def _record_hashed_event')]
+        self.assertIn('from reviews_account import submit',wrapper)
+        self.assertNotIn('requests.post',wrapper)
+
 
 
 if __name__ == "__main__":

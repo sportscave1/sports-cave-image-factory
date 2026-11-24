@@ -16,7 +16,7 @@ class NativeAccount(unittest.TestCase):
   return shop,{'shopify_order_id':self.order()['id'],'shopify_product_id':self.pid}
  def test_account_is_verified_pending_and_later_email_is_already_submitted(self):
   self.store.save_settings(ADMIN,{'enabled':True});shop,row=self.context();customer=self.order()['customer']['id']
-  with patch('collector_vault._resolve_review_reference',return_value=row),patch('collector_vault._submit_judgeme_review') as judge:
+  with patch('collector_vault._resolve_review_reference',return_value=row),patch('requests.post') as judge:
    result=submit(self.store,shop,customer,'signed',{'rating':1,'body':'An honest account review','reviewer_name':'Synthetic buyer'},[])
    again=submit(self.store,shop,customer,'signed',{'rating':1,'body':'A repeated account review','reviewer_name':'Synthetic buyer'},[])
   self.assertEqual(result,again);judge.assert_not_called()

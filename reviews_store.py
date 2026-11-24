@@ -168,12 +168,6 @@ class ReviewsStore(Store):
         if source not in ('csv','judgeme') or len(items)>10000:raise ValueError('Import at most 10,000 reviews per file.')
         return self.q('''INSERT INTO sc_review_imports(source,label,payload,total,invalid,actor) VALUES(%s,%s,%s::jsonb,%s,%s,%s) RETURNING *''',
           (source,plain(label,200),json.dumps(items),len(items),invalid,actor(user)),True)
-    def enqueue_sync(self,user):
-        require(user)
-        with self.db() as conn:
-            conn.execute('SELECT pg_advisory_xact_lock(72634193)')
-            row=conn.execute("SELECT id FROM sc_review_imports WHERE source='judgeme_api' AND status IN ('PENDING','RUNNING') ORDER BY created_at LIMIT 1").fetchone()
-            return row or conn.execute("INSERT INTO sc_review_imports(source,label,actor) VALUES('judgeme_api','Judge.me',%s) RETURNING id",(actor(user),)).fetchone()
     def imports(self):return self.q('SELECT id,label,status,total,cursor,imported,duplicates,invalid,unresolved,skipped,error_code,created_at FROM sc_review_imports ORDER BY created_at DESC LIMIT 10')
 
     def media(self,identity):

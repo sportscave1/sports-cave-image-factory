@@ -1,0 +1,10 @@
+/* Mobile only: matching gold rules flank the existing review summary. */
+@media (max-width:749px){
+  .scx-titlebar .scx-underline{visibility:hidden!important}
+  .scx-titlebar .scx-right{display:flex!important;align-items:center!important;justify-content:center!important;gap:8px!important;min-width:0!important;width:100%!important}
+  .scx-titlebar .scx-right::before,.scx-titlebar .scx-right::after{content:"";display:block!important;position:static!important;flex:1 1 0;min-width:0;max-width:78px;width:auto!important;height:1.5px!important;margin:0!important;padding:0!important;border:0!important;transform:none!important;opacity:1!important;pointer-events:none;background:linear-gradient(90deg,rgba(212,165,76,0),rgba(212,165,76,.55) 18%,#D4A54C 50%,rgba(212,165,76,.55) 82%,rgba(212,165,76,0))!important}
+  .scx-titlebar .scx-review-inline{flex:0 0 auto!important;min-width:0}
+}
+
+@media (max-width: 767px) {
+}

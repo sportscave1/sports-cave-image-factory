@@ -217,18 +217,13 @@ FRAMED_CERTIFICATE_PRODUCT_ID=gid://shopify/Product/...
 FRAMED_CERTIFICATE_PRODUCT_HANDLE=framed-collector-certificate
 FRAMED_CERTIFICATE_VARIANT_ID=gid://shopify/ProductVariant/...
 
-# Judge.me server integration
-JUDGEME_PRIVATE_API_TOKEN=...
-JUDGEME_PUBLIC_API_TOKEN=...
-JUDGEME_SHOP_DOMAIN=your-store.myshopify.com
-# Optional; defaults to https://judge.me/api/v1
-JUDGEME_API_BASE_URL=https://judge.me/api/v1
+# Native review collection uses the existing OS/Dropbox configuration.
 # Optional; defaults to 6 MiB
 COLLECTOR_VAULT_REVIEW_PHOTO_MAX_BYTES=6291456
 ```
 
 The existing Supabase, R2, Shopify Admin, and Shopify client-secret environment
-variables remain required. Never place Judge.me, Shopify Admin, Supabase service
+variables remain required. Never place Shopify Admin, Supabase service
 role, or R2 credentials in the customer account extension.
 
 The framed product must be active and published to the storefront before the
@@ -238,12 +233,10 @@ handle is only a discovery fallback. The selected variant must use SKU
 The offer stays hidden while the product is Draft, unpublished, unavailable,
 missing, or does not contain the configured variant and SKU.
 
-Judge.me review requests are server-side and are shown only for an owned order
-whose Shopify fulfillment history contains a real `DELIVERED` event. The public
-Judge.me API does not let API-created reviews force a verified-buyer badge;
-Sports Cave still validates ownership and delivery before submission. Configure
-Judge.me's existing review-request email timing to delivered date plus seven
-days in its dashboard. Do not enable a second Sports Cave email flow.
+Sports Cave review collection uses native OS endpoints, verified purchase ownership,
+Dropbox originals and WebP variants. Post Checkout owns review requests and media
+rewards; see `docs/REVIEWS_LIVE_CUTOVER_20261124.md`. No external review API token
+is required.
 
 Matching rules:
 
