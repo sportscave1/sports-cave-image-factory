@@ -799,10 +799,25 @@ function FrameProductTitle({title}) {
   </s-heading>;
 }
 
-function frameProductPriceImage(price, currency) {
+function frameProductPriceImage(price, currency, mobile = false) {
   const amount = price.replace(/^(?:AU|US|CA|NZ)(?=\$)/, '');
   const currencyX = frameProductTextWidth(amount, 34, -0.85) + 8;
-  return frameProductSvg(`<text x="0" y="34" font-family="SCProductMontserrat" font-size="34" font-weight="700" letter-spacing="-0.85" fill="#f5f2ea">${frameProductEscape(amount)}</text><text x="${currencyX}" y="34" font-family="SCProductMontserrat" font-size="13" font-weight="500" letter-spacing="0.325" fill="#f5f2ea" fill-opacity="0.8">${frameProductEscape(currency)}</text>`, 200, 44, true);
+  const prefix = mobile ? ({AUD:'AU', USD:'US', CAD:'CA', NZD:'NZ', GBP:'GBP'}[currency] || '') : '';
+  const amountX = prefix ? frameProductTextWidth(prefix, 17.68, 0.2652) + 1 : 0;
+  const prefixMarkup = prefix ? `<text x="0" y="26" font-family="SCProductMontserrat" font-size="17.68" font-weight="700" letter-spacing="0.2652" fill="#f5f2ea" fill-opacity="0.88">${prefix}</text>` : '';
+  const suffixMarkup = mobile ? '' : `<text x="${currencyX}" y="34" font-family="SCProductMontserrat" font-size="13" font-weight="500" letter-spacing="0.325" fill="#f5f2ea" fill-opacity="0.8">${frameProductEscape(currency)}</text>`;
+  return frameProductSvg(`${prefixMarkup}<text x="${amountX}" y="34" font-family="SCProductMontserrat" font-size="34" font-weight="700" letter-spacing="-0.85" fill="#f5f2ea">${frameProductEscape(amount)}</text>${suffixMarkup}`, 200, 44, !mobile);
+}
+
+function FrameProductPrice({price, currency}) {
+  return <s-heading>
+    <s-box display="@container (inline-size > 520px) auto, none" inlineSize="200px" maxInlineSize="100%" blockSize="44px">
+      <s-image src={frameProductPriceImage(price, currency)} alt={price} inlineSize="fill" aspectRatio="200/44" loading="eager" />
+    </s-box>
+    <s-box display="@container (inline-size > 520px) none, auto" inlineSize="200px" maxInlineSize="100%" blockSize="44px">
+      <s-image src={frameProductPriceImage(price, currency, true)} alt={price} inlineSize="fill" aspectRatio="200/44" loading="eager" />
+    </s-box>
+  </s-heading>;
 }
 
 function FramedCertificateOffer({
@@ -820,9 +835,7 @@ function FramedCertificateOffer({
     <s-box>
       <s-stack gap="@container (inline-size > 520px) large, small">
         {!checkoutState.checkoutUrl && checkoutState.status !== "ordered" ? (
-          <s-heading><s-box inlineSize="200px" maxInlineSize="100%" blockSize="44px">
-            <s-image src={frameProductPriceImage(price, selected?.contextual_price?.currencyCode || '')} alt={price} inlineSize="fill" aspectRatio="200/44" loading="eager" />
-          </s-box></s-heading>
+          <FrameProductPrice price={price} currency={selected?.contextual_price?.currencyCode || ''} />
         ) : null}
         <s-heading>Choose frame</s-heading>
         <s-grid gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap="small">
