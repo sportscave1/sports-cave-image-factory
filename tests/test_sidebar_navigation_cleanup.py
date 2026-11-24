@@ -83,11 +83,15 @@ class SidebarNavigationCleanupTests(unittest.TestCase):
         self.assertIn('[class*="-children"]', SIDEBAR_CSS)
         self.assertNotIn('st-key-sidebar-disclosure-crm', SIDEBAR_CSS)
 
-    def test_remaining_child_routes_and_deep_route_metadata_are_unchanged(self):
-        self.assertIn(
-            "elif current_page == social_media.AI_REELS_ROUTE:",
-            APP_SOURCE,
-        )
+    def test_remaining_child_routes_and_retired_reels_redirect_are_preserved(self):
+        import os_accounts
+        # The community-inbox release retired Reels; old bookmarks must still
+        # resolve to its existing Social Media destination and permission key.
+        self.assertEqual(os_accounts.normalise_route(social_media.AI_REELS_ROUTE),
+                         social_media.SOCIAL_MEDIA_ROUTE)
+        self.assertEqual(os_accounts.page_key_for_route(social_media.AI_REELS_ROUTE),
+                         social_media.SOCIAL_MEDIA_PAGE_KEY)
+        self.assertNotIn(social_media.AI_REELS_PAGE_KEY, os_accounts.PAGE_BY_KEY)
         for route in seo_navigation.SEO_ROUTES:
             self.assertIn(route, seo_navigation.SEO_NAV_LABELS)
         self.assertIn("elif current_page in seo_nav.SEO_ROUTES:", APP_SOURCE)

@@ -40,6 +40,15 @@ def preview(flow, customer, orders, at, *, suppressed=False, subscribed_at=None,
         base = anchor
         offset = step['delay_seconds']
         evidence = step['anchor']
+        absent=False
+        if kind == 'post_purchase' and step['anchor']=='fulfilment':
+            base=date((order or {}).get('fulfilled_at'))
+            if not base:blocked=blocked or 'awaiting_verified_fulfilment'
+            request=step.get('review_request')
+            if request:
+                index=request['product_index']
+                absent=index>=len((order or {}).get('review_products',[]))
+                if (order or {}).get('sourceName')=='pos':offset=(7+5*index)*86400
         if kind == 'post_purchase' and step['anchor'] == 'delivery':
             base = date((order or {}).get('delivered_at'))
             if not base:
@@ -54,7 +63,7 @@ def preview(flow, customer, orders, at, *, suppressed=False, subscribed_at=None,
                 blocked = blocked or 'unfulfilled'
         due = base + timedelta(seconds=offset) if base else None
         stages.append(dict(step_id=step['step_id'], name=step.get('name'), due_at=due,
-                           state='DISABLED' if not step.get('enabled', True) else 'HELD' if blocked else 'DRAFT',
+                           state='DISABLED' if absent or not step.get('enabled', True) else 'HELD' if blocked else 'DRAFT',
                            reason=blocked, anchor=evidence))
     return dict(eligible=not reason, reason=reason, stages=stages,
                 cycle=(last or {}).get('id') if kind == 'win_back' else (order or {}).get('id') or customer.get('id'))

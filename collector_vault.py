@@ -39,7 +39,6 @@ REVIEW_TITLE_MAX_LENGTH = 120
 REVIEW_PHOTO_MAX_PIXELS = 40_000_000
 DELIVERY_CACHE_TTL_SECONDS = 5 * 60
 FRAME_PRODUCT_CACHE_TTL_SECONDS = 5 * 60
-JUDGEME_PRODUCT_CACHE_TTL_SECONDS = 15 * 60
 SAFE_REVIEW_MIME_TYPES = {
     "image/jpeg": ("JPEG", ".jpg"),
     "image/png": ("PNG", ".png"),
@@ -69,7 +68,6 @@ _UUID = re.compile(
 _CACHE_LOCK = threading.RLock()
 _DELIVERY_CACHE = {}
 _FRAME_PRODUCT_CACHE = {}
-_JUDGEME_PRODUCT_CACHE = {}
 LOGGER = logging.getLogger(__name__)
 
 
@@ -948,13 +946,6 @@ def get_frame_product(*, force=False):
 
 
 def collector_vault_readiness(*, check_shopify=False, force=False):
-    judge_private = bool(
-        str(os.getenv("JUDGEME_PRIVATE_API_TOKEN") or "").strip()
-    )
-    judge_public = bool(
-        str(os.getenv("JUDGEME_PUBLIC_API_TOKEN") or "").strip()
-    )
-    judge_domain = bool(_judgeme_shop_domain())
     signing_ready = _asset_signing_configured()
     session_auth_ready = bool(_session_token_secrets()) and bool(_app_client_id())
     database_ready = supabase_backend.is_configured()
@@ -973,13 +964,8 @@ def collector_vault_readiness(*, check_shopify=False, force=False):
             else "framed_product_not_configured"
         )
     )
-    judge_configured = judge_private and judge_public and judge_domain
     return {
-        "judge_me_state": (
-            "judge_me_configured"
-            if judge_configured
-            else "judge_me_not_configured"
-        ),
+        "reviews_state": "sports_cave_os",
         "framed_product_state": frame_state,
         "signing_state": (
             "signing_secret_configured"
@@ -1103,67 +1089,12 @@ def delivery_statuses(order_ids, shopify_customer_id, *, force=False):
     return statuses
 
 
-def _judgeme_configured():
-    return bool(
-        str(os.getenv("JUDGEME_PRIVATE_API_TOKEN") or "").strip()
-        and str(os.getenv("JUDGEME_PUBLIC_API_TOKEN") or "").strip()
-        and _judgeme_shop_domain()
-    )
-
-
-def _judgeme_base_url():
-    return str(os.getenv("JUDGEME_API_BASE_URL") or "https://judge.me/api/v1").strip().rstrip("/")
-
-
-def _judgeme_shop_domain():
-    return _clean_shop_domain(os.getenv("JUDGEME_SHOP_DOMAIN") or shopify_sync.get_config().get("store_domain"))
-
-
 def _numeric_shopify_id(value):
     candidate = str(value or "").strip().rsplit("/", 1)[-1]
     return candidate if candidate.isdigit() else ""
 
 
-def lookup_judgeme_product(shopify_product_id, *, force=False, request_get=None):
-    external_id = _numeric_shopify_id(shopify_product_id)
-    if not external_id or not _judgeme_configured():
-        return {}
-    now_value = time.time()
-    with _CACHE_LOCK:
-        cached = _JUDGEME_PRODUCT_CACHE.get(external_id)
-        if not force and cached and cached["expires_at"] > now_value:
-            return dict(cached["value"])
-    getter = request_get or requests.get
-    try:
-        response = getter(
-            f"{_judgeme_base_url()}/products/-1",
-            params={
-                "shop_domain": _judgeme_shop_domain(),
-                "api_token": str(os.getenv("JUDGEME_PRIVATE_API_TOKEN") or "").strip(),
-                "external_id": external_id,
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        product = payload.get("product") or payload
-        value = {
-            "id": str(product.get("id") or ""),
-            "external_id": str(product.get("external_id") or external_id),
-        }
-        if not value["id"]:
-            value = {}
-    except Exception:
-        value = {}
-    with _CACHE_LOCK:
-        _JUDGEME_PRODUCT_CACHE[external_id] = {
-            "value": dict(value),
-            "expires_at": now_value + JUDGEME_PRODUCT_CACHE_TTL_SECONDS,
-        }
-    return value
-
-
-def _reviewed_keys(owner_hash):
+def _reviewed_keys(owner_hash,customer=None):
     with supabase_backend.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1175,7 +1106,7 @@ def _reviewed_keys(owner_hash):
                 """,
                 (owner_hash,),
             )
-            return {
+            legacy = {
                 (
                     _canonical_gid("Order", row.get("shopify_order_id")),
                     _canonical_gid("Product", row.get("shopify_product_id")),
@@ -1183,12 +1114,18 @@ def _reviewed_keys(owner_hash):
                 for row in (cur.fetchall() or [])
             }
 
+            if not customer:return legacy
+            cur.execute("SELECT order_id AS shopify_order_id,product_id AS shopify_product_id FROM sc_reviews WHERE source='sports_cave' AND customer_id=%s AND order_id IS NOT NULL",(str(customer),))
+            return legacy | {(_canonical_gid('Order',r.get('shopify_order_id')),_canonical_gid('Product',r.get('shopify_product_id'))) for r in (cur.fetchall() or [])}
+
 
 def review_prompt(rows, shopify_customer_id, *, allow_purchased=False):
-    if not rows or not _judgeme_configured():
-        return None
+    if not rows:return None
+    from reviews_store import ReviewsStore
+    native_store=ReviewsStore()
     try:
-        reviewed = _reviewed_keys(customer_hash(shopify_customer_id))
+        if not native_store.settings()['enabled']:return None
+        reviewed = _reviewed_keys(customer_hash(shopify_customer_id),shopify_customer_id)
     except Exception as error:
         _log_optional_feature_unavailable("reviews", error)
         return None
@@ -1203,10 +1140,8 @@ def review_prompt(rows, shopify_customer_id, *, allow_purchased=False):
             continue
         if (order_id, product_id) in reviewed:
             continue
-        judge_product = lookup_judgeme_product(product_id)
-        if not judge_product:
-            return None
         try:
+            if not native_store.match_product({"product_id":product_id}):continue
             public = _certificate_public_row(row)
         except Exception as error:
             LOGGER.warning(
@@ -1345,7 +1280,9 @@ def create_frame_request(
     country=None,
 ):
     row = _resolve_certificate_reference(certificate_reference, shopify_customer_id)
-    frame_product = get_frame_product(force=True)
+    # The account bootstrap has already warmed this bounded public catalogue
+    # cache. Shopify cart/add remains authoritative for live purchasability.
+    frame_product = get_frame_product()
     requested_variant = _canonical_gid("ProductVariant", frame_variant_id)
     allowed_variants = {v["variant_id"] for v in frame_product.get("variants", [])}
     allowed_variants.add(frame_product.get("variant_id"))
@@ -1458,7 +1395,7 @@ def frame_cart_handoff(token):
 
 
 def _frame_variant_sku(variant_id):
-    product = get_frame_product(force=True)
+    product = get_frame_product()
     color = next((item["color"] for item in product.get("variants", []) if item["variant_id"] == variant_id), None)
     if not product.get("available") or not color:
         raise CollectorVaultUnavailableError("The selected frame is unavailable.")
@@ -1629,7 +1566,7 @@ def validate_review_photo(photo):
             )
             if int(image.width) * int(image.height) > max_pixels:
                 raise CollectorVaultError("Photo dimensions are too large.")
-            # Judge.me's picture_urls accepts JPEG/PNG, not WebP. Keep accepting
+            # Cached account clients use JPEG/PNG uploads. Keep accepting
             # WebP at the account form, then convert it before provider delivery.
             output_format = "JPEG" if expected_format == "WEBP" else expected_format
             if expected_format == "WEBP":
@@ -1688,252 +1625,15 @@ def _reviewer_details(row):
     return name[:120], email[:320]
 
 
-def _reserve_review_submission(owner_hash, row, rating):
-    with supabase_backend.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT COUNT(*) AS attempts
-                FROM collector_reviews
-                WHERE customer_hash=%s
-                  AND created_at > now() - interval '10 minutes'
-                """,
-                (owner_hash,),
-            )
-            if int((cur.fetchone() or {}).get("attempts") or 0) >= 3:
-                raise CollectorVaultConflictError("Please wait before submitting another review.")
-            cur.execute(
-                """
-                SELECT *
-                FROM collector_reviews
-                WHERE customer_hash=%s
-                  AND shopify_order_id=%s
-                  AND shopify_product_id=%s
-                LIMIT 1
-                """,
-                (
-                    owner_hash,
-                    _canonical_gid("Order", row.get("shopify_order_id")),
-                    _canonical_gid("Product", row.get("shopify_product_id")),
-                ),
-            )
-            existing = cur.fetchone()
-            if existing and existing.get("status") in {"submitting", "submitted"}:
-                raise CollectorVaultConflictError("A review has already been submitted for this purchase.")
-            if existing:
-                cur.execute(
-                    """
-                    UPDATE collector_reviews
-                    SET rating=%s, review_title=NULL, review_body='',
-                        status='submitting', last_error=NULL, updated_at=now()
-                    WHERE id=%s
-                    RETURNING *
-                    """,
-                    (rating, existing.get("id")),
-                )
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO collector_reviews (
-                        customer_hash, shopify_customer_id, certificate_row_id,
-                        shopify_order_id, shopify_product_id, rating,
-                        review_title, review_body
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, NULL, '')
-                    RETURNING *
-                    """,
-                    (
-                        owner_hash,
-                        row.get("order_customer_id") or row.get("certificate_customer_id"),
-                        int(row.get("certificate_row_id") or 0),
-                        _canonical_gid("Order", row.get("shopify_order_id")),
-                        _canonical_gid("Product", row.get("shopify_product_id")),
-                        rating,
-                    ),
-                )
-            submission = cur.fetchone() or {}
-        conn.commit()
-    return submission
-
-
-def _upload_review_photo(submission, photo):
-    if not photo:
-        return {}
-    if not r2_storage.safe_r2_enabled():
-        raise CollectorVaultUnavailableError("Photo uploads are temporarily unavailable.")
-    bucket = r2_storage.get_bucket_name("assets")
-    if not bucket:
-        raise CollectorVaultUnavailableError("Photo storage is not configured.")
-    key = (
-        f"collector-reviews/{datetime.now(timezone.utc):%Y/%m}/"
-        f"{submission.get('submission_reference')}{photo.get('extension')}"
-    )
-    result = r2_storage.upload_bytes(
-        bucket,
-        key,
-        photo.get("bytes") or b"",
-        content_type=photo.get("mime_type"),
-    )
-    if not result.get("ok"):
-        raise CollectorVaultUnavailableError("Photo could not be uploaded.")
-    return {
-        "bucket": bucket,
-        "key": key,
-        "mime_type": photo.get("mime_type"),
-        "url": r2_storage.generate_presigned_download_url(bucket, key, expires_seconds=3600),
-    }
-
-
-def _submit_judgeme_review(row, submission, *, name, email, photo_upload, request_post=None):
-    judge_product = lookup_judgeme_product(row.get("shopify_product_id"), force=True)
-    if not judge_product:
-        raise CollectorVaultUnavailableError("This artwork is not mapped in Judge.me.")
-    post = request_post or requests.post
-    payload = {
-        "api_token": str(os.getenv("JUDGEME_PRIVATE_API_TOKEN") or "").strip(),
-        "shop_domain": _judgeme_shop_domain(),
-        "platform": "shopify",
-        "name": name,
-        "email": email,
-        "rating": int(submission.get("rating") or 0),
-        "body": submission.get("review_body") or "",
-        "id": _numeric_shopify_id(row.get("shopify_product_id")),
-    }
-    if submission.get("review_title"):
-        payload["title"] = submission.get("review_title")
-    if photo_upload.get("url"):
-        payload["picture_urls"] = [photo_upload["url"]]
-    response = post(
-        f"{_judgeme_base_url()}/reviews",
-        json=payload,
-        timeout=20,
-    )
-    if not 200 <= response.status_code < 300:
-        raise CollectorVaultUnavailableError("Judge.me did not accept the review.")
-    result = response.json() if response.content else {}
-    if not isinstance(result, dict) or result.get("error") or result.get("errors") or result.get("success") is False:
-        raise CollectorVaultUnavailableError("Judge.me did not accept the review.")
-    review = result.get("review") or result
-    if not isinstance(review, dict):
-        raise CollectorVaultUnavailableError("Judge.me did not accept the review.")
-    verification_status = str(
-        review.get("verification_status") or review.get("source") or ""
-    )
-    if "verified" in review:
-        verification_status = (
-            "verified" if review.get("verified") is True else "unverified"
-        )
-    return {
-        "review_id": str(review.get("id") or ""),
-        "verification_status": verification_status,
-        "judge_product_id": judge_product.get("id") or "",
-    }
-
-
-def submit_review(
-    shopify_customer_id,
-    *,
-    review_reference,
-    rating,
-    body,
-    title="",
-    reviewer_name="",
-    photo=None,
-    request_post=None,
-):
-    try:
-        rating_value = int(rating)
-    except (TypeError, ValueError) as error:
-        raise CollectorVaultError("Choose a star rating from 1 to 5.") from error
-    if rating_value not in range(1, 6):
-        raise CollectorVaultError("Choose a star rating from 1 to 5.")
-    body_value = _clean_review_text(body, maximum=REVIEW_BODY_MAX_LENGTH)
-    title_value = _clean_review_text(title, maximum=REVIEW_TITLE_MAX_LENGTH)
-    name_value = _clean_review_text(reviewer_name, maximum=120)
-    if len(body_value) < REVIEW_BODY_MIN_LENGTH:
-        raise CollectorVaultError("Review text must be at least 10 characters.")
-    row = _resolve_review_reference(review_reference, shopify_customer_id)
-    owner_hash = customer_hash(shopify_customer_id)
-    cleaned_photo = validate_review_photo(photo)
-    submission = _reserve_review_submission(owner_hash, row, rating_value)
-    judge_submission = {
-        **submission,
-        "rating": rating_value,
-        "review_title": title_value,
-        "review_body": body_value,
-    }
-    photo_upload = {}
-    try:
-        photo_upload = _upload_review_photo(submission, cleaned_photo)
-        name, email = _reviewer_details(row)
-        judge_result = _submit_judgeme_review(
-            row,
-            judge_submission,
-            name=name_value or name,
-            email=email,
-            photo_upload=photo_upload,
-            request_post=request_post,
-        )
-    except Exception as error:
-        with supabase_backend.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE collector_reviews
-                    SET status='failed', last_error=%s, updated_at=now()
-                    WHERE id=%s
-                    """,
-                    (str(error)[:500], submission.get("id")),
-                )
-            conn.commit()
-        record_event(
-            "review_submission_failed",
-            shopify_customer_id,
-            certificate_row_id=row.get("certificate_row_id"),
-            event_key=f"review-failed:{submission.get('submission_reference')}:{int(time.time() // 60)}",
-        )
-        raise
-    with supabase_backend.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE collector_reviews
-                SET status='submitted',
-                    judge_me_product_id=%s,
-                    judge_me_review_id=%s,
-                    judge_me_verification_status=%s,
-                    photo_bucket=%s,
-                    photo_object_key=%s,
-                    photo_mime_type=%s,
-                    last_error=NULL,
-                    submitted_at=now(),
-                    updated_at=now()
-                WHERE id=%s
-                RETURNING submission_reference, status, submitted_at
-                """,
-                (
-                    judge_result.get("judge_product_id"),
-                    judge_result.get("review_id"),
-                    judge_result.get("verification_status"),
-                    photo_upload.get("bucket"),
-                    photo_upload.get("key"),
-                    photo_upload.get("mime_type"),
-                    submission.get("id"),
-                ),
-            )
-            result = cur.fetchone() or {}
-        conn.commit()
-    record_event(
-        "review_submitted",
-        shopify_customer_id,
-        certificate_row_id=row.get("certificate_row_id"),
-        event_key=f"review-submitted:{result.get('submission_reference')}",
-    )
-    return {
-        "status": "submitted",
-        "submission_reference": str(result.get("submission_reference") or ""),
-        "message": "Review submitted \u2713",
-    }
+def submit_review(shopify_customer_id, *, review_reference, rating, body, title="", reviewer_name="", photo=None, request_post=None):
+    """Compatibility for cached account clients; all writes use native OS reviews."""
+    from reviews_account import submit
+    from reviews_store import ReviewsStore
+    from crm_shopify import Shopify
+    cleaned = validate_review_photo(photo)
+    uploads = [{"data": cleaned["bytes"], "kind": "image"}] if cleaned else []
+    return submit(ReviewsStore(), Shopify(), shopify_customer_id, review_reference,
+                  {"rating": rating, "body": body, "title": title, "reviewer_name": reviewer_name}, uploads)
 
 
 def _record_hashed_event(event_name, owner_hash, *, certificate_row_id=None, event_key=""):

@@ -480,6 +480,8 @@ def _hydrate(state,store,doc,*,fresh=False,data=None):
     # Optional checkout-style product/lifestyle elements also use the order.
     from crm_checkout_preview import needs_checkout,document
     if needs_checkout(result):result=document(result,checkout_data(data),shop=store.preview_shop if fresh else state.get('_automation_flow_visual_shop',store.preview_shop))[0]
+    from reviews_journey import preview_document as review_sample
+    result=review_sample(result)
     cache[token]=(deepcopy(result),store.preview_warning)
     while len(cache)>8:cache.pop(next(iter(cache)))
     return result,data['label']

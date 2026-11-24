@@ -1,0 +1,82 @@
+/*
+ * ------------------------------------------------------------
+ * IMPORTANT: The contents of this file are auto-generated.
+ *
+ * This file may be updated by the Shopify admin theme editor
+ * or related systems. Please exercise caution as any changes
+ * made to this file may be overwritten.
+ * ------------------------------------------------------------
+ */
+{
+  "sections": {
+    "7bcf1da2-fa03-4a3d-b6a6-efc68e417fb3": {
+      "type": "scrolling-banner",
+      "blocks": {
+        "ab47873e-fabd-498b-92a6-23e2639b6ad5": {
+          "type": "image",
+          "settings": {
+            "image": "shopify://shop_images/Exlusive_Designs_b75b90b6-1e7a-4c94-8987-87e62e987ae3.png",
+            "image_width": 400,
+            "link": "shopify://collections"
+          }
+        }
+      },
+      "block_order": [
+        "ab47873e-fabd-498b-92a6-23e2639b6ad5"
+      ],
+      "disabled": true,
+      "settings": {
+        "full_width": true,
+        "color_scheme": "default",
+        "text_size": 50,
+        "vertical_padding": 0,
+        "speed": 0.5,
+        "direction": "left",
+        "font": "heading",
+        "space": 0
+      }
+    },
+    "main": {
+      "type": "main-page",
+      "disabled": true,
+      "settings": {
+        "show_page_title": false,
+        "full_width": true
+      }
+    },
+    "custom_liquid_wqfbjQ": {
+      "type": "custom-liquid",
+      "name": "Custom Liquid",
+      "settings": {
+        "full_width": true,
+        "show_space": false,
+        "code": "{{ 'sc-reviews-page.css' | asset_url | stylesheet_tag }}\n<script type=\"application/ld+json\">\n{\"@context\":\"https://schema.org\",\"@type\":\"CollectionPage\",\"@id\":{{ canonical_url | append: '#reviews' | json }},\"url\":{{ canonical_url | json }},\"name\":\"Sports Cave Reviews\",\"description\":\"Collector photos, product reviews and experiences with Sports Cave.\",\"isPartOf\":{\"@type\":\"WebSite\",\"url\":{{ shop.url | json }},\"name\":{{ shop.name | json }}}}\n</script>"
+      }
+    },
+    "17635292781c364356": {
+      "type": "sc-customer-reviews",
+      "settings": {
+        "heading": "Sports Cave Reviews",
+        "layout": "reviews-page",
+        "columns": 4,
+        "max_width": 1450
+      }
+    },
+    "custom_liquid_DNax8x": {
+      "type": "custom-liquid",
+      "name": "Custom Liquid",
+      "settings": {
+        "full_width": true,
+        "show_space": false,
+        "code": "<style>\n  .scx-collection-nav{\n    position:relative;\n    left:50%;\n    right:50%;\n    margin-left:-50vw;\n    margin-right:-50vw;\n    width:100vw;\n\n    margin-top:2.2rem;\n    \n    padding:1.9rem 1.4rem 2.1rem;\n    background:#040404;\n    color:#f5f5f5;\n    box-sizing:border-box;\n  }\n\n  .scx-collection-nav__inner{\n    max-width:1150px;\n    margin:0 auto;\n  }\n\n  .scx-collection-nav__title{\n    margin:0 0 .35rem;\n    font-size:1.1rem;\n    font-weight:700;\n    letter-spacing:.08em;\n    text-transform:uppercase;\n    color:var(--sc-brand-gold); \n    text-align:center;\n  }\n\n  .scx-collection-nav__copy{\n    margin:0 0 1.1rem;\n    font-size:.92rem;\n    line-height:1.6;\n    text-align:center;\n    color:#f0f0f0;\n  }\n\n  .scx-collection-nav__shell{\n    display:flex;\n    align-items:center;\n    gap:.4rem;\n  }\n\n  \n  .scx-collection-nav__arrow{\n    flex:0 0 auto;\n    background:none;\n    border:none;\n    color:#f7d37a;\n    cursor:pointer;\n    padding:0 .2rem;\n    font-size:1.35rem;\n    line-height:1;\n  }\n  .scx-collection-nav__arrow:focus-visible{\n    outline:1px solid #f7d37a;\n    outline-offset:2px;\n  }\n\n  .scx-collection-nav__track{\n    flex:1 1 auto;\n    display:flex;\n    gap:.6rem;\n    overflow-x:auto;\n    padding:.15rem .15rem .25rem;\n    -webkit-overflow-scrolling:touch;\n    scroll-snap-type:x mandatory;\n\n    scrollbar-width:none;\n  }\n  .scx-collection-nav__track::-webkit-scrollbar{\n    display:none;\n  }\n\n  .scx-collection-nav__link{\n    scroll-snap-align:start;\n    display:inline-flex;\n    align-items:center;\n    justify-content:center;\n    padding:.42rem .9rem;\n    border-radius:999px;\n    border:1px solid rgba(247,211,122,.28);\n    background:linear-gradient(135deg,rgba(255,255,255,.03),rgba(247,211,122,.05));\n    font-size:.9rem;\n    font-weight:500;\n    white-space:nowrap;\n    text-decoration:none;\n    color:#fdfdfd;\n    box-shadow:0 0 0 1px rgba(0,0,0,.7);\n    transition:\n      background .18s ease,\n      border-color .18s ease,\n      transform .12s ease,\n      box-shadow .12s ease;\n  }\n\n  .scx-collection-nav__link:hover,\n  .scx-collection-nav__link:focus-visible{\n    border-color:#f7d37a;\n    background:linear-gradient(135deg,rgba(247,211,122,.18),rgba(199,154,50,.22));\n    transform:translateY(-1px);\n    box-shadow:\n      0 10px 20px rgba(0,0,0,.55),\n      0 0 0 1px rgba(247,211,122,.65);\n    outline:none;\n  }\n\n  \n  @media (min-width:900px){\n    .scx-collection-nav__shell{\n      gap:0;\n    }\n    .scx-collection-nav__arrow{\n      display:none;\n    }\n    .scx-collection-nav__track{\n      overflow:visible;\n      flex-wrap:nowrap;\n      justify-content:space-between;\n      padding:.15rem 0 .05rem;\n    }\n    .scx-collection-nav__link{\n      flex:1 1 0;\n      max-width:none;\n      padding:.38rem .75rem; \n      font-size:.86rem;\n    }\n  }\n\n  @media (max-width:768px){\n    .scx-collection-nav{\n      margin-top:1.8rem;\n      padding:1.6rem 1.1rem 1.9rem;\n    }\n    .scx-collection-nav__title{\n      font-size:1rem;\n    }\n    .scx-collection-nav__copy{\n      font-size:.86rem;\n    }\n  }\n</style>\n\n<section class=\"scx-collection-nav\" role=\"navigation\" aria-label=\"Browse more sports wall art collections\">\n  <div class=\"scx-collection-nav__inner\">\n    <h2 class=\"scx-collection-nav__title\">\n      Find your perfect sports wall art\n    </h2>\n    <p class=\"scx-collection-nav__copy\">\n      Build your own wall of fame.\n\n    <div class=\"scx-collection-nav__shell\" data-scx-collection-nav>\n      <button class=\"scx-collection-nav__arrow scx-collection-nav__arrow--prev\" type=\"button\" aria-label=\"Scroll collections left\">\n        ‹\n      </button>\n\n      <div class=\"scx-collection-nav__track\">\n        <a class=\"scx-collection-nav__link\" href=\"/collections/soccer\">Football Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/nba\">NBA Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/combat-art\">Combat Sports Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/tennis-wall-art\">Tennis Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/cricket\">Cricket Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/motor-racing-wall-art\">Motorsport Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/horse-racing-wall-art\">Horse Racing Wall Art</a>\n        <a class=\"scx-collection-nav__link\" href=\"/collections/all-sports-wall-art\">All Sports Wall Art</a>\n      </div>\n\n      <button class=\"scx-collection-nav__arrow scx-collection-nav__arrow--next\" type=\"button\" aria-label=\"Scroll collections right\">\n        ›\n      </button>\n    </div>\n  </div>\n</section>\n\n<script>\n  (function(){\n    var shells = document.querySelectorAll('[data-scx-collection-nav]');\n    if (!shells.length) return;\n\n    shells.forEach(function(shell){\n      var track = shell.querySelector('.scx-collection-nav__track');\n      var prev  = shell.querySelector('.scx-collection-nav__arrow--prev');\n      var next  = shell.querySelector('.scx-collection-nav__arrow--next');\n      if (!track || !prev || !next) return;\n\n      var amount = 220;\n\n      prev.addEventListener('click', function(){\n        track.scrollBy({ left: -amount, behavior: 'smooth' });\n      });\n      next.addEventListener('click', function(){\n        track.scrollBy({ left: amount, behavior: 'smooth' });\n      });\n    });\n  })();\n</script>"
+      }
+    }
+  },
+  "order": [
+    "7bcf1da2-fa03-4a3d-b6a6-efc68e417fb3",
+    "main",
+    "custom_liquid_wqfbjQ",
+    "17635292781c364356",
+    "custom_liquid_DNax8x"
+  ]
+}

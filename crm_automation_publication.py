@@ -178,10 +178,11 @@ def prepare(store,identity,flow,version,name,env=None,*,step_id=None):
                  'automation_id':str(identity),'automation_version':version,'step_id':step['step_id'],
                  'trigger':flow['trigger'],'rules':flow['rules']}
         if flow.get('lifecycle_version'):content['lifecycle_version']=1
-        if flow.get('review_request'):
+        request=step.get('review_request') or flow.get('review_request')
+        if request:
             from reviews_submission import MARKER
             if MARKER not in json.dumps(doc):raise ValueError('Add the review request link before publishing.')
-            content['review_request']=deepcopy(flow['review_request'])
+            content['review_request']=deepcopy(request)
         bundles.append((template_id,name+' · Email '+str(index+1),content))
         steps.append({'type':'send','step_id':step['step_id'],'delay_seconds':step['delay_seconds'],
                       'template_id':template_id,'template_version':version,'automation_version':version,

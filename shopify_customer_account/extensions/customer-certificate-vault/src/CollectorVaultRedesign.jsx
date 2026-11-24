@@ -139,7 +139,7 @@ function CollectorVault() {
           ) : null}
           {reviewSubmitted ? (
             <s-banner tone="success" heading="Review submitted ✓">
-              Thank you. Your review was sent to Judge.me and may be awaiting moderation.
+              Thank you. Your review was received by Sports Cave.
             </s-banner>
           ) : null}
           <s-grid

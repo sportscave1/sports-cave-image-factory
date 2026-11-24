@@ -132,7 +132,7 @@ async function prodigiReadyOwnedPage(plan,tab,refresh,attempts){
   // No supplier action has started. Use a new browser context once rather than
   // repeatedly reloading an unresponsive owned tab. Preserve the old tab.
   const allowed=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true)||
-    plan.selected_empty_product===true||plan.replace_artwork===true;
+    plan.selected_empty_product===true||plan.fresh_empty_item===true||plan.replace_artwork===true;
   if(!allowed||!tab.ordersReused)return null;
   const fresh=await prodigiWorkerTab(plan,true);
   if(prodigiBrowserTransfer)prodigiBrowserTransfer.tab=fresh.id;
@@ -143,6 +143,12 @@ async function prodigiReadyOwnedPage(plan,tab,refresh,attempts){
 function prodigiPlanValid(plan) {
   const host=plan?.environment==='sandbox'?'sandbox-beta-dashboard.pwinty.com':
     plan?.environment==='live'?'dashboard.prodigi.com':null;
+  if(plan?.fresh_empty_item!==undefined&&(plan.fresh_empty_item!==true||host!=='dashboard.prodigi.com'||
+    plan.kind!==undefined||plan.exact_item!==true||plan.replace_artwork!==undefined||
+    !/^prodigi_prepare:\d+$/.test(plan.key)||!/^[A-Za-z0-9_-]{43}$/.test(plan.token)||
+    !/^[A-Za-z0-9-]{1,100}$/.test(plan.item_id)))return false;
+  if(plan?.library_asset_id!==undefined&&(plan.fresh_empty_item!==true||
+    !/^[A-Za-z0-9-]{1,100}$/.test(plan.library_asset_id)))return false;
   if(plan?.fresh_saved_order!==undefined && (plan.fresh_saved_order!==true || host!=='dashboard.prodigi.com' || plan.kind!=='qa'))return false;
   if(plan?.item_only!==undefined && (plan.item_only!==true || plan.kind!=='qa' || plan.exact_item!==true || plan.items!==undefined ||
     !/^[A-Za-z0-9-]{1,100}$/.test(plan.item_id)))return false;
@@ -186,12 +192,27 @@ async function prodigiReceipt(plan,action,stage='readback',error='') {
   if(!response.ok) throw Error('The exact draft could not be verified.');
   return response.json();
 }
+async function prodigiResumeCompletion(plan) {
+  const done=plan.ordersCompletion;
+  const result=plan.kind==='qa'&&done?
+    await prodigiQAReceipt(plan,'finish',done.evidence??null,done.error||''):
+    await prodigiReceipt(plan,'finish',done?.stage||'readback',done?.error||'');
+  await chrome.storage.local.remove('ordersBrowserPending');
+  return result;
+}
 async function prodigiBrowserRun(plan) {
   if(!prodigiPlanValid(plan)) throw Error('Orders browser handoff rejected.');
   await chrome.storage.local.set({ordersBrowserPending:plan});
   if(typeof ordersProgressBegin==='function')ordersProgressBegin(plan);
   const progressTimer=typeof ordersProgressSend==='function'?setInterval(()=>void ordersProgressSend(),10000):null;
   let stage='download';if(typeof ordersProgressStage==='function')ordersProgressStage(plan.kind==='qa'?'open':plan.kind==='product'?'product':'download');
+  let finishing=false;
+  async function complete(stage,error='',evidence=null){
+    finishing=true;
+    const pending={...plan,ordersCompletion:{stage,error,evidence}};
+    await chrome.storage.local.set({ordersBrowserPending:pending});
+    return prodigiResumeCompletion(pending);
+  }
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
       stage='open';
@@ -206,8 +227,13 @@ async function prodigiBrowserRun(plan) {
       tab=await prodigiReadyOwnedPage(plan,tab,refresh,30);
       if(!tab)throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');
       stage=plan.kind==='qa'?'qa':'product';
-      const result=await chrome.tabs.sendMessage(tab.id,{type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}});
-      return plan.kind==='qa'?await prodigiQAReceipt(plan,'finish',result?.evidence||null,result?.error||''):await prodigiReceipt(plan,'finish',result?.stage||'product',result?.error||'');
+      const message={type:plan.kind==='merge-hold'?'prodigi:merge-hold':plan.kind==='merge-add'?'prodigi:merge-add':plan.kind==='product'?'prodigi:product':'prodigi:qa',plan:{...plan,progress:typeof ordersProgressStage==='function'}};
+      const result=typeof prodigiSigninHandoff==='function'?await prodigiSigninHandoff(plan,tab,message):await chrome.tabs.sendMessage(tab.id,message);
+      if(result?.error&&typeof prodigiSigninNeeded==='function'&&await prodigiSigninNeeded(plan,Error(result.error))){
+        finishing=true; // The sign-in outbox owns recovery until acknowledged.
+        return await prodigiPauseForSignin(plan);
+      }
+      return await complete(result?.stage||'product',result?.error||'',result?.evidence||null);
     }
     const file=await prodigiReadFetch(plan.artwork_url,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(150000)},'download');
     if(!file.ok || (file.headers.get('content-length') && Number(file.headers.get('content-length'))!==plan.bytes))
@@ -220,24 +246,29 @@ async function prodigiBrowserRun(plan) {
     let tab=await prodigiWorkerTab(plan);
     prodigiBrowserTransfer={plan,bytes,tab:tab.id};
     // Only a server-verified empty item may clear a product-selection shell.
-    tab=await prodigiReadyOwnedPage(plan,tab,plan.selected_empty_product===true||plan.replace_artwork===true,60);
+    tab=await prodigiReadyOwnedPage(plan,tab,plan.selected_empty_product===true||plan.fresh_empty_item===true||plan.replace_artwork===true,60);
     if(!tab) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
     const stopWake=prodigiUploadWake(plan,tab);
     let result;
-    try{result=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}});}
+    try{const message={type:'prodigi:upload',plan:{...plan,progress:typeof ordersProgressStage==='function'}};
+      result=typeof prodigiSigninHandoff==='function'?await prodigiSigninHandoff(plan,tab,message):await chrome.tabs.sendMessage(tab.id,message);}
     finally{stopWake();}
     stage=result?.stage||'page';
     if(!result?.saved) throw Error(result?.error||'The companion stopped before a confirmed artwork Save.');
-    return await prodigiReceipt(plan,'finish',stage);
+    return await complete(stage);
   } catch(error) {
+    if(finishing)throw error; // Keep the exact completion/evidence until acknowledged.
+    // The server records an auth wait before the browser navigates to login.
+    // A consumed permit will resume through independent readback, never replay.
+    if(typeof prodigiSigninNeeded==='function'&&await prodigiSigninNeeded(plan,error))
+      return await prodigiPauseForSignin(plan);
     stage=error.prodigiStage||stage;
     // Read back this same item; never repeat an uncertain Save or upload.
-    return await prodigiReceipt(plan,'finish',stage,String(error.message||'Browser handoff interrupted'));
+    return await complete(stage,plan.kind==='qa'?('QA '+stage+': '+String(error.message||'Browser handoff interrupted')).slice(0,240):String(error.message||'Browser handoff interrupted'));
   } finally {
     prodigiBrowserTransfer=null;
     if(progressTimer!==null)clearInterval(progressTimer);
     if(typeof ordersProgressEnd==='function')ordersProgressEnd();
-    await chrome.storage.local.remove('ordersBrowserPending');
   }
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{

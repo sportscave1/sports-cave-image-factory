@@ -29,15 +29,15 @@ UNSUBSCRIBE = '''mutation CrmUnsubscribe($input:CustomerEmailMarketingConsentUpd
  } }'''
 CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { '+CUSTOMER_FIELDS+' } } }'
 CAMPAIGN_CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { id firstName email validEmailAddress numberOfOrders emailMarketingConsent { marketingState } '+EMAIL_ADDRESS_FIELDS+' defaultAddress { countryCodeV2 provinceCode zip timeZone } } } }'
-ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus displayFulfillmentStatus
+ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus displayFulfillmentStatus sourceName
  customer { id } totalPriceSet { shopMoney { amount currencyCode } }
- lineItems(first:10) { nodes { id title variantTitle quantity product { id } }
+ lineItems(first:10) { nodes { id title variantTitle quantity originalTotalSet { shopMoney { amount currencyCode } } product { id } }
  '''+PAGE+' }'
 ORDERS = '''query CrmOrders($id:ID!,$after:String) { customer(id:$id) {
  orders(first:20,after:$after,sortKey:CREATED_AT,reverse:true) { nodes { '''+ORDER_FIELDS+' } '+PAGE+' } } }'
 ORDER = 'query CrmOrder($id:ID!) { order(id:$id) { '+ORDER_FIELDS+' } }'
 ORDER_LINES = '''query CrmOrderLines($id:ID!,$after:String) { order(id:$id) {
- lineItems(first:100,after:$after) { nodes { id title variantTitle quantity product { id } } '''+PAGE+' } } }'
+ lineItems(first:100,after:$after) { nodes { id title variantTitle quantity originalTotalSet { shopMoney { amount currencyCode } } product { id } } '''+PAGE+' } } }'
 FIRST_ORDER = '''query CrmFirstOrder($id:ID!) { customer(id:$id) {
  orders(first:1,sortKey:CREATED_AT) { nodes { id name createdAt } } } }'''
 PRODUCT_FIELDS = '''id title productType tags onlineStoreUrl featuredImage { url }

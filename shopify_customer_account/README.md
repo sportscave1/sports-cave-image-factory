@@ -15,9 +15,9 @@ Vault as a Shopify Customer Account full page.
   availability, cart creation, and checkout.
 - Shopify Admin API is used server-side for stable product/variant validation
   and confirmed delivery events.
-- Judge.me private API credentials remain on the server.
+- Native reviews use the existing OS and Dropbox configuration.
 
-The browser never receives Shopify Admin credentials, Judge.me private tokens,
+The browser never receives Shopify Admin credentials,
 Supabase service-role credentials, R2 credentials, permanent private asset URLs,
 customer email addresses, or local storage paths.
 
@@ -95,25 +95,13 @@ The account's Build your collection section uses the existing smart catalogue
 resolver, then fetches current Storefront variants and prices. Its four cards
 share a cart during the page session.
 
-## Judge.me
+## Native reviews
 
-Configure the existing Judge.me account:
-
-```text
-JUDGEME_PRIVATE_API_TOKEN=...
-JUDGEME_PUBLIC_API_TOKEN=...
-JUDGEME_SHOP_DOMAIN=your-store.myshopify.com
-```
-
-The API maps reviews by stable Shopify product ID, checks customer ownership,
-requires a Shopify `DELIVERED` fulfillment event, blocks duplicate submissions,
-rate limits retries, and validates/re-encodes JPG, PNG, and WebP photos before
-temporary private upload.
-
-Judge.me's public API cannot force an API-created review to carry its verified
-badge. The Sports Cave API still enforces verified purchase and delivery. Keep
-Judge.me's own review-request email as the only email system and set it to
-delivered date plus seven days in the Judge.me dashboard.
+My Collection retains the purchased-product lifestyle image and sends review text,
+photos and video to authenticated Sports Cave OS endpoints. The OS verifies purchase
+ownership, prevents duplicates and stores originals in Dropbox before background
+optimisation. Post Checkout owns requests and approved-media rewards. No external
+review provider credentials are required.
 
 ## Local Checks
 

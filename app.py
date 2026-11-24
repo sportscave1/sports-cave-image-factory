@@ -13912,7 +13912,8 @@ def render_selected_page(current_page):
         def reviews_navigate(route):
             set_current_page(route, source="reviews")
             st.rerun()
-        reviews_page.render_page(current_os_user(), reviews_navigate)
+        reviews_page.render_page(current_os_user(), reviews_navigate,
+            authorize=lambda: _refresh_session_account_if_due(current_os_user(),max_age_seconds=AUTH_REVALIDATE_SECONDS))
     elif current_page in os_accounts.crm_navigation.ROUTES:
         import crm_page
         def crm_navigate(route):
@@ -14006,6 +14007,14 @@ def main():
         f"PERF route_resolution duration_ms={(time.perf_counter() - route_started) * 1000:.2f} "
         f"route={current_page}"
     )
+    if current_page == 'Reviews' and os_accounts.can_access_page(current_os_user(), 'Reviews'):
+        # Start authorised reads before shell/sidebar serialisation, using the
+        # same session cache consumed by the normal page renderer below.
+        import reviews_page
+        try:
+            reviews_page.prefetch_overview(current_os_user())
+        except Exception as error:
+            logging.warning('Reviews prefetch unavailable type=%s',type(error).__name__)
     top_bar.render_top_bar(
         get_components_module(),
         current_os_user(),

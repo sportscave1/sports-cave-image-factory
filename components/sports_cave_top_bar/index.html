@@ -39,7 +39,7 @@
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
-  const CONTROLLER_VERSION = "companion-header-v12-orders-restart";
+  const CONTROLLER_VERSION = "companion-header-v13-review-arrivals";
   const TEMPORARY_TOAST_MS = 3000;
   let incomingNavigationEpoch = Number(config.navigationEpoch || 0);
   const liveNavigationEpoch = Number(
@@ -2449,6 +2449,8 @@
       }
       const email = readStatusCache("email").payload;
       if (Number.isInteger(email?.unread_count)) updateSidebarBadge("email", email.unread_count, "");
+      const reviews = readStatusCache("reviews").payload;
+      if (state.config.reviewsEnabled && Number.isInteger(reviews?.unread_count)) updateReviewBadge(reviews.unread_count);
     };
     const watchSidebarPresentation = () => {
       if (!parentWindow.MutationObserver) return;
@@ -2729,7 +2731,7 @@
     };
     const updateSidebarBadge = (route, count, label, attempt = 0) => {
       const group = route === "email" ? "email" : null;
-      const routeLabel = route === "orders" ? "Orders" : group === "social" ? "Social Media" : "Email";
+      const routeLabel = route === "orders" ? "Orders" : route === "reviews" ? "Reviews" : group === "social" ? "Social Media" : "Email";
       const row = doc.querySelector(group
         ? `section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-${group}-"]`
         : `section[data-testid="stSidebar"] .st-key-sidebar-row-${route}`);
@@ -2778,7 +2780,55 @@
       } else {
         badge?.remove(); notificationsButton.setAttribute('aria-label', 'Open notifications');
       }
+      const reviewCount = state.config.reviewsEnabled ? Number(root.dataset.reviewsCount || 0) : 0;
+      if (reviewCount > 0) {
+        badge = notificationsButton.querySelector('#sc-os-orders-notification-count');
+        if (!badge) { badge = doc.createElement('span'); badge.id='sc-os-orders-notification-count'; badge.setAttribute('aria-hidden','true'); notificationsButton.appendChild(badge); }
+        const total = (state.config.ordersEnabled ? count : 0) + reviewCount;
+        badge.textContent = total > 99 ? '99+' : String(total);
+        notificationsButton.setAttribute('aria-label', `Open notifications, ${state.config.ordersEnabled && count > 0 ? count+' orders require action, ' : ''}${reviewCount} new ${reviewCount === 1 ? 'review' : 'reviews'}`);
+      }
     };
+    const updateReviewBadge = (count) => {
+      updateSidebarBadge('reviews', count, '');
+      root.dataset.reviewsCount = String(count);
+      const orders = readStatusCache('orders').payload || {};
+      updateOrdersBadge(Number(root.dataset.ordersCount || 0), orders.badge_label || '');
+    };
+    let reviewStatusPending = false, reviewReadGeneration = 0, lastReviewListArrival = '';
+    const applyReviewStatus = (payload) => {
+      if (!state.config.reviewsEnabled || !Number.isInteger(payload?.unread_count) || payload.unread_count < 0) return;
+      const previous = readStatusCache('reviews').payload || {};
+      if (Number(payload.checked_at || 0) < Number(previous.checked_at || 0)) return;
+      writeStatusCache('reviews', payload);
+      updateReviewBadge(payload.unread_count);
+      if (state.activePanel === 'notifications') renderNotifications(state.notifications || []);
+    };
+    const refreshReviewStatus = async () => {
+      if (!state.config.reviewsEnabled || !state.config.reviewStatusUrl) { updateReviewBadge(0); return; }
+      if (reviewStatusPending || statusRefreshDelay('reviews', ORDER_STATUS_REFRESH_MS) > 0) return;
+      reviewStatusPending = true;
+      const generation = reviewReadGeneration;
+      try {
+        const payload = await requestJson(state.config.reviewStatusUrl);
+        if (generation !== reviewReadGeneration) return;
+        applyReviewStatus(payload);
+        if (payload.unread_count > 0 && payload.latest_arrival && payload.latest_arrival !== lastReviewListArrival && state.config.currentRouteKey === 'reviews' && doc.querySelector('.st-key-reviews-table')) {
+          const refresh = doc.querySelector('.st-key-reviews-refresh button');
+          if (refresh) { lastReviewListArrival = payload.latest_arrival; refresh.click(); }
+        }
+      } catch (_error) {
+        // Preserve the confirmed count on a temporary storage failure.
+        const previous = readStatusCache('reviews').payload || {};
+        writeStatusCache('reviews', {...previous, available:false});
+      } finally { reviewStatusPending = false; }
+    };
+    parentWindow.addEventListener('sc-reviews-seen', (event) => {
+      const receipt = event.detail;
+      if (!state.config.reviewsEnabled || receipt?.scope !== state.config.reviewsScope) return;
+      reviewReadGeneration += 1;
+      applyReviewStatus(receipt);
+    }, listenerOptions);
     const applyEmailStatus = (payload) => {
       if (!state.config.emailEnabled) return;
       const previous = readStatusCache("email").payload || {};
@@ -3067,9 +3117,10 @@
       if (doc.hidden) { scheduleOrderStatus(ORDER_STATUS_REFRESH_MS); return; }
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
+      void refreshReviewStatus();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
-        if (state.config.emailEnabled) scheduleOrderStatus(EMAIL_HEARTBEAT_MS);
+        if (state.config.emailEnabled || state.config.reviewsEnabled) scheduleOrderStatus(EMAIL_HEARTBEAT_MS);
         return;
       }
       // One request/timer per controller. Focus/open can refresh, but never flood.
@@ -3788,6 +3839,11 @@
         items = [{title: root.dataset.ordersState === 'delayed' ? 'Orders status delayed' : 'Checking Orders',
           subtitle:'Open Orders to review · status will retry automatically', route_key:'orders'}, ...items];
       }
+      const reviews = readStatusCache('reviews').payload || {};
+      if (state.config.reviewsEnabled && Number.isInteger(reviews.unread_count) && reviews.unread_count > 0) {
+        const count = reviews.unread_count;
+        items = [{title:`${count} new ${count === 1 ? 'review' : 'reviews'}`,subtitle:'Added to Reviews · clears when viewed',route_key:'reviews'}, ...items];
+      }
       notificationsPanel.innerHTML = '<div class="sc-os-topbar-panel-title">Notifications</div>';
       if (!items.length) {
         notificationsPanel.innerHTML += '<div class="sc-os-topbar-state">No new notifications</div>';
@@ -4309,6 +4365,8 @@
               cachedOrders.payload.badge_label,
             );
           }
+          const cachedReviews = readStatusCache("reviews").payload;
+          if (cachedReviews) applyReviewStatus(cachedReviews);
           const cachedEmail = readStatusCache("email").payload;
           if (cachedEmail) applyEmailStatus(cachedEmail);
           refreshOrderStatus();

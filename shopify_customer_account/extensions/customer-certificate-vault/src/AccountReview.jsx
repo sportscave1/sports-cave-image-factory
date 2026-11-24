@@ -2,29 +2,33 @@
 import {collectionThumbnail} from './collection-image-utils.js';
 import {useEffect,useRef,useState} from 'preact/hooks';
 import {reviewProductId, secondProductImage, REVIEW_IMAGE_QUERY} from './account-review-utils.js';
-import {fileFromDropEvent,inputValue,isAllowedReviewPhoto} from './vault-utils.js';
+import {inputValue} from './vault-utils.js';
 export function AccountReview({prompt, certificate, request, api, reviewStatus = "ready", onRetryReview = () => {}}) {
   const [submitted,setSubmitted]=useState(false);
   const onSubmitted=()=>setSubmitted(true);
-  const [rating, setRating] = useState(0);
+  const [rating, setRating] = useState(5);
   const [name, setName] = useState("");
   const [setupImage, setSetupImage] = useState(null);
   const productId = reviewProductId(prompt, certificate);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [photo, setPhoto] = useState(null);
+  const [files,setFiles]=useState([]);
   const [photoError, setPhotoError] = useState("");
   const [submitState, setSubmitState] = useState({status: "idle", message: ""});
   const modalId = "collector-review-modal";
-  const readerRef = useRef(null);
+  const [previews,setPreviews]=useState({});
   const modalRef = useRef(null);
 
   useEffect(() => {
-
-    return () => {
-      if (readerRef.current?.readyState === 1) readerRef.current.abort();
-    };
-  }, []);
+    let active=true;const readers=[];setPreviews({});
+    files.forEach((file,index)=>{
+      if(!file.type.startsWith('image/') || file.size>5*1024*1024)return;
+      const reader=new FileReader();readers.push(reader);
+      reader.onload=()=>{if(active)setPreviews(value=>({...value,[index]:String(reader.result || '')}));};
+      reader.readAsDataURL(file);
+    });
+    return ()=>{active=false;readers.forEach(reader=>{if(reader.readyState===1)reader.abort();});};
+  },[files]);
 
   useEffect(() => {
     let active = true;
@@ -40,28 +44,9 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
   };
 
   const handlePhoto = (event) => {
-    const file = fileFromDropEvent(event);
-    const validation = isAllowedReviewPhoto(file);
-    if (!validation.ok) {
-      setPhoto(null);
-      setPhotoError(validation.error);
-      return;
-    }
-    const reader = new FileReader();
-    readerRef.current = reader;
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      setPhoto({
-        name: file.name,
-        mime_type: file.type,
-        size: file.size,
-        base64: dataUrl.split(",", 2)[1] || "",
-        preview: dataUrl,
-      });
-      setPhotoError("");
-      };
-    reader.onerror = () => setPhotoError("Photo could not be read.");
-    reader.readAsDataURL(file);
+    const selected=Array.from(event?.files || event?.detail?.files || event?.currentTarget?.files || event?.target?.files || []);
+    if(selected.length>5 || selected.filter(f=>f.type.startsWith('video/')).length>1 || selected.some(f=>f.size>(f.type.startsWith('video/')?150:25)*1024*1024) || selected.reduce((n,f)=>n+f.size,0)>250*1024*1024){setPhotoError('Choose up to five files, including one video. A selected file is too large.');return;}
+    setPhotoError('');setFiles(selected);
   };
 
   const submitReview = async () => {
@@ -79,21 +64,10 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
     }
     setSubmitState({status: "submitting", message: ""});
     try {
-      await request("/api/collector-vault/review", {
-        method: "POST",
-        body: {
-          review_reference: prompt.reference,
-          rating,
-          reviewer_name: name.trim(),
-          title,
-          body,
-          photo: photo ? {
-            mime_type: photo.mime_type,
-            filename: photo.name,
-            base64: photo.base64,
-          } : null,
-        },
-      });
+      const data=new FormData();
+      for(const [key,value] of Object.entries({review_reference:prompt.reference,rating:String(rating),reviewer_name:name.trim(),title,body,display_consent:'yes'}))data.append(key,value);
+      for(const file of files)data.append('media',file,file.name);
+      await request('/api/collector-vault/review',{method:'POST',body:data});
       setSubmitState({status: "submitted", message: "Review submitted ✓"});
       onSubmitted();
     } catch (error) {
@@ -122,72 +96,76 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
       <s-modal
         ref={modalRef}
         id={modalId}
-        heading="How does it look in your space?"
+        heading="Leave a review"
         accessibilityLabel={`Leave a review for ${prompt?.product_title || certificate?.product_title || "your edition"}`}
-        size="large"
+        size="max"
+        padding="none"
       >
-        <s-stack gap="small">
+        <s-query-container>
+        <s-grid gridTemplateColumns="minmax(0, 1000px)" justifyContent="center" paddingInline="small" paddingBlock="none">
           {reviewStatus === "error" ? <s-banner tone="critical">Review options could not load. Please try again.<s-button onClick={onRetryReview}>Retry review</s-button></s-banner> : reviewStatus === "loading" ? <s-banner tone="info">Loading your review options…</s-banner> : !prompt ? <s-banner tone="info">There are no editions awaiting a review.</s-banner> : null}
-          <s-grid gridTemplateColumns="80px minmax(0, 1fr)" gap="base" alignItems="center">
-            <s-image src={collectionThumbnail(certificate?.purchased_image_url) || certificate?.certificate_preview_image_url} alt={certificate?.purchased_image_alt || "Your edition"} aspectRatio="4/3" objectFit="cover" />
-            <s-stack gap="small-400">
-              <s-text type="strong">{prompt?.product_title || certificate?.product_title}</s-text>
-              <s-text color="subdued">Edition {certificate?.edition_display?.replace(/^#/, "").replace(/\s*\/\s*/, " of ")}</s-text>
-            </s-stack>
+        <s-grid gridTemplateColumns="@container (inline-size > 500px) 'minmax(0, 1.15fr) minmax(0, 1fr)', 'minmax(0, 1fr)'" gap="small-400" alignItems="start" maxInlineSize="1000px">
+        <s-stack gap="none">
+          <s-text type="strong">{prompt?.product_title || certificate?.product_title}</s-text>
+          <s-grid gridTemplateColumns="minmax(0, 1fr) 220px" gap="small" alignItems="center">
+            <s-text>Your rating</s-text>
+            <StarRating rating={rating} onChange={chooseRating} />
           </s-grid>
-          <s-divider />
-          <s-text type="strong">Your rating</s-text>
-          <StarRating rating={rating} onChange={chooseRating} />
-          <s-box border="base" borderRadius="large" padding="base" background="subdued">
-            <s-grid gridTemplateColumns="minmax(0, 0.9fr) minmax(0, 1.1fr)" gap="base" alignItems="center">
-              <s-image src={setupImage?.url || collectionThumbnail(certificate?.purchased_image_url, 480)} alt={setupImage?.altText || "Your edition in a room"} aspectRatio="1.25" objectFit="cover" loading="lazy" />
-              <s-stack gap="small">
-                <s-heading>Show us your setup</s-heading>
-                <s-text>Start with the whole wall, then move in on your edition number.</s-text>
-                <s-text type="strong">Add photo/video (optional)</s-text>
-                <s-drop-zone
-                  label="Add photo"
-                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                  error={photoError}
-                  onInput={handlePhoto}
-                ></s-drop-zone>
-                <s-button href="https://www.sportscaveshop.com/pages/reviews#judgeme_review_widget" target="_blank">Add video</s-button>
-                <s-text color="subdued">For video, open Write a review in the new tab and finish your review there.</s-text>
-              </s-stack>
-            </s-grid>
-          </s-box>
-          <s-text-field label="Name" value={name} maxLength={120} required
-            onInput={(event) => setName(inputValue(event))}></s-text-field>
-          <s-text-field label="Review title (optional)" value={title} maxLength={120}
-            onInput={(event) => setTitle(inputValue(event))}></s-text-field>
-          <s-text-area label="Your review" placeholder="What stands out now that it’s on your wall?"
-            value={body} minLength={10} maxLength={2000} required rows={3}
+          <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="small">
+            <s-text-field label="Name" value={name} maxLength={120} required
+              onInput={(event) => setName(inputValue(event))}></s-text-field>
+            <s-text-field label="Review title (optional)" value={title} maxLength={120}
+              onInput={(event) => setTitle(inputValue(event))}></s-text-field>
+          </s-grid>
+          <s-text-area label="Your review"
+            value={body} minLength={10} maxLength={2000} required rows={1}
             onInput={(event) => setBody(inputValue(event))}></s-text-area>
-          {photo ? (
-            <s-stack gap="small">
-              <s-image
-                src={photo.preview}
-                alt={`Selected review photo ${photo.name}`}
-                aspectRatio="16/9"
-                objectFit="contain"
-              ></s-image>
-              <s-stack direction="inline" gap="small" alignItems="center">
-                <s-text>{photo.name}</s-text>
-                <s-button onClick={() => setPhoto(null)}>Remove photo</s-button>
-              </s-stack>
-            </s-stack>
-          ) : null}
           {submitState.message ? (
             <s-banner tone={submitState.status === "error" ? "critical" : "success"}>
               {submitState.message}
             </s-banner>
           ) : null}
         </s-stack>
+          <s-stack gap="none">
+          <s-stack gap="none">
+            <s-text type="strong">Show us your setup</s-text>
+            <s-text type="small" color="subdued">Start with your wall, then your edition number.</s-text>
+          </s-stack>
+            <s-grid gridTemplateColumns="minmax(0, 1fr) 100px" gap="small" alignItems="center">
+              <s-box inlineSize="100%" maxInlineSize="320px">
+                <s-image src={setupImage?.url || collectionThumbnail(certificate?.purchased_image_url, 480)} alt={setupImage?.altText || "Your edition in a room"} inlineSize="fill" aspectRatio="1" objectFit="contain" loading="lazy" borderRadius="base" />
+              </s-box>
+            {files.length ? <s-stack gap="small-400">
+              <s-stack gap="none">
+                {files.map((file,index)=><s-grid key={index} gridTemplateColumns="24px minmax(0, 1fr) 24px" gap="small-400" alignItems="center">
+                  <s-box inlineSize="24px" blockSize="24px">{previews[index]?<s-image src={previews[index]} alt={`Selected review photo ${file.name}`} aspectRatio="1" objectFit="contain" />:<s-text type="small">{file.type.startsWith('video/')?'▶':'▧'}</s-text>}</s-box>
+                  <s-text type="small">{file.name.length>9?file.name.slice(0,6)+'…':file.name}</s-text>
+                  <s-clickable accessibilityLabel={`Remove ${file.name}`} minBlockSize="24px" minInlineSize="24px" padding="none" onClick={()=>setFiles(files.filter((_,i)=>i!==index))}>×</s-clickable>
+                </s-grid>)}
+              </s-stack>
+              <s-clickable accessibilityLabel="Change photo/video" minBlockSize="28px" padding="none" onClick={()=>setFiles([])}><s-text type="small">Change files</s-text></s-clickable>
+            </s-stack> : <s-stack gap="small-400">
+              <s-box display="@container (inline-size > 500px) none, auto"><s-text type="small">Add photo/video (optional)</s-text></s-box>
+              <s-box inlineSize="100px">
+              <s-drop-zone
+              accessibilityLabel="Add photo/video (optional)"
+              multiple
+              accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
+              error={photoError}
+              onInput={handlePhoto}
+            ></s-drop-zone>
+              </s-box>
+            </s-stack>}
+            </s-grid>
+          </s-stack>
+        </s-grid>
+        </s-grid>
+        </s-query-container>
         <s-button
           slot="primary-action"
           variant="primary"
           onClick={submitReview}
-          disabled={!prompt || submitted}
+          disabled={!prompt || submitted || submitState.status === "submitting"}
           loading={submitState.status === "submitting"}
         >
           Submit review
@@ -202,7 +180,7 @@ export function AccountReview({prompt, certificate, request, api, reviewStatus =
 
 function StarRating({rating, onChange, modalId = "", compact = false}) {
   return (
-    <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" inlineSize={compact ? "120px" : "260px"} gap="none" alignItems="center">
+    <s-grid gridTemplateColumns="repeat(5, minmax(0, 1fr))" inlineSize={compact ? "120px" : "220px"} gap="none" alignItems="center">
       {[1, 2, 3, 4, 5].map((value) => (
         <s-clickable
           key={value}
@@ -211,8 +189,8 @@ function StarRating({rating, onChange, modalId = "", compact = false}) {
           command={modalId ? "--show" : undefined}
           commandFor={modalId || undefined}
           padding={compact ? "none" : "small-400"}
-          minBlockSize={compact ? "28px" : "36px"}
-          minInlineSize={compact ? "24px" : "36px"}
+          minBlockSize={compact ? "28px" : "40px"}
+          minInlineSize={compact ? "24px" : "44px"}
         >
           <s-icon
             type={value <= rating ? "star-filled" : "star"}

@@ -8,9 +8,9 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../sh
 const compiled=ts.transpileModule(source+'\nexport {CertificateViewer,CertificateGallery,CollectionUpsells,CollectionShowcase,FramedCertificatePreview,FramedCertificateOffer};',{
  compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,jsxFactory:'h'},fileName:'collection.jsx',
 }).outputText;
-function fixture({existing=false,failure=false}={}){
- const product={variant_id:'gid://shopify/ProductVariant/42',variants:[{variant_id:'gid://shopify/ProductVariant/42',color:'Oak',contextual_price:{amount:'79',currencyCode:'USD'}}]};
- const state=[{status:'ready',product,certificateReference:'owned-fixture'},'Oak',{status:'idle',message:'',checkoutUrl:''}];
+function fixture({existing=false,failure=false,country='US',color='Oak',currency='USD',amount='79'}={}){
+ const product={variant_id:'gid://shopify/ProductVariant/42',variants:['Black','Oak','White'].map((color,index)=>({variant_id:`gid://shopify/ProductVariant/${41+index}`,color,contextual_price:{amount,currencyCode:currency}}))};
+ const state=[{status:'ready',product,certificateReference:'owned-fixture',country,certificateKey:'fixture'},color,{status:'idle',message:'',checkoutUrl:''}];
  let index=0,queries=0;const calls=[],navigations=[];
  const hooks={useState:initial=>{const i=index++;return [state[i]??initial,v=>state[i]=v]},useEffect:()=>{},useRef:v=>({current:v})};
  const module={exports:{}};
@@ -19,8 +19,8 @@ function fixture({existing=false,failure=false}={}){
  const fetch=async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return {ok:!failure,status:failure?503:200,json:async()=>url.endsWith('/request')?{request_reference:'owned-request',cart_handoff_url:'https://fixture.test/launch',...(existing?{checkout_url:'https://fixture.test/checkout'}:{})}:{ok:true}}};
  const jsx=(type,props)=>h(type,props,...[props?.children]);
  vm.runInNewContext(compiled,{exports:module.exports,module,h,AbortController,fetch,navigation:{navigate:url=>navigations.push(url)},require:name=>name==='preact/jsx-runtime'?{jsx,jsxs:jsx}:name==='preact/hooks'?hooks:name==='./vault-utils.js'?utils:name==='./account-commerce.js'?commerceModule.exports:name==='./collection-performance.js'?{timedOperation:(_a,_b,_o,work)=>work(),operationForPath:()=>null}:name==='./collection-image-utils.js'?{collectionThumbnail:value=>value}:{}});
- const api={sessionToken:{get:async()=>'fixture-only'},query:async()=>{queries++;return {data:{cartCreate:{cart:{id:'fixture-cart',checkoutUrl:'https://fixture.test/checkout'}}}}},i18n:{formatNumber:String}};
- return {exports:module.exports,state,calls,navigations,get queries(){return queries},view:()=>{index=0;return module.exports.CertificateViewer({certificate:{key:'fixture',framingOnly:true,product_title:'Fixture edition'},api,apiBaseUrl:'https://fixture.test',country:'US',onClose:()=>{}})}};
+ const api={localization:{country:{value:{isoCode:country}}},sessionToken:{get:async()=>'fixture-only'},query:async()=>{queries++;return {data:{cartCreate:{cart:{id:'fixture-cart',checkoutUrl:'https://fixture.test/checkout'}}}}},i18n:{formatNumber:String}};
+ return {exports:module.exports,state,calls,navigations,api,get queries(){return queries},view:()=>{index=0;return module.exports.CertificateViewer({certificate:{key:'fixture',framingOnly:true,product_title:'Fixture edition'},api,apiBaseUrl:'https://fixture.test',country,onClose:()=>{}})}};
 }
 function find(node,predicate){if(!node||typeof node!=='object')return null;if(predicate(node))return node;for(const child of node.children||[]){const match=find(child,predicate);if(match)return match;}return null;}
 test('frame picker fits content with balanced columns and a full-width primary Add',()=>{
@@ -32,21 +32,54 @@ test('frame picker fits content with balanced columns and a full-width primary A
 });
 for(const existing of [false,true])test(`Add opens the storefront cart directly, existing cart: ${existing}`,async()=>{
  const f=fixture({existing});const offer=find(f.view(),n=>n.type?.name==='FramedCertificateOffer');
- await offer.props.onAdd();assert.equal(f.state[2].status,'adding');assert.equal(f.queries,existing?0:1);
+ await offer.props.onAdd();assert.equal(f.state[2].status,'adding');assert.equal(f.queries,0);
  assert.equal(f.calls[0].body.frame_variant_id,'gid://shopify/ProductVariant/42');assert.equal(f.calls[0].body.country,'US');
  assert.deepEqual(f.navigations,['https://fixture.test/launch']);
- assert.equal(f.calls.length,existing?1:2);
- if(!existing)assert.ok(f.calls[1].url.endsWith('/cart-created'));
+ assert.equal(f.calls.length,1);
  const cart=f.view();assert.equal(cart.props.heading,'Frame your certificate');
  assert.equal(find(cart,n=>n.type==='s-button'&&n.children.includes('Continue to cart')),null);
  await find(cart,n=>n.type?.name==='FramedCertificateOffer').props.onAdd();
- assert.equal(f.navigations.length,1);assert.equal(f.calls.length,existing?1:2);
+ assert.equal(f.navigations.length,1);assert.equal(f.calls.length,1);
 });
 
 test('failed Add keeps the frame picker and never presents checkout',async()=>{
  const f=fixture({failure:true});await find(f.view(),n=>n.type?.name==='FramedCertificateOffer').props.onAdd();
  assert.equal(f.navigations.length,0);assert.equal(f.state[2].status,'error');assert.equal(f.queries,0);assert.equal(f.view().props.size,'large-100');
  assert.equal(find(f.view(),n=>n.type==='s-button'&&n.props.href),null);
+});
+
+for(const [country,currency,amount] of [['AU','AUD','99'],['US','USD','73'],['GB','GBP','58'],['CA','CAD','105'],['NZ','NZD','123'],['IE','EUR','55.95'],['FR','EUR','55.95']]) {
+ for(const [index,color] of ['Black','Oak','White'].entries()) test(`${country}/${currency} sends exactly the selected ${color} frame and signed country`,async()=>{
+  const f=fixture({country,currency,amount,color});
+  const offer=find(f.view(),n=>n.type?.name==='FramedCertificateOffer');
+  assert.equal(offer.props.frameColor,color);
+  assert.equal(offer.props.product.variants[index].contextual_price.currencyCode,currency);
+  await offer.props.onAdd();
+  assert.equal(f.calls.length,1);assert.equal(f.calls[0].body.country,country);
+  assert.equal(f.calls[0].body.frame_variant_id,`gid://shopify/ProductVariant/${41+index}`);
+ });
+}
+test('unavailable selected frame never silently adds another colour',async()=>{
+ const f=fixture();f.state[0].product.variants=f.state[0].product.variants.filter(v=>v.color!=='Oak');
+ const offer=find(f.view(),n=>n.type?.name==='FramedCertificateOffer');
+ const ui=f.exports.FramedCertificateOffer({...offer.props,formatNumber:String});
+ assert.equal(find(ui,n=>n.type==='s-button'&&n.props.onClick).props.disabled,true);
+ await offer.props.onAdd();assert.equal(f.calls.length,0);
+});
+test('an offer from another certificate or country is never displayed',()=>{
+ for(const field of ['country','certificateKey']){
+  const f=fixture();f.state[0][field]='other';
+  assert.equal(find(f.view(),n=>n.type?.name==='FramedCertificateOffer'),null);
+ }
+});
+test('a just-changed host country blocks an old price before the next render',async()=>{
+ const f=fixture();const offer=find(f.view(),n=>n.type?.name==='FramedCertificateOffer');
+ f.api.localization.country.value={isoCode:'FR'};
+ await offer.props.onAdd();assert.equal(f.calls.length,0);
+});
+test('two simultaneous Add events issue only one authenticated request',async()=>{
+ const f=fixture();const add=find(f.view(),n=>n.type?.name==='FramedCertificateOffer').props.onAdd;
+ await Promise.all([add(),add()]);assert.equal(f.calls.length,1);assert.equal(f.navigations.length,1);
 });
 test('certificate gallery uses two desktop columns and one mobile column without horizontal scrolling',()=>{
  const tree=fixture().exports.CertificateGallery({certificates:[{key:'1'},{key:'2'}],onOpen:()=>{}});
@@ -118,6 +151,6 @@ test('mobile frame preview uses available viewport height and the description st
  const f=fixture();const tree=f.view();
  assert.ok(find(tree,n=>n.type==='s-text'&&n.children.includes('Your numbered certificate, professionally printed and framed.')));
  const preview=f.exports.FramedCertificatePreview({certificate:{},previewUrl:'https://fixture.test/asset?token=owner',color:'Black'});
- assert.match(preview.props.gridTemplateColumns,/100dvh - 440px/);
+ assert.match(preview.props.gridTemplateColumns,/100dvh - 472px/);
  assert.match(preview.props.gridTemplateColumns,/340px/);
 });

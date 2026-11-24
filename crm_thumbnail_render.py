@@ -97,7 +97,8 @@ def preview_document(doc):
     if needs_checkout(doc):doc, _ = document(doc, sample(doc))
     from crm_personalisation import present, render as personalise
     if present(doc):doc = personalise(doc, {'first_name':'Alex','product_name':'Your selected edition','short_product_name':'Your selected edition','sport_category':'Sport'}, trigger='post_purchase')
-    return doc
+    from reviews_journey import preview_document as review_sample
+    return review_sample(doc)
 
 
 def render(doc, cfg):

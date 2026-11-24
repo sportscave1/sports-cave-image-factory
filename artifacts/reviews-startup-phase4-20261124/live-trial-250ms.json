@@ -1,0 +1,108 @@
+{
+  "reload": [
+    {
+      "rows_ms": 3543,
+      "ready_ms": 5331
+    },
+    {
+      "rows_ms": 3103,
+      "ready_ms": 3178
+    },
+    {
+      "rows_ms": 2966,
+      "ready_ms": 3118
+    },
+    {
+      "rows_ms": 5094,
+      "ready_ms": 5122
+    },
+    {
+      "rows_ms": 2859,
+      "ready_ms": 3087
+    }
+  ],
+  "filters": [
+    {
+      "mode": "filtered",
+      "ms": 1200
+    },
+    {
+      "mode": "cached_all",
+      "ms": 685
+    },
+    {
+      "mode": "filtered",
+      "ms": 767
+    },
+    {
+      "mode": "cached_all",
+      "ms": 656
+    },
+    {
+      "mode": "filtered",
+      "ms": 759
+    },
+    {
+      "mode": "cached_all",
+      "ms": 622
+    },
+    {
+      "mode": "filtered",
+      "ms": 765
+    },
+    {
+      "mode": "cached_all",
+      "ms": 530
+    },
+    {
+      "mode": "filtered",
+      "ms": 829
+    },
+    {
+      "mode": "cached_all",
+      "ms": 631
+    }
+  ],
+  "pages": [
+    {
+      "mode": "next",
+      "ms": 1921
+    },
+    {
+      "mode": "previous",
+      "ms": 2888
+    },
+    {
+      "mode": "next",
+      "ms": 1971
+    },
+    {
+      "mode": "previous",
+      "ms": 2123
+    },
+    {
+      "mode": "next",
+      "ms": 1936
+    },
+    {
+      "mode": "previous",
+      "ms": 1776
+    },
+    {
+      "mode": "next",
+      "ms": 2107
+    },
+    {
+      "mode": "previous",
+      "ms": 1819
+    },
+    {
+      "mode": "next",
+      "ms": 2303
+    },
+    {
+      "mode": "previous",
+      "ms": 1817
+    }
+  ]
+}

@@ -5,6 +5,11 @@
  const safeUrl=value=>{try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password?u.href:''}catch{return ''}};
  class Reviews extends HTMLElement{
   connectedCallback(){
+   // A registered element can connect before its Liquid/parser children exist.
+   if(!this.querySelector('[data-summary]')||!this.querySelector('[data-error]')||(this.dataset.mode!=='stars'&&(!this.querySelector('[data-controls]')||!this.querySelector('[data-list]')))){
+    if(!this.readyObserver){this.readyObserver=new MutationObserver(()=>this.connectedCallback());this.readyObserver.observe(this,{childList:true,subtree:true})}return;
+   }
+   this.readyObserver?.disconnect();this.readyObserver=null;
    if(this.started)return;this.started=true;this.sequence=0;this.next=null;
    const endpoint=safeUrl(this.dataset.endpoint);if(!endpoint||new URL(endpoint).pathname!='/reviews/public')return;
    this.endpoint=endpoint;this.summary=this.querySelector('[data-summary]');this.error=this.querySelector('[data-error]');this.list=this.querySelector('[data-list]');this.more=this.querySelector('[data-more]');
@@ -12,7 +17,7 @@
    if(this.dataset.mode!=='stars')this.controls();
    if('IntersectionObserver' in window){this.observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){this.observer.disconnect();this.load(false)}});this.observer.observe(this)}else this.load(false);
   }
-  disconnectedCallback(){this.observer?.disconnect();this.controller?.abort();clearTimeout(this.debounce)}
+  disconnectedCallback(){this.readyObserver?.disconnect();this.observer?.disconnect();this.controller?.abort();clearTimeout(this.debounce);for(const dialog of this.querySelectorAll('dialog[open]'))dialog.close()}
   controls(){
    const host=this.querySelector('[data-controls]');this.sort=node('select');this.sort.setAttribute('aria-label','Sort reviews');
    for(const [value,label] of [['newest','Newest'],['highest','Highest rating'],['lowest','Lowest rating']]){const option=node('option',label);option.value=value;this.sort.append(option)}
@@ -53,8 +58,30 @@
     const image=safeUrl(r.product_image);if(image){const img=node('img');img.src=image;img.alt=r.product_title||'';img.loading='lazy';img.width=48;img.height=48;product.append(img)}product.append(label);article.append(product);
    }
    const rating=Math.max(1,Math.min(5,Number(r.rating)||1));const stars=node('div','★'.repeat(rating)+'☆'.repeat(5-rating),'sc-review-stars');stars.setAttribute('aria-label',rating+' out of 5 stars');article.append(stars);
+   if(r.shop_verified){const badge=document.createElement('img');badge.src='https://cdn.shopify.com/static/shop/Verified%20by%20Shop_Gray_EN.svg';badge.style.objectFit='contain';badge.alt='Verified by Shop';badge.width=100;badge.height=18;badge.loading='lazy';article.append(badge)}
    if(r.title)article.append(node('h3',r.title));article.append(node('p',r.body));article.append(node('small',r.reviewer_name+(r.verified_purchase?' · Verified purchase':'')+(r.created_at?' · '+String(r.created_at).slice(0,10):'')));
+   const media=node('div','','sc-review-media');
+   for(const item of (Array.isArray(r.media)?r.media:[]).slice(0,20)){
+    const url=safeUrl(item.url),thumb=safeUrl(item.thumbnail_url);if(!url||!thumb||!['image','video'].includes(item.kind))continue;
+    // Only the native review-media endpoint can supply display or video bytes.
+    if(new URL(url).origin!==new URL(this.endpoint).origin||!new URL(url).pathname.startsWith('/reviews/media/')||new URL(thumb).origin!==new URL(this.endpoint).origin||!new URL(thumb).pathname.startsWith('/reviews/media/'))continue;
+    const button=node('button','','sc-review-media-button');button.type='button';button.setAttribute('aria-label',item.kind==='video'?'Play customer review video':'Open customer review photo');
+    const img=node('img');img.src=thumb;img.alt=item.kind==='video'?'Customer video preview':'Customer review photo';img.loading='lazy';img.decoding='async';img.width=96;img.height=96;button.append(img);
+    if(item.kind==='video')button.append(node('span','▶','sc-review-play'));
+    button.addEventListener('click',()=>this.openMedia({...item,url},button));media.append(button);
+   }
+   if(media.childNodes.length)article.append(media);
    if(r.merchant_reply){const reply=node('blockquote');reply.append(node('strong','Sports Cave reply'),node('p',r.merchant_reply));article.append(reply)}return article;
+  }
+  openMedia(item,trigger){
+   const dialog=node('dialog','','sc-review-lightbox');dialog.setAttribute('aria-label',item.kind==='video'?'Customer review video':'Customer review photo');
+   const close=node('button','Close','sc-review-close');close.type='button';close.addEventListener('click',()=>dialog.close());dialog.append(close);
+   const content=node(item.kind==='video'?'video':'img');content.src=item.url;
+   if(item.kind==='video'){content.controls=true;content.preload='none';content.playsInline=true;const poster=safeUrl(item.poster_url);if(poster&&new URL(poster).origin===new URL(this.endpoint).origin&&new URL(poster).pathname.startsWith('/reviews/media/'))content.poster=poster;}
+   else{content.alt='Customer review photo';content.decoding='async';}
+   dialog.append(content);dialog.addEventListener('click',event=>{if(event.target===dialog)dialog.close()});
+   dialog.addEventListener('close',()=>{if(item.kind==='video'){content.pause();content.removeAttribute('src');content.load()}dialog.remove();trigger.focus()},{once:true});
+   this.append(dialog);dialog.showModal();close.focus();
   }
  }
  customElements.define('sports-cave-reviews',Reviews);

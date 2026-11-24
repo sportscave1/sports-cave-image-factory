@@ -2,12 +2,12 @@
 import argparse,json,os,re,subprocess,sys,time
 from pathlib import Path
 
-PYTHON=['test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
+PYTHON=['test_prodigi_signin.py','test_prodigi_upload_recovery.py','test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
  'test_prodigi_verified_sibling.py','test_inbox_companion.py','test_prodigi_product_browser.py','test_prodigi_browser.py','test_prodigi_dashboard_qa.py',
  'test_prodigi_order_group.py','test_prodigi_submission.py','test_prodigi_stage.py','test_prodigi_reset.py',
  'test_orders_fast_handoffs.py','test_orders_runtime.py','test_orders_qa_scaling.py','test_orders_prodigi_grid.py',
  'test_orders_feed.py','test_orders_fragment_context.py','test_orders_wake.py','test_orders_auto_jpg.py','test_companion_poll_transaction.py','test_orders_release_package.py']
-NODE=['test_prodigi_signin.cjs','test_inbox_companion.cjs','test_orders_progress.cjs','test_prodigi_wait.cjs','test_orders_fault_soak.cjs','test_prodigi_browser.cjs',
+NODE=['test_prodigi_signin_recovery.cjs','test_prodigi_upload_recovery.cjs','test_prodigi_signin.cjs','test_inbox_companion.cjs','test_orders_progress.cjs','test_prodigi_wait.cjs','test_orders_fault_soak.cjs','test_prodigi_browser.cjs',
  'test_orders_companion.cjs','test_prodigi_dashboard_qa.cjs','test_orders_wake.cjs','test_queue_wake_lifetime.cjs',
  'test_upload_companion_worker_lifetime.cjs','test_upload_companion_origin.cjs','test_orders_live_feed.cjs',
  'test_orders_row_patching.cjs','test_orders_grid_ui.cjs']

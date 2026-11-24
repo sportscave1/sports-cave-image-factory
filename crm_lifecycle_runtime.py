@@ -45,6 +45,9 @@ def verified_plan(engine,row,customer,trigger_id=None,trigger_at=None):
         item.update(operational_facts(verified[o['id']],o.get('displayFulfillmentStatus')=='FULFILLED'))
         if o.get('displayFulfillmentStatus')!='FULFILLED':item.update(fulfilled_at=None,delivered_at=None)
         if o['id']==trigger_id and row['trigger_type']=='post_purchase':item['paid_at']=item.get('paid_at') or date(trigger_at)
+        if any(s.get('review_request') for s in (row['config'].get('published_flow') or row['config']['draft'])['emails']):
+            from reviews_journey import order_products
+            item['review_products']=order_products(engine.shop,o)
         facts.append(item)
     flow=row['config'].get('published_flow') or row['config']['draft']
     result=preview(flow,customer,facts,engine.clock(),suppressed=engine.store.suppressed(customer['id'],recipient_hash(customer.get('email'))),
@@ -148,11 +151,18 @@ def advance(engine,enrollment):
     # Preserve slot identity; publication changes cannot replay accepted steps.
     receipts=engine.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s AND NOT test_send',(enrollment['id'],))
     if any(r['status'] in ('SUBMITTING','UNCERTAIN') for r in receipts):return
-    accepted={r['step_index'] for r in receipts if r['status']=='ACCEPTED'}
+    # A review received on the account page completes only its request slot.
+    # It is not an email acceptance and must not stop later product/collection steps.
+    accepted={r['step_index'] for r in receipts if r['status']=='ACCEPTED' or (r['status']=='BLOCKED' and r.get('error_code')=='review_already_received')}
     steps=deepcopy(enrollment['steps']);slots={s['step_id']:i for i,s in enumerate(steps)}
     for step in row['steps']:
         if step['step_id'] not in slots:slots[step['step_id']]=len(steps);steps.append(step)
-    pending=next((s for s in row['steps'] if slots[s['step_id']] not in accepted),None)
+    disabled=set()
+    if any(s.get('review_request') for s in (row['config'].get('published_flow') or row['config']['draft'])['emails']):
+        customer=engine.shop.customer(enrollment['shopify_customer_id'],fresh=True)
+        plan=verified_plan(engine,row,customer,enrollment['trigger_shopify_id'],enrollment['trigger_at'])
+        disabled={s['step_id'] for s in plan['stages'] if s['state']=='DISABLED'}
+    pending=next((s for s in row['steps'] if slots[s['step_id']] not in accepted and s['step_id'] not in disabled),None)
     if not pending:
         engine.store.q("UPDATE crm_automation_enrollments SET status='COMPLETED',stop_reason='sequence_complete',updated_at=now() WHERE id=%s",(enrollment['id'],));return
     index=slots[pending['step_id']]

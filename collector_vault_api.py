@@ -235,23 +235,30 @@ async def collector_vault_frame_cart_created(request: Request):
         return _error_response(error, "frame_cart_created")
 
 
+from reviews_http import bounded_upload
+
+@bounded_upload
 async def collector_vault_review_submit(request: Request):
     if request.method == "OPTIONS":
         return await collector_vault_options(request)
     try:
         _require_post_marker(request)
         session = _session(request)
-        body = await _json_body(request)
-        result = collector_vault.submit_review(
-            session["shopify_customer_id"],
-            review_reference=body.get("review_reference"),
-            rating=body.get("rating"),
-            title=body.get("title"),
-            reviewer_name=body.get("reviewer_name"),
-            body=body.get("body"),
-            photo=body.get("photo"),
-        )
+        from reviews_http import read_submission
+        if request.headers.get('content-type','').startswith('multipart/form-data'):
+            body,uploads=await read_submission(request)
+        else:
+            body=await _json_body(request)
+            photo=collector_vault.validate_review_photo(body.get('photo'))
+            uploads=[{'kind':'image','data':photo['bytes']}] if photo else []
+        from reviews_account import submit
+        from reviews_store import ReviewsStore
+        from crm_shopify import Shopify
+        result=await run_in_threadpool(submit,ReviewsStore(),Shopify(),session['shopify_customer_id'],body.get('review_reference'),
+            {k:body.get(k,'') for k in ('rating','title','reviewer_name','body')},uploads)
         return _json({"ok": True, **result})
+    except ValueError:
+        return _error_response(collector_vault.CollectorVaultError("Check your review fields and attached files."),"review_submit")
     except Exception as error:
         return _error_response(error, "review_submit")
 

@@ -56,6 +56,40 @@ async function prodigiReadyProductCard(scope,sku,colour,wait,pin) {
     return current.select.disabled?null:current;
   });
 }
+function prodigiLibraryImage(scope,plan,text,visible) {
+  const name=plan.filename.replace(/\.jpg$/,'');
+  const matches=Array.from(scope.querySelectorAll('button[data-test^="image-library-tile-"]')).filter(e=>
+    visible(e)&&[name,plan.filename].includes(text(e.querySelector('figcaption'))));
+  if(matches.length>1)throw Error('The exact uploaded library image is ambiguous.');
+  if(!matches.length)return null;
+  const tile=matches[0];
+  if(!Array.isArray(plan.dimensions)||!text(tile).replace(/\s/g,'').includes(plan.dimensions.join('x')+'px'))
+    throw Error('The uploaded library image dimensions differ.');
+  if(plan.library_asset_id){
+    const images=Array.from(tile.querySelectorAll('img'));
+    if(!images.length||images.some(e=>{
+      try{const url=new URL(e.getAttribute('src'));return url.protocol!=='https:'||url.hostname!=='live-services.pwinty.com'||
+        url.pathname!==`/image-library/image/${plan.library_asset_id}/thumbnail/small`;}catch{return true;}
+    }))throw Error('The uploaded library image identity differs.');
+  }
+  return tile.disabled?null:tile;
+}
+async function prodigiUploadedEditor(plan,editor,picker,wait,pin,text,visible) {
+  let selected=false,authSince=null;
+  return wait(()=>{
+    pin();
+    const library=picker(),loaded=editor();
+    if(!library)return loaded&&text(loaded).includes('Uploaded image:')&&loaded;
+    // Some uploads remain in the library instead of auto-selecting their result.
+    // Select only this handoff's unique filename/dimensions, once, without upload.
+    if(/Invalid JWT token|Error code:\s*401/i.test(text(library))){
+      if(authSince===null)authSince=Date.now();
+      if(Date.now()-authSince>=20000)throw Error('Prodigi image library authentication expired before image selection.');
+    }else authSince=null;
+    if(!selected){const image=prodigiLibraryImage(library,plan,text,visible);if(image){image.click();selected=true;}}
+    return null;
+  },600000);
+}
 function prodigiRemovePoint(canvas) {
   // Prodigi draws its trash affordance on a separate, transparent public canvas.
   // Read only that rendered control, never the artwork canvas or application state.
@@ -88,7 +122,7 @@ function prodigiIndefiniteHold(scope,text,visible) {
   return saysHeld&&!Array.from(scope.querySelectorAll('h1,h2,h3')).some(e=>visible(e)&&/until production/i.test(text(e)))&&
     !prodigiControls(scope,'button').some(e=>visible(e)&&text(e)==='Pause indefinitely');
 }
-if(typeof module!=='undefined') module.exports={prodigiOrderPageReady,prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiReadyProductCard,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
+if(typeof module!=='undefined') module.exports={prodigiOrderPageReady,prodigiExactRow,prodigiPinnedRow,prodigiControls,prodigiFilePicker,prodigiProductCard,prodigiReadyProductCard,prodigiLibraryImage,prodigiUploadedEditor,prodigiRemovePoint,prodigiResetControl,prodigiIndefiniteHold};
 (() => {
   'use strict';
   if(typeof document==='undefined') return;
@@ -274,6 +308,8 @@ if(typeof module!=='undefined') module.exports={prodigiOrderPageReady,prodigiExa
       if(!text(editor).includes(plan.sku)) throw Error('Editor product differs.');
       button(editor,'Add image').click();
       stage='picker';reportStage(stage,plan);
+      let hash=plan.sha256;
+      if(!plan.library_asset_id){
       const input=await filePickerInput();
       stage='transfer';reportStage(stage,plan);
       const parts=[];let received=0;
@@ -285,15 +321,15 @@ if(typeof module!=='undefined') module.exports={prodigiOrderPageReady,prodigiExa
       }
       if(received!==plan.bytes) throw Error('Pinned artwork byte count differs.');
       const file=new File(parts,plan.filename,{type:'image/jpeg'});
-      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
+      hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
       if(hash!==plan.sha256) throw Error('Pinned artwork checksum differs.');
       locationMatches(plan);
       const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;
       input.dispatchEvent(new Event('change',{bubbles:true}));
+      }
       stage='uploaded';reportStage(stage,plan);
-      const loaded=await wait(()=>{
-        const e=dialog('Image Editor');return e&&!dialog('Select image')&&text(e).includes('Uploaded image:')&&e;
-      },600000); // Large JPG processing can exceed four minutes; never replay the file here.
+      const loaded=await prodigiUploadedEditor(plan,()=>dialog('Image Editor'),()=>dialog('Select image'),wait,
+        ()=>locationMatches(plan),text,visible);
       const compact=text(loaded).replace(/\s/g,'');
       if(!Array.isArray(plan.dimensions)||!compact.includes(plan.dimensions.join('x')+'px'))
         throw Error('Uploaded image dimensions differ from the numbered archive.');

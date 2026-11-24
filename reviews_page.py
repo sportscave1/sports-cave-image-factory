@@ -6,7 +6,7 @@ from html import escape
 import hashlib
 import streamlit as st
 from reviews_store import ReviewsStore,require
-from reviews_cache import read,invalidate
+from reviews_cache import read,invalidate,settle_initial
 from reviews_model import FIELDS,auto_mapping,product_gid
 from crm_logic import now
 from crm_campaign_home import STYLE
@@ -17,16 +17,25 @@ STYLE_REVIEW='''<style>
 .st-key-sc-reviews [data-testid="stVerticalBlock"]{gap:8px}.st-key-sc-reviews button:focus-visible{outline:2px solid #b99232;outline-offset:2px}
 .st-key-reviews-tabs button,.st-key-reviews-status button{border:0!important;border-radius:0!important;background:transparent!important;border-bottom:2px solid transparent!important}
 .st-key-reviews-tabs button[kind="segmented_controlActive"],.st-key-reviews-status button[kind="segmented_controlActive"]{border-bottom-color:#b99232!important;color:#171820!important}
-.rv-row,.rv-head{display:grid;grid-template-columns:1.1fr 1.2fr .5fr 2.3fr .7fr .6fr .65fr;gap:12px;align-items:center;min-width:0}
-.rv-row{font-size:13px;padding:12px 0;border-bottom:1px solid #eae6df}.rv-row>div{min-width:0;overflow-wrap:anywhere}.rv-head{font-size:10px;color:#777;padding:10px 0;border-bottom:1px solid #eae6df}
+.rv-row,.rv-head{display:grid;grid-template-columns:minmax(100px,1fr) minmax(180px,1.7fr) 82px minmax(180px,2fr) 86px 82px;gap:12px;align-items:center;min-width:0}
+.rv-row{grid-template-areas:"customer product stars copy meta status";font-size:13px;line-height:1.4;padding:8px 0}.rv-row>div{min-width:0;word-break:normal;overflow-wrap:break-word}.rv-head{font-size:10px;color:#777;padding:10px 0}
+.rv-customer{grid-area:customer}.rv-product{grid-area:product}.rv-stars{grid-area:stars}.rv-copy{grid-area:copy}.rv-meta{grid-area:meta}.rv-status{grid-area:status}
 .rv-row small{display:block;color:#73737a;font-size:11px;margin-top:4px}.rv-stars{color:#947021;letter-spacing:1px;white-space:nowrap}
 .rv-product{display:flex;gap:8px;align-items:center}.rv-product img{width:42px;height:42px;object-fit:contain;flex:none;border-radius:4px}
-.rv-pill{display:inline-block;background:#eff0ee;padding:4px 7px;border-radius:5px;font-size:11px}.rv-pill.published{color:#28763a;background:#edf6ee}.rv-pill.pending{background:#faf3df;color:#806421}
-.st-key-reviews-table{padding:12px;border:1px solid #e9e6e0;border-radius:12px;background:white;min-width:0}
+.rv-product-name,.rv-copy b,.rv-copy small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.4;min-width:0}.rv-copy b{-webkit-line-clamp:1}.rv-product-name{flex:1}.rv-meta{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#73737a;white-space:nowrap}.rv-empty{color:#73737a;font-size:12px}
+.rv-pill{display:inline-block;background:#eff0ee;padding:4px 7px;border-radius:5px;font-size:11px;white-space:nowrap}.rv-pill.published{color:#28763a;background:#edf6ee}.rv-pill.pending{background:#faf3df;color:#806421}
+.st-key-reviews-table{padding:12px;border:1px solid #e9e6e0;border-radius:12px;background:white;min-width:0;container-type:inline-size;container-name:review-list}
+.rv-heading,[class*="st-key-rv-entry-"]{display:grid!important;grid-template-columns:minmax(0,1fr) 168px;gap:12px!important;align-items:center;min-width:0}.rv-heading{border-bottom:1px solid #eae6df;font-size:10px;color:#777}.rv-heading>span{text-align:right}
+[class*="st-key-rv-entry-"]{border-bottom:1px solid #eae6df;padding:4px 0}[class*="st-key-rv-entry-"]>div{min-width:0}
+.st-key-reviews-table [class*="st-key-rv-actions-"]{display:flex!important;flex-wrap:nowrap!important;gap:8px!important;justify-content:flex-end!important}
+.st-key-reviews-table [class*="st-key-rv-actions-"] button{min-width:80px!important;width:80px!important;min-height:36px!important;padding:4px 10px!important;white-space:nowrap!important}
+.st-key-reviews-table [class*="st-key-rv-actions-"] button p{display:block!important;visibility:visible!important;font-size:13px!important;white-space:nowrap!important;margin:0!important}
 .st-key-reviews-poll{display:none}.st-key-sc-reviews [data-testid="stHorizontalBlock"]{min-width:0}
-@media(max-width:1000px){.rv-row,.rv-head{grid-template-columns:1fr 1fr .5fr 2fr .65fr}.rv-date,.rv-source{display:none}}
+@container review-list (max-width:1050px){.rv-heading{display:none!important}[class*="st-key-rv-entry-"]{grid-template-columns:minmax(0,1fr);gap:4px!important;padding:10px 0}.rv-row{grid-template-columns:minmax(0,1fr) 86px;grid-template-areas:"customer stars" "product product" "copy copy" "meta status";gap:7px;padding:0}.rv-meta{flex-direction:row;flex-wrap:wrap;white-space:normal;gap:4px 12px}.rv-status{justify-self:end}.rv-product img{width:36px;height:36px}.rv-product-name{max-width:100%}.rv-copy:has(.rv-empty){display:none}}
+@container review-list (max-width:850px){.st-key-reviews-filters [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important}.st-key-reviews-filters [data-testid="stColumn"]{flex:1 1 120px!important;min-width:110px!important;width:auto!important}.st-key-reviews-filters [data-testid="stColumn"]:first-child{flex-basis:100%!important}}
+@container review-list (max-width:500px){[class*="st-key-rv-entry-"]{padding:12px 0}.st-key-reviews-table [class*="st-key-rv-actions-"] button{min-height:44px!important}.rv-product-name{font-size:13px}.rv-stars{font-size:12px}}
 .st-key-reviews-tabs [data-testid="stWidgetLabel"],.st-key-reviews-status [data-testid="stWidgetLabel"]{display:none}
-@media(max-width:640px){[data-testid="stMainBlockContainer"]:has(.st-key-sc-reviews){padding-left:12px!important;padding-right:12px!important}.rv-head{display:none}.rv-row{grid-template-columns:1fr 1fr}.rv-copy{grid-column:1/-1}.rv-product img{width:32px;height:32px}.rv-stars{font-size:12px}.st-key-sc-reviews [data-testid="stHorizontalBlock"]{flex-wrap:wrap}.st-key-sc-reviews [data-testid="stColumn"]{min-width:0!important}.st-key-reviews-filters [data-testid="stColumn"]{flex:1 1 120px!important;min-width:120px!important}.st-key-reviews-filters [data-testid="stColumn"]:first-child{flex-basis:100%!important}}
+@media(max-width:640px){[data-testid="stMainBlockContainer"]:has(.st-key-sc-reviews){padding-left:12px!important;padding-right:12px!important}.st-key-sc-reviews [data-testid="stColumn"]{min-width:0!important}}
 </style>'''
 
 def state():return st.session_state.setdefault('reviews_state',{})
@@ -34,6 +43,41 @@ def load(key,fn,ttl=60):
     value,activity=read(state(),key,fn,ttl);state().setdefault('activity',{})[key[0]]=activity
     return value,activity
 def changed(*groups):invalidate(state(),*groups)
+
+STATUS_LABELS={'All reviews':'all','Pending':'PENDING','Needs reply':'reply','Archived':'ARCHIVED'}
+
+
+def table_read(store,signature,offset):
+    status,search,product,rating,source,period=signature
+    matched=store.match_product({'product_handle':product,'product_title':product}) if product else None
+    if product and not matched:return []
+    return store.rows(status=status,search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset,received_first=True,overview=True)
+
+
+def prefetch_overview(user,store=None):
+    """Queue only the authorised current view while the OS shell is built."""
+    require(user)
+    if st.session_state.get('reviews-tabs','Overview')!='Overview':return
+    store=store or ReviewsStore()
+    signature=(STATUS_LABELS.get(st.session_state.get('reviews-status'),'all'),
+      st.session_state.get('rv_search',''),st.session_state.get('rv_product',''),
+      st.session_state.get('rv_rating',0),st.session_state.get('rv_source',''),st.session_state.get('rv_period',0))
+    offset=state().get('offset',0) if state().get('filters')==signature else 0
+    read(state(),('table',signature,offset),lambda:table_read(store,signature,offset))
+    read(state(),('summary',),store.summary)
+    return (('table',signature,offset),('summary',))
+
+def refresh_pending_reads(pending):
+    # Streamlit owns this timer so hidden tabs do not lose a one-shot JS refresh.
+    # Disable the interval as soon as the registered reads finish.
+    from time import monotonic
+    @st.fragment(run_every=1.2 if pending else None)
+    def poll():
+        stamp=monotonic();previous=state().setdefault('poll_at',stamp)
+        if pending and stamp-previous>=1:
+            state()['poll_at']=stamp
+            st.rerun(scope='app')
+    poll()
 
 def kpi_html(data=None):
     data=data or {};values=(('Average rating',None if data.get('average') is None else f"{data['average']:.1f}",':material/star:'),
@@ -55,20 +99,38 @@ def kpi_html(data=None):
 
 def row_html(r):
     from crm_campaign_html import email_image_url
-    image=email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
-    product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" width="42" height="42">' if image else '')+escape(r.get('product_title') or 'Needs product match')
-    return '<div class="rv-row"><div>'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy"><b>'+escape(r['title'])+'</b><small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small></div><div class="rv-date">'+escape(at)+'</div><div class="rv-source">'+escape({'judgeme':'Judge.me','csv':'CSV','sports_cave':'Sports Cave'}[r['source']])+'</div><div><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
+    from reviews_widget import product_thumbnail
+    image=product_thumbnail(r) or email_image_url(r.get('product_image',''));at=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Unknown'
+    name='Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match'
+    product=('<img src="'+escape(image,quote=True)+'" alt="" loading="lazy" decoding="async" width="42" height="42">' if image else '')+'<span class="rv-product-name" title="'+escape(name,quote=True)+'">'+escape(name)+'</span>'
+    copy=('<b>'+escape(r['title'])+'</b>' if r['title'] else '')+('<small>'+escape(r['body'][:160])+('…' if len(r['body'])>160 else '')+'</small>' if r['body'] else '')
+    return '<div class="rv-row"><div class="rv-customer">'+escape(r['reviewer_name'])+('<small>Verified purchase</small>' if r['verified_purchase'] else '')+'</div><div class="rv-product">'+product+'</div><div class="rv-stars" aria-label="'+str(r['rating'])+' out of 5">'+'★'*r['rating']+'☆'*(5-r['rating'])+'</div><div class="rv-copy">'+(copy or '<span class="rv-empty">Rating only</span>')+'</div><div class="rv-meta"><span>'+escape(at)+'</span><span>'+escape({'judgeme':'Imported','csv':'CSV','sports_cave':'Sports Cave','shop_app':'Shop app'}[r['source']])+'</span></div><div class="rv-status"><span class="rv-pill '+r['status'].lower()+'">'+escape(r['status'].title())+'</span></div></div>'
 
 @st.dialog('Review',width='large')
 def detail(store,user,identity):
     r=store.get_review(identity)
     if not r:st.warning('Review is unavailable.');return
     stamp=str(r['created_at'])[:10] if (r.get('source_metadata') or {}).get('date_known',True) else 'Date unavailable'
-    st.subheader(r.get('product_title') or 'Needs product match');st.caption(r['reviewer_name']+' · '+str(r['rating'])+'/5 · '+stamp+' · '+r['source'])
+    st.subheader('Store review' if r.get('review_type')=='STORE' else r.get('product_title') or 'Needs product match');st.caption(r['reviewer_name']+' · '+str(r['rating'])+'/5 · '+stamp+' · '+r['source'])
     if r['verified_purchase']:st.caption('Verified purchase · matched Shopify order, customer and product')
     elif r['source_verified']:st.caption('Source reports verification · not verified by Sports Cave')
     if r['title']:st.write(r['title'])
     st.write(r['body'])
+    for media in store.media(identity):
+        st.caption(media['kind'].title()+' · '+media['status'].title())
+        if media['status']=='FAILED' and st.button('Retry media copy',key='rv_retry_'+str(media['id'])):
+            store.retry_media(user,media['id']);changed('migration');st.rerun()
+        if media['status']=='COPIED':
+            from reviews_dropbox import asset,ReviewDropboxStorage
+            try:
+                ref,_=asset(media.get('storage',{}),'320',media['kind'])
+                preview=ReviewDropboxStorage().open(ref)
+                st.image(b''.join(preview.iter_chunks()),width=240)
+                if media['kind']=='video':st.caption('Video · poster preview; customers open a bounded player.')
+            except Exception:st.caption('Dropbox preview is unavailable. No external source is substituted.')
+            if st.button('Hide media' if media['approved'] else 'Approve media',key='rv_media_'+str(media['id'])):
+                store.approve_media(user,media['id'],not media['approved'])
+                changed('table','summary','migration','rewards');st.rerun()
     if r.get('order_id'):
         import os
         shop=os.getenv('SHOPIFY_STORE_DOMAIN','')
@@ -90,7 +152,7 @@ def detail(store,user,identity):
         store.moderate(user,identity,status='ARCHIVED');changed('table','summary');st.rerun()
     if spam.button('Mark spam',icon=':material/block:'):
         store.moderate(user,identity,status='SPAM');changed('table','summary');st.rerun()
-    with st.expander('Resolve product' if not r['product_id'] else 'Change product match'):
+    with st.expander('Convert to product review' if r.get('review_type')=='STORE' else 'Resolve product' if not r['product_id'] else 'Change product match'):
         query=st.text_input('Find product',key='review_match_search')
         choices=store.products(query)
         if choices:
@@ -98,74 +160,126 @@ def detail(store,user,identity):
             if st.button('Save product match'):
                 store.moderate(user,identity,product=picked['shopify_product_id']);changed('table','summary');st.rerun()
 
+@st.dialog('Edit review',width='large')
+def edit_review(store,user,identity):
+    r=store.get_review(identity)
+    if not r:st.warning('Review is unavailable.');return
+    # Keep the version that populated this form, even if another session edits it.
+    with st.form('review_edit_form_'+str(identity)):
+        st.caption(r['reviewer_name']+' · '+str(r['rating'])+'/5 · '+(r.get('product_title') or 'Store review'))
+        title=st.text_input('Review title',value=r['title'],max_chars=200)
+        body=st.text_area('Review text',value=r['body'],max_chars=5000,height=160)
+        reason=st.text_input('Reason for edit',placeholder='Customer-requested correction',max_chars=500)
+        save=st.form_submit_button('Save changes',type='primary')
+    version_key='review_edit_version_'+str(identity)
+    if not save:st.session_state[version_key]=str(r['updated_at'])
+    if save:
+        try:
+            store.edit_text(user,identity,title=title,body=body,reason=reason,expected_updated_at=st.session_state.get(version_key))
+        except (ValueError,PermissionError) as exc:st.warning(str(exc));return
+        except Exception:st.warning('The review could not save. Please try again.');return
+        st.session_state.pop(version_key,None);changed('table','summary');st.rerun()
+
+
+def move_page(step):
+    state()['offset']=max(0,state().get('offset',0)+step)
+
+
 @st.fragment
-def overview(store,user):
+def overview(store,user,authorize=None):
+    # Revalidate through the same OS policy on every partial rerun. Never let a
+    # fragment keep using an account whose access has expired or been removed.
+    try:
+        user=authorize() if authorize else user
+        require(user)
+    except PermissionError:
+        st.warning('Your Reviews access could not be verified. Please sign in again.')
+        return
+    state()['activity']={}
+    settle_initial(state(),prefetch_overview(user,store) or ())
     with st.container(key='reviews-summary'):
         value,activity=load(('summary',),store.summary)
         st.html(kpi_html(value))
         if activity=='ERROR':st.caption('Statistics could not refresh. Last resolved values remain visible.')
     with st.container(key='reviews-table'):
-        labels={'All reviews':'all','Pending':'PENDING','Needs reply':'reply','Archived':'ARCHIVED'}
+        labels=STATUS_LABELS
         status=st.segmented_control('Review status',list(labels),default='All reviews',key='reviews-status') or 'All reviews'
         with st.container(key='reviews-filters'):
             a,b,c,d,e=st.columns([2,1.5,1,1,1])
             search=a.text_input('Search reviews',label_visibility='collapsed',placeholder='Search reviews…',key='rv_search')
             product=b.text_input('Product',placeholder='Product name / handle',label_visibility='collapsed',key='rv_product')
-            rating=c.selectbox('Rating',range(6),format_func=lambda n:str(n)+' stars' if n else 'All ratings',label_visibility='collapsed')
-            source=d.selectbox('Source',['','csv','judgeme','sports_cave'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Judge.me','sports_cave':'Sports Cave'}[v],label_visibility='collapsed')
-            period=e.selectbox('Date',[0,30,90],format_func=lambda n:str(n)+' days' if n else 'All dates',label_visibility='collapsed')
+            rating=c.selectbox('Rating',range(6),format_func=lambda n:str(n)+' stars' if n else 'All ratings',label_visibility='collapsed',key='rv_rating')
+            source=d.selectbox('Source',['','csv','judgeme','sports_cave','shop_app'],format_func=lambda v:{'':'All sources','csv':'CSV','judgeme':'Imported','sports_cave':'Sports Cave','shop_app':'Shop app'}[v],label_visibility='collapsed',key='rv_source')
+            period=e.selectbox('Date',[0,30,90],format_func=lambda n:str(n)+' days' if n else 'All dates',label_visibility='collapsed',key='rv_period')
         signature=(labels[status],search,product,rating,source,period)
         if state().get('filters')!=signature:state()['filters']=signature;state()['offset']=0
         offset=state().get('offset',0)
-        def table():
-            matched=store.match_product({'product_handle':product,'product_title':product}) if product else None
-            if product and not matched:return []
-            return store.rows(status=labels[status],search=search,product=matched['shopify_product_id'] if matched else '',rating=rating,source=source,since=now()-timedelta(days=period) if period else None,offset=offset)
-        rows,activity=load(('table',signature,offset),table)
-        if activity=='ERROR':st.caption('Reviews could not refresh. Last resolved rows remain visible.')
-        head,actions=st.columns([12,1])
-        head.html('<div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DATE','SOURCE','STATUS'))+'</div>')
-        actions.html('<div class="rv-head">ACTIONS</div>')
+        rows,activity=load(('table',signature,offset),lambda:table_read(store,signature,offset))
+        if activity=='ERROR':
+            st.caption('Reviews could not refresh. Last resolved rows remain visible.')
+            st.button('Retry reviews',key='reviews-retry',on_click=changed,args=('table',))
+        st.html('<div class="rv-heading"><div class="rv-head">'+''.join('<div>'+s+'</div>' for s in ('CUSTOMER','PRODUCT','RATING','REVIEW','DETAILS','STATUS'))+'</div><span>ACTIONS</span></div>')
         if rows is not None:
             for r in rows[:25]:
-                content,action=st.columns([12,1])
-                content.html(row_html(r))
-                if action.button('Open',key='review_'+str(r['id']),help='Open review and actions',icon=':material/more_horiz:'):detail(store,user,r['id'])
+                with st.container(key='rv-entry-'+str(r['id'])):
+                    st.html(row_html(r))
+                    with st.container(key='rv-actions-'+str(r['id']),horizontal=True,horizontal_alignment='right',gap='small'):
+                        if st.button('Open',key='review_'+str(r['id']),help='Open review and actions',width=80):detail(store,user,r['id'])
+                        if st.button('Edit',key='review_edit_'+str(r['id']),help='Edit review text',width=80):edit_review(store,user,r['id'])
             if not rows:st.caption('No reviews match these filters.')
             previous,next_page=st.columns(2)
-            if previous.button('Previous',disabled=offset==0):state()['offset']=max(0,offset-25);st.rerun(scope='fragment')
-            if next_page.button('Next',disabled=len(rows)<=25):state()['offset']=offset+25;st.rerun(scope='fragment')
+            previous.button('Previous',disabled=offset==0,on_click=move_page,args=(-25,))
+            next_page.button('Next',disabled=len(rows)<=25,on_click=move_page,args=(25,))
+            if activity=='READY' and rows:
+                acknowledge_visible(store,user,rows[:25])
         elif activity=='LOADING':st.caption('Loading reviews…')
+    # Register completion delivery inside the owning fragment as well: a slow
+    # filter refresh must not inherit a disabled timer from the preceding view.
+    refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))
+
+
+def acknowledge_visible(store,user,rows):
+    import json
+    from reviews_notifications import mark_visible,scope
+    identities=tuple(str(row['id']) for row in rows if row.get('notification_received_at') is not None and row.get('status') in ('PENDING','PUBLISHED'))
+    if not identities:return
+    actor_scope=scope(user.get('id'))
+    key=('seen',actor_scope,identities)
+    receipt,activity=load(key,lambda:mark_visible(user,identities,store),ttl=3600)
+    if activity!='READY' or not receipt or not receipt.get('marked'):return
+    emitted=state().setdefault('seen_receipts',[])
+    if key in emitted:return
+    emitted.append(key);del emitted[:-48]
+    import streamlit.components.v1 as components
+    payload=json.dumps(receipt).replace('</','<\\/')
+    components.html('<script>window.parent.dispatchEvent(new CustomEvent("sc-reviews-seen",{detail:'+payload+'}));</script>',height=0,width=0)
 
 @st.fragment
 def importer(store,user):
-    from reviews_import import read_csv,preview,JudgeMe
-    st.subheader('Connected sources');provider=JudgeMe()
-    source,_=load(('sources',),lambda:store.q("SELECT value FROM sc_review_settings WHERE key='judgeme'",one=True))
-    verified=source and source['value'].get('verified')
-    st.write('Judge.me · '+('Last sync verified' if verified else 'Credentials configured · not verified' if provider.configured else 'Not connected'))
-    if verified:st.caption('Last sync · '+str(source['value'].get('last_sync','')))
-    sync,settings=st.columns([1,3])
-    if sync.button('Sync now',disabled=not provider.configured):store.enqueue_sync(user);changed('imports','sources');st.toast('Review sync queued')
-    with settings.popover('Settings'):
-        st.caption('Use the Judge.me Private API token in server configuration: JUDGEME_PRIVATE_API_TOKEN. The existing SHOPIFY_STORE_DOMAIN identifies the store. No credentials are stored in the browser or review records.')
-    st.subheader('Import file');uploaded=st.file_uploader('UTF-8 CSV · up to 10 MB / 10,000 rows',type=['csv'])
+    from reviews_import import read_csv,preview
+    connections(store)
+    st.caption('Media source: Dropbox · 03_ASSETS / Reviews · originals plus WebP display copies')
+    st.subheader('Import file')
+    st.download_button('Download CSV template','source_review_id,review_type,product_id,product_handle,reviewer_name,email,rating,title,body,review_date,status,picture_urls,video_urls,reply\nfixture-1,product,,example-product,Collector,,5,Great print,Looks great on my wall,2026-01-01,Published,,,\n',file_name='sports-cave-reviews-template.csv',mime='text/csv')
+    uploaded=st.file_uploader('UTF-8 CSV · up to 10 MB / 10,000 rows',type=['csv'])
     if uploaded:
         data=uploaded.getvalue();digest=hashlib.sha256(data).hexdigest();headers,raw=read_csv(data)
-        safe_preview=[{k:v for k,v in row.items() if 'email' not in k.lower()} for row in raw[:5]]
+        safe_preview=[{k:v for k,v in row.items() if k in ('rating','title','body','review_title','review_body','status','curated','product_handle','review_date')} for row in raw[:5]]
         st.dataframe(safe_preview,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
-        source=st.selectbox('Import source',['csv','judgeme'],format_func=lambda v:'Judge.me CSV' if v=='judgeme' else 'CSV')
+        source=st.selectbox('Import source',['csv','judgeme'],index=int('curated' in headers),format_func=lambda v:'Legacy export CSV' if v=='judgeme' else 'CSV')
+        published_only=st.checkbox('Import published reviews only',value=source=='judgeme')
+        st.caption('Legacy published exports use curated=ok. Hidden, pending and archived rows are excluded. Media copies run in the background; source URLs alone do not count as transferred files.')
         suggested=auto_mapping(headers);mapping={}
         with st.expander('Column mapping',expanded=True):
             columns=st.columns(3)
             for i,field in enumerate(FIELDS):
                 choices=['',*headers];mapping[field]=columns[i%3].selectbox(field.replace('_',' ').title(),choices,index=choices.index(suggested[field]),key='rv_map_'+digest[:10]+field)
-        key=('preview',digest,source,tuple(mapping.items()))
+        key=('preview',digest,source,published_only,tuple(mapping.items()))
         if st.button('Validate import',type='primary'):state()['preview_key']=key
         if state().get('preview_key')==key:
-            result,activity=load(key,lambda:preview(raw,mapping,store,source,__import__('os').getenv('SHOPIFY_STORE_DOMAIN','')))
+            result,activity=load(key,lambda:preview(raw,mapping,store,source,__import__('os').getenv('SHOPIFY_STORE_DOMAIN',''),published_only))
             if result:
-                st.caption(f"Ready: {result['ready']:,} · Duplicates: {result['duplicates']:,} · Need product match: {result['unresolved']:,} · Invalid: {len(result['invalid']):,}")
+                st.caption(f"Ready: {result['ready']:,} · Duplicates: {result['duplicates']:,} · Need product match: {result['unresolved']:,} · Invalid: {len(result['invalid']):,} · Excluded: {result['skipped']:,} · Media files: {result['media']:,}")
                 if result['invalid']:st.dataframe(result['invalid'][:50],hide_index=True, row_height=TABLE_ROW_HEIGHT)
                 if st.button('Confirm import',disabled=not result['items']):
                     store.enqueue_import(user,source,uploaded.name,result['items'],len(result['invalid']));state().pop('preview_key',None);changed('imports');st.toast('Import queued');st.rerun(scope='fragment')
@@ -182,6 +296,50 @@ def importer(store,user):
             state()['completed_imports']=completed
             changed('table','summary','sources')
     if activity=='ERROR':st.caption('Import history could not refresh.')
+
+def connections(store):
+    st.subheader('Connections')
+    row,_=load(('shop_connection',),lambda:store.q("SELECT value FROM sc_review_settings WHERE key='shop_app_connection'",one=True))
+    shop=(row or {}).get('value',{})
+    with st.expander('Shop app reviews'):
+        st.caption('Active · Shopify Flow inbox' if shop.get('enabled') and shop.get('last_success') and not shop.get('last_error') else 'Sync needs attention' if shop.get('last_error') else 'Waiting for setup / first sync')
+        st.write('Published written Shop reviews are matched to purchased products and imported automatically. Rating-only entries and deleted products are skipped. Shop imports do not issue upload rewards.')
+        if shop.get('last_success'):st.caption('Last successful sync: '+shop['last_success'])
+        st.caption('This incoming publication feed does not mirror later Shop deletions or backfill historical Shop reviews. Full two-way syndication requires Shopify program approval.')
+        st.link_button('Open Shop reviews','https://admin.shopify.com/store/sportscave-nb/apps/shop-72/merchant/reviews')
+    providers=(('ⓕ Facebook','Facebook Page reviews / recommendations'),('Ⓖ Google Reviews','Google Business Profile reviews'),('E Etsy','Etsy shop reviews'),('ebay eBay','eBay seller feedback'),('★ Trustpilot','Trustpilot business reviews'))
+    columns=st.columns(5)
+    for column,(label,description) in zip(columns,providers):
+        with column.popover(label,use_container_width=True):
+            st.write(description);st.caption('Not connected · setup planned')
+            st.caption('Account authorization and a supported review import are required. No reviews or customer details are shared until setup is complete.')
+            st.caption('Use the CSV importer for an authorized export in the meantime.')
+
+def collection(store,user,navigate):
+    st.subheader('Collect photos and videos')
+    st.caption('Order-linked review requests use the existing email automation editor. Reviews accept up to five media files, including one video. Review text and media are moderated separately.')
+    value,activity=load(('collection',),store.collection_settings)
+    if value is None:st.caption('Loading collection settings…' if activity!='ERROR' else 'Collection settings unavailable.');return
+    with st.form('review_reward_settings'):
+        enabled=st.checkbox('Track photo/video reward eligibility',value=value['rewards_enabled'])
+        left,right=st.columns(2)
+        image=left.number_input('Photo reward (%)',1,50,value['image_percent'])
+        video=right.number_input('Video reward (%)',1,50,value['video_percent'])
+        st.caption('One reward per verified order, after media approval, regardless of star rating. Imported reviews do not earn rewards. Codes are customer-specific, single-use, expire after 30 days and cannot combine with other discounts. Delivery honours existing email consent and suppression.')
+        import os
+        st.caption('Automatic reward delivery: '+('On' if value['rewards_enabled'] and os.getenv('REVIEW_REWARDS_DELIVERY_ENABLED','').lower()=='true' else 'Off'))
+        if st.form_submit_button('Save reward settings'):
+            store.save_collection_settings(user,{'rewards_enabled':enabled,'image_percent':image,'video_percent':video});changed('collection');st.toast('Reward settings saved')
+    st.subheader('Reward queue')
+    rewards,_=load(('rewards',),lambda:store.q('SELECT review_id,media_kind,percent,status,error_code,created_at FROM sc_review_rewards ORDER BY created_at DESC LIMIT 50'))
+    if rewards:st.dataframe(rewards,hide_index=True,row_height=TABLE_ROW_HEIGHT)
+    else:st.caption('No reward submissions yet.')
+    journey,_=load(('collection-flow',),lambda:store.q("SELECT status,config->'published_flow' AS flow FROM crm_automations WHERE id=%s",('26b47e22-b962-4c0b-b964-392a6399caf4',),True))
+    live=bool(isinstance(journey,dict) and journey.get('status')=='ACTIVE' and any(e.get('review_request') for e in (journey.get('flow') or {}).get('emails',[])))
+    (st.success if live else st.info)(('Post Checkout review requests are live. ' if live else 'Post Checkout review requests await publication. ')+'Online: 14 days after fulfilment, then eligible products 5 days apart (maximum 3). POS: 7 days, then 5 days apart. No reminders.')
+    request_automation(store,user,navigate)
+    with st.expander('Review collection and operations'):
+        st.markdown("Approve customer reviews and attached media in Overview. Eligible verified buyers receive one photo/video reward per order after approval. Customer uploads are stored in Dropbox; display copies are optimised in the background. Source verification on imported history does not issue rewards. Facebook, Google, Etsy, eBay and Trustpilot connections can be configured separately; authorised CSV exports can be imported now.")
 
 @st.fragment
 def display(store,user,navigate):
@@ -204,6 +362,9 @@ def display(store,user,navigate):
         value['moderation']=st.selectbox('New Sports Cave reviews',['manual','publish_all'],index=['manual','publish_all'].index(settings['moderation']),format_func=lambda v:'Manual moderation · every rating' if v=='manual' else 'Publish every rating')
         if st.form_submit_button('Save display settings',type='primary'):
             value['enabled']=enabled;store.save_settings(user,value);changed('settings');st.toast('Display settings saved')
+    request_automation(store,user,navigate)
+
+def request_automation(store,user,navigate):
     import os_accounts
     if os_accounts.can_access_page(user,'crm_automations_manage'):
         with st.expander('Review-request automation'):
@@ -219,21 +380,22 @@ def display(store,user,navigate):
                     st.query_params['automation']=str(row['id']);navigate('CRM Automations')
             st.caption('Opens the existing Email Automation editor as a draft. Publishing and delivery keep the existing consent and send guards.')
 
-def render_page(user,navigate=lambda _:None,*,store=None):
+def render_page(user,navigate=lambda _:None,*,store=None,authorize=None):
     require(user);store=store or ReviewsStore()
+    prefetch_overview(user,store)
     st.html(STYLE+STYLE_REVIEW)
     with st.container(key='sc-reviews'):
         st.title('Reviews');st.caption('Manage customer reviews and storefront social proof.')
-        tab=st.segmented_control('Reviews area',['Overview','Import reviews','Display'],default='Overview',key='reviews-tabs') or 'Overview'
+        tab=st.segmented_control('Reviews area',['Overview','Import reviews','Collect & reward','Display'],default='Overview',key='reviews-tabs') or 'Overview'
         state()['activity']={}
         try:
-            if tab=='Overview':overview(store,user)
+            if tab=='Overview':
+                overview(store,user,authorize)
             elif tab=='Import reviews':importer(store,user)
+            elif tab=='Collect & reward':collection(store,user,navigate)
             else:display(store,user,navigate)
         except (ValueError,PermissionError) as exc:st.warning(str(exc))
         except Exception:st.warning('Reviews could not complete this operation. Retry when storage is available.')
         with st.container(key='reviews-poll'):
-            if st.button('Refresh reviews',key='reviews-refresh'):pass
-        if any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()):
-            # One controller, active only for pending reads/imports. No provider polling.
-            st.html('<script>setTimeout(()=>{if(!document.hidden&&!document.querySelector("[role=dialog]"))document.querySelector(".st-key-reviews-poll button")?.click()},1200)</script>',unsafe_allow_javascript=True)
+            if st.button('Refresh reviews',key='reviews-refresh'):changed('table','summary');st.rerun()
+        if tab!='Overview':refresh_pending_reads(any(a in ('LOADING','REFRESHING') for a in state().get('activity',{}).values()))

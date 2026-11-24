@@ -10,6 +10,8 @@ from crm_logic import now,date
 from crm_tracking import public_https
 from reviews_model import normalize,product_gid
 
+class ReviewAlreadyReceived(ValueError):pass
+
 MARKER='SC_REVIEW_REQUEST_CONTEXT'.ljust(64,'_')
 
 def verified_context(shop,order_id,customer_id,product):
@@ -29,15 +31,16 @@ def verified_context(shop,order_id,customer_id,product):
 
 def issue(store,shop,order_id,customer_id,product,env=None):
     env=os.environ if env is None else env
-    base=env.get('CRM_PUBLIC_BASE_URL','').rstrip('/');secret=env.get('CRM_UNSUBSCRIBE_SECRET','')
+    from reviews_routing import public_base
+    base=public_base(env);secret=env.get('CRM_UNSUBSCRIBE_SECRET','')
     if not public_https(base) or len(secret)<32:raise ValueError('Secure review links require the existing CRM public URL and signing secret.')
     product=product_gid(product);verified_context(shop,order_id,customer_id,product)
     if not store.match_product({'product_id':product}):raise ValueError('Review product is not indexed.')
     value=hmac.new(secret.encode(),('review-request-v1:'+order_id+':'+customer_id+':'+product).encode(),hashlib.sha256).hexdigest()
     key=hashlib.sha256(value.encode()).hexdigest()
-    store.q('''INSERT INTO sc_review_tokens(token_hash,order_id,customer_id,product_id,expires_at)
-      VALUES(%s,%s,%s,%s,%s) ON CONFLICT(order_id,customer_id,product_id) DO NOTHING''',
-      (key,order_id,customer_id,product,now()+timedelta(days=30)))
+    store.q('''INSERT INTO sc_review_tokens(token_hash,order_id,customer_id,product_id,expires_at,review_id)
+      VALUES(%s,%s,%s,%s,%s,(SELECT id FROM sc_reviews WHERE source='sports_cave' AND order_id=%s AND customer_id=%s AND product_id=%s LIMIT 1)) ON CONFLICT(order_id,customer_id,product_id) DO NOTHING''',
+      (key,order_id,customer_id,product,now()+timedelta(days=30),order_id,customer_id,product))
     return base+'/reviews/request/'+value
 
 def token_row(store,token):
@@ -46,14 +49,25 @@ def token_row(store,token):
     if not row or date(row['expires_at'])<now():raise ValueError('Review link is invalid or expired.')
     return row
 
-def submit(store,token,payload):
+def submit(store,token,payload,uploads=None):
     if not isinstance(payload,dict) or set(payload)-{'rating','title','body','reviewer_name','website','display_consent'}:raise ValueError('Invalid review submission.')
     if payload.get('website') or payload.get('display_consent') is not True:raise ValueError('Confirm permission to display your review.')
     row=token_row(store,token)
+    if row['review_id']:return str(row['review_id'])
+    uploads=uploads or []
+    if len(uploads)>5 or sum(u['kind']=='video' for u in uploads)>1:raise ValueError('Attach up to five files, including one video.')
     item=normalize(payload,'sports_cave');product=store.match_product({'product_id':row['product_id']})
     if not product:raise ValueError('Review product is unavailable.')
     policy=store.settings();state='PUBLISHED' if policy['moderation']=='publish_all' else 'PENDING'
+    from reviews_media import save_owned
+    media=[{**save_owned(u['data'],u['kind'],defer_processing=True),'kind':u['kind']} for u in uploads]
     with store.db() as conn:
+        from reviews_account import purchase_key
+        conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',(purchase_key(row['order_id'],row['customer_id'],row['product_id']),))
+        existing=conn.execute("SELECT id FROM sc_reviews WHERE source='sports_cave' AND order_id=%s AND customer_id=%s AND product_id=%s LIMIT 1",(row['order_id'],row['customer_id'],row['product_id'])).fetchone()
+        if existing:
+            conn.execute('UPDATE sc_review_tokens SET review_id=%s WHERE token_hash=%s',(existing['id'],row['token_hash']))
+            return str(existing['id'])
         locked=conn.execute('SELECT * FROM sc_review_tokens WHERE token_hash=%s FOR UPDATE',(row['token_hash'],)).fetchone()
         if not locked or date(locked['expires_at'])<now():raise ValueError('Review link is invalid or expired.')
         if locked['review_id']:return str(locked['review_id'])
@@ -63,13 +77,27 @@ def submit(store,token,payload):
           (row['token_hash'],row['product_id'],product['title'],product['handle'],product.get('image_url') or '',product.get('online_store_url') or '',
            row['customer_id'],row['order_id'],item['reviewer_name'],item['rating'],item['title'],item['body'],state,'native:'+row['token_hash'])).fetchone()
         conn.execute('UPDATE sc_review_tokens SET review_id=%s WHERE token_hash=%s',(result['id'],row['token_hash']))
+        for m in media:
+            conn.execute("""INSERT INTO sc_review_media(review_id,kind,source_url,object_key,sha256,size_bytes,mime_type,status,consent,storage)
+              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,true,%s::jsonb) ON CONFLICT DO NOTHING""",
+              (result['id'],m['kind'],'native:'+m['sha256'],m['object_key'],m['sha256'],m['size_bytes'],m['mime_type'],'QUEUED' if m['storage'].get('processing')=='pending' else 'COPIED',json.dumps(m.get('storage',{}))))
         return str(result['id'])
 
 def prepare_email(content,row,enrollment,shop,store):
     request=content.get('review_request')
     if not request:return content
-    if content.get('trigger')!='fulfilled' or not enrollment:raise ValueError('Review request requires a fulfilment journey.')
-    url=issue(store,shop,enrollment['trigger_shopify_id'],enrollment['shopify_customer_id'],request['product_id'])
+    if content.get('trigger') not in ('fulfilled','post_purchase') or not enrollment:raise ValueError('Review request requires an order journey.')
+    product=request.get('product_id')
+    if 'product_index' in request:
+        from reviews_journey import order_products
+        order=shop.order(enrollment['trigger_shopify_id'],fresh=True)
+        if not order or order.get('displayFulfillmentStatus')!='FULFILLED':raise ValueError('Order fulfilment is unverified.')
+        choices=order_products(shop,order)
+        if request['product_index']>=len(choices):raise ValueError('Review product is unavailable.')
+        product=choices[request['product_index']]
+    existing=store.q("SELECT id FROM sc_reviews WHERE source='sports_cave' AND order_id=%s AND customer_id=%s AND product_id=%s LIMIT 1",(enrollment['trigger_shopify_id'],enrollment['shopify_customer_id'],product_gid(product)),True)
+    if isinstance(existing,dict) and existing.get('id'):raise ReviewAlreadyReceived('Review already received.')
+    url=issue(store,shop,enrollment['trigger_shopify_id'],enrollment['shopify_customer_id'],product)
     from urllib.parse import urlsplit
     if urlsplit(url).netloc!=urlsplit(request['base_url']).netloc:raise ValueError('Review request URL configuration changed. Republish the flow.')
     result=deepcopy(content)
@@ -77,14 +105,18 @@ def prepare_email(content,row,enrollment,shop,store):
     # One opt-in immutable template marker, never arbitrary text substitution.
     encoded=json.dumps(result['document'])
     if original not in encoded:raise ValueError('Add the review request link before publishing.')
-    result['document']=json.loads(encoded.replace(original,url))
+    from html import escape
+    mapped=store.match_product({'product_id':product}) or {}
+    encoded=encoded.replace(original,url).replace('SC_REVIEW_PRODUCT_TITLE',json.dumps(escape(mapped.get('title','your Sports Cave edition')))[1:-1])
+    result['document']=json.loads(encoded)
     return result
 
 def create_automation(user,base,product,days):
     from crm_automation_store import AutomationStore
     from crm_middle_sections import commit_middle
     from html import escape
-    env=os.environ;url=env.get('CRM_PUBLIC_BASE_URL','').rstrip('/')
+    from reviews_routing import public_base
+    env=os.environ;url=public_base(env)
     if not public_https(url):raise ValueError('Configure the existing CRM public URL first.')
     if not 1<=int(days)<=90:raise ValueError('Choose 1–90 days after fulfilment.')
     product=product_gid(product)
