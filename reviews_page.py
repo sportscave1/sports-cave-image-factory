@@ -231,7 +231,6 @@ def connections():
             st.caption('Account authorization and a supported review import are required. No reviews or customer details are shared until setup is complete.')
             st.caption('Use the CSV importer for an authorized export in the meantime.')
 
-@st.fragment
 def collection(store,user,navigate):
     st.subheader('Collect photos and videos')
     st.caption('Order-linked review requests use the existing email automation editor. Reviews accept up to five media files, including one video. Review text and media are moderated separately.')
@@ -244,23 +243,19 @@ def collection(store,user,navigate):
         video=right.number_input('Video reward (%)',1,50,value['video_percent'])
         st.caption('One reward per verified order, after media approval, regardless of star rating. Imported reviews do not earn rewards. Codes are customer-specific, single-use, expire after 30 days and cannot combine with other discounts. Delivery honours existing email consent and suppression.')
         import os
-        st.caption('Automatic delivery: '+('release gate enabled' if os.getenv('REVIEW_REWARDS_DELIVERY_ENABLED','').lower()=='true' else 'off · requires release configuration'))
+        st.caption('Automatic reward delivery: '+('On' if value['rewards_enabled'] and os.getenv('REVIEW_REWARDS_DELIVERY_ENABLED','').lower()=='true' else 'Off'))
         if st.form_submit_button('Save reward settings'):
             store.save_collection_settings(user,{'rewards_enabled':enabled,'image_percent':image,'video_percent':video});changed('collection');st.toast('Reward settings saved')
     st.subheader('Reward queue')
     rewards,_=load(('rewards',),lambda:store.q('SELECT review_id,media_kind,percent,status,error_code,created_at FROM sc_review_rewards ORDER BY created_at DESC LIMIT 50'))
     if rewards:st.dataframe(rewards,hide_index=True,row_height=TABLE_ROW_HEIGHT)
     else:st.caption('No reward submissions yet.')
-    st.info('Post Checkout review requests are saved as draft edits. Judge.me remains active during testing. Online orders: 14 days after fulfilment, then eligible products at 5-day intervals (maximum 3). POS: 7 days, then 5-day intervals. No reminder emails.')
+    journey,_=load(('collection-flow',),lambda:store.q("SELECT status,config->'published_flow' AS flow FROM crm_automations WHERE id=%s",('26b47e22-b962-4c0b-b964-392a6399caf4',),True))
+    live=bool(isinstance(journey,dict) and journey.get('status')=='ACTIVE' and any(e.get('review_request') for e in (journey.get('flow') or {}).get('emails',[])))
+    (st.success if live else st.info)(('Post Checkout review requests are live. ' if live else 'Post Checkout review requests await publication. ')+'Online: 14 days after fulfilment, then eligible products 5 days apart (maximum 3). POS: 7 days, then 5 days apart. No reminders.')
     request_automation(store,user,navigate)
-    with st.expander('Launch report · what is still required'):
-        st.markdown('''1. Release the reviewed changes and database migration through the existing OS release process.
-2. Import the published Judge.me CSV; reconcile every review, product match, public reply and media file against the archive. Source links alone are not a completed media transfer.
-3. Keep Judge.me running during the comparison period. Transfer any newly collected reviews before switching.
-4. Confirm photo/video reward percentages, Shopify discount permissions, email sender configuration and consent. Test one complete request → upload → moderation → reward journey with test accounts.
-5. Point existing review entry points and widgets at the native collection flow and verify store and product reviews. No replacement widget is required.
-6. Connect Facebook, Google, Etsy, eBay and Trustpilot when their accounts and supported access are ready.
-7. Disable Judge.me requests only after the native flow is verified, then turn Judge.me off. Keep the export and media archive for recovery.''')
+    with st.expander('Review collection and operations'):
+        st.markdown("Approve customer reviews and attached media in Overview. Eligible verified buyers receive one photo/video reward per order after approval. Customer uploads are stored in Dropbox; display copies are optimised in the background. Source verification on imported history does not issue rewards. Facebook, Google, Etsy, eBay and Trustpilot connections can be configured separately; authorised CSV exports can be imported now.")
 
 @st.fragment
 def display(store,user,navigate):
