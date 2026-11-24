@@ -12,6 +12,24 @@ from crm_http import bounded_body
 
 router=APIRouter()
 
+@router.get('/reviews/widget')
+async def storefront_widget(request:Request):
+    if not allow_rate('review-widget:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
+    try:
+        from reviews_public_cache import load
+        from reviews_widget import projection
+        store=ReviewsStore()
+        settings=await run_in_threadpool(load,store,('settings',),store.settings)
+        if not settings['enabled']:return Response(status_code=404)
+        country='US' if request.query_params.get('country')=='US' else 'AU'
+        offset=int(request.query_params.get('offset','0'))
+        if not 0<=offset<=50000:return Response(status_code=400)
+        origin=str(request.base_url).rstrip('/')
+        data=await run_in_threadpool(load,store,('widget-v1',origin,country,offset),lambda:projection(store,origin,country,offset))
+        return JSONResponse(jsonable_encoder(data),headers={'Access-Control-Allow-Origin':'*','Cache-Control':'public,max-age=30','X-Content-Type-Options':'nosniff'})
+    except (ValueError,TypeError):return Response(status_code=400)
+    except Exception:return Response(status_code=503)
+
 @router.get('/reviews/public')
 async def published_reviews(request:Request):
     store=ReviewsStore()
@@ -64,10 +82,11 @@ async def review_media(identity:str,request:Request):
     if not allow_rate('review-media:'+str(request.client.host if request.client else 'unknown')):return Response(status_code=429)
     try:
         identity=str(uuid.UUID(identity));store=ReviewsStore()
-        settings=await run_in_threadpool(store.settings)
+        from reviews_public_cache import load
+        settings=await run_in_threadpool(load,store,('settings',),store.settings)
         if not settings['enabled']:return Response(status_code=404)
-        media=await run_in_threadpool(store.q,"""SELECT m.kind,m.storage FROM sc_review_media m JOIN sc_reviews r ON r.id=m.review_id
-            WHERE m.id=%s AND m.status='COPIED' AND m.approved=true AND r.status='PUBLISHED'""",(identity,),True)
+        media=await run_in_threadpool(load,store,('media',identity),lambda:store.q("""SELECT m.kind,m.storage FROM sc_review_media m JOIN sc_reviews r ON r.id=m.review_id
+            WHERE m.id=%s AND m.status='COPIED' AND m.approved=true AND r.status='PUBLISHED'""",(identity,),True))
         if not media:return Response(status_code=404)
         from reviews_dropbox import asset,ReviewDropboxStorage
         ref,mime=asset(media['storage'],request.query_params.get('size','original' if media['kind']=='video' else '1280'),media['kind'])
@@ -183,7 +202,8 @@ async def storefront_form(request:Request):
         token=issue(product)
         mapped=await run_in_threadpool(store.match_product,{'product_id':product}) if product else None
         if product and not mapped:raise ValueError('Product unavailable.')
-        return HTMLResponse(form_html(mapped['title'] if mapped else 'Tell us about your Sports Cave experience',token),headers=PUBLIC_FORM_HEADERS)
+        from reviews_storefront_form import storefront_html,form_headers
+        return HTMLResponse(storefront_html(mapped,token),headers=form_headers(PUBLIC_FORM_HEADERS))
     except ValueError:return HTMLResponse(FORM_STYLE+'<main><h1>Review form unavailable</h1><p>Please reload and try again.</p></main>',status_code=400,headers=PUBLIC_FORM_HEADERS)
     except Exception:return Response(status_code=503)
 
