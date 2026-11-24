@@ -1,0 +1,243 @@
+{
+  "scope": "Synthetic local PostgreSQL/WASM SQL parity and plans; not production latency",
+  "source_sha256": "6228dc760a3d53508c494315f35641e2df9bfba6e3e1e390bd16f85aadb146c3",
+  "baseline_sha256": "a9bd2f6578c167a34ea3f34a15cabc596aaee9b8b3106cc728a5ee1bfe8fdf2f",
+  "certificates": 25000,
+  "baseline_source": "explicit local pre-Phase-2 snapshot",
+  "harness_sha256": {
+    "scripts/benchmark_app_data.py": "2663c40edff4575630958486c0296eb224d279e59da52aa58ed011c1efe6bfa1",
+    "scripts/local_pg_latency.py": "3f4a5dfe7a72b62a251a967811f00a09841610e92fd42520a19e43f02759c103",
+    "tests/fixtures/data_performance_server.mjs": "8887e9c9b4b47eef2f3891f3b72a3db81a241fc2aced00c987fc0805cd8843ab"
+  },
+  "test_dependencies": {
+    "@electric-sql/pglite": "0.6.0",
+    "@electric-sql/pglite-socket": "0.3.0"
+  },
+  "allocation_output_equal": true,
+  "home_output_equal": true,
+  "engine": "PostgreSQL 19.0 (PGlite 0.6.0) on wasm32-unknown-emscripten, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.13 (e13ee988ce3d87a738dd8f3661d02223308c412a), 32-bit",
+  "home_before": {
+    "n": 7,
+    "median_ms": 7.036,
+    "first_ms": 7.036,
+    "min_ms": 2.582,
+    "max_ms": 22.288,
+    "samples_ms": [
+      7.036,
+      3.29,
+      19.864,
+      22.288,
+      13.995,
+      3.059,
+      2.582
+    ]
+  },
+  "home_after": {
+    "n": 7,
+    "median_ms": 2.653,
+    "first_ms": 16.0,
+    "min_ms": 2.297,
+    "max_ms": 16.0,
+    "samples_ms": [
+      16.0,
+      2.814,
+      2.653,
+      2.573,
+      2.297,
+      3.04,
+      2.319
+    ]
+  },
+  "home_metrics_equal": true,
+  "orders_before": {
+    "n": 7,
+    "median_ms": 399.774,
+    "first_ms": 403.498,
+    "min_ms": 395.904,
+    "max_ms": 403.498,
+    "samples_ms": [
+      403.498,
+      399.774,
+      395.904,
+      396.921,
+      400.409,
+      401.71,
+      397.943
+    ]
+  },
+  "orders_after": {
+    "n": 7,
+    "median_ms": 4.593,
+    "first_ms": 5.824,
+    "min_ms": 4.149,
+    "max_ms": 5.824,
+    "samples_ms": [
+      5.824,
+      4.242,
+      4.593,
+      4.253,
+      5.153,
+      4.149,
+      4.608
+    ]
+  },
+  "allocation_rows": 100,
+  "pools": [
+    {
+      "requests_num": 9,
+      "requests_queued": 1,
+      "connections_num": 2,
+      "connections_ms": 2,
+      "requests_wait_ms": 1,
+      "usage_ms": 3251,
+      "pool_min": 1,
+      "pool_max": 3,
+      "pool_size": 2,
+      "pool_available": 2,
+      "requests_waiting": 0
+    }
+  ],
+  "home_delayed_before": {
+    "n": 7,
+    "median_ms": 107.136,
+    "first_ms": 106.289,
+    "min_ms": 105.496,
+    "max_ms": 121.557,
+    "samples_ms": [
+      106.289,
+      115.842,
+      118.194,
+      105.496,
+      107.136,
+      121.557,
+      106.308
+    ]
+  },
+  "home_delayed_after": {
+    "n": 7,
+    "median_ms": 64.146,
+    "first_ms": 86.882,
+    "min_ms": 64.083,
+    "max_ms": 86.882,
+    "samples_ms": [
+      86.882,
+      64.104,
+      64.083,
+      64.083,
+      64.58,
+      64.146,
+      64.41
+    ]
+  },
+  "home_delayed_equal": true,
+  "latency_model": {
+    "delay_ms": 20,
+    "scope": "One-way scheduled frontend transport delay; not WAN/TLS/production latency",
+    "physical_connections": 9,
+    "protocol": [
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      },
+      {
+        "startups": 1,
+        "syncs": 4,
+        "flushes": 4,
+        "simple_queries": 8
+      },
+      {
+        "startups": 1,
+        "syncs": 3,
+        "flushes": 3,
+        "simple_queries": 6
+      },
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      },
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      },
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      },
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      },
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      },
+      {
+        "startups": 1,
+        "syncs": 1,
+        "flushes": 0,
+        "simple_queries": 3
+      }
+    ]
+  },
+  "plans": {
+    "before": {
+      "execution_ms": 394.106,
+      "certificate_access": [
+        {
+          "node": "Seq Scan",
+          "index": null,
+          "loops": 100,
+          "rows_removed": 24999
+        }
+      ]
+    },
+    "after": {
+      "execution_ms": 5.388,
+      "certificate_access": [
+        {
+          "node": "Bitmap Heap Scan",
+          "index": null,
+          "loops": 100,
+          "rows_removed": 0
+        },
+        {
+          "node": "Bitmap Index Scan",
+          "index": "idx_certificates_related_edition_order",
+          "loops": 100,
+          "rows_removed": null
+        },
+        {
+          "node": "Bitmap Index Scan",
+          "index": "certificates_edition_order_id_key",
+          "loops": 100,
+          "rows_removed": null
+        }
+      ]
+    }
+  },
+  "known_baseline_failure": {
+    "test": "tests/test_daily_planner_overhaul.py::DailyPlannerOverhaulContractTests::test_toolbar_countdown_mirror_is_client_side_and_cross_window",
+    "source_is_unchanged_from_HEAD": {
+      "components/sports_cave_top_bar/index.html": true,
+      "components/daily_planner/index.html": true,
+      "tests/test_daily_planner_overhaul.py": true,
+      "top_bar.py": true,
+      "top_bar_api.py": true
+    },
+    "expected_timer_occurrences": 1,
+    "HEAD_timer_occurrences": 2,
+    "current_timer_occurrences": 2
+  }
+}

@@ -1,0 +1,282 @@
+{
+  "scope": "Actual Home/Orders loading functions with synthetic read/presentation; not production TTI",
+  "source_sha256": {
+    "app.py": "28141106f801ab879d8325c481c71221c93f7655cff01e27896e56b2d7461715",
+    "home_fast.py": "7c3cf3f621a45c2a6fc02aa02637ab314ba2a692ee657b893c7435a06a724802",
+    "display_snapshot.py": "e38d3048d13a44ac29922dc41f98ceec971d460bd41279086fbdad52cdb75fd2",
+    "orders_page.py": "20ff868a8ff52995708ae02f1528d93aa50834fbdd83a38eeaaf4cd50de9cead"
+  },
+  "results": [
+    {
+      "mode": "before",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 1142.6,
+      "full_app_runs_for_navigation": 2
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 1136.7,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 400.4,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 3041.1,
+      "full_app_runs_for_navigation": 2,
+      "search_ms": 2714.8,
+      "search_full_app_reruns": 1
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 417.1,
+      "full_app_runs_for_navigation": 1
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 761.2,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 411.5,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 1885.2,
+      "full_app_runs_for_navigation": 1,
+      "previous_rows_visible_during_search": true,
+      "search_ms": 1524.5,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 416.1,
+      "full_app_runs_for_navigation": 1
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 778.9,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 445.7,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 1912,
+      "full_app_runs_for_navigation": 1,
+      "previous_rows_visible_during_search": true,
+      "search_ms": 1554.4,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "before",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 1358.9,
+      "full_app_runs_for_navigation": 2
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 808.1,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 459.6,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 3266.7,
+      "full_app_runs_for_navigation": 2,
+      "search_ms": 2927.9,
+      "search_full_app_reruns": 1
+    },
+    {
+      "mode": "before",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 1425.7,
+      "full_app_runs_for_navigation": 2
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 800.4,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 476.2,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 3314.7,
+      "full_app_runs_for_navigation": 2,
+      "search_ms": 2976.9,
+      "search_full_app_reruns": 1
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 490.5,
+      "full_app_runs_for_navigation": 1
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "ready_ms": 831.5,
+      "full_app_runs_for_navigation": 1,
+      "search_ms": 520.2,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "ready_ms": 1983.3,
+      "full_app_runs_for_navigation": 1,
+      "previous_rows_visible_during_search": true,
+      "search_ms": 1625.1,
+      "search_full_app_reruns": 0
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "departure_ms": 408.2
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "departure_ms": 369.9
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "check": "failure_retry",
+      "reads": 2,
+      "completion_full_app_reruns": 0
+    }
+  ],
+  "summary": [
+    {
+      "mode": "before",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "n": 3,
+      "median_ms": 1358.9,
+      "range_ms": [
+        1142.6,
+        1425.7
+      ]
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "n": 3,
+      "median_ms": 808.1,
+      "range_ms": [
+        800.4,
+        1136.7
+      ]
+    },
+    {
+      "mode": "before",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "n": 3,
+      "median_ms": 3266.7,
+      "range_ms": [
+        3041.1,
+        3314.7
+      ]
+    },
+    {
+      "mode": "after",
+      "route": "Home",
+      "simulated_read_seconds": 0.3,
+      "n": 3,
+      "median_ms": 417.1,
+      "range_ms": [
+        416.1,
+        490.5
+      ]
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 0.3,
+      "n": 3,
+      "median_ms": 778.9,
+      "range_ms": [
+        761.2,
+        831.5
+      ]
+    },
+    {
+      "mode": "after",
+      "route": "Orders",
+      "simulated_read_seconds": 1.4,
+      "n": 3,
+      "median_ms": 1912,
+      "range_ms": [
+        1885.2,
+        1983.3
+      ]
+    }
+  ],
+  "baseline_sha256": {
+    "app_before.py": "43b00636ddbec7b2708dfc67415be61e3a349f47ea75db39b4e8038c5a7af63e",
+    "home_fast_before.py": "4cbf29bb0a532fb658c5493d0cb9d819d534dec3961f2217575cdb2453b082e7",
+    "orders_page_before.py": "23a774472688467df98f4238acd6c4b85f51bebc4b235cc46389bdf216797e09"
+  },
+  "harness_sha256": {
+    "scripts/benchmark_page_loading.py": "15e1bef0c3aa7d431dbac011caee238e097a589a31e585f0bd07243cf75a18d5",
+    "scripts/benchmark_app_startup.py": "f758a2c42a2b94768894113b9172e1cfdc3795425109555e2abb97ca8be7f6ec",
+    "scripts/startup_fixture_server.py": "56966a28d5523ed99d24eaacb4e3940e5c850195f5e95a9c1bc8d0b8e02ba258",
+    "tests/fixtures/page_loading_measurement.py": "2ecc881ff044d904bfa93530dceb66d5250519edc16f87652e6744581017d905"
+  },
+  "search_summary": [
+    {
+      "mode": "before",
+      "simulated_read_seconds": 0.3,
+      "median_ms": 459.6
+    },
+    {
+      "mode": "before",
+      "simulated_read_seconds": 1.4,
+      "median_ms": 2927.9
+    },
+    {
+      "mode": "after",
+      "simulated_read_seconds": 0.3,
+      "median_ms": 445.7
+    },
+    {
+      "mode": "after",
+      "simulated_read_seconds": 1.4,
+      "median_ms": 1554.4
+    }
+  ]
+}

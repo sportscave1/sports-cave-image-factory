@@ -1,3 +1,8 @@
+import time
+
+# Start before prompt/helper imports; this is script execution, not browser TTI.
+APP_START_TIME = time.perf_counter()
+
 from product_upload_prompt_core import (
     NEW_SHOPIFY_PRODUCT_PROMPT,
     UPDATE_EXISTING_PRODUCT_PROMPT,
@@ -66,12 +71,10 @@ import shutil
 import secrets
 import tempfile
 import threading
-import time
 import traceback
 from urllib.parse import parse_qs, quote, urlparse
 from zoneinfo import ZoneInfo
 
-APP_START_TIME = time.perf_counter()
 LAST_STARTUP_STAGE_TIME = APP_START_TIME
 AUTH_REVALIDATE_SECONDS = 30
 
@@ -13767,7 +13770,7 @@ def _orders_selection_access_allowed():
     return bool(ensure_current_page_access("Orders"))
 
 
-@st.fragment
+@st.fragment(parallel=True)
 def _render_orders_workspace():
     # Form and selection events rerender only the existing Orders workspace.
     # Reuse the exact authentication/permission checks, including expiry and
@@ -13777,10 +13780,12 @@ def _render_orders_workspace():
     if not is_app_authenticated():
         st.rerun()
         return
+    from workspace_display_cache import user_scope
+    scope = user_scope(current_os_user())
     allowed = ensure_current_page_access("Orders")
     if allowed:
         try:
-            get_orders_page().render_page(selection_guard=_orders_selection_access_allowed)
+            get_orders_page().render_page(selection_guard=_orders_selection_access_allowed, progressive=True)
         except Exception as error:
             logging.exception("Page render failed for Orders")
             _render_navigation_failure("Orders", error)
@@ -13791,6 +13796,10 @@ def _render_orders_workspace():
             status = _navigation_page_status("Orders")
     else:
         status = "denied"
+    if (st.session_state.get("current_page", "Orders") != "Orders"
+            or st.session_state.get("sports_cave_authenticated", True) is False
+            or user_scope(current_os_user()) != scope):
+        return
     _finish_navigation_transition("Orders", status=status)
     top_bar.render_navigation_complete(
         get_components_module(), current_route="Orders",

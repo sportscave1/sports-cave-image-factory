@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from time import monotonic
 from display_snapshot import Snapshots
 from workspace_display_cache import user_scope
 import os_accounts
@@ -56,29 +57,44 @@ def meta_data(today):
 
 def panel(st, user, today, name, loader, renderer):
     key = (user_scope(user), str(today), name)
-    initial = SNAPSHOTS.read(key, loader)
-    waiting = initial['value'] is None
+    scope = user_scope(user)
+    def current():
+        # Session-state access also yields to pending navigation/stop requests.
+        return (st.session_state.get('current_page', 'Dashboard') == 'Dashboard'
+                and st.session_state.get('sports_cave_authenticated', True) is not False
+                and user_scope(st.session_state.get('sports_cave_current_user') or {}) == scope)
 
-    # Replace one owned slot on every refresh, including loading/stale transitions.
-    # Never append refreshed HTML into the previous panel's container.
-    target = st.empty()
-
-    @st.fragment(run_every=1 if waiting else 30)
+    @st.fragment(run_every=30, parallel=True)
     def content():
-        with target.container():
-            result = SNAPSHOTS.read(key, loader)
-            value = result['value']
-            if value is None:
-                st.caption(name + (' · temporarily unavailable; retrying' if result['state'] == 'unavailable'
+        if not current():
+            return
+        # A separate status slot keeps loaded content at a stable position.
+        # All widgets render once, directly in their owning fragment.
+        status = st.empty()
+        result = SNAPSHOTS.read(key, loader)
+        if result['value'] is None and result['state'] == 'loading':
+            status.caption(name + ' · loading saved information…')
+            deadline = monotonic() + 8
+            while result['value'] is None and result['state'] == 'loading' and monotonic() < deadline:
+                SNAPSHOTS.wait(key, .05)
+                if not current():
+                    return
+                result = SNAPSHOTS.read(key, loader)
+        if not current():
+            return
+        value = result['value']
+        if value is None:
+            status.caption(name + (' · temporarily unavailable; retry below' if result['state'] == 'unavailable'
                                    else ' · loading saved information…'))
-                return
-            if waiting:
-                # One rerun switches the initial short refresh to the idle cadence.
-                st.rerun()
-            if result['state'] == 'stale':
-                stamp = datetime.fromtimestamp(result['checked_at'], ZoneInfo('Australia/Sydney')).strftime('%H:%M')
-                st.caption(f'Showing saved information checked at {stamp} Sydney · refreshing')
-            renderer(value)
+            if st.button('Retry ' + name, key='home-panel-retry-' + name):
+                SNAPSHOTS.invalidate(key)
+                st.rerun(scope='fragment')
+            return
+        status.empty()
+        if result['state'] == 'stale':
+            stamp = datetime.fromtimestamp(result['checked_at'], ZoneInfo('Australia/Sydney')).strftime('%H:%M')
+            st.caption(f'Showing saved information checked at {stamp} Sydney · refreshing')
+        renderer(value)
     content()
 
 

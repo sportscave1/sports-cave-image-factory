@@ -1,4 +1,9 @@
 import logging
+from startup_performance import StartupTrace, StartupTimingMiddleware
+
+logging.basicConfig(level=logging.INFO)
+BOOT_TRACE = StartupTrace()
+
 import os
 
 from starlette.routing import Route
@@ -42,6 +47,8 @@ from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
 from prodigi_preparation_api import ROUTES as PRODIGI_PREPARATION_ROUTES
 from marketplace_api import ROUTES as MARKETPLACE_ROUTES
 from marketplace_notifications import NotificationLifecycle
+
+BOOT_TRACE.mark("route_imports_done")
 
 
 
@@ -141,9 +148,11 @@ class _WallPreviewAccessLogFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
 from auto_editions_bulk_runtime import ReviewLifecycle
 streamlit_app = NotificationLifecycle(ReviewLifecycle(App("app.py", routes=routes)))
-app = ConstantTimeHealthMiddleware(
-    IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app)))
-)
+app = ConstantTimeHealthMiddleware(StartupTimingMiddleware(
+    IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app))),
+    trace=BOOT_TRACE,
+))
+BOOT_TRACE.mark("application_assembled")
 
 
 def prepare_google_seo_storage():
@@ -161,25 +170,35 @@ if __name__ == "__main__":
 
     # Run once per process, before listening. An incompatible deployment must fail
     # rather than advertising a healthy application with disabled persistence.
-    if os.getenv("RENDER") or run_migrations.get_database_url()[0]:
-        run_migrations.run_deployment_migrations()
-    prepare_google_seo_storage()
+    with BOOT_TRACE.span("deployment_migrations"):
+        if os.getenv("RENDER") or run_migrations.get_database_url()[0]:
+            run_migrations.run_deployment_migrations()
+    with BOOT_TRACE.span("seo_storage"):
+        prepare_google_seo_storage()
     # Readiness logging is diagnostic only. Never delay port binding on a
     # Shopify Admin API call during a process restart.
-    collector_vault.log_collector_vault_readiness(check_shopify=False)
-    from product_quiz_worker import start_app_reconciler
-    start_app_reconciler()
+    with BOOT_TRACE.span("vault_readiness"):
+        collector_vault.log_collector_vault_readiness(check_shopify=False)
+    with BOOT_TRACE.span("quiz_reconciler"):
+        from product_quiz_worker import start_app_reconciler
+        start_app_reconciler()
     if os.getenv('RENDER'):
-        from home_crm_reporting import start_app_reconciler as start_home_crm
-        start_home_crm()
-        from crm_thumbnail_cache import warm_renderer
-        warm_renderer()
-        from auto_editions_runtime import start_worker
-        start_worker()
-        from prodigi_status_sync import start_worker as start_order_tracking
-        start_order_tracking()
-        from database_read_pool import warm_application_reads
-        warm_application_reads()
+        with BOOT_TRACE.span("crm_reconciler"):
+            from home_crm_reporting import start_app_reconciler as start_home_crm
+            start_home_crm()
+        with BOOT_TRACE.span("thumbnail_warmup"):
+            from crm_thumbnail_cache import warm_renderer
+            warm_renderer()
+        with BOOT_TRACE.span("editions_worker"):
+            from auto_editions_runtime import start_worker
+            start_worker()
+        with BOOT_TRACE.span("order_tracking_worker"):
+            from prodigi_status_sync import start_worker as start_order_tracking
+            start_order_tracking()
+        with BOOT_TRACE.span("read_pool_warmup"):
+            from database_read_pool import warm_application_reads
+            warm_application_reads()
+    BOOT_TRACE.mark("listener_dispatch")
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),

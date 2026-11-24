@@ -790,6 +790,7 @@ def _run_read_operation(operation, read_callable, *, connection_factory=None, de
         print(
             "PERF DB read "
             f"operation={diagnostic['operation']} duration_ms={diagnostic['duration_ms']} "
+            f"connection_ms=0 query_ms={diagnostic['query_ms']} "
             "attempts=1 recovered=false shared_connection=true",
             flush=True,
         )
@@ -852,6 +853,7 @@ def _run_read_operation(operation, read_callable, *, connection_factory=None, de
             print(
                 "PERF DB read "
                 f"operation={diagnostic['operation']} duration_ms={elapsed_ms} "
+                f"connection_ms={connection_ms} query_ms={diagnostic['query_ms']} "
                 f"attempts={attempt + 1} recovered={str(bool(attempt)).lower()}",
                 flush=True,
             )
@@ -883,6 +885,7 @@ def _run_read_operation(operation, read_callable, *, connection_factory=None, de
                 "WARN DB read "
                 f"operation={diagnostic['operation']} category={category} "
                 f"exception_class={exception_class} sqlstate={sqlstate or 'none'} "
+                f"connection_ms={connection_ms} query_ms={diagnostic['query_ms']} "
                 f"duration_ms={elapsed_ms} retry={str(retry).lower()}",
                 flush=True,
             )
@@ -6709,59 +6712,65 @@ def load_home_weekly_work_bundle(
     clean_user_id = str(user_id or "").strip()
     if not clean_user_id:
         raise ValueError("A signed-in account is required.")
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
-            cur.execute(
-                """
-                WITH permitted_users AS (
-                    SELECT id::text AS id,
-                           username,
-                           COALESCE(email, '') AS email,
-                           COALESCE(NULLIF(display_name, ''), username) AS display_name,
-                           role,
-                           timezone
-                    FROM os_users
-                    WHERE is_active IS TRUE
-                      AND account_status <> 'removed'
-                      AND (%s IS TRUE OR id::text=%s)
-                ),
-                selected_sheets AS (
-                    SELECT sheet.*
-                    FROM daily_execution_sheets sheet
-                    JOIN permitted_users person ON person.id=sheet.user_id
-                    WHERE sheet.sheet_date >= %s::date
-                      AND sheet.sheet_date <= %s::date
-                ),
-                selected_timers AS (
-                    SELECT timer.*
-                    FROM daily_execution_task_timers timer
-                    JOIN selected_sheets sheet ON sheet.id=timer.sheet_id
-                ),
-                selected_human_work AS (
-                    SELECT work.*
-                    FROM human_work_events work
-                    JOIN permitted_users person ON person.id=work.user_id
-                    WHERE work.origin='human'
-                      AND work.occurred_at >= %s
-                      AND work.occurred_at <= %s
+    def load_bundle(cur):
+        # Reuse the bounded read pool, with the existing dashboard-specific
+        # timeout scoped to this transaction. Pipeline setup + SELECT instead
+        # of paying a separate round trip for each on a fresh connection.
+        with cur.connection.transaction():
+            with cur.connection.pipeline():
+                cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+                cur.execute(
+                    """
+                    WITH permitted_users AS (
+                        SELECT id::text AS id,
+                               username,
+                               COALESCE(email, '') AS email,
+                               COALESCE(NULLIF(display_name, ''), username) AS display_name,
+                               role,
+                               timezone
+                        FROM os_users
+                        WHERE is_active IS TRUE
+                          AND account_status <> 'removed'
+                          AND (%s IS TRUE OR id::text=%s)
+                    ),
+                    selected_sheets AS (
+                        SELECT sheet.*
+                        FROM daily_execution_sheets sheet
+                        JOIN permitted_users person ON person.id=sheet.user_id
+                        WHERE sheet.sheet_date >= %s::date
+                          AND sheet.sheet_date <= %s::date
+                    ),
+                    selected_timers AS (
+                        SELECT timer.*
+                        FROM daily_execution_task_timers timer
+                        JOIN selected_sheets sheet ON sheet.id=timer.sheet_id
+                    ),
+                    selected_human_work AS (
+                        SELECT work.*
+                        FROM human_work_events work
+                        JOIN permitted_users person ON person.id=work.user_id
+                        WHERE work.origin='human'
+                          AND work.occurred_at >= %s
+                          AND work.occurred_at <= %s
+                    )
+                    SELECT
+                        COALESCE((SELECT jsonb_agg(to_jsonb(person)) FROM permitted_users person), '[]'::jsonb) AS users,
+                        COALESCE((SELECT jsonb_agg(to_jsonb(sheet)) FROM selected_sheets sheet), '[]'::jsonb) AS sheets,
+                        COALESCE((SELECT jsonb_agg(to_jsonb(timer)) FROM selected_timers timer), '[]'::jsonb) AS timers,
+                        COALESCE((SELECT jsonb_agg(to_jsonb(work)) FROM selected_human_work work), '[]'::jsonb) AS human_work
+                    """,
+                    (
+                        bool(include_team),
+                        clean_user_id,
+                        str(week_start),
+                        str(week_end),
+                        start_utc,
+                        end_utc,
+                    ),
                 )
-                SELECT
-                    COALESCE((SELECT jsonb_agg(to_jsonb(person)) FROM permitted_users person), '[]'::jsonb) AS users,
-                    COALESCE((SELECT jsonb_agg(to_jsonb(sheet)) FROM selected_sheets sheet), '[]'::jsonb) AS sheets,
-                    COALESCE((SELECT jsonb_agg(to_jsonb(timer)) FROM selected_timers timer), '[]'::jsonb) AS timers,
-                    COALESCE((SELECT jsonb_agg(to_jsonb(work)) FROM selected_human_work work), '[]'::jsonb) AS human_work
-                """,
-                (
-                    bool(include_team),
-                    clean_user_id,
-                    str(week_start),
-                    str(week_end),
-                    start_utc,
-                    end_utc,
-                ),
-            )
-            row = cur.fetchone() or {}
+            return cur.fetchone() or {}
+
+    row, _diagnostic = _run_read_operation("home.weekly_work", load_bundle)
     return {
         "users": [dict(item or {}) for item in row.get("users") or []],
         "sheets": [_daily_execution_sheet_from_row(item) for item in row.get("sheets") or []],
@@ -22804,10 +22813,15 @@ def list_hybrid_order_rows(limit=50, search=""):
                 LEFT JOIN LATERAL (
                     SELECT certificate.*
                     FROM certificates certificate
-                    WHERE COALESCE(
-                        certificate.related_edition_order_id::text,
-                        certificate.edition_order_id::text
-                    )=eo.id::text
+                    -- Keep the preferred UUID link indexable. The legacy link
+                    -- only applies when that preferred link is absent.
+                    -- Guard the cast for older installations with numeric IDs.
+                    WHERE certificate.related_edition_order_id = CASE
+                              WHEN eo.id::text ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+                              THEN eo.id::text::uuid
+                          END
+                       OR (certificate.related_edition_order_id IS NULL
+                           AND certificate.edition_order_id::text=eo.id::text)
                     ORDER BY
                         CASE WHEN COALESCE(
                             NULLIF(certificate.shopify_file_url, ''),

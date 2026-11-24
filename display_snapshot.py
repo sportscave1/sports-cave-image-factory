@@ -7,7 +7,7 @@ Loaders must not access Streamlit session state or mutate external systems.
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from threading import BoundedSemaphore, Lock
+from threading import BoundedSemaphore, Event, Lock
 from time import monotonic, time
 import logging
 
@@ -32,11 +32,13 @@ class Snapshots:
                     if victim is None:
                         return dict(value=None, state='busy', checked_at=None)
                     del self.rows[victim]
-                row = dict(value=None, loading=False, due=0, saved=0, checked_at=None, failed=False)
+                row = dict(value=None, loading=False, due=0, saved=0, checked_at=None, failed=False,
+                           finished=Event())
                 self.rows[key] = row
             self.rows.move_to_end(key)
             if now >= row['due'] and not row['loading'] and self.slots.acquire(blocking=False):
                 row['loading'] = True
+                row['finished'].clear()
                 self.pool.submit(self._refresh, key, row, loader)
             value = row['value'] if now - row['saved'] <= self.max_age else None
             if value is not None:
@@ -44,6 +46,17 @@ class Snapshots:
             else:
                 state = 'unavailable' if row['failed'] and not row['loading'] else 'loading'
             return dict(value=deepcopy(value), state=state, checked_at=row['checked_at'])
+
+    def wait(self, key, timeout):
+        """Wait for a specific display read without holding the cache lock.
+
+        This never starts work or reads data. Callers recheck their route/scope
+        and read the current entry afterwards, including after invalidation.
+        """
+        with self.lock:
+            row = self.rows.get(key)
+            finished = row['finished'] if row is not None else None
+        return finished.wait(timeout) if finished is not None else False
 
     def _refresh(self, key, row, loader):
         try:
@@ -63,6 +76,7 @@ class Snapshots:
         finally:
             with self.lock:
                 row['loading'] = False
+                row['finished'].set()
             self.slots.release()
 
     def invalidate(self, key):

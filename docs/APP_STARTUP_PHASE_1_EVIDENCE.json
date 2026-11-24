@@ -1,0 +1,111 @@
+{
+  "scope": "Offline framework/transport fixture; not production Home/Orders end-to-end",
+  "versions": {
+    "streamlit": "1.58.0",
+    "starlette": "1.10.0",
+    "uvicorn": "0.54.0",
+    "playwright": "1.65.2"
+  },
+  "source_sha256": {
+    "app.py": "43b00636ddbec7b2708dfc67415be61e3a349f47ea75db39b4e8038c5a7af63e",
+    "sports_cave_server.py": "2d65ea57d01a6bdda201e7b339862996ba042c3d48430329376d38d84c611402",
+    "supabase_backend.py": "a9bd2f6578c167a34ea3f34a15cabc596aaee9b8b3106cc728a5ee1bfe8fdf2f",
+    "startup_performance.py": "e9fda08149349e7292f6e9b79afe9bece49ca3e1fa8ba70e7db74b48d2d39ef5",
+    "static_asset_compression.py": "bd5b537d46a20185971b4baf54e162211e22b12033f409fceb12138d032a5100",
+    "scripts/benchmark_app_startup.py": "d7418fdd28e7c69a2549144720dd5ae0d2a2205e5d06118c35584de09164a626",
+    "scripts/startup_fixture_server.py": "dd9033f67673220e40c4fbfb2b91dadeed3dfacf2fa893d5c1c4fad9a57968da",
+    "tests/fixtures/startup_measurement.py": "d1b8c9eea1985d8c7d34477edab6e7ccb000de898fe6ea533424c497feaf2d03"
+  },
+  "summaries": {
+    "normal": {
+      "fresh_browser": {
+        "n": 10,
+        "p50_ms": 466.916,
+        "p95_ms": 559.008
+      },
+      "cached_reopen": {
+        "n": 10,
+        "p50_ms": 360.402,
+        "p95_ms": 371.579
+      },
+      "warm_home": {
+        "n": 20,
+        "p50_ms": 107.236,
+        "p95_ms": 120.041
+      },
+      "first_orders": {
+        "n": 10,
+        "p50_ms": 315.894,
+        "p95_ms": 721.361
+      },
+      "warm_orders": {
+        "n": 10,
+        "p50_ms": 104.492,
+        "p95_ms": 111.8
+      }
+    },
+    "slow": {
+      "fresh_browser": {
+        "n": 3,
+        "p50_ms": 8797.153,
+        "p95_ms": 8835.184
+      },
+      "cached_reopen": {
+        "n": 3,
+        "p50_ms": 1215.55,
+        "p95_ms": 1258.26
+      },
+      "warm_home": {
+        "n": 6,
+        "p50_ms": 214.888,
+        "p95_ms": 246.644
+      },
+      "first_orders": {
+        "n": 3,
+        "p50_ms": 2174.523,
+        "p95_ms": 2212.623
+      },
+      "warm_orders": {
+        "n": 3,
+        "p50_ms": 261.944,
+        "p95_ms": 267.298
+      }
+    }
+  },
+  "restart_samples": [
+    {
+      "server_healthy_ms": 1155.748,
+      "browser_ms": 555.498,
+      "combined_ms": 1711.246
+    },
+    {
+      "server_healthy_ms": 1129.49,
+      "browser_ms": 555.398,
+      "combined_ms": 1684.888
+    },
+    {
+      "server_healthy_ms": 1139.93,
+      "browser_ms": 502.961,
+      "combined_ms": 1642.891
+    }
+  ],
+  "cold_assets": {
+    "encoded_bytes": 908331,
+    "decoded_bytes": 3317269,
+    "transfer_bytes": 912231
+  },
+  "cached_reload_bundle_transfer_bytes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "external_browser_requests": 0,
+  "browser_errors": 0
+}

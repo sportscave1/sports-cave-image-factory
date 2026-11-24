@@ -18,6 +18,7 @@ import streamlit as st
 import fulfilment_handoff
 import order_refunds
 import ui_loading
+from workspace_display_cache import user_scope
 
 
 class _LazyModule:
@@ -350,7 +351,7 @@ def _start_snapshot_load(search="", *, force=False):
     st.session_state[LOAD_ERROR_KEY] = ""
     st.session_state[LOAD_REQUEST_KEY] = query
     user = st.session_state.get('sports_cave_current_user') or {}
-    st.session_state[LOAD_SCOPE_KEY] = (str(user.get('id') or ''), user.get('session_version'))
+    st.session_state[LOAD_SCOPE_KEY] = user_scope(user)
     st.session_state[LOAD_GENERATION_KEY] = int(st.session_state.get(LOAD_GENERATION_KEY) or 0) + 1
     st.session_state[LOAD_STARTED_KEY] = time.monotonic()
     future = _ORDERS_LOAD_EXECUTOR.submit(
@@ -372,8 +373,9 @@ def _consume_snapshot_load():
     if future is None:
         return "idle"
     user = st.session_state.get('sports_cave_current_user') or {}
-    scope = (str(user.get('id') or ''), user.get('session_version'))
+    scope = user_scope(user)
     if (st.session_state.get(LOAD_SCOPE_KEY, scope) != scope
+            or st.session_state.get('sports_cave_authenticated', True) is False
             or st.session_state.get('current_page', 'Orders') != 'Orders'):
         future.cancel()
         st.session_state[LOAD_FUTURE_KEY] = None
@@ -382,7 +384,8 @@ def _consume_snapshot_load():
     def still_current():
         current_user = st.session_state.get('sports_cave_current_user') or {}
         return (st.session_state.get(LOAD_FUTURE_KEY) is future
-                and (str(current_user.get('id') or ''), current_user.get('session_version')) == scope
+                and st.session_state.get('sports_cave_authenticated', True) is not False
+                and user_scope(current_user) == scope
                 and st.session_state.get('current_page', 'Orders') == 'Orders')
 
     started = float(st.session_state.get(LOAD_STARTED_KEY) or time.monotonic())
@@ -3034,6 +3037,28 @@ def _render_orders_loading_fragment():
     _orders_loading_fragment()
 
 
+def _wait_for_snapshot_load():
+    """Reveal a read in its owning workspace, yielding to navigation every 50ms.
+
+    Only the parallel Orders workspace opts in. The existing read deadline,
+    cancellation/generation checks and error handling remain authoritative.
+    No extra timer, read or executor is created.
+    """
+    while True:
+        status = _consume_snapshot_load()
+        if status != 'loading':
+            return status
+        future = st.session_state.get(LOAD_FUTURE_KEY)
+        if future is None:
+            return 'superseded'
+        try:
+            future.result(timeout=.05)
+        except FutureTimeoutError:
+            pass
+        except Exception:
+            pass  # Consume via the existing safe error path on the next pass.
+
+
 def _render_orders_styles():
     # The existing form key scopes every rule to Orders, including outer padding.
     # Style-only HTML uses Streamlit's event container, reserving no layout slot.
@@ -3041,31 +3066,39 @@ def _render_orders_styles():
         st.html((Path(__file__).parent / "orders_page.css").read_text(encoding="utf-8"))
 
 
-def render_page(selection_guard=None):
+def render_page(selection_guard=None, *, progressive=False):
     page_started = time.perf_counter()
     _ensure_state()
     print("PERF Orders page entry", flush=True)
     _render_orders_styles()
     st.title("Orders")
     search_text, search_submitted = _render_orders_search_form()
+    # Reserve a stable slot on every progressive render so a pending update
+    # cannot replace the previous table's position in the page.
+    load_status = st.empty() if progressive else None
     if _async_orders_load_supported():
         if search_submitted:
             _start_snapshot_load(search_text, force=True)
         elif not st.session_state.get(SNAPSHOT_LOADED_KEY) and st.session_state.get(LOAD_FUTURE_KEY) is None:
             _start_snapshot_load("")
         if st.session_state.get(LOAD_FUTURE_KEY) is not None:
-            # Fast reads can finish in this event's render, avoiding a timer
-            # tick and a second app rerun. Slow reads keep the existing bounded
-            # asynchronous loader and its unchanged loading/error presentation.
-            future = st.session_state[LOAD_FUTURE_KEY]
-            try:
-                future.result(timeout=ORDERS_INLINE_READ_WAIT_SECONDS)
-            except FutureTimeoutError:
-                pass
-            except Exception:
-                # _consume_snapshot_load retains the established error path.
-                pass
-            _consume_snapshot_load()
+            # The primary parallel workspace reveals its completed read directly.
+            # Direct/legacy callers retain their bounded inline/loader path.
+            if progressive:
+                load_status.caption("Updating orders…" if st.session_state.get(ROWS_KEY) else "Loading orders…")
+                if _wait_for_snapshot_load() == 'superseded':
+                    return
+                load_status.empty()
+            else:
+                future = st.session_state[LOAD_FUTURE_KEY]
+                try:
+                    future.result(timeout=ORDERS_INLINE_READ_WAIT_SECONDS)
+                except FutureTimeoutError:
+                    pass
+                except Exception:
+                    # _consume_snapshot_load retains the established error path.
+                    pass
+                _consume_snapshot_load()
         if st.session_state.get(LOAD_FUTURE_KEY) is not None:
             _render_orders_loading_fragment()
             _perf_log("page shell", page_started, state="loading")
