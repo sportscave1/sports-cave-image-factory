@@ -125,8 +125,9 @@ def detail(store,user,identity):
             if st.button('Save product match'):
                 store.moderate(user,identity,product=picked['shopify_product_id']);changed('table','summary');st.rerun()
 
-@st.fragment
 def overview(store,user):
+    # Filters must rerun the page so its completion poll observes newly queued
+    # reads. A fragment-only rerun leaves the previously idle poll disabled.
     with st.container(key='reviews-summary'):
         value,activity=load(('summary',),store.summary)
         st.html(kpi_html(value))
