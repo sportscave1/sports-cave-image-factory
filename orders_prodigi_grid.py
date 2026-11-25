@@ -61,6 +61,14 @@ def batch_status(ids):
     with queue.connect() as c,c.cursor() as q:
         q.execute('SELECT key,value FROM app_settings WHERE key=ANY(%s)',(keys,))
         rows=q.fetchall()
+        from inbox_companion import available,FLAG,order_identity
+        identities={r['key'].split(':')[1]:order_identity(r['value'].get('snapshot',{}).get('identity',{}).get('order_id'))
+                    for r in rows if r['key'].startswith(queue.PREFIX)}
+        flags={}
+        flag_keys=list({FLAG+identity for identity in identities.values() if identity}) if available() else []
+        if flag_keys:
+            q.execute('SELECT key,value FROM app_settings WHERE key=ANY(%s)',(flag_keys,))
+            flags={r['key']:r['value'] for r in q.fetchall()}
     states={r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.PREFIX)}
     states.update({r['key'].split(':')[1]:r['value'] for r in rows if r['key'].startswith(queue.FAILURE_PREFIX) and r['value'].get('active')})
     automatic=next((r['value'].get('enabled') is True for r in rows if r['key']=='orders_submit_after_qa'),False)
@@ -68,6 +76,8 @@ def batch_status(ids):
     runtime={r['key'].split(':')[-1]:r['value'] for r in rows if r['key'].startswith('orders_runtime:')}
     companion=next((r['value'] for r in rows if r['key']=='orders_companion_runtime'),{})
     for aid,value in states.items():
+        inbox=flags.get(FLAG+identities.get(aid,''))
+        if inbox:value['_inbox']=inbox
         value['_submit_enabled']=automatic
         value['_runtime']=public(value,runtime.get(aid,{}))
         value['_companion_version']=companion.get('version','')
@@ -124,6 +134,12 @@ def review(saved,row,jpg):
     from prodigi_dashboard_qa import CHECKS
     state=(saved or {}).get('status','Waiting')
     checks=(saved or {}).get('checks') or {}
+    inbox=(saved or {}).get('_inbox') or {}
+    customer_hold=inbox.get('blocking') is True
+    hold_only=(customer_hold and state in ('Needs QA','Needs review','Ready for manual payment')
+        and not (saved or {}).get('submission') and not (saved or {}).get('last_failure')
+        and bool(checks) and all(checks.get(k) is True for k in CHECKS))
+    if hold_only:state='Customer hold'
     runtime=(saved or {}).get('_runtime') or {}
     stopped=state in ('Needs QA','Needs review','Submission uncertain','Status unavailable')
     snap=(saved or {}).get('snapshot') or {}
@@ -134,18 +150,21 @@ def review(saved,row,jpg):
     if state in ('Submitted','Complete','Certificate pending','Submission uncertain') or str(row.get('prodigi','')).lower()=='complete':
         artwork={**artwork,'active':False,'repairable':False} if artwork else {}
     repairing=bool(artwork.get('active') or artwork.get('repairable')) and state not in ('Submitted','Complete','Certificate pending','Submission uncertain')
-    if repairing:
+    if repairing and not customer_hold:
         state='PSD repairing' if artwork.get('active') else 'PSD repair'
         stopped=False
         items=[dict(label=label,state='pending') for label in CHECKS.values()]
     timestamps=[str(v) for v in (runtime.get('seen_at'),(saved or {}).get('updated_at'),
-        ((saved or {}).get('last_failure') or {}).get('at'),artwork.get('updated_at')) if v]
+        ((saved or {}).get('last_failure') or {}).get('at'),artwork.get('updated_at'),inbox.get('updated_at')) if v]
     message=(artwork.get('message') if repairing else None) or runtime.get('label') or (saved or {}).get('message','Waiting for automatic artwork preparation.')
-    inbox=((saved or {}).get('_inbox') or {}).get('label')
-    if inbox:message=inbox+' · '+message
+    if customer_hold:
+        reason='Address-change request needs review in Inbox Companion.' if inbox.get('kind')=='address' else 'Customer request needs review in Inbox Companion.'
+        message=('Artwork QA passed. '+reason+' This is a submission hold; Reset is not needed.') if hold_only else reason+' '+message
+    elif inbox.get('label'):message=inbox['label']+' · '+message
     return dict(status=state,message=message,
         artwork=artwork,
         progress=runtime,companion_version=(saved or {}).get('_companion_version',''),
+        customer_hold=customer_hold,hold_kind=inbox.get('kind','') if customer_hold else '',has_error=stopped,
         updated_at=latest_update(timestamps),proof_url=jpg if '/api/auto-editions/file?' in jpg else '',
         submission_enabled=(saved or {}).get('_submit_enabled'),
         insert_names=((saved or {}).get('qa') or {}).get('inserts',{}).get('names',[]),
@@ -153,8 +172,8 @@ def review(saved,row,jpg):
         supplier_status=((saved or {}).get('submission') or {}).get('supplier_status',''),
         supplier_checked_at=((saved or {}).get('submission') or {}).get('checked_at'),
         supplier_delayed=((saved or {}).get('supplier_sync') or {}).get('delayed',False),
-        can_merge_restart=stopped and bool((saved or {}).get('merge_pending')),
-        items=items,can_restart=stopped,can_reset=stopped and not bool((saved or {}).get('submission')) and not bool((saved or {}).get('merge_pending')),allocation_id=str(row.get('edition_order_id') or ''),
+        can_merge_restart=stopped and not customer_hold and bool((saved or {}).get('merge_pending')),
+        items=items,can_restart=stopped and not customer_hold,can_reset=stopped and not customer_hold and not bool((saved or {}).get('submission')) and not bool((saved or {}).get('merge_pending')),allocation_id=str(row.get('edition_order_id') or ''),
         order_url=supplier_link((saved or {}).get('order_id')),
         preview=jpg.split('#')[0]+'&preview=1' if '/api/auto-editions/file?' in jpg else '')
 

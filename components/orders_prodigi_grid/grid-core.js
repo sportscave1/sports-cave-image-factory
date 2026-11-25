@@ -1,7 +1,14 @@
 (function(root){
   'use strict';
   const PAGE_SIZE=50;
-  function category(row){if(row.review?.artwork?.active)return 'progress';if(row.review?.artwork?.repairable)return 'attention';if(row.review?.status==='Submitted')return 'ready';if(row.review?.status==='Complete')return 'complete';if(String(row.cells?.prodigi||'').toLowerCase()==='complete')return 'complete';if(row.state?.tone==='success')return 'ready';if(row.review&&!row.review.can_restart)return 'progress';return 'attention';}
+  function category(row){if(row.review?.customer_hold)return 'attention';if(row.review?.artwork?.active)return 'progress';if(row.review?.artwork?.repairable)return 'attention';if(row.review?.status==='Submitted')return 'ready';if(row.review?.status==='Complete')return 'complete';if(String(row.cells?.prodigi||'').toLowerCase()==='complete')return 'complete';if(row.state?.tone==='success')return 'ready';if(row.review&&!row.review.can_restart)return 'progress';return 'attention';}
+  function fulfilmentLabel(row){
+    const q=row.review||{},s=row.state||{};
+    if(q.status==='Customer hold')return 'Customer hold';
+    const supplier={in_production:'In production',partially_shipped:'Partially shipped',shipped:'Shipped',completed:'Completed',cancelled:'Cancelled',failed:'Failed',on_hold:'On hold'};
+    const label=q.status==='Complete'||s.tone==='complete'?'✓ Complete':q.status==='Submitted'?'Submitted':(q.has_error??q.can_restart)?'× Needs attention':['Waiting','Queued','Preparing JPG'].includes(q.status)?'Queued':q.status==='Ready for manual payment'?(q.submission_enabled?'Submitting':'Ready · submit paused'):q.status||'Queued';
+    return supplier[q.supplier_status]||label;
+  }
   function filtered(rows,filter){return filter==='all'?rows:rows.filter(r=>category(r)===filter);}
   function pageRows(rows,page){return rows.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);}
   function togglePage(ids,rows,checked){const next=new Set(ids);for(const r of rows)checked?next.add(r.id):next.delete(r.id);return next;}
@@ -47,6 +54,6 @@
     const active=rows.find(r=>r.id===opened),priority=[...(active?[active,...siblings(rows,active)]:[]),...pageRows(visible(rows,filter,query),page),...rows];
     return [...new Set(priority.map(r=>r.review?.allocation_id).filter(v=>/^[1-9][0-9]*$/.test(v||'')))].slice(0,200);
   }
-  const api={PAGE_SIZE,category,filtered,pageRows,togglePage,orderGroups,siblings,visible,preserveReview,mergeDelta,anchoredPage,statusIds};
+  const api={PAGE_SIZE,category,fulfilmentLabel,filtered,pageRows,togglePage,orderGroups,siblings,visible,preserveReview,mergeDelta,anchoredPage,statusIds};
   if(typeof module!=='undefined')module.exports=api;else root.OrdersGridCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

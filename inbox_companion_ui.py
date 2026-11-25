@@ -45,7 +45,7 @@ def controls(actor):
         st.caption(job.get('message') or 'Checking customer request')
         flag=inbox.read(inbox.FLAG+job['shopify_order_id'])
         if flag.get('blocking') and flag.get('request')==job['key']:
-            st.caption('Review the customer email and supplier order before clearing this flag. Clearing it does not resume Prodigi.')
+            st.caption('Review the customer email and supplier order before clearing this flag. Verified, unsubmitted drafts return to fresh QA before configured submission. Existing supplier pauses remain unchanged.')
             if st.button('Reviewed — clear order flag',key='inbox-review-'+job['key']):
                 inbox.review(actor,job['key']);st.rerun()
 
