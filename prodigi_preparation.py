@@ -201,7 +201,9 @@ def shopify_recipient(raw, order_id):
     address=address if isinstance(address,dict) else {}
     name=source.get('shipping_name') or address.get('name') or ' '.join(str(address.get(k) or '') for k in
         (('firstName','lastName') if 'firstName' in address else ('first_name','last_name'))).strip()
-    recipient={'name':name,'address':{'line1':address.get('address1'),'line2':address.get('address2'),
+    # Prodigi imports a company into line 2 when Shopify has no apartment line.
+    # Preserve an explicit apartment/unit; never weaken the full-address comparison.
+    recipient={'name':name,'address':{'line1':address.get('address1'),'line2':address.get('address2') or address.get('company'),
         'townOrCity':address.get('city'),'stateOrCounty':address.get('province'),
         'postalOrZipCode':address.get('zip'),'countryCode':address.get('countryCodeV2') or address.get('country_code') or address.get('countryCode')},
         'state_aliases':[address.get('province'),address.get('provinceCode') or address.get('province_code')]}
