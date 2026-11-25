@@ -355,6 +355,9 @@ def build_mime(draft, mailbox, sender_name, signatures, *, as_draft=False):
         if people and (name != "Bcc" or as_draft):
             msg[name] = address_text(people)
     msg["Subject"] = subject
+    if draft.get('auto_submitted') == 'auto-replied':
+        msg['Auto-Submitted'] = 'auto-replied'
+        msg['X-Auto-Response-Suppress'] = 'All'
     if draft.get("mode") in {"reply", "reply_all"}:
         reply = message_ids(draft.get("in_reply_to"))
         refs = tuple(dict.fromkeys(i for r in draft.get("references", []) for i in message_ids(r)))

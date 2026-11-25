@@ -251,6 +251,7 @@ class IdleLifecycle:
         self.app, self.factory, self.watcher = app, factory, None
         self.inbox_reads = None
         self.outbox = None
+        self.certificate_replies = None
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'lifespan':
@@ -258,6 +259,8 @@ class IdleLifecycle:
 
         async def lifecycle_receive():
             message = await receive()
+            if message['type'] == 'lifespan.shutdown' and self.certificate_replies:
+                await asyncio.to_thread(self.certificate_replies.close)
             if message['type'] == 'lifespan.shutdown' and self.watcher:
                 await asyncio.to_thread(self.watcher.close)
             if message['type'] == 'lifespan.shutdown' and self.inbox_reads:
@@ -283,5 +286,12 @@ class IdleLifecycle:
                     # IDLE is optional; resource/thread initialization cannot prevent
                     # an otherwise healthy web server from serving polling/manual mail.
                     LOGGER.warning('email_idle_start_failure type=%s polling_fallback=true', type(error).__name__)
+                if self.factory is None:
+                    try:
+                        from inbox_certificate_replies import CertificateReplyWorker
+                        self.certificate_replies = CertificateReplyWorker(load_configuration())
+                        self.certificate_replies.start()
+                    except Exception as error:
+                        LOGGER.warning('certificate_reply_start_failure type=%s', type(error).__name__)
             await send(message)
         await self.app(scope, lifecycle_receive, lifecycle_send)

@@ -2,7 +2,8 @@
 import argparse,json,os,re,subprocess,sys,time
 from pathlib import Path
 
-PYTHON=['test_prodigi_signin.py','test_prodigi_upload_recovery.py','test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
+PYTHON=['test_inbox_certificate_replies.py','test_support_email_signatures.py','test_support_email_v2.py','test_support_email_idle.py',
+ 'test_prodigi_signin.py','test_prodigi_upload_recovery.py','test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
  'test_prodigi_verified_sibling.py','test_inbox_companion.py','test_prodigi_product_browser.py','test_prodigi_browser.py','test_prodigi_dashboard_qa.py',
  'test_prodigi_order_group.py','test_prodigi_submission.py','test_prodigi_stage.py','test_prodigi_reset.py',
  'test_orders_fast_handoffs.py','test_orders_runtime.py','test_orders_qa_scaling.py','test_orders_prodigi_grid.py',
