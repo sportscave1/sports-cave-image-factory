@@ -30,20 +30,39 @@ def controls(actor):
                 inbox.review(actor,job['key']);st.rerun()
 
 
+def _certificate_toggle(actor):
+    import streamlit as st
+    import inbox_certificate_replies as replies
+    try:
+        replies.configure(actor, bool(st.session_state['certificate-replies-enabled']))
+    except Exception:
+        st.session_state['certificate-replies-action-error'] = 'The reply setting could not be changed. Try again shortly.'
+
+
+def _certificate_current(actor, header):
+    import streamlit as st
+    import inbox_certificate_replies as replies
+    try:
+        replies.configure(actor, True, existing=header)
+        st.session_state.pop('certificate-replies-current', None)
+    except Exception:
+        st.session_state['certificate-replies-action-error'] = 'This request could not be queued. Check it again; no new reply was authorised.'
+
+
 def certificate_controls(actor):
     import streamlit as st
     import inbox_certificate_replies as replies
     import inbox_companion as state
     with st.expander('Missing certificate replies', expanded=True):
         config = state.read(replies.SETTING)
-        enabled = st.toggle('Automatically reply to missing certificate or packing slip emails',
-                            value=bool(config.get('enabled')), key='certificate-replies-enabled')
-        if enabled != bool(config.get('enabled')):
-            try:
-                replies.configure(actor, enabled)
-                st.rerun()
-            except (ValueError, PermissionError) as error:
-                st.error(str(error))
+        # Synchronise before instantiating the widget. Only actual user callbacks
+        # change server settings; stale page state must never disable another action.
+        st.session_state['certificate-replies-enabled'] = bool(config.get('enabled'))
+        st.toggle('Automatically reply to missing certificate or packing slip emails',
+                  key='certificate-replies-enabled', on_change=_certificate_toggle, args=(actor,))
+        error = st.session_state.pop('certificate-replies-action-error', None)
+        if error:
+            st.error(error)
         st.caption('Links customers to My Collection, mentions framing and asks for a review. Uses Nathan’s saved signature. Runs on the server; checks new mail only and leaves existing replies and drafts alone.')
         if st.button('Check newest Inbox request', key='certificate-replies-preview'):
             try:
@@ -56,13 +75,8 @@ def certificate_controls(actor):
                 st.write('Reply to ' + preview['header']['sender']['email'])
                 st.markdown(preview['html'], unsafe_allow_html=True)
                 st.caption('Nathan’s existing signature is appended once when sent.')
-                if st.button('Enable and reply to this request', key='certificate-replies-current-send'):
-                    try:
-                        replies.configure(actor, True, existing=preview['header'])
-                        st.session_state.pop('certificate-replies-current', None)
-                        st.rerun()
-                    except Exception:
-                        st.error('This request could not be queued. Check it again; no new reply was authorised.')
+                st.button('Enable and reply to this request', key='certificate-replies-current-send',
+                          on_click=_certificate_current, args=(actor, preview['header']))
             else:
                 st.info(preview['reason'])
         with state.prep.connect() as c, c.cursor() as q:

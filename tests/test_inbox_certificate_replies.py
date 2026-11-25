@@ -350,3 +350,32 @@ def test_plain_human_reply_has_no_automatic_response_headers():
     msg = BytesParser(policy=email_policy.default).parsebytes(
         build_mime(draft, MAILBOX, settings['sender_name'], settings['signatures'])['bytes'])
     assert not msg['Auto-Submitted'] and not msg['X-Auto-Response-Suppress']
+
+
+@pytest.mark.parametrize('action', ['current', 'toggle'])
+def test_ui_activation_survives_reruns_without_stale_toggle_disabling_it(monkeypatch, action):
+    from unittest.mock import MagicMock
+    from streamlit.testing.v1 import AppTest
+    config = {}
+    calls = []
+    def configure(actor, enabled, **kwargs):
+        calls.append(enabled)
+        config['enabled'] = enabled
+    monkeypatch.setattr(state, 'read', lambda key: deepcopy(config))
+    monkeypatch.setattr(replies, 'configure', configure)
+    monkeypatch.setattr(replies, 'preview_latest', lambda actor:
+                        dict(status='eligible', html='<p>Click the link and log in.</p>', header=header()))
+    conn = MagicMock()
+    conn.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchall.return_value = []
+    monkeypatch.setattr(state.prep, 'connect', lambda: conn)
+    app = AppTest.from_string("from inbox_companion_ui import certificate_controls\ncertificate_controls({'id':'fixture','role':'admin'})").run()
+    if action == 'current':
+        app.button(key='certificate-replies-preview').click().run()
+        app.button(key='certificate-replies-current-send').click().run()
+    else:
+        app.toggle(key='certificate-replies-enabled').set_value(True).run()
+    app.run()
+    assert not app.exception and config['enabled'] is True and calls == [True]
+    assert app.toggle(key='certificate-replies-enabled').value is True
+    app.toggle(key='certificate-replies-enabled').set_value(False).run()
+    assert config['enabled'] is False and calls == [True, False]
