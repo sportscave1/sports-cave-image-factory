@@ -50,7 +50,7 @@ def classify(subject,text,*,is_reply=False):
     # A narrowly explicit billing-only correction does not change delivery.
     # Full-match authored text so mixed/ambiguous requests still require review.
     billing_only=re.fullmatch(r"\s*(?:(?:my|the)\s+)?billing\s+address\s+(?:(?:is|was)\s+)?(?:incorrect|wrong)[.!?\s]*",body,re.I)
-    if billing_only and not re.search(r'\b(shipping|delivery|ship|deliver|cancel|refund|hold|pause|frame|size)\b',str(subject),re.I):
+    if billing_only and not re.search(r'\b(shipping|delivery|ship|deliver|cancel|cancellation|refund|hold|pause|frame|size|colour|color|product|artwork)\b',str(subject),re.I):
         return {'kind':'ignore','text':body,'reason':'billing_only'}
     # An order number in a quoted historical exchange is not a new instruction.
     product=bool(re.search(r'\b(size|frame|colour|color|cancel|cancellation|refund|hold|pause|product|artwork)\b',value))

@@ -23,6 +23,8 @@ def test_explicit_billing_only_correction_does_not_hold_shipping(body):
     ('','My billing address is incorrect. Please change my shipping address too.'),
     ('','My billing address is incorrect. Cancel the order.'),
     ('Change shipping address','My billing address is incorrect'),
+    ('Order cancellation','My billing address is incorrect'),
+    ('Wrong artwork','My billing address is incorrect'),
     ('','My address is incorrect'),
 ])
 def test_billing_guard_never_suppresses_delivery_or_ambiguous_requests(subject,body):
