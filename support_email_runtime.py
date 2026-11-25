@@ -18,6 +18,10 @@ _BACKGROUND = ContextVar("email_background", default=False)
 _FORCE = ContextVar("email_force", default=False)
 
 
+def background_operation():
+    return _BACKGROUND.get()
+
+
 class Deferred(RuntimeError):
     """A check was skipped, not a new failed connection."""
     def __init__(self, message, *, reason="busy"):

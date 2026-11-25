@@ -74,3 +74,19 @@ button{min-height:30px;border-radius:4px;transition:background-color .12s ease}b
 .companion-sent{display:inline-block;color:#36745a;font-size:10px;font-weight:500;white-space:nowrap;margin-right:8px}
 .message-time{display:inline-flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 .message-time .companion-sent{margin-right:0}
+
+/* Phase 3: accessible status, stable loading and compact mobile actions. */
+#mail{grid-template-rows:48px auto auto auto minmax(0,1fr)}
+.email-sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.statusbar{min-height:36px;padding:7px 14px;gap:8px 16px;align-items:center;flex-wrap:wrap;background:#f8faf9;border-bottom:1px solid var(--line)}
+.connection-summary{display:flex;gap:7px 12px;align-items:center;flex-wrap:wrap;min-width:0;font-size:11px;color:#53655f}
+.connection-label{font-weight:600;color:#286044;white-space:nowrap}.connection-mailbox{overflow-wrap:anywhere}.connection-last-sync,.connection-retry-time{color:#68736f}
+[data-connection=reconnecting] .connection-label{color:#805e13}[data-connection=attention] .connection-label{color:#a13e32}[data-connection=syncing] .connection-label{color:#326b8c}
+.statusbar .notice{font-size:11px;color:#586760;line-height:1.45;white-space:normal;overflow:visible;text-overflow:clip}.connection-retry{min-height:30px;margin-left:6px;padding:3px 9px}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2b7569;outline-offset:2px}
+.conversation:focus-visible{position:relative;z-index:2;outline-offset:-3px;background:#eef5f2}.subject-header h2:focus{outline:2px solid #2b7569;outline-offset:4px}
+.mail-loading{padding:24px 20px;font-size:12px;color:#66756f}.mail-skeleton{margin-top:16px;display:grid;gap:11px;max-width:620px}.mail-skeleton i{display:block;height:10px;background:#e9eeeb;border-radius:4px;animation:email-placeholder 1.5s ease-in-out infinite alternate}.mail-skeleton i:nth-child(2){width:94%}.mail-skeleton i:nth-child(3){width:72%}@keyframes email-placeholder{to{opacity:.45}}
+@media(max-width:540px){#mail{grid-template-rows:82px auto auto auto minmax(0,1fr)}.statusbar{padding:7px 9px;gap:5px;align-items:flex-start}.connection-summary{gap:4px 8px}.statusbar .notice{flex-basis:100%}.statusbar>span:first-child{max-width:none}.reading-toolbar [data-action=archive],.reading-toolbar [data-action=trash],.reading-toolbar [data-action=mark_read],.reading-toolbar [data-action=mark_unread],.reading-toolbar [data-action=star],.reading-toolbar [data-action=unstar],.reading-toolbar [data-action=junk]{display:none}.message-time{justify-content:flex-start;gap:4px 9px}.subject-header h2{overflow-wrap:anywhere}.mail-loading{padding:20px 14px}}
+@media(prefers-reduced-motion:reduce){.mail-skeleton i{animation:none}}
+
+.email-operations{padding:12px;border:1px solid var(--line);border-radius:5px;background:#f4f8f5;line-height:1.5}.email-operations p{margin:5px 0;white-space:normal;overflow-wrap:anywhere}

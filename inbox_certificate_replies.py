@@ -7,6 +7,7 @@ import uuid
 
 import inbox_companion as state
 import inbox_certificate_policy as policy
+from support_email_operations import METRICS, backlog_progress, poll_delay, HealthMonitor
 
 SETTING = 'inbox_certificate_reply_settings'
 PREFIX = 'inbox_certificate_reply:'
@@ -172,7 +173,7 @@ def handle(imap, header, config):
         state.save(q, key, record)
 
 
-def tick(imap):
+def tick(imap, *, progress=None):
     from support_email_store import load_assignees
     config = state.read(SETTING)
     if not config.get('enabled') or config.get('mailbox') != imap.configuration.address.casefold():
@@ -203,14 +204,22 @@ def tick(imap):
                             handle(imap, header, config)
                     if len(messages) > 1:
                         cursor['last_uid'] = int(messages[0]['uid'])
+        saved_progress = None
         with state.prep.connect() as c, c.cursor() as q:
             q.execute('SELECT value FROM app_settings WHERE key=%s FOR UPDATE', (SETTING,))
             row = q.fetchone()
             fresh = row['value'] if row else {}
             if (fresh.get('enabled') and fresh.get('changed_at') == config.get('changed_at')
                     and fresh.get('cursor') == config.get('cursor')):
+                now = state.prep.now()
+                saved_progress = backlog_progress(fresh, current, cursor, now)
                 state.save(q, SETTING, {**fresh, 'cursor': cursor, 'initial_message': None,
-                                      'checked_at': state.prep.now()})
+                                      'checked_at': now, **saved_progress})
+                if saved_progress['pending_visible_count'] or saved_progress['pending_window_limited']:
+                    LOG.info('certificate_reply_backlog visible_pending=%d window_limited=%s',
+                             saved_progress['pending_visible_count'], saved_progress['pending_window_limited'])
+        if progress is not None and saved_progress is not None:
+            progress(saved_progress)
         return True
     finally:
         _gate.release()
@@ -221,6 +230,7 @@ class CertificateReplyWorker:
         self.configuration = configuration
         self.stop = threading.Event()
         self.thread = None
+        self.health_monitor = None
 
     def run(self):
         from support_email_provider import ImapProvider
@@ -229,19 +239,27 @@ class CertificateReplyWorker:
             delay = 30
             started = time.monotonic()
             try:
-                checked = tick(ImapProvider(self.configuration, background=True))
+                progress = []
+                checked = tick(ImapProvider(self.configuration, background=True), progress=progress.append)
                 failures = 0
+                delay = poll_delay(progress[-1]) if checked and progress else 30
+                METRICS.poll('success' if checked else 'idle', (time.monotonic()-started)*1000, delay)
                 if checked:
                     LOG.info('certificate_reply_check outcome=success duration_ms=%.1f',
                              (time.monotonic() - started) * 1000)
             except Exception as error:
                 failures, delay = retry_delay(error, failures)
+                METRICS.poll('waiting' if getattr(error, 'code', '') in {'busy', 'pending', 'deferred'} else 'failed',
+                             (time.monotonic()-started)*1000, delay)
                 LOG.warning('certificate_reply_worker category=%s code=%s retry_seconds=%.1f',
                             type(error).__name__, getattr(error, 'code', 'internal'), delay)
+            if self.health_monitor is not None:
+                self.health_monitor.check(self.configuration.address)
             self.stop.wait(delay)
 
     def start(self):
         if self.configuration.configured and not self.thread and not self.stop.is_set():
+            self.health_monitor = HealthMonitor()
             self.thread = threading.Thread(target=self.run, name='certificate-replies', daemon=True)
             self.thread.start()
 

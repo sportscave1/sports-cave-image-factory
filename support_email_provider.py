@@ -13,6 +13,7 @@ import hashlib
 import base64
 import imaplib
 import logging
+from support_email_operations import METRICS as OP_METRICS
 import os
 import re
 import socket
@@ -21,7 +22,7 @@ import time
 import errno
 from typing import Protocol
 from urllib.parse import urlsplit
-from support_email_runtime import RUNTIME, Deferred, operation
+from support_email_runtime import RUNTIME, Deferred, operation, background_operation
 
 
 LOGGER = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ def _retry_read(method):
     def read(self, *args, **kwargs):
         for attempt in range(2):
             try:
-                with operation(force=True) if attempt else nullcontext():
+                with operation(background=getattr(self, "background", False) or background_operation(), force=True) if attempt else nullcontext():
                     result = method(self, *args, **kwargs)
                 if attempt:
                     LOGGER.info("email_imap_reconnect_succeeded operation=%s", method.__name__)
@@ -499,13 +500,21 @@ class _ManagedSSL(_SSL_CLASS):
 
 
 class ImapProvider:
-    def __init__(self, configuration, *, connection_factory=None, runtime=None, background=False):
+    def __init__(self, configuration, *, connection_factory=None, runtime=None, background=False, reuse_reads=False):
         self.configuration = configuration
         self.connection_factory = connection_factory or (_ManagedSSL if imaplib.IMAP4_SSL is _SSL_CLASS else imaplib.IMAP4_SSL)
         # Injected transports are isolated by default; load tests explicitly share a runtime.
         self.runtime = runtime if runtime is not None else (RUNTIME if connection_factory is None else None)
         self.background = background
         self._read_session = ContextVar('mailbox_read_session', default=None)
+        self._read_slot = None
+        if reuse_reads:
+            from support_email_read_connection import ReadConnectionSlot
+            self._read_slot = ReadConnectionSlot(self._close_connection)
+
+    def close_read_connections(self):
+        if self._read_slot:
+            self._read_slot.close()
 
     @contextmanager
     def read_session(self):
@@ -564,7 +573,23 @@ class ImapProvider:
 
     @contextmanager
     def _wire_connection(self, folder="INBOX", expected_validity=None, *, write=False):
-        conn = None
+        slot = self._read_slot
+        if slot is None:
+            with self._perform_connection(folder, expected_validity, write=write) as result:
+                yield result
+            return
+        with slot.lock:
+            if write:
+                slot.discard()
+            wire = None if write else slot.take()
+            LOGGER.info('email_read_connection reused=%s', str(wire is not None).lower())
+            with self._perform_connection(folder, expected_validity, write=write, conn=wire,
+                                          retain=None if write else slot.keep) as result:
+                yield result
+
+    @contextmanager
+    def _perform_connection(self, folder, expected_validity, *, write=False, conn=None, retain=None):
+        retained = False
         stage = "configuration"
         started = time.monotonic()
         try:
@@ -574,13 +599,14 @@ class ImapProvider:
             argument = folder_argument(folder) if folder is not None else None
             stage = "connect"
             LOGGER.debug("email_imap_check_started")
-            conn = self.connection_factory(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=cfg.timeout)
-            LOGGER.info('email_stage stage=connect duration_ms=%.1f', (time.monotonic()-started)*1000)
-            conn.debug = 0
-            stage = "authentication"
-            auth_started = time.monotonic()
-            self._ok(conn.login(cfg.address, cfg.password), stage=stage)
-            LOGGER.info('email_stage stage=authentication duration_ms=%.1f', (time.monotonic()-auth_started)*1000)
+            if conn is None:
+                conn = self.connection_factory(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=cfg.timeout)
+                LOGGER.info('email_stage stage=connect duration_ms=%.1f', (time.monotonic()-started)*1000)
+                conn.debug = 0
+                stage = "authentication"
+                auth_started = time.monotonic()
+                self._ok(conn.login(cfg.address, cfg.password), stage=stage)
+                LOGGER.info('email_stage stage=authentication duration_ms=%.1f', (time.monotonic()-auth_started)*1000)
             LOGGER.debug("email_imap_connection_opened")
             count, uidvalidity = 0, ""
             if argument is not None:
@@ -597,11 +623,15 @@ class ImapProvider:
             stage = "operation"
             yield conn, count, uidvalidity
             LOGGER.debug("email_imap_check_success duration_ms=%d", (time.monotonic() - started) * 1000)
-        except MailboxError:
+            if retain is not None:
+                retained = retain(conn)
+        except MailboxError as error:
+            OP_METRICS.connection_failed(error.code)
             raise
         except Exception as error:
             # Never log provider response text, arguments, repr, tracebacks or credentials.
             failure = _failure(error, stage)
+            OP_METRICS.connection_failed(failure.code)
             LOGGER.warning("email_imap_check_failure stage=%s code=%s type=%s errno=%s winerror=%s duration_ms=%d",
                 failure.stage, failure.code, type(error).__name__,
                 getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
@@ -609,24 +639,29 @@ class ImapProvider:
                 (time.monotonic() - started) * 1000)
             raise failure from None
         finally:
-            if conn is not None:
-                logout_started = time.monotonic()
-                try:
-                    sock = vars(conn).get('sock')
-                    if sock is not None:sock.settimeout(1)  # Cleanup must not add another 8s after failure.
-                    conn.logout()  # Never CLOSE/EXPUNGE, even after a write.
-                except Exception:
-                    pass
-                finally:
-                    # logout can time out or be interrupted. shutdown only closes the
-                    # transport; unlike IMAP CLOSE it never expunges mailbox messages.
-                    try:
-                        conn.shutdown()
-                    except Exception:
-                        pass
-                    finally:
-                        _close_resources(conn)
-                        LOGGER.info('email_stage stage=logout duration_ms=%.1f', (time.monotonic()-logout_started)*1000)
+            OP_METRICS.observe('imap_write_ms' if write else 'imap_read_ms', (time.monotonic()-started)*1000)
+            if conn is not None and not retained:
+                self._close_connection(conn)
+
+    @staticmethod
+    def _close_connection(conn):
+        logout_started = time.monotonic()
+        try:
+            sock = vars(conn).get('sock')
+            if sock is not None:sock.settimeout(1)  # Cleanup must not add another 8s after failure.
+            conn.logout()  # Never CLOSE/EXPUNGE, even after a write.
+        except Exception:
+            pass
+        finally:
+            # logout can time out or be interrupted. shutdown only closes the
+            # transport; unlike IMAP CLOSE it never expunges mailbox messages.
+            try:
+                conn.shutdown()
+            except Exception:
+                pass
+            finally:
+                _close_resources(conn)
+                LOGGER.info('email_stage stage=logout duration_ms=%.1f', (time.monotonic()-logout_started)*1000)
 
     @staticmethod
     def _ok(response, *, stage="operation"):
@@ -717,7 +752,7 @@ class ImapProvider:
                     if not selected or selected[0].decode("ascii") != validity:
                         raise MailboxError(SAFE_ERROR)
                     data = self._ok(conn.uid("FETCH", f"{low}:{high}",
-                        "(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"))
+                        "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"))
                     rows = [row for row in self._headers(data, validity, "INBOX")
                             if low <= int(row["uid"]) <= high]
                 else:

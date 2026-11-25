@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+const {createSelectionTiming}=require('../components/support_email/mail.js');
+let now=0,events=[];
+const timing=createSelectionTiming(()=>now,event=>events.push(event));
+let first=timing.start('cold');now=12;timing.stage(first,'header');
+now=100;timing.stage(first,'body');timing.stage(first,'body');
+assert.deepEqual(events.map(e=>[e.source,e.stage,e.duration_ms]),[['cold','header',12],['cold','body',100]]);
+let second=timing.start('cached');now=103;timing.stage(first,'body');timing.stage(second,'body');
+assert.equal(events.at(-1).duration_ms,3);
+timing.cancel();timing.stage(second,'header');assert.equal(events.length,3);
+assert.deepEqual(Object.keys(events[0]).sort(),['duration_ms','event','source','stage']);
+console.log('Selection timing deduplication, cancellation, generation fence and privacy checks passed.');

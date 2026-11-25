@@ -714,6 +714,9 @@ class Workspace:
         thread = self._thread()
         cache_key = (version, thread_key)
         self.state["history_pending"] = False
+        if self.state.get('history_retry_key') == cache_key and time.monotonic() < self.state.get('history_retry_at', 0):
+            self.state['history_pending'] = True
+            return
         if not thread or self.resolved_threads.get(cache_key) is not None:
             return
         identifiers = list(dict.fromkeys(i for m in thread["messages"]
@@ -728,6 +731,10 @@ class Workspace:
             if isinstance(error, MailboxError) and error.code == 'pending':
                 self.state['history_pending'] = True
                 return
+            if isinstance(error, MailboxError) and error.code in {'busy', 'deferred'}:
+                self.state.update(history_pending=True, history_retry_key=cache_key,
+                                  history_retry_at=time.monotonic()+max(5, error.retry_after or 5))
+                return
             self.state["notice"] = "Message loaded. Older conversation history is temporarily unavailable."
             return
         unique = {}
@@ -737,6 +744,7 @@ class Workspace:
         group = next((t for t in groups if set(t["aliases"]).intersection(thread["aliases"])), thread)
         self.state["conversation"] = group["messages"]
         self.resolved_threads.put(cache_key, group["messages"])
+        self.state.pop('history_retry_at', None)
 
     def _sync_draft(self, payload):
         draft = self.state.get("draft")
@@ -825,6 +833,8 @@ class Workspace:
             elif action == 'mail_diagnostics':
                 if not os_accounts.is_admin(self.user):raise PermissionError('Admin required.')
                 self.state['mail_diagnostics'] = self.durable.diagnostics(self.config.address) if self.durable else {}
+                from support_email_operations import diagnostics
+                self.state['operations_diagnostics'] = diagnostics(self.config.address, self.state['mail_diagnostics'], event.get('selection_metrics'))
             elif action == 'load_sent_after_send':
                 self._load_sent_after_send()
             elif action == 'sync_index':
@@ -1799,6 +1809,7 @@ class Workspace:
             'sent_folder_load_pending':bool(s.get('sent_folder_load_pending') and s['view']=='mail'),
             'admin_diagnostics':s.get('mail_diagnostics') if os_accounts.is_admin(user) else None,
             'can_diagnose':os_accounts.is_admin(user),
+            'admin_operations':s.get('operations_diagnostics') if os_accounts.is_admin(user) else None,
             "inbox_status": s.get("inbox_status", {}),
             "smtp_configured": self.smtp_config.configured and self.smtp_config.address.casefold() == self.config.address.casefold(),
             "error": s.get("error", ""), "live_error": s.get("live_error", ""), "notice": s["notice"] or s.get("live_error", ""), "ack": s.get("ack", ""),
@@ -1824,6 +1835,8 @@ class Workspace:
             "contact_result": s.get('contact_result') if can_read and s['view']=='compose' else None,
             "bulk_result": s.get('bulk_result') if can_read else None,
             "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": same_view and s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
+            "history_retry_ms": max(0, int((s.get('history_retry_at', 0)-time.monotonic())*1000))
+                if s.get('history_retry_key') == (s["mailbox_version"], s.get("selected")) else 0,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),

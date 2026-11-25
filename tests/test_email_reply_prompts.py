@@ -75,7 +75,7 @@ class ReplyPromptTests(unittest.TestCase):
     def test_instructions_discount_permission_no_invention_and_signoff(self):
         for requirement in ('thank-you specifically for sending the photo or video','15% off their next Sports Cave order',
           'Do not imply that the 15% discount was given in exchange for the positive review',
-          'with their permission','Do not invent any facts','Do not mention Judge.me','Do not include a subject line',
+          'with their permission','Do not invent any facts','Do not mention internal review infrastructure','Do not include a subject line',
           'Do not use bullet points or markdown','70–120 words','Thanks again,\nNathan\nSports Cave',
           'Return ONLY the finished customer email reply'):
             self.assertIn(requirement,FIVE_STAR_TEMPLATE)

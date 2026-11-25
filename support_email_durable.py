@@ -242,7 +242,16 @@ class MailStore(SignalStore):
             cur.execute('''SELECT status,error_category,updated_at FROM support_email_outbox
                 WHERE mailbox=%s AND attempts>0 ORDER BY updated_at DESC LIMIT 1''',(mailbox.lower(),))
             attempt=cur.fetchone()
-            return {'counts':counts,'last_attempt':{k:str(v) for k,v in attempt.items()} if attempt else None}
+            cur.execute('''SELECT
+                MIN(created_at) FILTER (WHERE status IN ('queued','in_progress')) AS oldest_queued_at,
+                COUNT(*) FILTER (WHERE status='unknown') AS unknown_count,
+                COUNT(*) FILTER (WHERE status='accepted' AND copy_status NOT IN ('present','appended')) AS copy_pending_count,
+                MIN(COALESCE(accepted_at,updated_at)) FILTER
+                  (WHERE status='accepted' AND copy_status NOT IN ('present','appended')) AS oldest_copy_pending_at
+                FROM support_email_outbox WHERE mailbox=%s''',(mailbox.lower(),))
+            ages=cur.fetchone() or {}
+            return {'counts':counts,'last_attempt':{k:str(v) for k,v in attempt.items()} if attempt else None,
+                    **{k:(int(v) if k.endswith('_count') else v.isoformat() if v else None) for k,v in ages.items()}}
 
 
 class DurableRegistry:

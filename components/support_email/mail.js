@@ -129,7 +129,7 @@
   }
   function readerStamp(m,ignoreFlags=false){
     const rows=ignoreFlags?(m.messages||[]).map(({unread,starred,...row})=>row):m.messages;
-    return JSON.stringify([m.selected,m.view,m.active_message,rows,m.error,m.draft,m.send_result,m.send_stage,m.sent_result,m.draft_pending,m.context,m.settings,m.settings_available,m.signature_preference]);
+    return JSON.stringify([m.selected,m.view,m.active_message,rows,m.error,m.draft,m.send_result,m.send_stage,m.sent_result,m.draft_pending,m.context,m.settings,m.settings_available,m.signature_preference,m.view==='settings'?[m.admin_diagnostics,m.admin_operations,m.sync_health]:null]);
   }
   function patchReadFlags(pane,active){
     if(!active)return;
@@ -190,10 +190,146 @@
   function messageTime(row) {
     return `<span class="message-time">${companionBadge(row.companion)}<small>${esc(row.time)}</small></span>`;
   }
-  if (typeof module !== 'undefined') {module.exports={companionBadge,conversationPreview,messageTime,componentHandshake,bindEmailFrame,readerStamp,patchReadFlags,searchKnownRows,safeReaderView,patchImagePermission,receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,deliveryHistory,createViewCache,threadView,recoveryFeedback}; return;}
+  function connectionPresentation(m){
+    const health=m.sync_health||{},recovery=m.recovery||{};
+    const attention=['authentication','configuration','tls'].includes(health.category)||recovery.state==='stopped';
+    const reconnecting=health.state==='RECONNECTING'||(!m.read_pending&&Boolean(m.error||m.live_error||recovery.state==='waiting'));
+    const delay=Math.max(Number(recovery.delay_ms)||0,(Number(health.retry_after)||0)*1000);
+    if(!m.configured)return {state:'offline',label:'Mailbox not connected',detail:'Connect this mailbox in Email settings.',retry_ms:0,attention:false};
+    if(attention)return {state:'attention',label:'Mailbox connection needs attention',detail:'Your saved mail and drafts are kept. Check the mailbox connection in Email settings.',retry_ms:0,attention:true};
+    if(reconnecting)return {state:'reconnecting',label:'Reconnecting',detail:m.threads?.length?'Reconnecting · showing last synced mail. Your drafts are kept.':'We’ll reconnect automatically. Your drafts are kept.',retry_ms:Number.isFinite(delay)?Math.min(900000,Math.max(0,delay)):0,attention:false};
+    if(m.initial_load_pending||m.read_pending||m.sent_folder_load_pending||health.state==='SYNCING')return {state:'syncing',label:'Syncing',detail:m.threads?.length?'Updating your mailbox.':'Loading your mailbox…',retry_ms:0,attention:false};
+    return {state:'connected',label:'Connected',detail:'',retry_ms:0,attention:false};
+  }
+  function loadingPlaceholder(){
+    return '<div class="message-loading mail-loading" role="status"><span>Loading message…</span><div class="mail-skeleton" aria-hidden="true"><i></i><i></i><i></i></div></div>';
+  }
+  function listNavigationIndex(key,index,count){
+    if(!count)return -1;
+    if(key==='Home')return 0;if(key==='End')return count-1;
+    if(key==='ArrowDown')return Math.min(count-1,index+1);
+    if(key==='ArrowUp')return Math.max(0,index-1);
+    return -1;
+  }
+  function createSelectionSummary(){
+    const rows={cold_header:[],cold_body:[],cached_header:[],cached_body:[]};
+    return {
+      observe(metric){
+        const name=metric.source+'_'+metric.stage,value=metric.duration_ms;
+        if(!Object.hasOwn(rows,name)||typeof value!=='number'||!Number.isFinite(value)||value<0||value>900000)return;
+        rows[name].push(value);if(rows[name].length>200)rows[name].shift();
+      },
+      snapshot(){return Object.fromEntries(Object.entries(rows).map(([name,values])=>{
+        const sorted=[...values].sort((a,b)=>a-b),count=sorted.length;
+        return [name,{count,p50_ms:count?sorted[Math.ceil(count*.5)-1]:null,p95_ms:count?sorted[Math.ceil(count*.95)-1]:null}];
+      }));}
+    };
+  }
+  function operationsFeedback(value){
+    if(!value)return '';
+    const labels={healthy:'Email operations healthy',off:'Certificate automation is off',warming_up:'Certificate worker is starting',needs_attention:'Email operations need attention'};
+    const age=value.last_successful_poll_age_seconds;
+    return '<section class="email-operations" aria-label="Email operations"><strong>'+esc(labels[value.state]||'Email operations status unavailable')+'</strong>'+
+      (Number.isFinite(age)?'<p>Last successful certificate check: '+esc(Math.round(age))+'s ago.</p>':'')+
+      (value.alerts||[]).map(a=>'<p>'+esc(a.message)+'</p>').join('')+
+      (value.observed_at?'<small>Snapshot: '+esc(value.observed_at)+'. Refresh Mailbox diagnostics for current status.</small>':'')+'</section>';
+  }
+  function createSelectionTiming(clock,report) {
+    let sequence=0,current=null;
+    return {
+      start(source){current={token:++sequence,start:clock(),source,seen:new Set()};return sequence;},
+      cancel(){current=null;},
+      stage(token,stage){
+        if(!current||current.token!==token||current.seen.has(stage))return;
+        current.seen.add(stage);
+        report({event:'email_selection',source:current.source,stage,duration_ms:Math.round((clock()-current.start)*100)/100});
+      }
+    };
+  }
+  if (typeof module !== 'undefined') {module.exports={createSelectionSummary,operationsFeedback,connectionPresentation,loadingPlaceholder,listNavigationIndex,createSelectionTiming,companionBadge,conversationPreview,messageTime,componentHandshake,bindEmailFrame,readerStamp,patchReadFlags,searchKnownRows,safeReaderView,patchImagePermission,receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,deliveryHistory,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
+  let keyboardReaderFocus=false,retryDisplayTimer=null,lastAnnouncement='';
+  function captureUIFocus(){
+    const node=document.activeElement;
+    if(!document.hasFocus()||!node||!root.contains(node))return null;
+    return {node,reader:node.matches('.subject-header h2'),id:node.id,tag:node.tagName,
+      data:Object.fromEntries(['action','key','folder','operation','draft'].filter(k=>node.dataset[k]).map(k=>[k,node.dataset[k]])),
+      start:node.selectionStart,end:node.selectionEnd,value:node.value};
+  }
+  function focusReader(){const heading=root.querySelector('.subject-header h2');if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});}}
+  function restoreUIFocus(saved){
+    if(!saved||saved.node.isConnected||!document.hasFocus()||document.activeElement!==document.body)return;
+    const node=saved.reader?root.querySelector('.subject-header h2'):saved.id?document.getElementById(saved.id):
+      Object.keys(saved.data).length?[...root.querySelectorAll(saved.tag)].find(n=>Object.entries(saved.data).every(([k,v])=>n.dataset[k]===v)):null;
+    if(!node||node.disabled||!node.getClientRects().length)return;
+    if(saved.reader)node.tabIndex=-1;
+    node.focus({preventScroll:true});
+    if(saved.value===node.value&&Number.isInteger(saved.start)&&node.setSelectionRange){try{node.setSelectionRange(saved.start,saved.end);}catch(_){}}
+  }
+  function returnToList(){
+    mobileReading=false;snapshot();root.querySelector('.workspace')?.classList.remove('show-reading');render(model);
+    const row=[...root.querySelectorAll('.conversation[data-action="open_thread"]')].find(n=>n.dataset.key===model.selected);
+    row?.focus({preventScroll:true});
+  }
+  function updateConnectionUI(){
+    const state=connectionPresentation(model),bar=root.querySelector('.statusbar');
+    bar.dataset.connection=state.state;
+    const retry=state.attention?'<button type="button" data-action="retry_connection" class="connection-retry">Retry connection</button>':'';
+    const notice=model.notice&&!model.recovery?.state&&!model.live_error?String(model.notice):'';
+    let markup=`<div class="connection-summary"><span class="connection-label"><span class="dot ${state.state==='connected'?'':'off'}" aria-hidden="true"></span>${esc(state.label)}</span><span class="connection-mailbox">${esc(model.mailbox)}</span>${model.refreshed?'<span class="connection-last-sync">Last synced: '+esc(model.refreshed)+'</span>':''}<span class="connection-retry-time"></span></div><span id="notice" class="notice">${esc(notice||state.detail)} ${retry}</span>`;
+    if(model.recoverable_drafts?.length)markup+=`<details data-status-disclosure="saved"><summary>${model.recoverable_drafts.length} saved drafts</summary>${model.recoverable_drafts.map(d=>button(esc(d.subject||'(No subject)'),'open_local_draft',`data-draft="${esc(d.draft_id)}"`)).join('')}</details>`;
+    if(recoveryDrafts.length)markup+=`<details data-status-disclosure="unsaved"><summary>Recover unsaved edits (${recoveryDrafts.length})</summary>${recoveryDrafts.map(d=>button('Recover copy: '+esc(d.subject||'(No subject)'),'recover_local_edits',`data-draft="${esc(d.id)}"`)+button('Download edits','export_draft_text',`data-draft="${esc(d.id)}"`)).join('')}</details>`;
+    if(markup!==bar._statusMarkup){
+      const expanded=new Set([...bar.querySelectorAll('details[open]')].map(n=>n.dataset.statusDisclosure));
+      bar.innerHTML=markup;bar._statusMarkup=markup;
+      bar.querySelectorAll('details').forEach(n=>{n.open=expanded.has(n.dataset.statusDisclosure);});
+    }
+    const noticeNode=bar.querySelector('#notice'),noticeMarkup=esc(notice||state.detail)+' '+retry;
+    if(noticeNode.innerHTML!==noticeMarkup)noticeNode.innerHTML=noticeMarkup;
+    let announcer=document.getElementById('email-state-announcer');
+    if(!announcer){announcer=document.createElement('div');announcer.id='email-state-announcer';announcer.className='email-sr-only';announcer.setAttribute('role','status');announcer.setAttribute('aria-live','polite');announcer.setAttribute('aria-atomic','true');root.append(announcer);}
+    const announcement=[state.label,notice||state.detail].filter(Boolean).join('. ');
+    if(announcement!==lastAnnouncement){announcer.textContent=announcement;lastAnnouncement=announcement;}
+    clearTimeout(retryDisplayTimer);
+    const deadline=performance.now()+state.retry_ms;
+    function tick(){
+      const target=bar.querySelector('.connection-retry-time');
+      if(!target||state.state!=='reconnecting')return;
+      const seconds=Math.max(0,Math.ceil((deadline-performance.now())/1000));
+      target.textContent=seconds?'Retry in '+seconds+'s':'Retrying automatically…';
+      if(seconds)retryDisplayTimer=setTimeout(tick,1000);
+    }
+    tick();
+  }
+  window.addEventListener('pagehide',()=>clearTimeout(retryDisplayTimer));
+
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
+  const selectionSummary=createSelectionSummary();
+  const selectionTiming=createSelectionTiming(()=>performance.now(),metric=>{
+    selectionSummary.observe(metric);
+    console.debug('email_selection_timing',JSON.stringify(metric));
+    window.dispatchEvent(new CustomEvent('email-selection-timing',{detail:metric}));
+  });
+  let selectionRequest=null;
+  function recordSelectionPaint(){
+    const request=selectionRequest;
+    if(!request||model.view!=='mail'||(request.kind==='thread'?model.selected:model.active_message)!==request.key)return;
+    requestAnimationFrame(()=>{
+      if(selectionRequest!==request)return;
+      selectionTiming.stage(request.token,'header');
+      const row=(model.messages||[]).find(m=>m.key===model.active_message);
+      if(!row?.expanded)return;
+      const article=[...root.querySelectorAll('[data-message-key]')].find(n=>n.dataset.messageKey===row.key);
+      const frame=article?.querySelector('.email-document');
+      const ready=()=>requestAnimationFrame(()=>selectionTiming.stage(request.token,'body'));
+      if(frame){
+        try{if(frame.contentDocument?.readyState==='complete'&&frame.contentDocument.URL==='about:srcdoc'){ready();return;}}catch(_){}
+        frame.addEventListener('load',ready,{once:true});
+      }else if(article?.querySelector('.message-body'))ready();
+    });
+  }
+
   let selectionControlsDisabled=false, receivedHostRender=false;
   let completionRequest=null;
   let searchTimer=null, searchText=null, searchFolder='';
@@ -303,6 +439,7 @@
   }
   function emit(action, values={}) {
     const selecting=['open_thread','open_message'].includes(action);
+    if(['folder','search','compose','settings','close_composer','close_panel'].includes(action)){selectionRequest=null;selectionTiming.cancel();}
     if (busy) {
       if(selecting || ['folder','search','compose','settings','close_composer','resume_composer','context'].includes(action) || ['open_thread','open_message','resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','load_sent_after_send','sync_index','auto_check_sent','advance_send','autosave_draft','live_check','load_mail_metadata','mark_visible_read','contact_search'].includes(pendingAction)){
         queued={action,values};
@@ -356,7 +493,7 @@
   const readerVersion=m=>m.reader_version??m.mailbox_version;
   const viewKey=(m,key)=>JSON.stringify([m.reader_scope,m.mailbox,readerVersion(m),key]);
   function markSelection(){
-    root.querySelectorAll('.conversation').forEach(e=>{const active=e.dataset.key===model.selected;e.classList.toggle('selected',active);e.setAttribute('aria-selected',String(active));});
+    root.querySelectorAll('.conversation').forEach(e=>{const active=e.dataset.key===model.selected;e.classList.toggle('selected',active);e.setAttribute('aria-current',String(active));});
   }
   function optimistic(action,values){
     snapshot();mobileReading=true;
@@ -366,6 +503,7 @@
     }
     if(action==='open_thread'){
       const hit=views.get(viewKey(model,values.thread_key));
+      selectionRequest={kind:'thread',key:values.thread_key,token:selectionTiming.start(hit?'cached':'cold')};
       model={...model,view:'mail',selected:values.thread_key,messages:hit?.messages||[],active_message:hit?.active_message};
       if(hit){
         paintReading(true,true);
@@ -373,20 +511,23 @@
       }
       if(!hit){
         const t=model.threads.find(t=>t.key===values.thread_key);
-        root.querySelector('.reading').innerHTML=`<div class="subject-header"><h2>${esc(t?.subject||'')}</h2><div class="customer">${esc(t?.customer||'')}</div><small>${esc(t?.email||'')}</small></div><div class="message-loading" role="status">Loading message…</div>`;
+        root.querySelector('.reading').innerHTML=`<div class="subject-header"><h2>${esc(t?.subject||'')}</h2><div class="customer">${esc(t?.customer||'')}</div><small>${esc(t?.email||'')}</small></div>${loadingPlaceholder()}`;
         readingStamp='';
       }
     }else{
+      selectionRequest={kind:'message',key:values.message_key,token:selectionTiming.start((model.messages||[]).find(m=>m.key===values.message_key)?.expanded?'cached':'cold')};
       model={...model,active_message:values.message_key};
       paintReading();
       const row=model.messages.find(m=>m.key===values.message_key);
       if(row&&!row.expanded){
         const article=[...root.querySelectorAll('.message-head')].find(e=>e.dataset.key===values.message_key)?.closest('article');
-        if(article&&!article.querySelector('.message-loading'))article.insertAdjacentHTML('beforeend','<div class="message-loading" role="status">Loading message…</div>');
+        if(article&&!article.querySelector('.message-loading'))article.insertAdjacentHTML('beforeend',loadingPlaceholder());
       }
     }
+    recordSelectionPaint();
     markSelection();
     root.querySelector('.workspace').classList.toggle('show-reading',mobileReading);
+    if(keyboardReaderFocus){focusReader();keyboardReaderFocus=false;}
     // Cached content can paint instantly; writes wait until the server validates this selection.
     root.querySelectorAll('.reading button').forEach(e=>e.disabled=true);
     selectionControlsDisabled=true;
@@ -420,14 +561,14 @@
   function conversations(view) {
     const current=view||model;
     const folder=(current.folders||[]).find(f=>f.name===current.folder);
-    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(current.filters?.scope==='all'?'All folders':roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(current))}</small></div><div class="conversations">${(current.local_drafts||[]).map(d=>`<button class="conversation" data-action="open_local_draft" data-draft="${esc(d.draft_id)}"><div class="subject ellipsis">${esc(d.subject||"(No subject)")}</div><div class="preview ellipsis">Saved draft · ${esc(d.recipients)}</div></button>`).join('')}${current.error?`<div class="empty">Waiting for mailbox data…</div>`:(current.threads||[]).map(t=>`<div class="conversation-wrap"><button class="conversation ${t.unread?'unread':''} ${current.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-label="${esc(t.customer+' · '+t.subject)}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${conversationPreview(t)}</span><small>${current.filters?.scope==='all'?esc(t.folder)+' · ':''}${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button><button class="row-more" data-action="message_menu" data-key="${esc(t.key)}" aria-label="More actions for ${esc(t.subject)}">⋯</button></div>`).join('')||`<div class="empty">${(current.initial_load_pending||current.read_pending)?'Loading conversations…':'No messages in this view.'}</div>`}</div><div class="list-footer">${current.has_more&&!current.error?button('Load 50 more','load_more'): '<span class="muted">'+(current.error?'':current.live_error?'Cached mailbox · last successful view':current.query?(current.read_pending?'Searching current folder…':'Live search · current folder'):'Live mailbox · latest messages')+'</span>'}</div></section>`;
+    return `<section class="listpane" aria-label="Conversations"><div class="list-heading row spread"><strong>${esc(current.filters?.scope==='all'?'All folders':roleLabels[roleOf(folder||{})]||folder?.label||'Mailbox')}</strong><small>${esc(mailboxCount(current))}</small></div><p id="email-list-shortcuts" class="email-sr-only">Use Up and Down arrows, Home and End to move between conversations. Press Enter to open, Escape to return to the list, or slash to search.</p><div class="conversations">${(current.local_drafts||[]).map(d=>`<button class="conversation" data-action="open_local_draft" data-draft="${esc(d.draft_id)}"><div class="subject ellipsis">${esc(d.subject||"(No subject)")}</div><div class="preview ellipsis">Saved draft · ${esc(d.recipients)}</div></button>`).join('')}${current.error?`<div class="empty">Waiting for mailbox data…</div>`:(current.threads||[]).map(t=>`<div class="conversation-wrap"><button class="conversation ${t.unread?'unread':''} ${current.selected===t.key?'selected':''}" data-action="open_thread" data-key="${esc(t.key)}" aria-describedby="email-list-shortcuts" aria-current="${current.selected===t.key?'true':'false'}" aria-label="${esc(t.customer+' · '+t.subject+(t.companion?.status==='sent'?' · Companion sent':''))}"><div class="row spread"><span class="sender ellipsis">${esc(t.customer||t.email||'Unknown sender')}</span><time>${esc(t.time)}</time></div><div class="subject ellipsis">${esc(t.subject)}</div><div class="row spread"><span class="preview ellipsis grow">${conversationPreview(t)}</span><small>${current.filters?.scope==='all'?esc(t.folder)+' · ':''}${t.attachment?'⌁ ':''}${t.starred?'★ ':''}${t.count>1?t.count:''}</small></div></button><button class="row-more" data-action="message_menu" data-key="${esc(t.key)}" aria-label="More actions for ${esc(t.subject)}">⋯</button></div>`).join('')||`<div class="empty">${(current.initial_load_pending||current.read_pending)?'Loading conversations…':'No messages in this view.'}</div>`}</div><div class="list-footer">${current.has_more&&!current.error?button('Load 50 more','load_more'): '<span class="muted">'+(current.error?'':current.live_error?'Cached mailbox · last successful view':current.query?(current.read_pending?'Searching current folder…':'Live search · current folder'):'Live mailbox · latest messages')+'</span>'}</div></section>`;
   }
   const names=people=>(people||[]).map(p=>p.name?`${p.name} <${p.email}>`:p.email).join(', ');
   function messages() {
     const rows=model.messages||[], active=rows.find(m=>m.key===model.active_message)||rows[rows.length-1];
     const selectedThread=(model.threads||[]).find(t=>t.key===model.selected);
     if (!active) return `<div class="reading-toolbar">${button('Back to list','back','','','mobile-back')}</div><div class="reading-scroll empty">${'Select a conversation to read it.'}${model.draft?'<p class="attachments">'+button('Resume draft','resume_composer')+'</p>':''}</div>`;
-    return `<div class="reading-toolbar">${button('←','back','','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Flag / unflag" aria-label="Flag / unflag"')}${button('Junk','junk','',!model.roles.junk)}${button('⋯','message_menu','title="More message actions" aria-label="More message actions"')}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article data-message-key="${esc(m.key)}" class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}" aria-label="${m.expanded?'Select':'Expand'} message from ${esc(m.sender.name||m.sender.email)}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span>${messageTime(m)}</div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.reply_to?.length&&names(m.reply_to)!==names([m.sender])?'<br>Reply-To: '+esc(names(m.reply_to)):''}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div>${!m.expanded&&m.preview?'<div class="preview ellipsis">'+esc(m.preview)+'</div>':''}</button>${m.expanded?`${button('Collapse message','collapse_message',`data-key="${esc(m.key)}"`)}${receivedBody(m)}${m.quote&&!m.reader_document?`<div class="quote">${m.quote}</div>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="${esc(a.content_type)} · Download directly from mailbox"`)).join('')}</div>`:m.body_loading?'<div class="message-loading" role="status">Loading message…</div>':m.body_error?`<div class="message-error" role="status">${esc(m.body_error)} ${button('Retry','open_message',`data-key="${esc(m.key)}"`)}</div>`:'' }</article>`).join('')}</div></div>`;
+    return `<div class="reading-toolbar">${button('←','back','aria-label="Back to conversations"','','mobile-back')}${button('Reply','compose','data-mode="reply"')}${button('Reply all','compose','data-mode="reply_all"')}${button('Forward','compose','data-mode="forward"')}<span class="grow"></span>${button('Archive','archive','',!model.roles.archive)}${button('Trash','trash','',!model.roles.trash)}${button(active.unread?'Mark read':'Mark unread',active.unread?'mark_read':'mark_unread')}${button(active.starred?'★':'☆',active.starred?'unstar':'star','title="Flag / unflag" aria-label="Flag / unflag"')}${button('Junk','junk','',!model.roles.junk)}${button('⋯','message_menu','title="More message actions" aria-label="More message actions"')}</div><div class="reading-scroll"><div class="subject-header"><div class="row spread"><h2>${esc(active.subject)}</h2>${button('Customer / Order','context','','','plain')}</div><div class="customer">${esc(selectedThread?.customer||active.sender.name||active.sender.email)}</div><small>${esc(selectedThread?.email||active.sender.email)}</small><div class="meta">Actions apply to the selected message · ${esc(active.folder)} · ${esc(active.time)}</div>${active.draft?'<div class="attachments">'+button('Edit mailbox draft','edit_draft')+'</div>':''}${model.draft?'<div class="attachments">'+button('Resume draft','resume_composer')+'</div>':''}</div><div class="messages">${rows.map(m=>`<article data-message-key="${esc(m.key)}" class="message ${m.key===active.key?'active':''}"><button class="message-head" data-action="open_message" data-key="${esc(m.key)}" aria-expanded="${m.expanded}" aria-label="${m.expanded?'Select':'Expand'} message from ${esc(m.sender.name||m.sender.email)}"><div class="row spread"><span class="label">${m.own?'Sports Cave':'Customer'} ${m.expanded?'':'· expand'}</span>${messageTime(m)}</div><div class="person">${esc(m.sender.name||m.sender.email)}</div><div class="meta">${esc(m.sender.email)}${m.reply_to?.length&&names(m.reply_to)!==names([m.sender])?'<br>Reply-To: '+esc(names(m.reply_to)):''}${m.expanded?'<br>To: '+esc(names(m.to))+(m.cc.length?' · CC: '+esc(names(m.cc)):''):''}</div>${!m.expanded&&m.preview?'<div class="preview ellipsis">'+esc(m.preview)+'</div>':''}</button>${m.expanded?`${button('Collapse message','collapse_message',`data-key="${esc(m.key)}"`)}${receivedBody(m)}${m.quote&&!m.reader_document?`<div class="quote">${m.quote}</div>`:''}${(m.warnings||[]).map(w=>'<p class="muted">'+esc(w)+'</p>').join('')}<div class="attachments">${m.attachments.map(a=>button('⌁ '+esc(a.filename)+' · '+size(a.encoded_size)+' ↓','download',`data-key="${esc(m.key)}" data-section="${esc(a.section)}" title="${esc(a.content_type)} · Download directly from mailbox"`)).join('')}</div>`:m.body_loading?loadingPlaceholder():m.body_error?`<div class="message-error" role="status">${esc(m.body_error)} ${button('Retry','open_message',`data-key="${esc(m.key)}"`)}</div>`:'' }</article>`).join('')}</div></div>`;
   }
   function formatBar(target='editor') {
     return `<div class="format-bar" data-editor="${target}">${[['B','bold'],['I','italic'],['U','underline'],['↗ Link','createLink'],['• List','insertUnorderedList'],['1. List','insertOrderedList']].map(([label,cmd])=>`<button type="button" data-command="${cmd}" title="${cmd}" ${target==='editor'&&locked(model)?'disabled':''}>${label}</button>`).join('')}</div>`;
@@ -448,7 +589,7 @@
     const s=model.settings;
     const previews=Object.entries(s.signatures).map(([key,sig])=>`<div><label>${esc(sig.label)} <small>Preview</small></label>${model.admin?formatBar('sig-'+key):''}<div id="sig-${key}" class="signature-edit" contenteditable="${model.admin}" role="${model.admin?'textbox':'group'}" aria-label="${esc(sig.label)} signature">${signaturePreview(key)}</div></div>`).join('');
     const mailbox=model.admin?`<div class="section stack"><div class="label">Mailbox settings</div><label>Sender display name<input id="sender-name" value="${esc(s.sender_name)}" maxlength="120"></label><div class="mapping">${['sent','drafts','archive','junk','trash'].map(role=>`<label for="map-${role}">${roleLabels[role]}</label><select id="map-${role}"><option value="">Use special-use discovery</option>${model.folders.filter(f=>f.name.toUpperCase()!=='INBOX').map(f=>`<option value="${esc(f.name)}" ${s.folder_mapping[role]===f.name?'selected':''}>${esc(f.label)}</option>`).join('')}</select>`).join('')}</div><label>Sent copy handling<select id="sent-policy">${[['verify','Automatic · find or save Sent copy'],['server','Server saves Sent · confirmed'],['append','App saves Sent copy']].map(([v,l])=>`<option value="${v}" ${s.sent_policy===v?'selected':''}>${l}</option>`).join('')}</select></label><small>Automatic checks the real Sent folder by Message-ID before saving a missing copy. Use server saving only when confirmed for this mailbox.</small></div>`:'';
-    return `<section class="panel"><div class="panel-head"><strong>Email settings</strong>${button('Close','close_panel','','','plain')}</div><div class="panel-scroll stack"><div><div class="label">Connection</div><p>${esc(model.mailbox)}</p><small>IMAP ${model.configured?'configured':'not configured'} · SMTP ${model.smtp_configured?'configured':'not configured'}</small></div>${button('Test IMAP connection','test_connection','',!model.configured)}<label>Your default signature<select id="preference">${signaturesOptions(model.signature_preference)}</select></label>${button('Save my preference','save_preference','',!model.settings_available)}${!model.settings_available?'<small>Settings storage is unavailable. Defaults remain usable.</small>':''}${model.can_diagnose?button('Mailbox diagnostics','mail_diagnostics'):''}${model.admin_diagnostics?'<pre>'+esc(JSON.stringify({inbound:model.sync_health,outbound:model.admin_diagnostics},null,2))+'</pre>':''}${mailbox}<div class="section stack"><div class="label">Signatures</div>${previews}${model.admin?button('Save mailbox settings','save_settings','',!model.settings_available,'primary'):''}</div></div></section>`;
+    return `<section class="panel"><div class="panel-head"><strong>Email settings</strong>${button('Close','close_panel','','','plain')}</div><div class="panel-scroll stack"><div><div class="label">Connection</div><p>${esc(model.mailbox)}</p><small>IMAP ${model.configured?'configured':'not configured'} · SMTP ${model.smtp_configured?'configured':'not configured'}</small></div>${button('Test IMAP connection','test_connection','',!model.configured)}<label>Your default signature<select id="preference">${signaturesOptions(model.signature_preference)}</select></label>${button('Save my preference','save_preference','',!model.settings_available)}${!model.settings_available?'<small>Settings storage is unavailable. Defaults remain usable.</small>':''}${model.can_diagnose?button('Mailbox diagnostics','mail_diagnostics'):''}${operationsFeedback(model.admin_operations)}${model.admin_diagnostics?'<pre>'+esc(JSON.stringify({inbound:model.sync_health,outbound:model.admin_diagnostics,operations:model.admin_operations},null,2))+'</pre>':''}${mailbox}<div class="section stack"><div class="label">Signatures</div>${previews}${model.admin?button('Save mailbox settings','save_settings','',!model.settings_available,'primary'):''}</div></div></section>`;
   }
   function external(label,url){url=safeLink(url); return url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`:'';}
   function appURL(query) {try{return window.parent.location.href.split('?')[0].split('#')[0]+query;}catch(_){return '';}}
@@ -509,10 +650,12 @@
       readingStamp=stamp;
       selectionControlsDisabled=false;
     }
+    recordSelectionPaint();
   }
   function render(next) {
+    const savedUIFocus=captureUIFocus();
     if(model.reader_scope&&model.reader_scope!==next.reader_scope){
-      views.clear();pending='';busy=false;queued=null;readingStamp='';
+      views.clear();selectionRequest=null;selectionTiming.cancel();pending='';busy=false;queued=null;readingStamp='';
     }
     // The fragment first receives the old model before processing its event. Ignore that echo.
     if(pending&&next.ack!==pending)return;
@@ -577,31 +720,27 @@
     scheduleSentCheck();
     scheduleSendStage();
     if(!root.querySelector('.workspace'))root.innerHTML='<header class="topbar"></header><div id="send-status" class="send-status" role="status" aria-live="polite" aria-atomic="true"></div><div class="statusbar"></div><div class="delivery-receipt"></div><main class="workspace"><nav class="folders"></nav><section class="listpane"></section><section class="reading" aria-label="Reading and compose pane"></section></main>';
-    $('send-status').innerHTML=sendFeedback(model);
+    const sendMarkup=sendFeedback(model);if($('send-status').innerHTML!==sendMarkup)$('send-status').innerHTML=sendMarkup;
     if(model.send_result?.status==='rejected')submitted.delete(model.send_result.operation_id);
     const receipts=root.querySelector('.delivery-receipt');
     const historyOpen=receipts.querySelector('.delivery-history')?.open;
     const expandedPreviews=new Set([...receipts.querySelectorAll('.sent-receipt details[open]')]
       .map(details=>details.closest('.sent-receipt').dataset.operation));
-    receipts.innerHTML=(model.send_stage==='CONFIRMING_SENT_COPY'?'':sentReceipt(model))+deliveryHistory(model,historyOpen);
+    const receiptMarkup=(model.send_stage==='CONFIRMING_SENT_COPY'?'':sentReceipt(model))+deliveryHistory(model,historyOpen);
+    if(receipts._emailMarkup!==receiptMarkup){receipts.innerHTML=receiptMarkup;receipts._emailMarkup=receiptMarkup;}
     receipts.querySelectorAll('.sent-receipt details').forEach(details=>{
       details.open=expandedPreviews.has(details.closest('.sent-receipt').dataset.operation);
     });
     const toolbarKey=JSON.stringify([model.configured,model.query,model.field]);
     if(wasFrozen||toolbarKey!==toolbarStamp){
-      root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings"')}`;
+      root.querySelector('.topbar').innerHTML=`<h1 class="brand">EMAIL</h1>${button('＋ New mail','compose','data-mode="new"',!model.configured,'primary')}<form id="search-form" class="search"><input id="search" aria-label="Search current mailbox folder" placeholder="Search mail · name, subject, order number" value="${esc((model.field!=='TEXT'&&model.query?model.field.toLowerCase()+': ':'')+model.query)}" maxlength="256"><button title="Search the live mailbox, including older messages">Search</button></form>${button('↻ Refresh','refresh','',!model.configured)}${button('⚙','settings','title="Email settings" aria-label="Email settings"')}`;
       toolbarStamp=toolbarKey;
     }
-    const health=model.sync_health||{}, reconnecting=Boolean(model.error||model.live_error||model.recovery?.state==='stopped'||health.state==='RECONNECTING');
-    const attention=['authentication','configuration','tls'].includes(health.category)||model.recovery?.state==='stopped';
-    const status=!model.configured?'Not configured':attention?'Mailbox connection needs attention':reconnecting?(model.threads?.length?'Reconnecting · showing last synced mail':'Mailbox unavailable · retrying automatically'):model.initial_load_pending||model.read_pending||model.sent_folder_load_pending||health.state==='SYNCING'?'Syncing…':'Connected';
-    root.querySelector('.statusbar').innerHTML=`<span title="${esc(health.diagnosis||'Mail source: VentraIP IMAP')}"><span class="dot ${status==='Connected'?'':'off'}"></span>${esc(status)} · ${esc(model.mailbox)}${model.refreshed?' · Last synced: '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status">${attention?esc(health.diagnosis||'')+' <button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':esc(model.recovery?.state||model.live_error?health.diagnosis||'':model.notice||health.diagnosis||'')}</span>`;
-    if(model.recoverable_drafts?.length)root.querySelector('.statusbar').insertAdjacentHTML('beforeend',`<details><summary>${model.recoverable_drafts.length} saved drafts</summary>${model.recoverable_drafts.map(d=>button(esc(d.subject||'(No subject)'),'open_local_draft',`data-draft="${esc(d.draft_id)}"`)).join('')}</details>`);
-    if(recoveryDrafts.length)root.querySelector('.statusbar').insertAdjacentHTML('beforeend',`<details><summary>Recover unsaved edits (${recoveryDrafts.length})</summary>${recoveryDrafts.map(d=>button('Recover copy: '+esc(d.subject||'(No subject)'),'recover_local_edits',`data-draft="${esc(d.id)}"`)+button('Download edits','export_draft_text',`data-draft="${esc(d.id)}"`)).join('')}</details>`);
+    updateConnectionUI();
     scheduleReconnect();
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder,model.initial_load_pending]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}
-    const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,Boolean(model.live_error),model.limit,model.initial_load_pending,model.local_drafts,model.filters,model.read_pending,model.sent_folder_load_pending,model.bulk_result]);
+    const listKey=JSON.stringify([model.mailbox_version,model.folder,model.query,model.field,model.error,Boolean(model.live_error),model.limit,model.initial_load_pending,model.local_drafts,model.filters,model.read_pending,model.sent_folder_load_pending,model.bulk_result,(model.threads||[]).map(t=>t.companion||null)]);
     if(wasFrozen||listKey!==listStamp){const node=root.querySelector('.listpane'),top=node.querySelector('.conversations')?.scrollTop||0;node.outerHTML=conversations();root.querySelector('.conversations').scrollTop=oldFolder===model.folder&&oldQuery===model.query?top:0;listStamp=listKey;}
     if(oldFolder!==model.folder||oldQuery!==model.query)mobileReading=model.view==='compose';
     root.querySelector('.workspace').className=`workspace ${collapsed?'collapsed':''} ${mobileReading?'show-reading':''}`;
@@ -619,7 +758,7 @@
       $('draft-save-status')?.insertAdjacentHTML('afterend',`<span id="draft-recovery-actions">${button('Recover copy','recover_current_copy')}${button('Download edits','export_draft_text')}</span>`);
     }else if(model.draft_save_status==='Saved')$('draft-recovery-actions')?.remove();
     wire();renderDeleteConfirmation();fit();
-    if(focusOwner&&!focusOwner.node.isConnected&&document.activeElement===document.body){
+    if(focusOwner&&!focusOwner.node.isConnected&&document.hasFocus()&&document.activeElement===document.body){
       const target=[...root.querySelectorAll('[id],[data-action],[data-pane],.mail-select')].find(node=>
         focusOwner.id?node.id===focusOwner.id:focusOwner.checkbox?node.classList.contains('mail-select')&&node.closest('.conversation-wrap')?.querySelector('.conversation')?.dataset.key===focusOwner.thread:
         focusOwner.pane?node.dataset.pane===focusOwner.pane:focusOwner.action&&node.dataset.action===focusOwner.action&&node.dataset.key===focusOwner.key&&node.dataset.folder===focusOwner.folder&&node.dataset.mode===focusOwner.mode);
@@ -668,12 +807,13 @@
     } else if(model.history_pending&&model.view==='mail'&&!model.error){
       const key=model.selected,version=model.mailbox_version;
       // Yield first paint. This fetches headers only, never speculative bodies or attachments.
-      historyTimer=setTimeout(()=>{if(!busy&&model.selected===key&&model.mailbox_version===version)emit('resolve_thread',{thread_key:key,mailbox_version:version});},1000);
+      historyTimer=setTimeout(()=>{if(!busy&&model.selected===key&&model.mailbox_version===version)emit('resolve_thread',{thread_key:key,mailbox_version:version});},Math.max(1000,model.history_retry_ms||0));
     } else if(model.live_pending){
       historyTimer=setTimeout(()=>{if(!busy)emit('live_check');},1000);
     } else if(model.sync_health?.state==='SYNCING'&&!model.recovery?.state){
       historyTimer=setTimeout(()=>{if(!busy)emit('sync_index');},1000);
     }
+    restoreUIFocus(savedUIFocus);
   }
   function compose(mode) {
     if (model.draft && !locked(model) && !confirm('Replace this open compose session? Save a mailbox draft first if you want to keep it.')) return;
@@ -769,6 +909,8 @@
         document.execCommand(b.dataset.command,false,value);snapshot();return;
       }
       const action=b.dataset.action;if(!action)return;
+      if(action==='mail_diagnostics'){emit(action,{selection_metrics:selectionSummary.snapshot()});return;}
+      if(action==='open_thread'&&e.detail===0)keyboardReaderFocus=true;
       if(action==='show_images'){emit(action,{message_key:b.dataset.key,reader_identity:b.dataset.readerIdentity});return;}
       if(action==='reply_prompts'){showReplyPrompts(b);return;}
       if(action==='reply_prompt_help'){showReplyPrompts(b,true);return;}
@@ -786,7 +928,7 @@
         const a=document.createElement('a');a.href=url;a.download='unsaved-email-draft.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;
       }
       if(action==='collapse'){collapsed=!collapsed;snapshot();render(model);return;}
-      if(action==='back'){mobileReading=false;snapshot();render(model);return;}
+      if(action==='back'){returnToList();return;}
       if(action==='compose'){compose(b.dataset.mode);return;}
       if(action==='send'){send();return;}
       if(action==='choose_file'){$('attachment').click();return;}
@@ -915,6 +1057,17 @@
     }
     if(promptPopup&&!promptPopup.hidden&&['ArrowDown','ArrowUp'].includes(e.key)){
       const items=[...promptPopup.querySelectorAll('button')];if(items.length){e.preventDefault();const at=items.indexOf(document.activeElement);items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}
+    }
+    const editable=(e.composedPath?.()||[e.target]).some(n=>n?.isContentEditable||n?.closest?.('input,textarea,select,[contenteditable],[role="textbox"],[role="combobox"]'));
+    if(!editable&&!e.isComposing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&model.view==='mail'){
+      const row=e.target.closest?.('.conversation[data-action="open_thread"]');
+      if(row){
+        const rows=[...root.querySelectorAll('.conversation[data-action="open_thread"]:not(:disabled)')];
+        const next=listNavigationIndex(e.key,rows.indexOf(row),rows.length);
+        if(next>=0){e.preventDefault();rows[next].focus();rows[next].scrollIntoView({block:'nearest'});return;}
+      }
+      if(e.key==='/'){e.preventDefault();document.getElementById('search')?.focus();return;}
+      if(e.key==='Escape'&&(mobileReading||e.target.closest?.('.reading'))){e.preventDefault();returnToList();return;}
     }
     if(e.ctrlKey&&e.key==='Enter'&&model.view==='compose'){e.preventDefault();send();}
     if(e.key==='Escape'&&model.view==='compose'){e.preventDefault();emit('close_composer');}

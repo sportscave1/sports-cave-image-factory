@@ -9,6 +9,7 @@ from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from datetime import datetime, timezone
 import logging
+from support_email_operations import METRICS as OP_METRICS
 import threading
 import time
 import random
@@ -67,7 +68,11 @@ class ReadService:
                     raise MailboxError('Loading selected message…', code='pending', retry_after=1)
                 def timed():
                     started = self.clock()
-                    try:return loader()
+                    OP_METRICS.observe('queue_wait_ms', (started-now)*1000)
+                    LOGGER.info('email_read_queue stage=%s wait_ms=%.1f', key[0], (started-now)*1000)
+                    try:
+                        with operation(background=key[0] == 'related_headers_many'):
+                            return loader()
                     finally:LOGGER.info('email_read stage=%s duration_ms=%.1f',key[0],(self.clock()-started)*1000)
                 future = self.pool.submit(timed)
                 # Queue/connect time is not useful cache lifetime. In particular a
@@ -103,6 +108,9 @@ class ReadService:
         self.stop.set(); self.wake.set()
         if self.thread:self.thread.join(timeout=2)
         self.pool.shutdown(wait=False, cancel_futures=True)
+        close = getattr(self.provider, 'close_read_connections', None)
+        if close:
+            close()
 
     def refresh(self):
         with self.lock:
@@ -365,7 +373,7 @@ def service(config):
         if config.scope not in _SERVICES:
             for key, old in list(_SERVICES.items()):
                 old.close();_SERVICES.pop(key)  # Credential rotation cannot retain old mail.
-            _SERVICES[config.scope] = ReadService(ImapProvider(config))
+            _SERVICES[config.scope] = ReadService(ImapProvider(config, reuse_reads=True))
         return _SERVICES[config.scope]
 
 

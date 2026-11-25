@@ -1,4 +1,24 @@
 """Owner controls only; Inbox Companion intentionally has no top status bar."""
+
+def certificate_outcome(status, reason=''):
+    """Explain the authoritative outbox result, never an older queue reason."""
+    messages = {
+        'accepted': ('✓ Companion sent', 'Reply sent automatically.'),
+        'queued': ('Queued', 'Waiting to send automatically.'),
+        'in_progress': ('Sending', 'Sending the automatic reply.'),
+        'unknown': ('Checking reply', 'Checking whether the original reply was sent. Do not resend.'),
+        'rejected': ('Needs attention', 'The reply was not accepted. Review this request.'),
+        'answered': ('Already answered', 'A reply already exists in Sent.'),
+    }
+    if status in messages:
+        return messages[status]
+    if status == 'review':
+        return 'Needs attention', reason or 'Review this request before replying.'
+    if status == 'ignored':
+        return 'No automatic reply', reason or 'This message does not match the certificate reply rules.'
+    return 'Checking request', 'The reply status has not been confirmed.'
+
+
 def controls(actor):
     import streamlit as st
     import os_accounts
@@ -87,4 +107,5 @@ def certificate_controls(actor):
               WHERE a.key LIKE 'inbox_certificate_reply:%%' ORDER BY a.updated_at DESC LIMIT 5""",
                       (config.get('mailbox', 'hello@sportscaveshop.com'),))
             for row in q.fetchall():
-                st.caption(row['sender'] + ' · ' + row['status'] + ' · ' + row['reason'])
+                label, message = certificate_outcome(row['status'], row['reason'])
+                st.caption((row['sender'] or 'Customer request') + ' · ' + label + ' · ' + message)

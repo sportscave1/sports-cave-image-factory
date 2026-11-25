@@ -107,7 +107,7 @@ class NotificationTests(unittest.TestCase):
         self.poll();self.wire.arrive(101);self.wire.arrive(102);self.poll(1061)
         self.assertEqual(len(self.db.events),2)
         fetch=[c for c in self.wire.calls if c[0]=='FETCH']
-        self.assertEqual(fetch,[('FETCH','101:102','(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])')])
+        self.assertEqual(fetch,[('FETCH','101:102','(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])')])
         self.assertIn(('SELECT','"INBOX"',True),self.wire.calls)
         for forbidden in ('BODYSTRUCTURE','BODY.PEEK[]','BODY.PEEK[TEXT]','attachment','password'):
             self.assertNotIn(forbidden,str(self.db.events)+str(self.wire.calls))
