@@ -1,10 +1,10 @@
 name: Orders QA release gate
 on:
   pull_request:
-    paths: ['inbox_companion*.py', 'inbox_certificate*.py', 'support_email_compose.py', 'support_email_idle.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_support_email*', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
+    paths: ['inbox_companion*.py', 'inbox_certificate*.py', 'support_email_compose.py', 'support_email_idle.py', 'support_email_provider.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_support_email*', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
   push:
     branches: [main]
-    paths: ['inbox_companion*.py', 'inbox_certificate*.py', 'support_email_compose.py', 'support_email_idle.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_support_email*', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
+    paths: ['inbox_companion*.py', 'inbox_certificate*.py', 'support_email_compose.py', 'support_email_idle.py', 'support_email_provider.py', 'prodigi*.py', 'orders*.py', 'windows-upload-companion/**', 'components/orders_prodigi_grid/**', 'tests/test_support_email*', 'tests/test_inbox*', 'tests/test_orders*', 'tests/test_prodigi*', 'scripts/check_orders_release.py', '.github/workflows/orders-qa.yml']
   workflow_dispatch:
 permissions:
   contents: read

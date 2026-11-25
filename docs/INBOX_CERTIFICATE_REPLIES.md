@@ -1,7 +1,9 @@
 # Missing-certificate replies
 
 The canonical web server runs a small lifecycle-owned worker every thirty
-seconds. No extension update, new service, credential, campaign or order change
+seconds. Each pass reads at most one request over one read-only IMAP connection,
+preserving the existing mailbox connection budget and foreground priority.
+Interactive preview and activation use the foreground lane. No extension update, new service, credential, campaign or order change
 is required. The rule is disabled until an Email administrator enables it in
 Companion → Inbox → Missing certificate replies.
 

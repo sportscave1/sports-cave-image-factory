@@ -84,12 +84,13 @@ def inspect(imap, header, actor_id, *, orders_loader=None, settings_loader=None)
 def preview_latest(actor):
     from support_email_provider import ImapProvider, load_configuration
     require_admin(actor)
-    imap = ImapProvider(load_configuration(), background=True)
-    current = imap.notification_snapshot(None)
-    header = imap.notification_target(current['uidvalidity'], str(current['last_uid']))
-    if not header:
-        return {'status': 'ignored', 'reason': 'No newest Inbox message is available.'}
-    return inspect(imap, header, str(actor['id']))
+    imap = ImapProvider(load_configuration(), background=False)
+    with imap.read_session():
+        current = imap.notification_snapshot(None)
+        header = imap.notification_target(current['uidvalidity'], str(current['last_uid']))
+        if not header:
+            return {'status': 'ignored', 'reason': 'No newest Inbox message is available.'}
+        return inspect(imap, header, str(actor['id']))
 
 
 def configure(actor, enabled, *, existing=None):
@@ -102,21 +103,22 @@ def configure(actor, enabled, *, existing=None):
         smtp = load_smtp_configuration()
         if not smtp.configured:
             raise ValueError('Configure the mailbox sender before enabling automatic replies.')
-        imap = ImapProvider(load_configuration(), background=True)
+        imap = ImapProvider(load_configuration(), background=False)
         if smtp.address.casefold() != imap.configuration.address.casefold():
             raise ValueError('The Inbox and sender must use the same mailbox.')
-        current = imap.notification_snapshot(None)
-        config.update(mailbox=imap.configuration.address.casefold(),
-                      cursor=(old['cursor'] if old.get('enabled') and old.get('mailbox') == imap.configuration.address.casefold()
-                              and old.get('cursor') else {k: current[k] for k in ('uidvalidity', 'last_uid')}),
-                      initial_message=None)
-        if existing:
-            expected = pointer(existing)
-            header = imap.notification_target(**expected)
-            if (not header or pointer(header) != expected or str(current['uidvalidity']) != expected['uidvalidity']
-                    or inspect(imap, header, str(actor['id']))['status'] != 'eligible'):
-                raise ValueError('This request changed or already has a reply. Check it again before enabling.')
-            config['initial_message'] = expected
+        with imap.read_session():
+            current = imap.notification_snapshot(None)
+            config.update(mailbox=imap.configuration.address.casefold(),
+                          cursor=(old['cursor'] if old.get('enabled') and old.get('mailbox') == imap.configuration.address.casefold()
+                                  and old.get('cursor') else {k: current[k] for k in ('uidvalidity', 'last_uid')}),
+                          initial_message=None)
+            if existing:
+                expected = pointer(existing)
+                header = imap.notification_target(**expected)
+                if (not header or pointer(header) != expected or str(current['uidvalidity']) != expected['uidvalidity']
+                        or inspect(imap, header, str(actor['id']))['status'] != 'eligible'):
+                    raise ValueError('This request changed or already has a reply. Check it again before enabling.')
+                config['initial_message'] = expected
     with state.prep.connect() as c, c.cursor() as q:
         q.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (SETTING,))
         q.execute('SELECT value FROM app_settings WHERE key=%s FOR UPDATE', (SETTING,))
@@ -170,22 +172,25 @@ def tick(imap):
     if not _gate.acquire(blocking=False):
         return False
     try:
-        current = imap.notification_snapshot(config.get('cursor'))
-        cursor = {k: current[k] for k in ('uidvalidity', 'last_uid')}
-        same_mailbox = str((config.get('cursor') or {}).get('uidvalidity')) == str(current['uidvalidity'])
-        initial = config.get('initial_message')
-        if same_mailbox:
-            if initial and initial['uidvalidity'] == str(current['uidvalidity']):
-                header = imap.notification_target(**initial)
-                if header and pointer(header) == initial:
-                    handle(imap, header, config)
-            messages = sorted(current['messages'], key=lambda h: int(h['uid']))
-            for short in messages[:5]:
-                header = imap.notification_target(short['uidvalidity'], short['uid'], short.get('message_id', ''))
-                if header and pointer(header) == pointer(short):
-                    handle(imap, header, config)
-            if len(messages) > 5:
-                cursor['last_uid'] = int(messages[4]['uid'])
+        with imap.read_session():
+            current = imap.notification_snapshot(config.get('cursor'))
+            cursor = {k: current[k] for k in ('uidvalidity', 'last_uid')}
+            same_mailbox = str((config.get('cursor') or {}).get('uidvalidity')) == str(current['uidvalidity'])
+            initial = config.get('initial_message')
+            if same_mailbox:
+                if initial and initial['uidvalidity'] == str(current['uidvalidity']):
+                    header = imap.notification_target(**initial)
+                    if header and pointer(header) == initial:
+                        handle(imap, header, config)
+                    cursor = config['cursor']  # New arrivals wait for the next bounded pass.
+                else:
+                    messages = sorted(current['messages'], key=lambda h: int(h['uid']))
+                    for short in messages[:1]:
+                        header = imap.notification_target(short['uidvalidity'], short['uid'], short.get('message_id', ''))
+                        if header and pointer(header) == pointer(short):
+                            handle(imap, header, config)
+                    if len(messages) > 1:
+                        cursor['last_uid'] = int(messages[0]['uid'])
         with state.prep.connect() as c, c.cursor() as q:
             q.execute('SELECT value FROM app_settings WHERE key=%s FOR UPDATE', (SETTING,))
             row = q.fetchone()

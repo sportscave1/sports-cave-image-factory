@@ -1,5 +1,6 @@
 """Synthetic mailbox and real disposable SQL; no production mail or customer fixtures."""
 from copy import deepcopy
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from email import policy as email_policy
 from email.parser import BytesParser
@@ -109,6 +110,8 @@ class Mailbox:
         same = cursor and str(cursor['uidvalidity']) == self.validity
         return dict(uidvalidity=self.validity, last_uid=high,
                     messages=[deepcopy(h) for h in self.headers if same and int(h['uid']) > int(cursor['last_uid'])])
+    def read_session(self):
+        return nullcontext(self)
     def notification_target(self, uidvalidity, uid, message_id=''):
         return next((deepcopy(h) for h in self.headers if h['uidvalidity'] == str(uidvalidity)
                      and h['uid'] == str(uid) and (not message_id or h['message_id'] == message_id)), None)
@@ -218,6 +221,8 @@ def test_current_and_new_mail_survive_reconfiguration(mail, monkeypatch):
     monkeypatch.setattr('support_email_store.load_orders', lambda **kw:
                         [*orders(), {**orders()[0], 'customer_email': 'second-customer@example.test'}])
     replies.configure(ACTOR, True, existing=header())
+    replies.tick(mail.imap)
+    assert row(mail)['status'] == 'queued'
     replies.tick(mail.imap)
     mail.sql.execute('SELECT count(*) AS n FROM support_email_outbox')
     assert mail.sql.fetchone()['n'] == 2
@@ -379,3 +384,75 @@ def test_ui_activation_survives_reruns_without_stale_toggle_disabling_it(monkeyp
     assert app.toggle(key='certificate-replies-enabled').value is True
     app.toggle(key='certificate-replies-enabled').set_value(False).run()
     assert config['enabled'] is False and calls == [True, False]
+
+
+def test_interactive_preview_and_activation_use_foreground_capacity(mail, monkeypatch):
+    lanes = []
+    def provider(*args, **kwargs):
+        lanes.append(kwargs['background'])
+        return mail.imap
+    monkeypatch.setattr('support_email_provider.ImapProvider', provider)
+    assert replies.preview_latest(ACTOR)['status'] == 'eligible'
+    enable(mail)
+    assert lanes == [False, False]
+
+
+def test_grouped_read_needs_one_remaining_background_slot_and_preserves_uid_fences():
+    from support_email_provider import ImapProvider, Configuration, MailboxError
+    from support_email_runtime import MailboxRuntime
+    cfg = Configuration(password='synthetic-password')
+    runtime = MailboxRuntime(clock=lambda: 100)
+    for _ in range(5):
+        with runtime.connection(cfg.scope, background=True):
+            pass
+    wires = []
+    class Wire:
+        def __init__(self): self.calls = []; self.folder = ''
+        def login(self, *args): return 'OK', [b'authenticated']
+        def select(self, folder, readonly=False):
+            self.folder = folder; self.calls.append(('select', readonly))
+            return 'OK', [b'1']
+        def response(self, name): return name, [b'20' if 'Sent' in self.folder else b'10']
+        def logout(self): self.calls.append(('logout',))
+        def shutdown(self): self.calls.append(('shutdown',))
+    def factory(*args, **kwargs):
+        wire = Wire(); wires.append(wire); return wire
+    adapter = ImapProvider(cfg, connection_factory=factory, runtime=runtime, background=True)
+    with adapter.read_session():
+        for _ in range(5):
+            with adapter._connection('INBOX', '10') as (_, count, validity):
+                assert count == 1 and validity == '10'
+        with adapter.read_session():
+            with adapter._connection('Sent', '20'):
+                pass
+        with pytest.raises(MailboxError, match='identifiers changed'):
+            with adapter._connection('INBOX', '99'):
+                pytest.fail('Changed mailbox must not be read')
+        with pytest.raises(MailboxError, match='read-only'):
+            with adapter._connection('INBOX', write=True):
+                pytest.fail('Grouped session must not mutate mail')
+    assert len(wires) == 1 and runtime.active == 0 and runtime.background_active == 0
+    assert all(call[1] is True for call in wires[0].calls if call[0] == 'select')
+    assert wires[0].calls.count(('logout',)) == 1
+    assert adapter._read_session.get() is None
+    with pytest.raises(MailboxError):
+        with adapter._connection('INBOX'):
+            pytest.fail('The existing six-connection background budget must still apply')
+
+
+def test_group_failure_closes_socket_instead_of_retrying_the_failed_connection():
+    from support_email_provider import ImapProvider, Configuration, MailboxError, _retry_read
+    from unittest.mock import Mock
+    wire = Mock(); wire.login.return_value = ('OK', [b'authenticated'])
+    adapter = ImapProvider(Configuration(password='synthetic-password'), connection_factory=Mock(return_value=wire))
+    attempts = []
+    @_retry_read
+    def broken(self):
+        attempts.append(1)
+        raise MailboxError('Synthetic interrupted read', retryable=True, code='connection')
+    with pytest.raises(MailboxError):
+        with adapter.read_session():
+            broken(adapter)
+    assert attempts == [1] and adapter._read_session.get() is None
+    wire.logout.assert_called_once()
+    wire.shutdown.assert_called_once()

@@ -1,5 +1,6 @@
 """Live IMAP adapter. Reads are non-mutating; writes require explicit method calls."""
 from contextlib import contextmanager, nullcontext, ExitStack
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email import policy
@@ -104,6 +105,9 @@ def _retry_read(method):
                     LOGGER.info("email_imap_reconnect_succeeded operation=%s", method.__name__)
                 return result
             except MailboxError as error:
+                session = getattr(self, '_read_session', None)
+                if session is not None and session.get() is not None:
+                    raise  # The caller retries the complete read group on a fresh socket.
                 # A failed dial has no established session to recover. Respect
                 # the circuit opened by that failure instead of forcing another
                 # DNS/TCP attempt immediately (including background index polls).
@@ -501,6 +505,20 @@ class ImapProvider:
         # Injected transports are isolated by default; load tests explicitly share a runtime.
         self.runtime = runtime if runtime is not None else (RUNTIME if connection_factory is None else None)
         self.background = background
+        self._read_session = ContextVar('mailbox_read_session', default=None)
+
+    @contextmanager
+    def read_session(self):
+        """One connection-budget slot for a bounded group of read-only lookups."""
+        if self._read_session.get() is not None:
+            yield self
+            return
+        with self._connection(None) as shared:
+            token = self._read_session.set(shared)
+            try:
+                yield self
+            finally:
+                self._read_session.reset(token)
 
     @contextmanager
     def interactive_refresh(self):
@@ -511,6 +529,21 @@ class ImapProvider:
 
     @contextmanager
     def _connection(self, folder="INBOX", expected_validity=None, *, write=False):
+        shared = self._read_session.get()
+        if shared is not None:
+            if write:
+                raise MailboxError('A read-only mailbox session cannot change mail.')
+            conn, count, validity = shared
+            if folder is not None:
+                count = int(self._ok(conn.select(folder_argument(folder), readonly=True), stage='select')[0])
+                _, raw = conn.response('UIDVALIDITY')
+                validity = raw[0].decode('ascii') if raw else ''
+                if not validity.isdigit():
+                    raise MailboxError(SAFE_ERROR)
+            if expected_validity is not None and validity != str(expected_validity):
+                raise MailboxError('Mailbox identifiers changed. Refresh Inbox before opening this message.')
+            yield conn, count, validity
+            return
         cfg = self.configuration
         gate = self.runtime.connection(cfg.scope, timeout=cfg.timeout, background=self.background) if self.runtime else nullcontext()
         try:
