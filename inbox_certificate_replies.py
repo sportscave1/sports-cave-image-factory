@@ -2,6 +2,7 @@
 from copy import deepcopy
 import logging
 import threading
+import time
 import uuid
 
 import inbox_companion as state
@@ -11,6 +12,17 @@ SETTING = 'inbox_certificate_reply_settings'
 PREFIX = 'inbox_certificate_reply:'
 LOG = logging.getLogger(__name__)
 _gate = threading.Lock()
+
+
+def retry_delay(error, failures):
+    """Admission is not a failed connection; the mailbox owns its backoff."""
+    code = getattr(error, 'code', '')
+    if code in {'busy', 'pending'}:
+        return failures, 5
+    if code == 'deferred':
+        return failures, min(300, max(5, getattr(error, 'retry_after', 0) or 15))
+    failures = min(failures + 1, 4)
+    return failures, min(300, 15 * 2 ** failures)
 
 
 def identity(mailbox, header):
@@ -215,13 +227,17 @@ class CertificateReplyWorker:
         failures = 0
         while not self.stop.is_set():
             delay = 30
+            started = time.monotonic()
             try:
-                tick(ImapProvider(self.configuration, background=True))
+                checked = tick(ImapProvider(self.configuration, background=True))
                 failures = 0
+                if checked:
+                    LOG.info('certificate_reply_check outcome=success duration_ms=%.1f',
+                             (time.monotonic() - started) * 1000)
             except Exception as error:
-                failures = min(failures + 1, 4)
-                delay = min(300, 15 * 2 ** failures)
-                LOG.warning('certificate_reply_worker category=%s retry_seconds=%d', type(error).__name__, delay)
+                failures, delay = retry_delay(error, failures)
+                LOG.warning('certificate_reply_worker category=%s code=%s retry_seconds=%.1f',
+                            type(error).__name__, getattr(error, 'code', 'internal'), delay)
             self.stop.wait(delay)
 
     def start(self):

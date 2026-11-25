@@ -265,10 +265,18 @@ def test_disable_during_inspection_prevents_queue(mail, monkeypatch):
 def test_reconnect_keeps_cursor_and_explicit_current_request(mail, monkeypatch):
     enable(mail)
     before = state.read(replies.SETTING)
+    original = mail.imap.read_message
     def interrupted(*args, **kwargs): raise ConnectionError('fixture')
     monkeypatch.setattr(mail.imap, 'read_message', interrupted)
     with pytest.raises(ConnectionError): replies.tick(mail.imap)
     assert state.read(replies.SETTING) == before and not row(mail)
+    monkeypatch.setattr(mail.imap, 'read_message', original)
+    assert replies.tick(mail.imap)
+    frozen = row(mail)
+    smtp = SimpleNamespace(submit=lambda *a, **kw: {'status': 'accepted'})
+    assert mail.registry.submit_prepared(frozen['operation_id'], MAILBOX, smtp)['status'] == 'accepted'
+    assert replies.tick(mail.imap)
+    assert row(mail)['attempts'] == 1
 
 
 def test_uidvalidity_rotation_never_replays_old_mail(mail):

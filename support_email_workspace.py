@@ -140,6 +140,19 @@ class Workspace:
         else:
             s["error"] = message
 
+    def _body_failed(self, key, error):
+        """Retry only a selected read, through the existing reconnect scheduler."""
+        s = self.state
+        s.setdefault('body_errors', {})[key] = str(error)
+        s.pop('body_pending', None)
+        s.pop('body_completion', None)
+        s['body_loading'] = False
+        if error.retryable or error.code in TERMINAL_CONNECTION_ERRORS | {'deferred', 'busy', 'limit', 'timeout', 'connection', 'reset', 'network', 'bye'}:
+            if key:
+                s['expanded'].add(key)
+            if not s.get('recovery_state') or s.get('connection_code') != error.code:
+                self._unavailable(str(error), code=error.code, retry_after=error.retry_after)
+
     def _recovered(self):
         s = self.state
         if s.get("recovery_state"):
@@ -828,9 +841,7 @@ class Workspace:
                         if self._body(message) is not None and self.state.pop('body_mark_read',None) == key:
                             self._visible_ready(message)  # Paint before the explicit Open's flag write.
                     except MailboxError as error:
-                        self.state.setdefault('body_errors', {})[key] = str(error)
-                        self.state['body_loading'] = False
-                        self.state.pop('body_completion', None)
+                        self._body_failed(key, error)
             elif action == 'load_conversation_body':
                 # Older embedded clients must not speculatively fetch collapsed MIME.
                 # Their scheduler retries every row without body_error. Mark all
@@ -1042,10 +1053,8 @@ class Workspace:
                 "mark_read", "mark_unread", "star", "unstar", "move", "copy", "archive", "trash", "junk"} else str(error)
             if event.get("action") in {"open_thread", "open_message", "load_visible_body"}:
                 key = self.state.get('active_message')
-                self.state.setdefault('body_errors', {})[key] = str(error)
-                self.state.pop('body_pending', None)
-                self.state.pop('body_completion', None)
-                self.state['body_loading'] = False
+                if isinstance(error, MailboxError):
+                    self._body_failed(key, error)
             if event.get("action") in {"open_thread", "open_message"} and self.state.get("recovery_state"):
                 self.state["connection_notice"] = self.state["notice"]
             if event.get("action") == "test_connection":

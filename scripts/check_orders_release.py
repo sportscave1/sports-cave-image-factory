@@ -2,7 +2,7 @@
 import argparse,json,os,re,subprocess,sys,time
 from pathlib import Path
 
-EMAIL=['test_email_companion_receipts.py','test_inbox_certificate_replies.py','test_support_email.py','test_support_email_live.py',
+EMAIL=['test_email_reconnect_recovery.py','test_email_companion_receipts.py','test_inbox_certificate_replies.py','test_support_email.py','test_support_email_live.py',
  'test_support_email_signatures.py','test_support_email_v2.py','test_support_email_idle.py',
  'test_support_email_performance.py','test_support_email_render.py']
 PYTHON=['test_orders_release_gate.py','test_prodigi_signin.py','test_prodigi_upload_recovery.py','test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
