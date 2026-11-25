@@ -69,3 +69,8 @@ button{min-height:30px;border-radius:4px;transition:background-color .12s ease}b
 @media(max-width:540px){.signature-preview{overflow-wrap:anywhere}.signature-preview table{width:100%!important;max-width:100%!important;table-layout:fixed}.signature-preview td{width:auto!important;min-width:0!important;white-space:normal!important;overflow-wrap:anywhere;padding-left:5px!important;padding-right:5px!important}.signature-preview td:first-child{width:64px!important}.signature-preview img{max-width:58px!important;height:auto!important}}
 
 .delivery-history{padding:5px 14px;color:var(--muted);font-size:12px}.delivery-history summary{cursor:pointer}.delivery-history>button{margin-top:6px}
+
+/* A confirmed automatic reply, shared by inbox rows and message headers. */
+.companion-sent{display:inline-block;color:#36745a;font-size:10px;font-weight:500;white-space:nowrap;margin-right:8px}
+.message-time{display:inline-flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.message-time .companion-sent{margin-right:0}

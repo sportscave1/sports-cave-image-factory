@@ -42,6 +42,19 @@ storing incoming message bodies. Read-only message fetches do not mark mail
 read, move it, download certificates or modify customer orders. Incomplete
 messages, unavailable certificates and existing manual work remain for review.
 
+The inbox row and individual message header show a small `✓ Companion sent`
+marker after the durable outbox confirms SMTP acceptance. The marker applies
+to the original request and exact outgoing reply, including existing automatic
+address confirmations. Queued, rejected, uncertain and manual sends do not get
+the marker. A later unanswered customer message does not inherit an earlier
+reply's tick. The tooltip includes the automatic send time.
+
+Attribution uses a single bounded metadata query for visible Message-IDs and
+their direct reply IDs, cached for thirty seconds per view. Private request
+keys and outbox operation IDs must agree; email text or sender-supplied
+automation headers cannot create a marker. No body, MIME, attachment or extra
+mailbox connection is needed. A metadata outage leaves the live inbox usable.
+
 Offline verification uses fabricated mailbox data and disposable PGlite with
 the real mail-outbox migration. Tests cover matching, exclusions, threading,
 one Nathan signature, no certificate/PDF attachment, duplicate scans, restart

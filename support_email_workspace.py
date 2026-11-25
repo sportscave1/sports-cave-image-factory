@@ -1656,6 +1656,25 @@ class Workspace:
         self.load_context()
         self.state["notice"] = "Support workflow saved."
 
+    def _companion_receipts(self, headers):
+        if not self.durable:
+            return {}
+        ids = tuple(sorted({i for h in headers for i in (h.get('message_id'), *h.get('in_reply_to', ()))
+                            if isinstance(i, str) and i and len(i) <= 998}))
+        scope = (self.config.address.casefold(), ids)
+        cached = self.state.get('companion_receipts', {})
+        now = time.monotonic()
+        if cached.get('scope') == scope and now - cached['at'] < 30:
+            return cached['rows']
+        try:
+            rows = store.load_companion_receipts(self.config.address, ids)
+        except store.SupportStorageError:
+            # Accepted sends remain true during a metadata outage. Never block
+            # the live mailbox or mistake an unavailable receipt for a send.
+            rows = cached.get('rows', {}) if cached.get('scope') == scope else {}
+        self.state['companion_receipts'] = dict(scope=scope, at=now, rows=rows)
+        return rows
+
     def model(self):
         """Whitelisted browser payload: no credentials, raw MIME or unsolicited attachment bytes."""
         can_read = os_accounts.can_access_page(self.user, 'Email')
@@ -1672,6 +1691,26 @@ class Workspace:
         same_view = (s.get('snapshot_view') == (s.get('folder'), s['query'], s['field'])
                      and s.get('snapshot_filters', {}) == s.get('filters', {}))
         threads = s["list_model"] if not s.get("error") and same_view else []
+        receipts = {}
+        if can_read and not s.get('error'):
+            visible = {t['key'] for t in threads}
+            receipts = self._companion_receipts([*s.get('conversation', []),
+                *(t['messages'][-1] for t in s.get('threads', []) if t['thread_key'] in visible)])
+        def companion(message_id):
+            receipt = receipts.get(message_id)
+            return ({'status': 'sent', 'time': formatted_date(receipt['accepted_at'], user)} if receipt else None)
+        latest = {t['thread_key']: t['messages'][-1].get('message_id') for t in s.get('threads', [])}
+        badges = {t['key']: companion(latest[t['key']]) for t in threads if latest.get(t['key']) in receipts}
+        if badges:
+            cached = s.get('companion_list_model', {})
+            if cached.get('source') is threads and cached.get('badges') == badges:
+                threads = cached['rows']
+            else:
+                decorated = [dict(t, companion=badges[t['key']]) if t['key'] in badges else t for t in threads]
+                s['companion_list_model'] = dict(source=threads, badges=badges, rows=decorated)
+                threads = decorated
+        else:
+            s.pop('companion_list_model', None)
         conversation = []
         reply_prompts = []
         prompt_source = None
@@ -1681,6 +1720,7 @@ class Workspace:
                 content = self._content(m) if key in s["expanded"] else None
                 body = content["body"] if content else None
                 row = {"key": key, "reply_to": m.get("reply_to", []), "sender": m["sender"], "subject": m["subject"], "to": m["to"], "cc": m["cc"],
+                    "companion": companion(m.get('message_id')),
                     "time": formatted_date(m["date"] or m["received_at"], user), "folder": m["folder"],
                     "own": m["sender"]["email"].casefold() == self.config.address.casefold(), "unread": m["unread"],
                     "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "body_loading": key == s.get("body_pending"), "preview": str(m.get("snippet") or "")[:180], "body_error": s.get('body_errors', {}).get(key, ''), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}

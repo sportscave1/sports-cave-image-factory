@@ -5,9 +5,11 @@ The settings API accepts administrator-authored signature HTML only.
 Schema provisioning is an explicit migration, never a page-render side effect.
 """
 from contextlib import contextmanager
+import hashlib
 import logging
 import json
 import re
+import uuid
 
 import os_accounts
 from support_email_db_guard import METADATA_DB
@@ -48,6 +50,55 @@ def load_metadata(mailbox, keys):
         cur.execute("SELECT * FROM customer_support_threads WHERE mailbox=%s AND thread_key=ANY(%s)",
                     (mailbox.casefold(), list(keys)))
         return {row["thread_key"]: dict(row) for row in cur.fetchall()}
+
+
+def load_companion_receipts(mailbox, message_ids):
+    """One bounded, indexed lookup of confirmed automatic sends, without MIME reads.
+
+    Include visible messages' In-Reply-To IDs so a Sent reply can find its
+    original request. A reference alone never labels a later customer message.
+    Both existing Companion producers use deterministic private request keys.
+    """
+    mailbox = mailbox.casefold()
+    candidates = []
+    for message_id in dict.fromkeys(message_ids):
+        if not isinstance(message_id, str) or not message_id or len(message_id) > 998:
+            continue
+        digest = hashlib.sha256(json.dumps([mailbox, message_id], sort_keys=True).encode()).hexdigest()
+        certificate_key = 'inbox_certificate_reply:' + digest
+        address_key = 'inbox_companion_request:' + digest
+        candidates.append(dict(source_id=message_id, certificate_key=certificate_key, address_key=address_key,
+            certificate_operation=str(uuid.uuid5(uuid.NAMESPACE_URL, 'sports-cave-certificate-reply:' + certificate_key)),
+            address_operation=str(uuid.uuid5(uuid.NAMESPACE_URL, 'sports-cave-inbox:' + address_key))))
+        if len(candidates) == 2000:
+            break
+    if not candidates:
+        return {}
+    with cursor() as cur:
+        cur.execute("""WITH candidates AS (
+          SELECT * FROM jsonb_to_recordset(%s::jsonb) AS c(
+            source_id text, certificate_key text, address_key text,
+            certificate_operation uuid, address_operation uuid)
+        ), requests AS (
+          SELECT c.source_id, c.certificate_operation AS operation_id
+          FROM candidates c JOIN app_settings a ON a.key=c.certificate_key
+          WHERE a.value->>'message_id'=c.source_id
+            AND a.value->>'operation_id'=c.certificate_operation::text
+          UNION ALL
+          SELECT c.source_id, c.address_operation AS operation_id
+          FROM candidates c JOIN app_settings a ON a.key=c.address_key
+          WHERE a.value->>'kind'='address' AND a.value->'header'->>'message_id'=c.source_id
+        )
+        SELECT r.source_id, o.message_id, o.accepted_at
+        FROM requests r JOIN support_email_outbox o ON o.operation_id=r.operation_id
+        WHERE o.mailbox=%s AND o.status='accepted' AND o.accepted_at IS NOT NULL
+        ORDER BY o.accepted_at""", (json.dumps(candidates), mailbox))
+        receipts = {}
+        for row in cur.fetchall():
+            receipt = {'status': 'sent', 'accepted_at': row['accepted_at']}
+            receipts[row['source_id']] = receipt
+            receipts[row['message_id']] = receipt
+        return receipts
 
 
 def load_assignees():
