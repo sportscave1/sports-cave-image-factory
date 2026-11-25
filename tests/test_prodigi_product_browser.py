@@ -76,7 +76,7 @@ def test_known_auto_editor_recovery_rechecks_before_retrying(blank,monkeypatch,c
     assert not blank.writes
 
 @pytest.mark.parametrize('change',[
-    lambda o:o.update(status='paused'),lambda o:o.update(charges=[{'amount':1}]),
+    lambda o:o.update(status='in_production'),lambda o:o.update(charges=[{'amount':1}]),
     lambda o:o['items'][0].update(sku='GLOBAL-CFP-A1'),
     lambda o:o['items'][0].update(quantity=2),
     lambda o:o['items'][0].update(assets=[{'url':'https://fixture.invalid/art','printArea':'default'}]),
@@ -85,6 +85,18 @@ def test_unsafe_claims_do_not_issue_browser_plan(blank,change):
     change(blank.data)
     assert product.claim() is None
     assert saved()['status']=='Needs review' and not blank.writes
+
+
+@pytest.mark.parametrize('state',['paused','on_hold'])
+def test_editable_unpaid_hold_keeps_exact_single_use_product_selection_guards(blank,state):
+    blank.data.update(status=state,allowedActions=['update','resume'])
+    plan=product.claim()
+    assert plan['order_id']=='99' and plan['item_id']=='88' and plan['sku']=='GLOBAL-CFP-A2'
+    assert product.permit(plan['key'],plan['token'],plan['sha256'])=={'permitted':True}
+    with pytest.raises(ValueError):product.permit(plan['key'],plan['token'],plan['sha256'])
+    blank.data['items'][0].update(sku=plan['sku'],attributes={'color':'natural'})
+    assert product.finish(plan['key'],plan['token'])['status']==browser.WAITING
+    assert saved()['product_browser']['verified'] and blank.data['status']==state and not blank.writes
 
 def test_concurrent_customer_or_item_change_blocks_permit(blank):
     p=product.claim();blank.data['recipient']={'name':'Changed'}
