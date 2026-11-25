@@ -2,9 +2,9 @@
 import argparse,json,os,re,subprocess,sys,time
 from pathlib import Path
 
-PYTHON=['test_inbox_certificate_replies.py','test_support_email.py','test_support_email_live.py',
- 'test_support_email_signatures.py','test_support_email_v2.py','test_support_email_idle.py',
- 'test_prodigi_signin.py','test_prodigi_upload_recovery.py','test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
+EMAIL=['test_inbox_certificate_replies.py','test_support_email.py','test_support_email_live.py',
+ 'test_support_email_signatures.py','test_support_email_v2.py','test_support_email_idle.py']
+PYTHON=['test_orders_release_gate.py','test_prodigi_signin.py','test_prodigi_upload_recovery.py','test_prodigi_handoff_recovery.py','test_prodigi_first_prices.py','test_prodigi_reset_selection.py',
  'test_prodigi_verified_sibling.py','test_inbox_companion.py','test_prodigi_product_browser.py','test_prodigi_browser.py','test_prodigi_dashboard_qa.py',
  'test_prodigi_order_group.py','test_prodigi_submission.py','test_prodigi_stage.py','test_prodigi_reset.py',
  'test_orders_fast_handoffs.py','test_orders_runtime.py','test_orders_qa_scaling.py','test_orders_prodigi_grid.py',
@@ -24,13 +24,19 @@ def main():
     env={**os.environ,'PYTHONPATH':os.pathsep.join([str(root),str(root/'tests')]),'AUTO_EDITIONS_TEST_PGLITE':str(Path(args.pglite).resolve()),'PYTHONIOENCODING':'utf-8'}
     report=dict(version=json.loads((root/'windows-upload-companion/manifest.json').read_text())['version'],
         commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),suites={},benchmarks=[])
-    commands={'python':[sys.executable,'-m','pytest',*[str(root/'tests'/p) for p in PYTHON],'-q','-s'],
+    commands={'email':[sys.executable,'-m','pytest',*[str(root/'tests'/p) for p in EMAIL],'-vv','-s','-o','faulthandler_timeout=60'],
+        'python':[sys.executable,'-m','pytest',*[str(root/'tests'/p) for p in PYTHON],'-vv','-s','-o','faulthandler_timeout=60'],
         'node':['node','--test',*[str(root/'tests'/p) for p in NODE]],
         'topology':[sys.executable,str(root/'scripts/validate_render_topology.py')]}
     passed=True
     for name,command in commands.items():
         started=time.monotonic()
-        run=subprocess.run(command,cwd=root,env=env,text=True,encoding='utf-8',errors='replace',capture_output=True,timeout=900)
+        try:
+            run=subprocess.run(command,cwd=root,env=env,text=True,encoding='utf-8',errors='replace',capture_output=True,timeout=300 if name=='email' else 900)
+        except subprocess.TimeoutExpired as error:
+            def decoded(value):return value.decode('utf-8','replace') if isinstance(value,bytes) else value or ''
+            run=subprocess.CompletedProcess(command,124,stdout=decoded(error.stdout),
+                stderr=decoded(error.stderr)+'\nRelease check exceeded its time limit; partial output retained.\n')
         output=run.stdout+'\n'+run.stderr;(out/(name+'.log')).write_text(output,encoding='utf-8')
         skipped=bool(re.search(r'\b\d+ skipped\b',output))
         result=dict(exit_code=run.returncode,elapsed_s=round(time.monotonic()-started,2),skipped=skipped)
