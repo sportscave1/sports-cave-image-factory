@@ -228,14 +228,26 @@ def restore_missing_recipient(value,resolver=None):
     return True
 
 
+
+def editable_order(order):
+    """Supplier-authorised, unpaid draft or pause window; never production."""
+    if order.get('status') not in ('draft','paused') or 'update' not in order.get('allowedActions',[]):return False
+    if order.get('charges') or order.get('shipments') or order.get('issues'):return False
+    for event in order.get('statusHistory') or []:
+        if not isinstance(event,dict):return False
+        if any(event.get(k) in ('in_production','partially_shipped','shipped','completed')
+               for k in ('status','toStatus','fromStatus','stage')):return False
+    return True
+
+
 def validate_order(order, snapshot, order_id, item_id, *, allow_unselected=False, binding=None):
     if binding:
         from prodigi_consolidation import bound_order
         order=bound_order(order,snapshot,binding,item_id)
     if str(order.get('id')) != str(order_id):
         raise ProdigiError('Prodigi returned a different order ID.')
-    if order.get('status') != 'draft' or 'update' not in order.get('allowedActions', []):
-        raise ProdigiError('Artwork can only be prepared on an editable draft. Open the existing order for manual handling.')
+    if not editable_order(order):
+        raise ProdigiError('Artwork requires an unpaid editable draft or pause window with no production history. Open the existing order for review.')
     refs = {str(snapshot['identity']['order_id']), str(snapshot['identity']['order_id']).rsplit('/', 1)[-1],
             str(snapshot['order_reference']), str(snapshot['order_reference']).lstrip('#')}
     if str(order.get('merchantReference')) not in refs:

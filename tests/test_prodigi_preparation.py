@@ -61,7 +61,7 @@ class Provider:
 
 @pytest.mark.parametrize('change,reason', [
     (lambda o:o.update(id='100'), 'different order'),
-    (lambda o:o.update(status='paused'), 'editable draft'),
+    (lambda o:o.update(status='in_production'), 'editable draft'),
     (lambda o:o.update(allowedActions=['resume']), 'editable draft'),
     (lambda o:o.update(merchantReference='wrong'), 'order reference'),
     (lambda o:o['items'][0].update(quantity=2), 'one separately'),

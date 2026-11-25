@@ -57,7 +57,7 @@ def checked(value,provider,resolver,authorisation,*,whole_order=True,_order=None
     pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
     if prep.digest(pinned)!=receipt.get('validated_order_hash'):
         raise ValueError('The supplier order changed after QA. Recheck this exact order before submission.')
-    if 'submit' not in order.get('allowedActions',[]):
+    if order.get('status')!='paused' and 'submit' not in order.get('allowedActions',[]):
         raise ValueError('Prodigi does not allow this existing order to be submitted through the API. Open it for manual handling.')
     if whole_order and len(order.get('items',[]))>1:
         from prodigi_order_group import members,WaitingForItems
@@ -98,10 +98,11 @@ def complete_certificate(value):
 def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_post=False,authorisation=None):
     """Only a caller holding the freshly committed intent may POST once."""
     receipt=value.get('submission') or {}
-    if may_post:
+    if may_post and not receipt.get('adopted_paused'):
         try:
-            checked(value,provider,resolver,authorisation or {})
-            provider.submit(value['order_id'])
+            current=checked(value,provider,resolver,authorisation or {})
+            if current.get('status')=='paused':receipt['adopted_paused']=True
+            else:provider.submit(value['order_id'])
         except Exception as error:
             receipt['request_issue']=str(error) if isinstance(error,ValueError) else 'Supplier acknowledgement uncertain.'
     try:
@@ -122,7 +123,9 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
             receipt['lease_until']=prep.now()
             value.update(status='Submitted',message=(
                 'Submitted to Prodigi · supplier reports on hold. Open Prodigi to review its current hold/countdown; payment and production are not confirmed.'
-                if state=='on_hold' else 'Submitted to Prodigi · awaiting payment/production under your supplier countdown.'))
+                if state=='on_hold' else 'Existing Prodigi order verified · pause preserved; payment and production are not confirmed.'
+                if state=='paused' and receipt.get('adopted_paused')
+                else 'Submitted to Prodigi · awaiting payment/production under your supplier countdown.'))
             persist(value);return value
         items=order.get('items') or []
         mapping=value['snapshot']['mapping']
@@ -215,13 +218,13 @@ def tick():
                 ('prodigi_submit_order:'+value['order_id'],json.dumps({'allocation_id':value['allocation_id'],'at':prep.now()})))
             if not q.fetchone():
                 value.update(status='Needs review',message='This supplier order already has a submission intent. Review the original handoff.');prep.save(q,value);return
-            value['submission']=dict(intent_at=prep.now(),actor=authorisation['actor'])
+            value['submission']=dict(intent_at=prep.now(),actor=authorisation['actor'],adopted_paused=order.get('status')=='paused')
             from prodigi_order_group import reserve
             reserve(q,value,order,authorisation,units=units)
         value.update(status='Submitting' if may_post else value['status'],message='Confirming this exact supplier order. Submission is never blindly retried.')
         value['submission']['lease_until']=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()
         prep.save(q,value)
-    run(value,prep.Client(),prep.resolve,lambda v:_save(v),may_post=may_post,authorisation=authorisation)
+    run(value,prep.Client(),prep.resolve,lambda v:_save(v),may_post=may_post and not value['submission'].get('adopted_paused'),authorisation=authorisation)
     from prodigi_order_group import publish
     publish(value)
 

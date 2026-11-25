@@ -60,7 +60,7 @@ def shipping_reprice_recheck(value,order,evidence):
     planned=receipt.get('shipping') or {};target=planned.get('target')
     if (receipt.get('started') is not True or value.get('qa_shipping_reprice_rechecks',0)>=1
             or clean(before.get('shippingMethod'))==target or clean(order.get('shippingMethod'))!=target
-            or order.get('charges') or order.get('status')!='draft'):
+            or not prep.editable_order(order)):
         return False
     shipping=evidence.get('shipping') if isinstance(evidence,dict) else None
     if not isinstance(shipping,dict) or set(shipping)!={'options','selected'}:return False
@@ -418,7 +418,7 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
     assets=item.get('assets') or []
     checks=item_checks(value,snapshot,order,item,evidence,identity_verified=identity_verified)
     checks.update(shipping=quote_ok,certificate=selected,packing_slip=selected,inserts_available=available)
-    checks['final_check']=all(checks.values()) and not order.get('issues') and (order.get('status')=='draft' or bool(value.get('consolidation_binding') and value.get('merge_pending') and order.get('status')=='paused'))
+    checks['final_check']=all(checks.values()) and not order.get('issues') and (prep.editable_order(order) or bool(value.get('consolidation_binding') and value.get('merge_pending') and order.get('status')=='paused'))
     labels={'product_option':'Product/SKU differs.','frame':'Frame colour differs.','size':'Size mapping differs.',
         'artwork_upload':'Exact saved design is not verified.','edition_number':'Allocated edition number is not verified.',
         'sent_to_production':'Full-image fit/orientation is not verified.','image_quality':'Prodigi image quality must show Excellent.',
