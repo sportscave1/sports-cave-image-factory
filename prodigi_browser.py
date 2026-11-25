@@ -492,9 +492,17 @@ def recover_missing_save(key):
         from inbox_companion import submission_guard
         submission_guard(value)
         snap,order,item=checked(value,provider,resolver,False)
+        current_business=business(order,item['id']);original_business=deepcopy(receipt['before'])
+        # A failed first Save can remove the placeholder and its calculated
+        # target prices. Identity, product, address and sibling values stay pinned.
+        comparable_business=deepcopy(current_business)
+        for view in (comparable_business,original_business):
+            for target in view.get('items',[]):
+                if str(target.get('id'))==str(item['id']):
+                    target.pop('unitPrice',None);target.pop('lineTotal',None)
         if (has_existing_artwork(item) or has_existing_artwork({'assets':receipt.get('empty_slots',[])})
-            or (item.get('assets') or [])!=receipt.get('empty_slots',[])
-            or business(order,item['id'])!=receipt['before']
+            or (bool(item.get('assets')) and item['assets']!=receipt.get('empty_slots',[]))
+            or comparable_business!=original_business
             or receipt.get('companion_sha256')!=snap['output']['sha256']):return False
         previous=value.get('missing_save_recovery') or {}
         observed=dict(business_hash=prep.digest(business(order,item['id'])),

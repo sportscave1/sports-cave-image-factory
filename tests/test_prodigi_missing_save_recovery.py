@@ -128,3 +128,16 @@ def test_dependency_failure_preserves_receipt_without_stalling_poll(missing,monk
     assert prep.read(1)['browser']['started'] and not p.writes
     p.order=lambda *_:pytest.fail('A deferred library failure must not re-read on every poll')
     assert browser.recover_saved_uploads({'id':'owner'})==0
+
+
+def test_failed_save_can_remove_original_empty_slot_and_calculated_target_prices(missing):
+    store,p,_,_=missing;value=prep.read(1)
+    value['browser']['empty_slots']=[dict(id='original-slot',printArea='default',status='NotYetDownloaded',required=True,pageCount=0)]
+    value['browser']['before']['items'][0].update(unitPrice=dict(amount='63.75',currency='USD'),lineTotal=dict(amount='63.75',currency='USD'))
+    write(store,value)
+    observe_twice(store)
+    assert browser.recover_saved_uploads({'id':'owner'})==1
+    plan=browser.claim(exact_item_supported=True,upload_recovery_supported=True)
+    assert plan['fresh_empty_item'] and plan['library_asset_id']=='asset-id'
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+    assert not p.writes

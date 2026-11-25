@@ -40,7 +40,7 @@ def save(value):
 
 @pytest.mark.parametrize('change',[
     {'charges':[{'amount':'1.00'}]}, {'shipments':[{'id':'shipment'}]}, {'issues':[{'code':'hold'}]},
-    {'status':'on_hold'}, {'status':'in_production'}, {'status':'completed'}, {'allowedActions':['resume']},
+    {'status':'on_hold'}, {'status':'in_production'}, {'status':'completed'}, {'allowedActions':['cancel']},
     {'statusHistory':[{'status':'in_production'}]}, {'statusHistory':[{'fromStatus':'shipped'}]},
     {'statusHistory':['unknown']},
 ])
@@ -56,6 +56,13 @@ def test_paused_order_still_requires_every_dashboard_check():
     assert all(result['checks'].values()) and not result['blockers']
     evidence['quality']='Poor'
     assert not qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)['checks']['image_quality']
+
+
+def test_paused_resume_permission_allows_browser_edit_without_api_update_or_release():
+    value=order();value.update(status='paused',allowedActions=['cancel','resume'])
+    assert prep.validate_order(value,snapshot(),'99','88')['id']=='88'
+    value.update(status='draft')
+    with pytest.raises(ProdigiError):prep.validate_order(value,snapshot(),'99','88')
 
 
 def test_verified_paused_order_adopted_with_durable_fence_and_zero_submit_or_resume(store,monkeypatch):
