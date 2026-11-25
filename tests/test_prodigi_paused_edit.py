@@ -19,11 +19,12 @@ def test_unpaid_editable_pause_keeps_exact_item_validation():
     with pytest.raises(ProdigiError,match='SKU'):prep.validate_order(value,snapshot(),'99','88')
 
 
-def test_explicit_recovery_preserves_paused_order_and_scopes_original_artwork_replacement(draft):
+@pytest.mark.parametrize('state',['paused','on_hold'])
+def test_explicit_recovery_preserves_paused_order_and_scopes_original_artwork_replacement(draft,state):
     import prodigi_reset as reset
     import prodigi_browser as browser
     from copy import deepcopy
-    p,s=draft;p.data.update(status='paused',allowedActions=['update','resume'])
+    p,s=draft;p.data.update(status=state,allowedActions=['update','resume'])
     before=deepcopy(p.data)
     value=reset.reset_order({'id':'owner'},1)
     assert value['reset_authorisation']['assets']==before['items'][0]['assets']
@@ -49,8 +50,9 @@ def test_noneditable_or_production_history_never_admits_artwork(change):
     with pytest.raises(ProdigiError,match='unpaid editable'):prep.validate_order(value,snapshot(),'99','88')
 
 
-def test_paused_order_still_requires_every_dashboard_check():
-    value,snap,p,evidence=fixture();p.data.update(status='paused',shippingMethod='Budget')
+@pytest.mark.parametrize('state',['paused','on_hold'])
+def test_paused_order_still_requires_every_dashboard_check(state):
+    value,snap,p,evidence=fixture();p.data.update(status=state,allowedActions=['update','resume'],shippingMethod='Budget')
     value['dashboard_qa']={'shipping':dict(options=options(),current='standard',target='budget')}
     result=qa.evaluate(value,snap,p.data,p.data['items'][0],evidence,identity_verified=True)
     assert all(result['checks'].values()) and not result['blockers']
@@ -65,8 +67,9 @@ def test_paused_resume_permission_allows_browser_edit_without_api_update_or_rele
     with pytest.raises(ProdigiError):prep.validate_order(value,snapshot(),'99','88')
 
 
-def test_verified_paused_order_adopted_with_durable_fence_and_zero_submit_or_resume(store,monkeypatch):
-    value,snap,p,auth=ready();p.data.update(status='paused',allowedActions=['update','resume'])
+@pytest.mark.parametrize('state',['paused','on_hold'])
+def test_verified_paused_order_adopted_with_durable_fence_and_zero_submit_or_resume(store,monkeypatch,state):
+    value,snap,p,auth=ready();p.data.update(status=state,allowedActions=['update','resume'])
     monkeypatch.setattr(prep,'Client',lambda:p);monkeypatch.setattr(prep,'resolve',lambda _:snap)
     p.resume=lambda *_:pytest.fail('An existing pause must never be released')
     with store() as c,c.cursor() as q:
@@ -75,25 +78,27 @@ def test_verified_paused_order_adopted_with_durable_fence_and_zero_submit_or_res
     submit.tick();submit.tick()
     saved=prep.read(1)
     assert saved['status']=='Submitted' and saved['submission']['adopted_paused']
-    assert saved['submission']['confirmed'] and saved['submission']['supplier_status']=='paused'
-    assert 'pause preserved' in saved['message']
-    assert not p.submits and p.data['status']=='paused'
+    assert saved['submission']['confirmed'] and saved['submission']['supplier_status']==state
+    assert ('pause preserved' if state=='paused' else 'on hold') in saved['message']
+    assert not p.submits and p.data['status']==state
     with store() as c,c.cursor() as q:
         q.execute("SELECT count(*) n FROM app_settings WHERE key LIKE 'prodigi_submit_order:%%'")
         assert q.fetchone()['n']==1
 
 
-def test_supplier_pause_after_initial_intent_never_gets_a_duplicate_submit():
-    value,snap,p,auth=ready();p.data.update(status='paused',allowedActions=['update','resume'])
+@pytest.mark.parametrize('state',['paused','on_hold'])
+def test_supplier_pause_after_initial_intent_never_gets_a_duplicate_submit(state):
+    value,snap,p,auth=ready();p.data.update(status=state,allowedActions=['update','resume'])
     value['submission']={'intent_at':prep.now(),'adopted_paused':False}
     result=submit.run(value,p,lambda _:snap,lambda _:None,may_post=True,authorisation=auth)
     assert result['status']=='Submitted' and result['submission']['adopted_paused']
-    assert not p.submits and p.data['status']=='paused'
+    assert not p.submits and p.data['status']==state
 
 
 @pytest.mark.parametrize('change',['owner','qa','customer','image','charges'])
-def test_paused_adoption_never_bypasses_owner_qa_customer_or_artwork_guards(store,monkeypatch,change):
-    value,snap,p,auth=ready();p.data.update(status='paused',allowedActions=['update','resume'])
+@pytest.mark.parametrize('state',['paused','on_hold'])
+def test_paused_adoption_never_bypasses_owner_qa_customer_or_artwork_guards(store,monkeypatch,change,state):
+    value,snap,p,auth=ready();p.data.update(status=state,allowedActions=['update','resume'])
     monkeypatch.setattr(prep,'Client',lambda:p);monkeypatch.setattr(prep,'resolve',lambda _:snap)
     if change=='owner':auth['enabled']=False
     if change=='qa':value['qa']['checks']['image_quality']=False
@@ -107,3 +112,11 @@ def test_paused_adoption_never_bypasses_owner_qa_customer_or_artwork_guards(stor
         q.execute('INSERT INTO app_settings(key,value) VALUES(%s,%s::jsonb)',(submit.SETTING,json.dumps(auth)))
     submit.tick()
     assert not prep.read(1).get('submission') and not p.submits
+
+
+@pytest.mark.parametrize('change',[{'allowedActions':['resume']},{'allowedActions':['update']},
+    {'issues':[{'code':'payment_required'}]},{'charges':[{'amount':'1'}]},
+    {'shipments':[{'id':'shipped'}]},{'statusHistory':[{'status':'in_production'}]}])
+def test_hold_requires_both_edit_permissions_and_no_payment_or_production_problem(change):
+    value=order();value.update(status='on_hold',allowedActions=['update','resume']);value.update(change)
+    assert not prep.editable_order(value)

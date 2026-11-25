@@ -522,7 +522,6 @@ def recover_missing_save(key):
             import logging
             logging.getLogger(__name__).warning('ORDERS_MISSING_SAVE_LIBRARY deferred key=%s',key)
             return False
-        if not asset_id:return False
         # The previous Save is not replayed. Its token is retired atomically.
         # A fresh handoff rechecks this exact empty item before one new Save.
         value['browser_history']=(value.get('browser_history',[])+[dict(
@@ -533,7 +532,8 @@ def recover_missing_save(key):
             source_sha256=snap['output']['sha256'],filename=receipt['filename'],asset_id=asset_id,
             before=deepcopy(business(order,item['id'])),empty_slots=deepcopy(item.get('assets') or []))
         value.pop('browser');value.pop('last_failure',None)
-        value.update(status=WAITING,message='Two independent reads confirmed the unchanged empty item. Reusing the checksum-verified JPG with a fresh Save permit.')
+        value.update(status=WAITING,message='Two independent reads confirmed the unchanged empty item. '+
+            ('Reusing the checksum-verified JPG' if asset_id else 'Uploading the same checksum-pinned JPG under a new filename')+' with a fresh Save permit.')
         save(q,key,value);return True
 
 

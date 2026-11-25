@@ -230,9 +230,10 @@ def restore_missing_recipient(value,resolver=None):
 
 
 def editable_order(order):
-    """Supplier-authorised, unpaid draft or pause window; never production."""
+    """Supplier-authorised unpaid editor, including an explicitly resumable hold."""
     state=order.get('status');actions=order.get('allowedActions') or []
-    if state not in ('draft','paused'):return False
+    if state not in ('draft','paused','on_hold'):return False
+    if state=='on_hold' and not {'update','resume'}.issubset(actions):return False
     if 'update' not in actions and not (state=='paused' and 'resume' in actions):return False
     if order.get('charges') or order.get('shipments') or order.get('issues'):return False
     for event in order.get('statusHistory') or []:

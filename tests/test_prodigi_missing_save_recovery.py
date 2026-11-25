@@ -64,7 +64,7 @@ def test_recent_or_single_empty_read_never_repeats_save(missing):
 
 
 @pytest.mark.parametrize('change',['address','quantity','shipping','source','artwork','slots',
-    'submission','intent','hidden','unknown','checksum','original_artwork','repeat','customer_hold','library'])
+    'submission','intent','hidden','unknown','checksum','original_artwork','repeat','customer_hold'])
 def test_uncertain_or_changed_work_never_gets_new_authority(missing,monkeypatch,change):
     store,p,_,_=missing;observe_twice(store);value=prep.read(1)
     if change=='address':p.data['recipient']={'name':'Changed synthetic recipient'}
@@ -84,7 +84,6 @@ def test_uncertain_or_changed_work_never_gets_new_authority(missing,monkeypatch,
         import inbox_companion
         def held(_):raise ValueError('Paused customer request')
         monkeypatch.setattr(inbox_companion,'submission_guard',held)
-    if change=='library':p.assets=lambda:[]
     write(store,value)
     assert browser.recover_saved_uploads({'id':'owner'})==0
     assert prep.read(1).get('browser') and not p.writes
@@ -140,4 +139,18 @@ def test_failed_save_can_remove_original_empty_slot_and_calculated_target_prices
     plan=browser.claim(exact_item_supported=True,upload_recovery_supported=True)
     assert plan['fresh_empty_item'] and plan['library_asset_id']=='asset-id'
     assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+    assert not p.writes
+
+
+def test_missing_library_uses_one_fresh_upload_of_the_same_pinned_numbered_file(missing):
+    store,p,old,_=missing;p.assets=lambda:[]
+    observe_twice(store)
+    assert browser.recover_saved_uploads({'id':'owner'})==1
+    plan=browser.claim(exact_item_supported=True,upload_recovery_supported=True)
+    assert plan['fresh_empty_item'] and not plan.get('library_asset_id')
+    assert plan['filename']!=old['filename'] and plan['sha256']==old['sha256']
+    assert plan['order_id']==old['order_id'] and plan['item_id']==old['item_id']
+    assert browser.permit(KEY,plan['token'],plan['sha256'])=={'permitted':True}
+    p.data['items'][0]['assets']=[dict(printArea='default',url='unexpected.jpg')]
+    assert browser.recover_saved_uploads({'id':'owner'})==0
     assert not p.writes

@@ -57,7 +57,7 @@ def checked(value,provider,resolver,authorisation,*,whole_order=True,_order=None
     pinned=pinned_order(order);pinned['shippingMethod']=order.get('shippingMethod')
     if prep.digest(pinned)!=receipt.get('validated_order_hash'):
         raise ValueError('The supplier order changed after QA. Recheck this exact order before submission.')
-    if order.get('status')!='paused' and 'submit' not in order.get('allowedActions',[]):
+    if order.get('status')=='draft' and 'submit' not in order.get('allowedActions',[]):
         raise ValueError('Prodigi does not allow this existing order to be submitted through the API. Open it for manual handling.')
     if whole_order and len(order.get('items',[]))>1:
         from prodigi_order_group import members,WaitingForItems
@@ -101,7 +101,7 @@ def run(value,provider,resolver,persist,certificate=complete_certificate,*,may_p
     if may_post and not receipt.get('adopted_paused'):
         try:
             current=checked(value,provider,resolver,authorisation or {})
-            if current.get('status')=='paused':receipt['adopted_paused']=True
+            if current.get('status') in ('paused','on_hold'):receipt['adopted_paused']=True
             else:provider.submit(value['order_id'])
         except Exception as error:
             receipt['request_issue']=str(error) if isinstance(error,ValueError) else 'Supplier acknowledgement uncertain.'
@@ -218,7 +218,7 @@ def tick():
                 ('prodigi_submit_order:'+value['order_id'],json.dumps({'allocation_id':value['allocation_id'],'at':prep.now()})))
             if not q.fetchone():
                 value.update(status='Needs review',message='This supplier order already has a submission intent. Review the original handoff.');prep.save(q,value);return
-            value['submission']=dict(intent_at=prep.now(),actor=authorisation['actor'],adopted_paused=order.get('status')=='paused')
+            value['submission']=dict(intent_at=prep.now(),actor=authorisation['actor'],adopted_paused=order.get('status') in ('paused','on_hold'))
             from prodigi_order_group import reserve
             reserve(q,value,order,authorisation,units=units)
         value.update(status='Submitting' if may_post else value['status'],message='Confirming this exact supplier order. Submission is never blindly retried.')
