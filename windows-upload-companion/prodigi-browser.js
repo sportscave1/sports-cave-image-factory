@@ -220,9 +220,11 @@ async function prodigiReceipt(plan,action,stage='readback',error='') {
 }
 async function prodigiResumeCompletion(plan) {
   const done=plan.ordersCompletion;
+  const interrupted=plan.kind===undefined&&!done;
   const result=plan.kind==='qa'&&done?
     await prodigiQAReceipt(plan,'finish',done.evidence??null,done.error||''):
-    await prodigiReceipt(plan,'finish',done?.stage||'readback',done?.error||'');
+    await prodigiReceipt(plan,'finish',done?.stage||(interrupted?'open':'readback'),done?.error||
+      (interrupted?'The supplier browser response was interrupted. Verify the saved order before continuing.':''));
   await chrome.storage.local.remove('ordersBrowserPending');
   return result;
 }

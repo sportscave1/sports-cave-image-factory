@@ -54,7 +54,16 @@ Only an independently proven unchanged pre-Save wait shows “Recovering artwork
 in Orders and the Companion header. Its retry remains durable. Failed fresh
 revalidation removes that projection and retains the real review state. This
 does not hide unknown failures or claim that future supplier failures cannot
-occur. Companion package version: 1.7.59; no new permissions or service topology.
+occur. Companion package version: 1.7.60; no new permissions or service topology.
+
+Live follow-through found one additional restart case: the older worker resumed
+SC3572's persisted handoff without completion evidence as a bare `readback`.
+Save was false and the independent changed-fields list was empty. Recovery now
+recognises only that exact legacy failure signature before freshly checking the
+source, full business state and empty artwork slots again. New worker restarts
+explicitly report the interrupted artwork handoff; recorded completion evidence
+and other handoff kinds retain their existing readback path. A consumed Save,
+submission/document intent or changed/hidden order cannot enter this recovery.
 
 ## Verification and rollout
 
@@ -69,6 +78,12 @@ holds, source/target fences, consumed-Save recovery, QA, submission, grid/header
 reads and the release-package contract. Its only warning is the existing
 Starlette TestClient/httpx deprecation. Test-run hashes pin the unchanged final
 source files; the release evidence retains the full commands and logs.
+
+The restart follow-up passed 102 Python recovery, consumed-Save and package
+checks, and 91 browser/sign-in checks, with zero skips. SC3574 subsequently
+completed artwork verification and every dashboard QA check, then its existing
+configured submission flow confirmed supplier status `on_hold`. This is a
+submitted-order receipt, not confirmation of payment or production.
 
 Exact-commit verification, production rollout, installed extension activation
 and per-order outcomes are recorded in

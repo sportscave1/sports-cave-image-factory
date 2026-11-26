@@ -56,6 +56,50 @@ def test_existing_product_recovers_original_asset_without_reset_or_repeating_sav
     assert not provider.writes
 
 
+def legacy_readback(store):
+    value=prep.read(1)
+    value['browser'].pop('client_error',None)
+    value['browser'].update(last_stage='readback',readback_changed_fields=[])
+    value['last_failure']=dict(stage='artwork.readback',error_type='ValueError',message=recovery.LEGACY_READBACK_MESSAGE)
+    write(store,value)
+    return value
+
+
+def test_legacy_restart_readback_recovers_only_after_fresh_unchanged_empty_proof(waiting):
+    store,provider,old,_=waiting
+    legacy_readback(store)
+    assert recovery.recover({'id':'owner'})==1
+    assert browser.finish(KEY,old['token'])['status']=='Handoff unavailable'
+    plan=browser.claim(exact_item_supported=True,upload_recovery_supported=True)
+    assert plan['fresh_empty_item'] and plan['library_asset_id']=='asset-id'
+    assert plan['order_id']==old['order_id'] and plan['token']!=old['token']
+    assert not provider.writes
+
+
+@pytest.mark.parametrize('change',['recipient','quantity','artwork','source','save','submission','intent','document_intent','hidden',
+    'unknown','changed_fields','missing_fields','failure_stage','failure_message','failure_type'])
+def test_restart_readback_never_bypasses_fences_or_absent_completion_evidence(waiting,change):
+    store,provider,_,_=waiting;value=legacy_readback(store)
+    if change=='recipient':provider.data['recipient']={'name':'Changed synthetic recipient'}
+    if change=='quantity':provider.data['items'][0]['quantity']=2
+    if change=='artwork':provider.data['items'][0]['assets']=[{'url':'unexpected.jpg'}]
+    if change=='source':value['snapshot']['output']['sha256']='f'*64
+    if change=='save':value['browser']['started']=True
+    if change=='submission':value['submission']={'intent_at':prep.now()}
+    if change=='intent':value['write_intent']=True
+    if change=='document_intent':value['document_write_intent']=True
+    if change=='hidden':value['hidden']=True
+    if change=='unknown':value['browser']['client_error']='Unknown error'
+    if change=='changed_fields':value['browser']['readback_changed_fields']=['quantity']
+    if change=='missing_fields':value['browser'].pop('readback_changed_fields')
+    if change=='failure_stage':value['last_failure']['stage']='artwork.save'
+    if change=='failure_message':value['last_failure']['message']='Unknown failure'
+    if change=='failure_type':value['last_failure']['error_type']='RuntimeError'
+    write(store,value)
+    assert recovery.recover({'id':'owner'})==0
+    assert prep.read(1).get('browser') and not provider.writes
+
+
 def test_missing_library_original_uses_fresh_same_item_upload(waiting):
     _,provider,old,_=waiting;provider.assets=lambda:[]
     assert recovery.recover({'id':'owner'})==1

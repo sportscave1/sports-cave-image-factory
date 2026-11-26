@@ -97,6 +97,26 @@ function setup(bytes='exact',saved=true) {
   vm.runInContext(source,context);
   return{context,calls,tabs,storage,listeners};
 }
+
+test('a restarted artwork plan without completion records interruption through readback, without another supplier action',async()=>{
+ const {context,calls,storage}=setup();context.plan=plan;storage.ordersBrowserPending=plan;
+ context.chrome.tabs.sendMessage=()=>assert.fail('Restart must only read the existing supplier item');
+ await vm.runInContext('prodigiResumeCompletion(plan)',context);
+ assert.equal(calls.length,1);assert(calls[0].url.endsWith('/browser/finish'));
+ const body=JSON.parse(calls[0].options.body);
+ assert.equal(body.stage,'open');assert.match(body.error,/supplier browser response was interrupted/);
+ assert(!storage.ordersBrowserPending);
+});
+
+test('restart retains exact recorded completion evidence and leaves other handoff kinds on independent readback',async()=>{
+ for(const addition of [{ordersCompletion:{stage:'save',error:'Recorded save outcome'}},{kind:'product'},{kind:'certificate'}]){
+  const {context,calls}=setup();context.plan={...plan,...addition};
+  await vm.runInContext('prodigiResumeCompletion(plan)',context);
+  const body=JSON.parse(calls[0].options.body);
+  assert.equal(body.stage,addition.ordersCompletion?'save':'readback');
+  assert.equal(body.error,addition.ordersCompletion?'Recorded save outcome':undefined);
+ }
+});
 test('only exact pinned artwork and supplier order destinations are accepted',()=>{
   const {context}=setup();context.plan=plan;
   assert.equal(vm.runInContext('prodigiPlanValid(plan)',context),true);
