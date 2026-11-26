@@ -29,6 +29,7 @@ class SpeedReleaseChecks(unittest.TestCase):
                               'tests/test_marketplace_collation.py',
                               'tests/test_recovery_revision_cache.py',
                               'tests/test_reporting_normalisation.py',
+                              'tests/test_human_work_read.py',
                               'tests/test_daily_planner_overhaul.py',
                               'tests/test_reporting_permissions.py',
                               'tests/test_reporting_page.py'])

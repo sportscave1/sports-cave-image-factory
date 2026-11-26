@@ -3622,7 +3622,9 @@ def list_human_work_events(
     limit_sql = "LIMIT %s OFFSET %s" if safe_limit is not None else ""
     if safe_limit is not None:
         params.extend((safe_limit, safe_offset))
-    with connect() as conn:
+    # Reuse the existing bounded read transport; keep the shorter dashboard
+    # timeout transaction-local on its autocommit connections.
+    with read_connection() as conn, conn.transaction():
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
