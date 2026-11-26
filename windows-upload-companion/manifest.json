@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sports Cave Companion",
   "description": "Processes designs, uploads, Meta Ads and guarded Prodigi order preparation through the paired Edge desktop.",
-  "version": "1.7.58",
+  "version": "1.7.59",
   "action": {"default_title": "Sports Cave Companion"},
   "permissions": [
     "storage",

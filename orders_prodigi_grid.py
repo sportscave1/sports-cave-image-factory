@@ -33,6 +33,9 @@ def action_state(saved, fulfilment=""):
         return dict(label="✓ Complete",tone="complete",action="",url="",detail="This order is already complete.")
     if not saved:return dict(label='Send',tone='plain',action='send',url='',detail='Prepare and check this existing order. Submission follows the Orders companion setting.')
     state=saved.get('status','Needs review')
+    from prodigi_upload_recovery import pending
+    if pending(saved):
+        return dict(label='Recovering artwork',tone='pending',action='',url='',detail=saved.get('message','Rechecking the unchanged supplier item before retrying.'))
     failure=saved.get('last_failure') or {}
     if (state in ('Needs QA','Needs review') and failure.get('stage')=='preflight'
             and failure.get('error_type')=='ArtworkQuality'
@@ -140,6 +143,8 @@ def review(saved,row,jpg):
         and not (saved or {}).get('submission') and not (saved or {}).get('last_failure')
         and bool(checks) and all(checks.get(k) is True for k in CHECKS))
     if hold_only:state='Customer hold'
+    from prodigi_upload_recovery import pending
+    if not customer_hold and pending(saved or {}):state='Recovering artwork'
     runtime=(saved or {}).get('_runtime') or {}
     stopped=state in ('Needs QA','Needs review','Submission uncertain','Status unavailable')
     snap=(saved or {}).get('snapshot') or {}

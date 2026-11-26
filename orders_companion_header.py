@@ -8,7 +8,7 @@ def snapshot(connect):
               SELECT DISTINCT ON (value->>'allocation_id') value,updated_at
               FROM app_settings WHERE (key LIKE 'prodigi_prepare:%%' OR key LIKE 'orders_auto_jpg:%%' OR key LIKE 'prodigi_prepare_failure:%%') AND (key NOT LIKE 'prodigi_prepare_failure:%%' OR COALESCE((value->>'active')::boolean,false)) AND NOT COALESCE((value->>'hidden')::boolean,false)
               ORDER BY value->>'allocation_id',CASE WHEN key LIKE 'prodigi_prepare_failure:%%' THEN 0 WHEN key LIKE 'prodigi_prepare:%%' THEN 1 ELSE 2 END,updated_at DESC
-            ), stats AS (SELECT count(*) FILTER(WHERE value->>'status' IN
+            ), stats AS (SELECT count(*) FILTER(WHERE value->>'upload_retry_pending'='true' OR value->>'status' IN
               ('Waiting for order','Queued','Waiting','Preparing JPG','Awaiting product selection','Awaiting browser upload','Awaiting dashboard QA','Ready for manual payment','Submitted','Merge preparing')) AS waiting FROM units)
             SELECT value,updated_at,stats.waiting,
               EXISTS(SELECT 1 FROM app_settings WHERE key='orders_submit_after_qa' AND value->>'enabled'='true') AS automatic,
@@ -25,13 +25,15 @@ def snapshot(connect):
             v=row.get('value')
             if not v:continue
             status=v.get('status','Needs review')
+            from prodigi_upload_recovery import pending
+            recovering=pending(v)
             state=('complete' if status in ('Complete','Ready') else 'running' if status in
                 ('Uploading','Selecting product','Browser uploading','Generating','Checking QA','Checking dashboard QA','Submitting','Certificate pending')
                 else 'waiting' if status in ('Waiting for order','Queued','Waiting','Preparing JPG','Awaiting product selection','Awaiting browser upload','Awaiting dashboard QA','Ready for manual payment','Submitted') else 'failed')
             snap=v.get('snapshot') or {}
             signin=(v.get('signin_wait') or {}).get('state')=='waiting'
             jobs.append(dict(id=str(v.get('allocation_id')),title=(snap.get('order_reference') or v.get('order_reference') or '')+' · '+(snap.get('product') or v.get('title') or 'Order'),
-                state='waiting' if signin else state,can_restart=state=='failed' and not signin,label='Prodigi sign-in needed' if signin else 'JPG ready' if status=='Ready' else status,
+                state='waiting' if signin or recovering else state,can_restart=state=='failed' and not signin and not recovering,label='Prodigi sign-in needed' if signin else 'Recovering artwork' if recovering else 'JPG ready' if status=='Ready' else status,
                 detail='Sign into Prodigi in Edge. Waiting orders resume automatically after sign-in.' if signin else '',
                 updated_at=str(row['updated_at']),percent=100 if state=='complete' else 0,estimated=False))
         return dict(enabled=prep.enabled(),automation_enabled=bool(rows and rows[0]['automatic']),online=bool(rows and rows[0]['online']),waiting=rows[0]['waiting'] if rows else 0,jobs=jobs)

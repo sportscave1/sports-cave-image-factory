@@ -242,7 +242,7 @@ async function prodigiBrowserRun(plan) {
   try {
     if(plan.kind==='qa'||plan.kind==='product'||plan.kind==='merge-add'||plan.kind==='merge-hold'){
       stage='open';
-      let tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id};
+      let tab=await prodigiWorkerTab(plan);prodigiBrowserTransfer={plan,bytes:new Uint8Array(),tab:tab.id,stage:'open'};
       let refresh=plan.kind==='product'||(plan.kind==='qa'&&plan.fresh_saved_order===true);
       if(plan.kind==='merge-hold'&&tab.ordersReused){
         const state=await chrome.tabs.sendMessage(tab.id,{type:'prodigi:ready'});
@@ -270,7 +270,7 @@ async function prodigiBrowserRun(plan) {
     if(hash!==plan.sha256) throw Error('The numbered JPG checksum changed.');
     stage='open';if(typeof ordersProgressStage==='function')ordersProgressStage('open');
     let tab=await prodigiWorkerTab(plan);
-    prodigiBrowserTransfer={plan,bytes,tab:tab.id};
+    prodigiBrowserTransfer={plan,bytes,tab:tab.id,stage:'open'};
     // Only a server-verified empty item may clear a product-selection shell.
     tab=await prodigiReadyOwnedPage(plan,tab,plan.selected_empty_product===true||plan.fresh_empty_item===true||plan.replace_artwork===true,60);
     if(!tab) {stage='readiness';throw Error('The exact Prodigi order page did not become ready; check its loading or sign-in state.');}
@@ -288,7 +288,7 @@ async function prodigiBrowserRun(plan) {
     // A consumed permit will resume through independent readback, never replay.
     if(typeof prodigiSigninNeeded==='function'&&await prodigiSigninNeeded(plan,error))
       return await prodigiPauseForSignin(plan);
-    stage=error.prodigiStage||stage;
+    stage=error.prodigiStage||prodigiBrowserTransfer?.stage||stage;
     // Read back this same item; never repeat an uncertain Save or upload.
     return await complete(stage,plan.kind==='qa'?('QA '+stage+': '+String(error.message||'Browser handoff interrupted')).slice(0,240):String(error.message||'Browser handoff interrupted'));
   } finally {
@@ -301,6 +301,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const job=prodigiBrowserTransfer;
   if(!job || sender.frameId!==0 || sender.tab?.id!==job.tab || !prodigiOrderAddress(sender.url,job.plan.order_url)) return;
   if(message?.type==='prodigi:progress'&&typeof message.stage==='string'){
+    if(/^(page|row|editor|reset-image|picker|transfer|uploaded|orientation|permit|save|product|product-row|shipping|inserts|tax-declaration)$/.test(message.stage))job.stage=message.stage;
     if(typeof ordersProgressStage==='function')ordersProgressStage(message.stage);
     reply({ok:true});return;
   }

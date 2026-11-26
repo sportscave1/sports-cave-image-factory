@@ -27,8 +27,19 @@ ERRORS = {
     'The woken order page did not expose its identity.',
     'Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.',
     'The draft changed before Save.',
+    'The supplier browser response was interrupted. Verify the saved order before continuing.',
+    'The supplier order tab closed. Verify its saved state before continuing.',
+    'Prodigi image processing stopped responding before Save.',
 }
 STAGES = {'download','open','signin','readiness','row','editor','picker','transfer','uploaded','orientation','permit'}
+
+
+def pending(value):
+    receipt=value.get('browser') or {}
+    return (value.get('upload_retry_pending') is True and value.get('status')=='Needs review'
+        and receipt.get('started') is False and not receipt.get('verified')
+        and receipt.get('last_stage') in STAGES and receipt.get('client_error') in ERRORS
+        and not any(value.get(k) for k in ('submission','write_intent','document_write_intent','hidden')))
 
 
 def reusable_asset(provider, filename, snap, *, assets=None):
@@ -101,6 +112,7 @@ def defer(key):
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key)
         if value.get('status')!='Needs review' or (value.get('browser') or {}).get('started') is not False:return
+        value.pop('upload_retry_pending',None) # A changed/unsupported candidate must stay visible for review.
         value.setdefault('upload_recovery',{})['retry_at']=(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat()
         browser.save(cur,key,value)
 
@@ -137,6 +149,7 @@ def recover_one(key):
              'source_sha256':snap['output']['sha256']}])[-8:]
         # Removing the old token and recording the replacement proof commit together.
         value.pop('browser'); value.pop('last_failure', None)
+        value.pop('upload_retry_pending',None)
         value.update(upload_recovery=recovery, status=browser.WAITING,
             message='Recovering this unchanged empty item; reusing the verified uploaded JPG when available. No Save was repeated.')
         browser.save(cur, key, value)

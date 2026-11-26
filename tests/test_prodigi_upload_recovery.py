@@ -68,6 +68,10 @@ def test_missing_library_original_uses_fresh_same_item_upload(waiting):
     ('download','The pinned JPG is unavailable.'),
     ('open','Failed to fetch'),
     ('open','The woken order page did not expose its identity.'),
+    ('open','The supplier browser response was interrupted. Verify the saved order before continuing.'),
+    ('uploaded','The supplier browser response was interrupted. Verify the saved order before continuing.'),
+    ('uploaded','Prodigi image processing stopped responding before Save.'),
+    ('uploaded','The supplier order tab closed. Verify its saved state before continuing.'),
     ('signin','Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.'),
     ('readiness','The exact Prodigi order page did not become ready; check its loading or sign-in state.'),
     ('picker','The expected Prodigi control did not finish loading.'),
@@ -160,6 +164,39 @@ def test_changed_library_asset_between_claim_and_permit_stays_unconsumed(waiting
 def test_one_bad_recovery_does_not_cancel_other_ready_orders(waiting,monkeypatch):
     monkeypatch.setattr(recovery,'recover_one',lambda _:(_ for _ in ()).throw(RuntimeError('Synthetic dependency unavailable')))
     assert recovery.recover({'id':'owner'})==0
+
+
+def test_proven_unchanged_pre_save_wait_is_visible_as_recovering_until_real_revalidation(waiting):
+    from orders_prodigi_grid import review,action_state
+    store,provider,_,_=waiting;value=prep.read(1)
+    assert recovery.pending(value)
+    assert action_state(value)['label']=='Recovering artwork'
+    projected=review(value,{'edition_order_id':1},'')
+    assert projected['status']=='Recovering artwork' and not projected['has_error'] and not projected['can_reset']
+    provider.data['items'][0]['quantity']=2
+    assert recovery.recover({'id':'owner'})==0
+    value=prep.read(1)
+    assert not recovery.pending(value)
+    assert review(value,{'edition_order_id':1},'')['has_error']
+
+
+@pytest.mark.parametrize('change',['recipient','quantity','artwork','shipping','source','save','submission','intent','unknown'])
+def test_interrupted_response_never_bypasses_source_business_or_save_fences(waiting,change):
+    store,provider,_,_=waiting;value=prep.read(1)
+    value['browser'].update(last_stage='open',client_error=
+        'The supplier browser response was interrupted. Verify the saved order before continuing.')
+    if change=='recipient':provider.data['recipient']={'name':'Changed synthetic recipient'}
+    if change=='quantity':provider.data['items'][0]['quantity']=2
+    if change=='artwork':provider.data['items'][0]['assets']=[{'url':'unexpected.jpg'}]
+    if change=='shipping':provider.data['shippingMethod']='Express'
+    if change=='source':value['snapshot']['output']['sha256']='f'*64
+    if change=='save':value['browser']['started']=True
+    if change=='submission':value['submission']={'intent_at':prep.now()}
+    if change=='intent':value['write_intent']=True
+    if change=='unknown':value['browser']['client_error']='The supplier order page changed during the supplier action.'
+    write(store,value)
+    assert recovery.recover({'id':'owner'})==0
+    assert prep.read(1).get('browser') and not provider.writes
 
 
 @pytest.fixture

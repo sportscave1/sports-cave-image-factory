@@ -649,6 +649,7 @@ def _finish(key,read_receipt,stage,client_error=''):
         if client_error:value['browser']['client_error']=str(client_error)[:240]
         if value['browser'].get('verified'):
             return {'status':value['status']}
+        value.pop('upload_retry_pending',None)
         try:
             snap,order,item=checked(value,provider,resolver,sandbox)
             # Saving the first artwork makes Prodigi calculate target-item prices.
@@ -664,17 +665,23 @@ def _finish(key,read_receipt,stage,client_error=''):
                 value['browser']['readback_changed_fields']=changed_fields(expected_business,current_business)
                 page_wait=(stage in ('open','readiness') and client_error in (
                     'The woken order page did not expose its identity.',
-                    'The exact Prodigi order page did not become ready; check its loading or sign-in state.'))
+                    'The exact Prodigi order page did not become ready; check its loading or sign-in state.',
+                    'The supplier browser response was interrupted. Verify the saved order before continuing.',
+                    'The supplier order tab closed. Verify its saved state before continuing.'))
                 upload_wait=(stage=='uploaded' and client_error in (
                     'Prodigi image upload did not finish within the allowed time.',
                     'Prodigi image library stayed busy after the uploaded image became available.',
                     'Prodigi image selection did not finish after the verified library image became ready.',
                     'The uploaded image did not become available in the Prodigi picker.',
-                    'The expected Prodigi control did not finish loading.'))
+                    'The expected Prodigi control did not finish loading.',
+                    'Prodigi image processing stopped responding before Save.',
+                    'The supplier browser response was interrupted. Verify the saved order before continuing.',
+                    'The supplier order tab closed. Verify its saved state before continuing.'))
                 if (value['browser']['started'] is False and (page_wait or upload_wait)
                         and business(order,item['id'])==before
                         and not has_existing_artwork(item)
                         and (item.get('assets') or [])==value['browser'].get('empty_slots',[])):
+                    value['upload_retry_pending']=True
                     reason='page stopped responding' if page_wait else 'upload or image selection did not complete'
                     raise ValueError('The supplier '+reason+' before artwork Save. The saved draft is unchanged; safe recovery is pending.')
                 raise ValueError('Supplier order changed or Save was not permitted. Review this exact draft.')
