@@ -28,12 +28,27 @@ other tasks and installed Companion customisations remain preserved.
   associated Product Uploads handoff ended at stage 7 with an APPROVAL failure,
   so publication had not completed the PSD mapping handoff. The PSD contains
   embedded ICC, an editable `SC_EDITION_NUMBER` (001 / 100), and plaque layer.
-  Copy/link recovery requires the separately requested exact-file confirmation.
-  The original source and its review notes remain retained.
+  The user subsequently approved the exact copy/link recovery. Dropbox copied
+  the source to the existing main PSD folder as `id:u1tYiAa2O-AAAAAAAADKYA`,
+  revision `016613632afde16000000036d367e13`, without creating folders. Both
+  41,810,193-byte files have SHA-256
+  `19e208765a0809abb0534c3aa16337a64c5a9c5c201d5f1c60d692d75b3b6b8f`.
+  The original source and its review notes remain retained. The authenticated
+  Add / Save PSD workflow linked the copy to the existing product at
+  `2026-11-26T23:21:49Z`, recording the normal mapping audit and enqueueing
+  preparation. No direct database mutation, new listing or edition reallocation
+  was used.
 
 Fresh read-only Photoshop inspection of an isolated copy successfully opened
 the Kirill PSD and resolved both standard edition roles, reference 1/100 and
 Cinzel-Medium. Original and staged Dropbox content hashes remained identical.
+
+The approved Kirill copy completed native preparation on its first attempt and
+reached Cloud Ready at `2026-11-26T23:26:31Z`, preparation
+`a648f6d9c0c8e90951d83fc522a255a3814ca8b06a9efaa32973577433a1282d`.
+Both existing Kirill allocations, 1000 (001/100) and 1007 (002/100), then
+generated their numbered JPGs and entered fulfilment. The retained missing-PSD
+failure for 1007 became inactive automatically at `2026-11-26T23:28:40Z`.
 
 ## Recovery changes
 
@@ -84,6 +99,30 @@ checks, and 91 browser/sign-in checks, with zero skips. SC3574 subsequently
 completed artwork verification and every dashboard QA check, then its existing
 configured submission flow confirmed supplier status `on_hold`. This is a
 submitted-order receipt, not confirmation of payment or production.
+
+## Verified closure
+
+All three requested orders have verified original artwork bytes, full-image fit,
+every dashboard QA check and a confirmed supplier submission. The source repair
+also recovered the earlier Kirill allocation without reassigning its edition.
+
+| Order | Allocation | Edition | Supplier order | Confirmed outcome |
+|---|---:|---|---|---|
+| SC3572 | 1006 | 094/100 | 75496446719197184 | Submitted; supplier `on_hold` |
+| SC3573 | 1007 | 002/100 | 75500980680593920 | Submitted; supplier `on_hold` |
+| SC3574 | 1008 | 032/100 | 75503070205325312 | Submitted; supplier `on_hold` |
+| SC3565 (same Kirill source) | 1000 | 001/100 | 75464595871964672 | Submitted; supplier `on_hold` |
+
+SC3573's final receipt was independently read at `2026-11-26T23:40:00Z`.
+Supplier hold is distinct from payment or production confirmation; certificates
+continue through the existing finalisation workflow. No manual supplier Save,
+payment, hold release, extra primary service or Blueprint sync was performed.
+
+Runtime hardening is deployed in `52aab1ac` and `30e0da04`; installed Companion
+1.7.60 is active. The final repository follow-up records the approved source
+repair and closure, with no additional runtime behaviour change. Deployment
+identities, health checks, immutable source/JPG hashes, test results and final
+order receipts are retained in the Studio task evidence.
 
 Exact-commit verification, production rollout, installed extension activation
 and per-order outcomes are recorded in
