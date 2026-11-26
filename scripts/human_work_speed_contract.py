@@ -206,7 +206,6 @@ with sync_playwright() as p:
                     page.locator('[data-testid="stDataFrame"] canvas').first.wait_for()
                     expect(page.get_by_role('button',name='Next',exact=True)).to_be_enabled()
                     browser_samples[label].append((time.perf_counter()-start)*1000)
-        cpu[label].append((time.process_time()-cpu_start)*1000)
                     start=time.perf_counter()
                     page.get_by_role('button',name='Next',exact=True).click()
                     page.get_by_text('Page 2 | Up to 25 records per page',exact=True).wait_for()
