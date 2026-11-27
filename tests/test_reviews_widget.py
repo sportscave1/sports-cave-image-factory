@@ -14,25 +14,6 @@ from reviews_storefront_form import storefront_html,form_headers,SCRIPT
 
 class WidgetBoundaryTests(unittest.TestCase):
     def setUp(self):CACHE.invalidate()
-    def test_lightweight_summary_is_shared_short_cached_and_disabled_fails_closed(self):
-        app=FastAPI();app.include_router(router);client=TestClient(app)
-        store=Mock();store.connect='summary-fixture';store.settings.return_value={'enabled':True}
-        snapshot={'summary':{'count':212,'average':4.75},'histogram':[[5,159],[4,53],[3,0],[2,0],[1,0]],'as_of':'2026-11-27T04:00:00+00:00'}
-        with patch('reviews_http.ReviewsStore',return_value=store),patch('reviews_http.allow_rate',return_value=True),patch('reviews_widget.published_summary',return_value=snapshot) as summary,patch('reviews_widget.projection') as rows:
-            for country in ('AU','US'):
-                response=client.get('/reviews/widget?summary=1&country='+country)
-                self.assertEqual(response.json(),snapshot);self.assertEqual(response.headers['cache-control'],'public,max-age=5')
-            summary.assert_called_once();rows.assert_not_called()
-            CACHE.invalidate();store.settings.return_value={'enabled':False}
-            self.assertEqual(client.get('/reviews/widget?summary=1').status_code,404)
-
-    def test_public_summary_reads_one_consistent_published_snapshot(self):
-        from reviews_widget import published_summary
-        store=Mock();store._read_query.return_value={'totals':{'published':2,'published_rating':9},'histogram':[{'rating':5,'count':1},{'rating':4,'count':1}],'as_of':'2026-11-27T04:00:00+00:00'}
-        value=published_summary(store)
-        self.assertEqual(value['summary'],{'count':2,'average':4.5})
-        self.assertEqual(sum(n for _,n in value['histogram']),2)
-        store._read_query.assert_called_once();self.assertIn("status='PUBLISHED'",store._read_query.call_args.args[1])
     def test_shop_verified_uses_standard_buyer_badge_without_changing_order_verification(self):
         row=dict(id=str(uuid.uuid4()),source='shop_app',source_review_id='synthetic-shop',reviewer_name='Synthetic buyer',
           rating=5,title='Synthetic',body='Synthetic review',product_title='Synthetic edition',product_image='',product_url='',
@@ -68,23 +49,6 @@ class WidgetBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable SQL fixture required')
 class WidgetSQLTests(unittest.TestCase):
-    def test_published_snapshot_tracks_shop_publication_and_archival_without_counting_pending(self):
-        from tests.crm_db_fixture import connect
-        from reviews_store import ReviewsStore
-        from reviews_widget import published_summary
-        store=ReviewsStore(connect);identity=str(uuid.uuid4());before=published_summary(store)['summary']
-        try:
-            store.q("INSERT INTO sc_reviews(id,source,product_id,reviewer_name,rating,body,status,dedupe_key) VALUES(%s,'shop_app','gid://shopify/Product/123','Synthetic Shop buyer',1,'Synthetic review','PENDING',%s)",(identity,identity))
-            self.assertEqual(published_summary(store)['summary'],before)
-            store.q("UPDATE sc_reviews SET status='PUBLISHED' WHERE id=%s",(identity,))
-            data=published_summary(store);self.assertEqual(data['summary']['count'],before['count']+1)
-            expected=(before['count']*(before['average'] or 0)+1)/(before['count']+1)
-            self.assertAlmostEqual(data['summary']['average'],expected)
-            self.assertEqual(sum(n for _,n in data['histogram']),data['summary']['count']);self.assertIsNotNone(data['as_of'])
-            store.q("UPDATE sc_reviews SET status='ARCHIVED' WHERE id=%s",(identity,))
-            self.assertEqual(published_summary(store)['summary'],before)
-        finally:store.q('DELETE FROM sc_reviews WHERE id=%s',(identity,))
-
     def test_exact_legacy_ids_pagination_country_order_and_dropbox_only_images(self):
         from tests.crm_db_fixture import connect
         from reviews_store import ReviewsStore

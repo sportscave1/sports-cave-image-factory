@@ -24,7 +24,7 @@ class NativeReviewMethods {
       entry.request.catch(() => { if (owner.nativeRequests.get(country) === entry) owner.nativeRequests.delete(country); });
     }
     const data = await entry.request;
-    this.nativeSummary(data.summary,data.as_of);
+    this.nativeSummary(data.summary);
     return data;
   }
 
@@ -46,18 +46,14 @@ class NativeReviewMethods {
   }
 
   nativeSummary(summary) {
-    if (!Number.isSafeInteger(summary?.count) || summary.count < 0) return;
-    document.querySelectorAll('sc-customer-reviews').forEach(widget => widget.summary(Number(summary.average || 0).toFixed(2), String(summary.count)));
-    document.querySelectorAll('.scx-review-text').forEach(target => {
-      const rating = target.querySelector('strong'), count = target.querySelector('span:last-child');
-      if (rating) rating.textContent = Number(summary.average || 0).toFixed(1);
-      if (count) count.textContent = `${summary.count} reviews`;
-    });
+    if (!Number.isSafeInteger(summary?.count) || summary.count < 0 ||
+        !Number.isFinite(summary.average) || summary.average < 0 || summary.average > 5) return;
+    document.querySelectorAll('sc-customer-reviews').forEach(widget => widget.summary(Number(summary.average).toFixed(2), String(summary.count)));
   }
 
   nativeApply(data, append = false) {
     if (!this.controller || this.controller.signal.aborted) return;
-    this.nativeSummary(data.summary,data.as_of);
+    this.nativeSummary(data.summary);
     if (!append) {
       this.renderCarousel(this.nativeRows(data.featured, true));
       if (this.querySelector('[data-review-histogram]')) this.renderHistogram(data.histogram, data.summary.count);

@@ -20,8 +20,8 @@
   - No heavy review pill background
 {%- endcomment -%}
 
-{%- assign scx_rating = '—' -%}
-{%- assign scx_review_count = '—' -%}
+{%- assign scx_rating = 4.8 -%}
+{%- assign scx_review_count = 211 -%}
 
 {%- assign is_limited = false -%}
 {%- if product.tags contains 'Limited Edition'
@@ -842,12 +842,12 @@
     </div>
 
     <div class="scx-side scx-right">
-      <button class="scx-review-inline" type="button" aria-busy="true" aria-label="Jump to customer reviews">
-        <span class="scx-stars" aria-hidden="true" style="opacity:.35">★★★★★</span>
+      <button class="scx-review-inline" type="button" aria-label="Jump to customer reviews">
+        <span class="scx-stars" aria-hidden="true">★★★★★</span>
         <span class="scx-review-text">
-          <strong style="display:inline-block;min-inline-size:3ch;font-variant-numeric:tabular-nums">{{ scx_rating }}</strong>
+          <strong>{{ scx_rating }}</strong>
           <span>•</span>
-          <span style="display:inline-block;min-inline-size:11ch;font-variant-numeric:tabular-nums">{{ scx_review_count }} reviews</span>
+          <span>{{ scx_review_count }} reviews</span>
         </span>
       </button>
     </div>

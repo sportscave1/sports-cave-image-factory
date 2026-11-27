@@ -28,18 +28,6 @@ def product_thumbnail(row):
     return urlunsplit((u.scheme,u.netloc,u.path,urlencode(args),''))
 
 
-def published_summary(store):
-    """One published-only snapshot, without rows, customer details or media."""
-    data=store._read_query('reviews.public-summary',"""SELECT
-      COALESCE((SELECT to_jsonb(t) FROM sc_review_totals t WHERE scope='all'),'{}'::jsonb) AS totals,
-      (SELECT COALESCE(jsonb_agg(h),'[]'::jsonb) FROM (SELECT rating,count(*) AS count FROM sc_reviews
-        WHERE status='PUBLISHED' AND (product_id IS NOT NULL OR review_type='STORE') GROUP BY rating) h) AS histogram,
-      statement_timestamp() AS as_of""",one=True)
-    totals=data['totals'];count=int(totals.get('published',0))
-    return {'summary':{'count':count,'average':float(totals.get('published_rating',0))/count if count else None},
-      'histogram':[[n,next((int(r['count']) for r in data['histogram'] if r['rating']==n),0)] for n in (5,4,3,2,1)],'as_of':data['as_of']}
-
-
 def projection(store, origin, country='AU', offset=0, settings=None):
     if country not in ('AU', 'US'):country='AU'
     if not isinstance(offset,int) or not 0<=offset<=50000:raise ValueError('Invalid page.')
@@ -63,7 +51,7 @@ def projection(store, origin, country='AU', offset=0, settings=None):
         SELECT (SELECT COALESCE(jsonb_agg(a ORDER BY a.position),'[]'::jsonb) FROM archive a) AS archive,
         (SELECT COALESCE(jsonb_agg(f ORDER BY f.position),'[]'::jsonb) FROM featured f) AS featured,
         (SELECT COALESCE(jsonb_agg(m ORDER BY m.kind,m.created_at,m.id),'[]'::jsonb) FROM media m) AS media,
-        '''+histogram_sql+''' AS histogram,(SELECT to_jsonb(t) FROM sc_review_totals t WHERE scope='all') AS totals,statement_timestamp() AS as_of'''
+        '''+histogram_sql+''' AS histogram,(SELECT to_jsonb(t) FROM sc_review_totals t WHERE scope='all') AS totals'''
     if store.connect:context=store.db()
     else:
         from supabase_backend import read_connection
@@ -89,6 +77,6 @@ def projection(store, origin, country='AU', offset=0, settings=None):
                 'shop_verified':bool(row.get('shop_verified')),
                 'source_verified':bool(settings['verified'] and (row.get('shop_verified') or (row['source']=='judgeme' and (row['source_verified'] or IMPORTED_VERIFIED.get(legacy) is True or str(row['id']) in CONFIRMED_IMPORT_IDS)))),
                 'media':by_review.get(str(row['id']),[])}
-    return {'reviews':[public(row) for row in archive],'featured':[public(row) for row in featured],'as_of':data.get('as_of'),
+    return {'reviews':[public(row) for row in archive],'featured':[public(row) for row in featured],
             'summary':summary,'histogram':[[n,next((int(r['count']) for r in histogram if r['rating']==n),0)] for n in (5,4,3,2,1)] if offset==0 else [],
             'next_offset':offset+5 if more else None}
