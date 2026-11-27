@@ -27,10 +27,11 @@ for(const country of ['AU','US'])test(`draft ${country}: one initial request, st
   const started=Date.now();await page.addScriptTag({content:fs.readFileSync(process.env.REVIEW_DRAFT_WIDGET_SOURCE,'utf8')});
   await page.waitForFunction(()=>document.querySelector('[data-review-archive]').children.length===5);
   const productThumb=page.locator('[data-review-archive] img[alt^="Product reviewed:"]');assert.equal(await productThumb.count(),1);assert.equal(await productThumb.getAttribute('loading'),'lazy');assert.equal(await productThumb.getAttribute('width'),'68');assert.match(await productThumb.getAttribute('src'),/width=136/);
-  const shopBadge=page.getByRole('img',{name:'Verified by Shop',exact:true});assert.equal(await shopBadge.count(),1);assert.equal(await shopBadge.getAttribute('src'),'https://cdn.shopify.com/static/shop/Verified%20by%20Shop_Gray_EN.svg');assert.equal(await shopBadge.getAttribute('loading'),'lazy');
+  assert.equal(await page.getByRole('img',{name:'Verified by Shop',exact:true}).count(),0);
   assert.ok(Date.now()-started<1500);assert.equal(requests.length,1);
   assert.equal(await page.locator('[data-review-archive] time').count(),country==='AU'?1:0);
-  assert.equal(await page.locator('[data-review-archive] .sc-reviews__verified').count(),1);
+  assert.equal(await page.locator('[data-review-archive] .sc-reviews__verified').count(),2);
+  assert.deepEqual(await page.locator('[data-review-archive] .sc-reviews__verified').allTextContents(),['✓Verified buyer','✓Verified buyer']);
   assert.match(await page.locator('.sc-reviews__thumbnail img').first().getAttribute('srcset'),/640w/);
   assert.doesNotMatch(await page.locator('.sc-reviews__thumbnail img').first().getAttribute('srcset'),/1280w/);
   const expected=country==='AU'?['Fixture 0','Fixture 1','Fixture 2','Fixture 3']:['Fixture 1','Fixture 3','Fixture 0','Fixture 2'];

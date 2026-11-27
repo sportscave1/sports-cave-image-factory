@@ -58,8 +58,7 @@
     const image=safeUrl(r.product_image);if(image){const img=node('img');img.src=image;img.alt=r.product_title||'';img.loading='lazy';img.width=48;img.height=48;product.append(img)}product.append(label);article.append(product);
    }
    const rating=Math.max(1,Math.min(5,Number(r.rating)||1));const stars=node('div','★'.repeat(rating)+'☆'.repeat(5-rating),'sc-review-stars');stars.setAttribute('aria-label',rating+' out of 5 stars');article.append(stars);
-   if(r.shop_verified){const badge=document.createElement('img');badge.src='https://cdn.shopify.com/static/shop/Verified%20by%20Shop_Gray_EN.svg';badge.style.objectFit='contain';badge.alt='Verified by Shop';badge.width=100;badge.height=18;badge.loading='lazy';article.append(badge)}
-   if(r.title)article.append(node('h3',r.title));article.append(node('p',r.body));article.append(node('small',r.reviewer_name+(r.verified_purchase?' · Verified purchase':'')+(r.created_at?' · '+String(r.created_at).slice(0,10):'')));
+   if(r.title)article.append(node('h3',r.title));article.append(node('p',r.body));article.append(node('small',r.reviewer_name+((r.verified_purchase||r.shop_verified)?' · Verified buyer':'')+(r.created_at?' · '+String(r.created_at).slice(0,10):'')));
    const media=node('div','','sc-review-media');
    for(const item of (Array.isArray(r.media)?r.media:[]).slice(0,20)){
     const url=safeUrl(item.url),thumb=safeUrl(item.thumbnail_url);if(!url||!thumb||!['image','video'].includes(item.kind))continue;

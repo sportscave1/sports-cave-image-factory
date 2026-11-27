@@ -3,7 +3,7 @@ import json
 import os
 import unittest
 import uuid
-from unittest.mock import Mock,patch
+from unittest.mock import Mock,MagicMock,patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from reviews_http import router
@@ -14,6 +14,18 @@ from reviews_storefront_form import storefront_html,form_headers,SCRIPT
 
 class WidgetBoundaryTests(unittest.TestCase):
     def setUp(self):CACHE.invalidate()
+    def test_shop_verified_uses_standard_buyer_badge_without_changing_order_verification(self):
+        row=dict(id=str(uuid.uuid4()),source='shop_app',source_review_id='synthetic-shop',reviewer_name='Synthetic buyer',
+          rating=5,title='Synthetic',body='Synthetic review',product_title='Synthetic edition',product_image='',product_url='',
+          review_type='PRODUCT',created_at='2026-11-27',date_known=True,verified_purchase=False,source_verified=True,shop_verified=True)
+        store=Mock();store.connect='synthetic';store.db=MagicMock()
+        store.db.return_value.__enter__.return_value.execute.return_value.fetchone.return_value={
+          'archive':[row],'featured':[],'media':[],'histogram':[],'totals':{'published':1,'published_rating':5}}
+        for country in ('AU','US'):
+            result=projection(store,'https://fixture.example',country,settings={'verified':True})['reviews'][0]
+            self.assertTrue(result['source_verified']);self.assertTrue(result['shop_verified'])
+            self.assertFalse(result['verified_purchase'])
+            self.assertFalse(projection(store,'https://fixture.example',country,settings={'verified':False})['reviews'][0]['source_verified'])
     def test_projection_is_cached_country_scoped_and_disabled_fails_closed(self):
         app=FastAPI();app.include_router(router);client=TestClient(app)
         store=Mock();store.connect='fixture';store.settings.return_value={'enabled':True}

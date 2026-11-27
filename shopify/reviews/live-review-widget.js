@@ -352,12 +352,7 @@
       const tick = node('span', 'sc-reviews__tick', '✓');
       tick.setAttribute('aria-hidden', 'true');
       verified.append(tick, document.createTextNode('Verified buyer'));
-      if (review.shopVerified) {
-        const badge = document.createElement('img');
-        badge.src = 'https://cdn.shopify.com/static/shop/Verified%20by%20Shop_Gray_EN.svg';
-        badge.style.objectFit = 'contain'; badge.alt = 'Verified by Shop'; badge.width = 100; badge.height = 18; badge.loading = 'lazy'; badge.decoding = 'async';
-        credit.append(badge);
-      } else if (review.verified) credit.append(verified);
+      if (review.verified || review.shopVerified) credit.append(verified);
       container.append(credit);
     }
 

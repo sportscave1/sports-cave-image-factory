@@ -75,7 +75,7 @@ def projection(store, origin, country='AU', offset=0, settings=None):
                 'product_title':row['product_title'],'product_thumbnail_url':product_thumbnail(row),'product_url':row.get('product_url') or '', 'created_at':row['created_at'] if settings.get('date',True) and row['date_known'] else None,
                 'verified_purchase':bool(settings['verified'] and row['verified_purchase']),
                 'shop_verified':bool(row.get('shop_verified')),
-                'source_verified':bool(settings['verified'] and row['source']=='judgeme' and (row['source_verified'] or IMPORTED_VERIFIED.get(legacy) is True or str(row['id']) in CONFIRMED_IMPORT_IDS)),
+                'source_verified':bool(settings['verified'] and (row.get('shop_verified') or (row['source']=='judgeme' and (row['source_verified'] or IMPORTED_VERIFIED.get(legacy) is True or str(row['id']) in CONFIRMED_IMPORT_IDS)))),
                 'media':by_review.get(str(row['id']),[])}
     return {'reviews':[public(row) for row in archive],'featured':[public(row) for row in featured],
             'summary':summary,'histogram':[[n,next((int(r['count']) for r in histogram if r['rating']==n),0)] for n in (5,4,3,2,1)] if offset==0 else [],
