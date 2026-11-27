@@ -2,9 +2,9 @@ name: Reviews startup regression
 on:
   push:
     branches: [main]
-    paths: ['app.py', 'reviews*.py', 'tests/test_reviews*.py', 'tests/test_review*.py', 'tests/fixtures/reviews_table_layout.py', '.github/workflows/reviews-startup.yml']
+    paths: ['app.py', 'reviews*.py', 'shopify/reviews/**', 'tests/test_reviews*.py', 'tests/test_review*.py', 'tests/test_reviews_count_sync.cjs', 'tests/test_draft_review_widgets.cjs', 'tests/fixtures/reviews_table_layout.py', '.github/workflows/reviews-startup.yml']
   pull_request:
-    paths: ['app.py', 'reviews*.py', 'tests/test_reviews*.py', 'tests/test_review*.py', 'tests/fixtures/reviews_table_layout.py', '.github/workflows/reviews-startup.yml']
+    paths: ['app.py', 'reviews*.py', 'shopify/reviews/**', 'tests/test_reviews*.py', 'tests/test_review*.py', 'tests/test_reviews_count_sync.cjs', 'tests/test_draft_review_widgets.cjs', 'tests/fixtures/reviews_table_layout.py', '.github/workflows/reviews-startup.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,6 +29,14 @@ jobs:
         run: python -m pytest -q tests/test_reviews_startup.py tests/test_database_read_pool.py tests/test_reviews.py tests/test_review_text_edits.py tests/test_review_notifications.py
       - name: Application startup scope (separate Streamlit runtime)
         run: python -m pytest -q tests/test_app_startup_scope_regression.py
+      - name: Storefront count, stars and badge regressions
+        env:
+          REVIEW_BROWSER_CHANNEL: chrome
+          REVIEW_DRAFT_WIDGET_SOURCE: shopify/reviews/live-review-widget.js
+        run: |
+          npm install --prefix "$RUNNER_TEMP/review-node" --no-audit --no-fund playwright@1.56.1
+          export REVIEW_PLAYWRIGHT_MODULE="$RUNNER_TEMP/review-node/node_modules/playwright"
+          node --test tests/test_reviews_count_sync.cjs tests/test_draft_review_widgets.cjs
       - name: Start synthetic fixture without provider credentials
         run: |
           python -m streamlit run tests/fixtures/reviews_table_layout.py --server.address 127.0.0.1 --server.port 8543 --server.headless true --browser.gatherUsageStats false > fixture.log 2>&1 &

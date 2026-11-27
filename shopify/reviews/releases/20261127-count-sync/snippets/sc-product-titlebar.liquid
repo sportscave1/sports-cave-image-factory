@@ -1,0 +1,971 @@
+{% doc %}
+  Product title and reviews. Product structured data is emitted by Shopify's main product section.
+{% enddoc %}
+{% if template.name == 'product' %}
+{%- comment -%}
+  Sports Cave • Premium Product Titlebar with Reviews
+  Best Compact Collector Version
+  - Cleans product title display
+  - Hides Wall Art from product title display
+  - Hides Limited Edition from product title display
+  - Small premium collector underline restored
+  - Compact mobile spacing
+  - Reviews sit neatly under title on mobile
+  - Desktop keeps balanced 3-column layout
+  - Desktop breadcrumbs moved into the far-left edge of the titlebar
+  - Full-width desktop titlebar so breadcrumbs start as far left as safely possible
+  - Breadcrumb text made smaller, lighter, and more subtle for SEO support without distracting from UI
+  - Desktop reviews increased again and pulled further inward from the right edge
+  - Breadcrumb separators and previous/next chevrons restored so they remain visible like the original theme breadcrumbs
+  - No heavy review pill background
+{%- endcomment -%}
+
+{%- assign scx_rating = '—' -%}
+{%- assign scx_review_count = '—' -%}
+
+{%- assign is_limited = false -%}
+{%- if product.tags contains 'Limited Edition'
+  or product.tags contains 'Limited'
+  or product.metafields.custom.limited_edition == true
+-%}
+  {%- assign is_limited = true -%}
+{%- endif -%}
+
+{%- assign title_clean = product.title | escape -%}
+{%- assign title_clean = title_clean
+  | replace: ' – Wall Art', ''
+  | replace: ' - Wall Art', ''
+  | replace: ' | Wall Art', ''
+  | replace: ': Wall Art', ''
+  | replace: ' Wall Art', ''
+  | replace: 'Wall Art', ''
+  | replace: ' – wall art', ''
+  | replace: ' - wall art', ''
+  | replace: ' | wall art', ''
+  | replace: ': wall art', ''
+  | replace: ' wall art', ''
+  | replace: 'wall art', ''
+  | replace: ' – WALL ART', ''
+  | replace: ' - WALL ART', ''
+  | replace: ' | WALL ART', ''
+  | replace: ': WALL ART', ''
+  | replace: ' WALL ART', ''
+  | replace: 'WALL ART', ''
+
+  | replace: ' – Limited Edition', ''
+  | replace: ' - Limited Edition', ''
+  | replace: ' | Limited Edition', ''
+  | replace: ': Limited Edition', ''
+  | replace: ' Limited Edition', ''
+  | replace: 'Limited Edition', ''
+  | replace: ' – limited edition', ''
+  | replace: ' - limited edition', ''
+  | replace: ' | limited edition', ''
+  | replace: ': limited edition', ''
+  | replace: ' limited edition', ''
+  | replace: 'limited edition', ''
+  | replace: ' – LIMITED EDITION', ''
+  | replace: ' - LIMITED EDITION', ''
+  | replace: ' | LIMITED EDITION', ''
+  | replace: ': LIMITED EDITION', ''
+  | replace: ' LIMITED EDITION', ''
+  | replace: 'LIMITED EDITION', ''
+
+  | replace: '  ', ' '
+  | replace: '  ', ' '
+  | strip
+-%}
+
+<style>
+#scx-titlebar-{{ product.id }},
+#scx-titlebar-{{ product.id }} *{
+  box-sizing:border-box;
+  min-width:0;
+}
+
+#scx-titlebar-{{ product.id }}.scx-titlebar{
+  --bg:#0B0B0D;
+  --ink:#F5F2EA;
+  --muted:#A6A19A;
+  --gold:#D4A54C;
+  --title:#FFF3C5;
+  --line:rgba(245,242,234,.12);
+  --stroke:rgba(0,0,0,.28);
+  --pull-next:0;
+
+  background:var(--bg);
+  border-bottom:1px solid var(--line);
+  position:relative;
+  z-index:50;
+  margin-bottom:var(--pull-next);
+  overflow-x:clip;
+  font-family:"Montserrat",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+
+@supports not (overflow-x:clip){
+  #scx-titlebar-{{ product.id }}.scx-titlebar{
+    overflow-x:hidden;
+  }
+}
+
+#scx-titlebar-{{ product.id }} .scx-titlewrap{
+  width:100%;
+  max-width:100%;
+  margin:0 auto;
+  padding:6px max(10px, env(safe-area-inset-left)) 6px max(10px, env(safe-area-inset-right));
+  display:grid;
+  grid-template-columns:minmax(132px,.42fr) minmax(0,1fr) minmax(178px,.42fr);
+  align-items:center;
+  column-gap:10px;
+  container-type:inline-size;
+  overflow:hidden;
+}
+
+#scx-titlebar-{{ product.id }} .scx-side{
+  display:flex;
+  align-items:center;
+}
+
+#scx-titlebar-{{ product.id }} .scx-left{
+  justify-content:flex-start;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:3px;
+}
+
+#scx-titlebar-{{ product.id }} .scx-right{
+  justify-content:flex-end;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs{
+  display:none;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs *{
+  max-width:100%;
+  min-width:0;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs{
+  color:rgba(245,242,234,.42);
+  font-size:7.25px;
+  line-height:1;
+  font-weight:500;
+  letter-spacing:0;
+  text-transform:none;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  opacity:.76;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a{
+  color:rgba(245,242,234,.44);
+  text-decoration:none;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a:hover{
+  color:rgba(212,165,76,.62);
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .page-header,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .breadcrumbs,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .breadcrumb,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs nav,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs ol,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs ul{
+  display:flex!important;
+  align-items:center!important;
+  flex-wrap:nowrap!important;
+  gap:1.5px!important;
+  max-width:100%!important;
+  margin:0!important;
+  padding:0!important;
+  list-style:none!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs li,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs span{
+  white-space:nowrap!important;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs li:last-child,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs span:last-child{
+  min-width:0!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+
+/* Restore original breadcrumb chevrons/separators so Home > Collection > Product and Previous/Next remain readable. */
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs svg,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .icon,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs [class*="chevron"],
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs [class*="separator"],
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs [class*="sep"],
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs [class*="arrow"],
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs [class*="next"] svg,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs [class*="prev"] svg{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  flex:0 0 auto!important;
+  width:auto!important;
+  min-width:4px!important;
+  height:auto!important;
+  margin:0 1px!important;
+  color:rgba(166,161,154,.68)!important;
+  opacity:.92!important;
+  visibility:visible!important;
+  transform:none!important;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs svg path,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs svg polygon,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs svg polyline,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs svg use{
+  stroke:currentColor!important;
+  fill:none!important;
+  opacity:1!important;
+  visibility:visible!important;
+}
+
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .breadcrumbs__separator,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .breadcrumb__separator,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .separator,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs .sep{
+  color:rgba(166,161,154,.68)!important;
+  opacity:.92!important;
+  visibility:visible!important;
+}
+
+/* Do not add fake Previous/Next arrows here. The breadcrumbs snippet already outputs the correct theme icons. */
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a[rel="prev"]::before,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a.prev::before,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a.previous::before,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a[class*="prev"]::before,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a[rel="next"]::after,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a.next::after,
+#scx-titlebar-{{ product.id }} .scx-breadcrumbs a[class*="next"]::after{
+  content:none!important;
+  display:none!important;
+}
+
+#scx-titlebar-{{ product.id }} .scx-center{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
+
+#scx-titlebar-{{ product.id }} .scx-title{
+  justify-self:center;
+  text-align:center;
+  font-family:"Montserrat",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.13em;
+  line-height:1.02;
+  white-space:nowrap;
+  max-width:100%;
+  padding:0;
+  margin:0;
+  color:var(--title);
+  -webkit-text-stroke:.16px var(--stroke);
+  text-shadow:0 .5px 0 rgba(0,0,0,.32);
+  font-size:clamp(11px, 4.35vw, 18px);
+  overflow:visible;
+  text-overflow:clip;
+}
+
+@supports (font-size:clamp(1px, 1cqw, 2px)){
+  #scx-titlebar-{{ product.id }} .scx-title{
+    font-size:clamp(11px, 4.0cqw, 18px);
+  }
+}
+
+#scx-titlebar-{{ product.id }} .scx-underline{
+  display:block;
+  width:82px;
+  height:1.5px;
+  margin-top:3px;
+  margin-bottom:0;
+  background:linear-gradient(
+    90deg,
+    rgba(212,165,76,0) 0%,
+    rgba(212,165,76,.55) 18%,
+    #D4A54C 50%,
+    rgba(212,165,76,.55) 82%,
+    rgba(212,165,76,0) 100%
+  );
+  opacity:1;
+  flex:0 0 auto;
+}
+
+#scx-titlebar-{{ product.id }} .scx-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:3px 9px;
+  border-radius:999px;
+  font-weight:700;
+  font-size:8.5px;
+  text-transform:uppercase;
+  letter-spacing:.15em;
+  background:rgba(245,242,234,.04);
+  color:var(--gold);
+  border:1px solid rgba(212,165,76,.42);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.04);
+  white-space:nowrap;
+}
+
+#scx-titlebar-{{ product.id }} .scx-review-inline{
+  appearance:none;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+  padding:0;
+  margin:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+  cursor:pointer;
+  line-height:1;
+  white-space:nowrap;
+  color:var(--ink);
+  -webkit-tap-highlight-color:transparent;
+}
+
+#scx-titlebar-{{ product.id }} .scx-review-inline:hover{
+  opacity:.86;
+}
+
+#scx-titlebar-{{ product.id }} .scx-review-inline:focus-visible{
+  outline:1px solid rgba(212,165,76,.45);
+  outline-offset:4px;
+  border-radius:4px;
+}
+
+#scx-titlebar-{{ product.id }} .scx-stars{
+  display:inline-flex;
+  align-items:center;
+  color:var(--gold);
+  font-size:12.5px;
+  letter-spacing:.025em;
+  line-height:1;
+  text-shadow:0 1px 1px rgba(0,0,0,.32);
+}
+
+#scx-titlebar-{{ product.id }} .scx-review-text{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  color:var(--muted);
+  font-size:9.8px;
+  font-weight:700;
+  letter-spacing:.01em;
+}
+
+#scx-titlebar-{{ product.id }} .scx-review-text strong{
+  color:var(--ink);
+  font-size:10.2px;
+  font-weight:700;
+}
+
+/* Desktop-only review enhancement: 15% larger and slightly pulled in from the right edge. */
+@media (min-width:750px){
+  #scx-titlebar-{{ product.id }} .scx-right{
+    padding-right:clamp(14px, 1.55vw, 24px);
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-inline{
+    gap:7px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-stars{
+    font-size:14.4px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text{
+    gap:5px;
+    font-size:11.3px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text strong{
+    font-size:11.7px;
+  }
+}
+
+/* Desktop */
+@media (min-width:1200px){
+  #scx-titlebar-{{ product.id }}.scx-titlebar{
+    --pull-next:-20px;
+  }
+
+  /* Full-width desktop row: breadcrumbs start at the safe left edge instead of inside the centered page container. */
+  #scx-titlebar-{{ product.id }} .scx-titlewrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding:5px max(18px, env(safe-area-inset-left)) 5px max(18px, env(safe-area-inset-right));
+    grid-template-columns:minmax(0,1fr) minmax(0,auto) minmax(0,1fr);
+    column-gap:14px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-left{
+    justify-self:start;
+    justify-content:flex-start;
+    flex-direction:row;
+    align-items:center;
+    width:auto;
+    max-width:min(34vw, 560px);
+    gap:4px;
+    overflow:hidden;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-center{
+    justify-self:center;
+    width:auto;
+    max-width:min(42vw, 760px);
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-right{
+    justify-self:end;
+    padding-right:clamp(46px, 3.6vw, 68px);
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs{
+    display:block;
+    width:auto;
+    max-width:min(34vw, 560px);
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs,
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs a{
+    font-size:7.25px!important;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs .page-header,
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs .breadcrumbs,
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs .breadcrumb,
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs nav,
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs ol,
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs ul{
+    gap:1.5px!important;
+  }
+
+  /* Keep the far-left breadcrumb clean and prevent the Limited Edition badge from stealing breadcrumb width on desktop. */
+  #scx-titlebar-{{ product.id }} .scx-left .scx-badge{
+    display:none;
+  }
+
+  #scx-titlebar-{{ product.id }} + .breadcrumb,
+  #scx-titlebar-{{ product.id }} + .breadcrumbs,
+  #scx-titlebar-{{ product.id }} + nav.breadcrumbs,
+  #scx-titlebar-{{ product.id }} + .breadcrumb-wrapper,
+  #scx-titlebar-{{ product.id }} + .page-breadcrumbs,
+  #scx-titlebar-{{ product.id }} + .product__breadcrumbs,
+  #scx-titlebar-{{ product.id }} + [class*="bread"]{
+    margin-top:0!important;
+  }
+}
+
+/* Desktop-only final review positioning: 15% bigger again and moved further inward from the right edge. */
+@media (min-width:1200px){
+  #scx-titlebar-{{ product.id }} .scx-review-inline{
+    gap:8px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-stars{
+    font-size:16.6px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text{
+    gap:5.75px;
+    font-size:13px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text strong{
+    font-size:13.5px;
+  }
+}
+
+/* Tablet */
+@media (min-width:750px) and (max-width:1199px){
+  #scx-titlebar-{{ product.id }} .scx-titlewrap{
+    grid-template-columns:minmax(105px,.34fr) minmax(0,1fr) minmax(165px,.38fr);
+    column-gap:8px;
+    padding-top:6px;
+    padding-bottom:6px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-left{
+    flex-direction:row;
+    align-items:center;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-title{
+    letter-spacing:.12em;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-badge{
+    font-size:7.8px;
+    padding:3px 8px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-stars{
+    font-size:11.5px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text{
+    font-size:9.2px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text strong{
+    font-size:9.7px;
+  }
+}
+
+/* Mobile */
+@media (max-width:749px){
+  #scx-titlebar-{{ product.id }} .scx-titlewrap{
+    padding:5px max(5px, env(safe-area-inset-left)) 6px max(5px, env(safe-area-inset-right));
+    grid-template-columns:1fr;
+    row-gap:2px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-left{
+    display:none;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-center{
+    grid-column:1;
+    justify-content:center;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-right{
+    grid-column:1;
+    justify-content:center;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-title{
+    line-height:1.02;
+    letter-spacing:.12em;
+    font-weight:700;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-underline{
+    width:78px;
+    height:1.5px;
+    margin-top:3px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-inline{
+    gap:5px;
+    margin-top:0;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-stars{
+    font-size:11.5px;
+    letter-spacing:.02em;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text{
+    font-size:9.2px;
+    gap:3px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text strong{
+    font-size:9.7px;
+  }
+}
+
+/* Very small phones */
+@media (max-width:380px){
+  #scx-titlebar-{{ product.id }} .scx-titlewrap{
+    padding-top:4px;
+    padding-bottom:5px;
+    row-gap:2px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-title{
+    letter-spacing:.095em;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-underline{
+    width:68px;
+    margin-top:2px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-inline{
+    gap:4px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-stars{
+    font-size:10.8px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text{
+    font-size:8.8px;
+  }
+
+  #scx-titlebar-{{ product.id }} .scx-review-text strong{
+    font-size:9.1px;
+  }
+}
+
+.scx-reviews-target-highlight{
+  animation:scx-reviews-pulse 1.35s ease-out 1;
+}
+
+@keyframes scx-reviews-pulse{
+  0%{ box-shadow:0 0 0 0 rgba(212,165,76,.32); }
+  100%{ box-shadow:0 0 0 18px rgba(212,165,76,0); }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .scx-reviews-target-highlight{
+    animation:none!important;
+  }
+}
+
+/* DESKTOP RESTORE ONLY — sourced from the earlier Sports Cave split titlebar.
+   Mobile CSS, markup, sizing, title-fitting, and interactions remain untouched. */
+@media (min-width:750px) {
+  #scx-titlebar-{{ product.id }}.scx-titlebar {
+    --pull-next:0;
+    margin-bottom:0;
+    background:linear-gradient(105deg,#171611 0%,#111113 55%,#0D0D0E 100%);
+    border-top:0;
+    border-bottom:1px solid rgba(212,165,76,.48);
+    overflow:hidden;
+  }
+  #scx-titlebar-{{ product.id }}.scx-titlebar::after {
+    content:"";
+    position:absolute;
+    left:0;right:0;bottom:0;
+    height:1px;
+    pointer-events:none;
+    background:linear-gradient(90deg,#8F6B1E80,#D4A54C 24%,#E8C978 50%,#D4A54C 76%,#8F6B1E80);
+    opacity:.72;
+  }
+  #scx-titlebar-{{ product.id }}.scx-titlebar::before {
+    content:"";
+    position:absolute;
+    left:0;bottom:0;
+    width:18%;height:1px;
+    pointer-events:none;
+    z-index:1;
+    background:linear-gradient(90deg,transparent,rgba(232,201,120,.15) 25%,rgba(240,215,152,.55) 50%,rgba(232,201,120,.15) 75%,transparent);
+    opacity:0;
+    transform:translateX(-100%);
+    animation:sc-title-desktop-sweep 7s cubic-bezier(.4,0,.2,1) infinite;
+  }
+  #scx-titlebar-{{ product.id }} .scx-titlewrap {
+    display:grid;
+    grid-template-columns:minmax(92px,.27fr) minmax(0,1.5fr) minmax(125px,.38fr);
+    align-items:center;
+    column-gap:12px;
+    padding:4px 12px;
+    max-width:none;
+    margin:0 auto;
+    container-type:normal;
+    overflow:visible;
+  }
+  #scx-titlebar-{{ product.id }} .scx-left {
+    display:flex;
+    flex-direction:row;
+    align-items:center;
+    justify-content:flex-start;
+    justify-self:start;
+    min-width:0;
+  }
+  #scx-titlebar-{{ product.id }} .scx-center {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    justify-self:center;
+    text-align:center;
+    min-width:0;
+    width:auto;
+    max-width:100%;
+  }
+  #scx-titlebar-{{ product.id }} .scx-title {
+    display:block;
+    width:auto;
+    max-width:100%;
+    margin:0;
+    padding:0;
+    font-family:"Montserrat",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    font-weight:700;
+    font-size:clamp(12px,1.35vw,17px);
+    line-height:1.12;
+    letter-spacing:.10em;
+    text-align:center;
+    white-space:normal;
+    overflow-wrap:break-word;
+    transform:none;
+    -webkit-text-stroke:0;
+    text-shadow:none;
+    color:#DDCFAD;
+  }
+  #scx-titlebar-{{ product.id }} .scx-underline { display:none; }
+  #scx-titlebar-{{ product.id }} .scx-right {
+    display:flex;
+    justify-self:end;
+    justify-content:center;
+    align-items:center;
+    width:auto;
+    margin:0;
+    padding:0 0 0 12px;
+    border:0;
+    position:relative;
+  }
+  #scx-titlebar-{{ product.id }} .scx-right::before {display:none;}
+  #scx-titlebar-{{ product.id }} .scx-review-inline {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:2px;
+    text-align:center;
+    white-space:nowrap;
+  }
+  #scx-titlebar-{{ product.id }} .scx-stars {
+    display:block;
+    font-size:14px;
+    line-height:1;
+    letter-spacing:.015em;
+  }
+  #scx-titlebar-{{ product.id }} .scx-review-text {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    font-size:10.5px;
+    font-weight:700;
+    line-height:1.1;
+  }
+  #scx-titlebar-{{ product.id }} .scx-review-text strong {
+    font-size:10.9px;
+    font-weight:700;
+  }
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs {
+    display:none;
+  }
+}
+@media (min-width:1200px) {
+  #scx-titlebar-{{ product.id }} .scx-titlewrap {
+    grid-template-columns:minmax(0,1fr) minmax(0,auto) minmax(0,1fr);
+    column-gap:16px;
+    padding:5px max(18px,env(safe-area-inset-right)) 5px max(18px,env(safe-area-inset-left));
+  }
+  #scx-titlebar-{{ product.id }} .scx-left {
+    max-width:min(34vw,560px);
+    overflow:hidden;
+  }
+  #scx-titlebar-{{ product.id }} .scx-left .scx-badge {display:none;}
+  #scx-titlebar-{{ product.id }} .scx-breadcrumbs {display:block;max-width:min(34vw,560px);}
+  #scx-titlebar-{{ product.id }} .scx-center {max-width:min(42vw,760px);}
+  #scx-titlebar-{{ product.id }} .scx-title {
+    font-size:clamp(13px,1.35vw,19px);
+    letter-spacing:.11em;
+    line-height:1.12;
+  }
+  #scx-titlebar-{{ product.id }} .scx-right {
+    padding-left:15px;
+    margin-right:clamp(70px,7.5vw,155px);
+  }
+  #scx-titlebar-{{ product.id }} .scx-stars {font-size:16.6px;}
+  #scx-titlebar-{{ product.id }} .scx-review-text {font-size:12.5px;gap:5px;}
+  #scx-titlebar-{{ product.id }} .scx-review-text strong {font-size:13px;}
+}
+@supports ((background-clip:text) or (-webkit-background-clip:text)) {
+  @media (min-width:750px) {
+    #scx-titlebar-{{ product.id }} .scx-title {
+      background:linear-gradient(115deg,#F5ECD7 0%,#E2CEA0 40%,#CBAA68 72%,#F0E2BF 100%);
+      background-clip:text;
+      -webkit-background-clip:text;
+      color:transparent;
+      -webkit-text-fill-color:transparent;
+    }
+  }
+}
+@keyframes sc-title-desktop-sweep {
+  0%,45%{opacity:0;transform:translateX(-100%);}
+  51%,77%{opacity:.85;}
+  82%,100%{opacity:0;transform:translateX(556%);}
+}
+@media (prefers-reduced-motion:reduce) {
+  #scx-titlebar-{{ product.id }}.scx-titlebar::before {animation:none;opacity:0;}
+}
+
+@media(max-width:989px){
+ #scx-titlebar-{{ product.id }} .scx-center{width:100%;max-width:100%;min-width:0;}
+ #scx-titlebar-{{ product.id }} .scx-title{max-width:100%;white-space:nowrap;overflow:visible;text-overflow:clip;}
+}
+</style>
+
+<section
+  id="scx-titlebar-{{ product.id }}"
+  class="scx-titlebar"
+  role="region"
+  aria-label="Product title and customer reviews"
+  data-limited="{{ is_limited }}">
+
+  <div class="scx-titlewrap">
+
+    <div class="scx-side scx-left">
+      <div class="scx-breadcrumbs not-in-quickbuy" aria-label="Product breadcrumb">
+        {% render 'breadcrumbs', show_next_prev: true %}
+      </div>
+
+      {% if is_limited %}
+        <span class="scx-badge" aria-label="Limited Edition">Limited&nbsp;Edition</span>
+      {% endif %}
+    </div>
+
+    <div class="scx-center">
+      <h1 class="scx-title">
+        {{ title_clean }}
+      </h1>
+
+      <span class="scx-underline" aria-hidden="true"></span>
+    </div>
+
+    <div class="scx-side scx-right">
+      <button class="scx-review-inline" type="button" aria-busy="true" aria-label="Jump to customer reviews">
+        <span class="scx-stars" aria-hidden="true" style="opacity:.35">★★★★★</span>
+        <span class="scx-review-text">
+          <strong style="display:inline-block;min-inline-size:3ch;font-variant-numeric:tabular-nums">{{ scx_rating }}</strong>
+          <span>•</span>
+          <span style="display:inline-block;min-inline-size:11ch;font-variant-numeric:tabular-nums">{{ scx_review_count }} reviews</span>
+        </span>
+      </button>
+    </div>
+
+  </div>
+</section>
+
+
+
+<script>
+(function(){
+  var ROOT_ID = 'scx-titlebar-{{ product.id }}';
+  var root = document.getElementById(ROOT_ID);
+  if(!root || root.dataset.scxReady === '1') return;
+  root.dataset.scxReady = '1';
+
+  function fit(){
+    var title=root.querySelector('.scx-title');
+    var center=root.querySelector('.scx-center');
+    if(!title || !center)return;
+    title.style.removeProperty('font-size');
+    title.style.removeProperty('transform');
+    title.style.removeProperty('letter-spacing');
+    if(!window.matchMedia('(max-width:989px)').matches)return;
+    var available=center.clientWidth-2;
+    if(available<=0)return;
+    var range=document.createRange();
+    range.selectNodeContents(title);
+    var size=parseFloat(getComputedStyle(title).fontSize);
+    for(var pass=0;pass<4;pass++){
+      var width=range.getBoundingClientRect().width;
+      if(width<=available || !width)break;
+      size=size*available/width*.995;
+      title.style.setProperty('font-size',size+'px','important');
+    }
+  }
+
+  function stickyOffset(){
+    var s = document.querySelector('.shopify-section-header-sticky, .shopify-section-header, header[role="banner"], header.site-header, header.header');
+    if(!s) return 0;
+
+    var cs = getComputedStyle(s);
+    var fixed = cs.position === 'fixed' || cs.position === 'sticky' || s.classList.contains('is-sticky');
+
+    return fixed ? Math.min(120, Math.round(s.getBoundingClientRect().height || 0)) : 0;
+  }
+
+  function getReviewsTarget(){
+    var selectors = [
+      'sc-customer-reviews', '#scx-reviews-anchor',
+    ];
+
+    for(var i = 0; i < selectors.length; i++){
+      var el = document.querySelector(selectors[i]);
+      if(el) return el;
+    }
+
+    return null;
+  }
+
+  function bindReviewJump(){
+    var btn = root.querySelector('.scx-review-inline');
+    if(!btn) return;
+
+    btn.addEventListener('click', function(){
+      var target = getReviewsTarget();
+      if(!target) return;
+
+      var top = target.getBoundingClientRect().top + window.pageYOffset - (stickyOffset() + 10);
+
+      window.scrollTo({
+        top:top,
+        behavior:'smooth'
+      });
+
+      target.classList.add('scx-reviews-target-highlight');
+
+      setTimeout(function(){
+        target.classList.remove('scx-reviews-target-highlight');
+      }, 1500);
+    });
+  }
+
+  function schedule(){
+    fit();
+  }
+
+  if(document.readyState !== 'loading'){
+    schedule();
+  }else{
+    document.addEventListener('DOMContentLoaded', schedule, { once:true });
+  }
+
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(fit);
+  }
+
+  window.addEventListener('load', fit, { once:true });
+
+  var tm;
+  function debouncedFit(){
+    cancelAnimationFrame(tm);
+    tm = requestAnimationFrame(fit);
+  }
+
+  window.addEventListener('resize', debouncedFit, { passive:true });
+  window.addEventListener('orientationchange', debouncedFit, { passive:true });
+
+  if('ResizeObserver' in window){
+    var wrap = document.querySelector('#' + ROOT_ID + ' .scx-titlewrap');
+    if(wrap){
+      new ResizeObserver(debouncedFit).observe(wrap);
+    }
+  }
+
+  var titleNode=root.querySelector('.scx-title');
+  if(titleNode)new MutationObserver(debouncedFit).observe(titleNode,{childList:true,characterData:true,subtree:true});
+  bindReviewJump();
+})();
+</script>
+{% endif %}

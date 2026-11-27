@@ -1,0 +1,9 @@
+{% doc %}
+Published OS totals load without a stale hard-coded fallback.
+@param {string} part - Summary or histogram
+{% enddoc %}
+{% if part == 'summary' %}
+<p class="sc-reviews__summary" data-review-summary aria-busy="true"><strong>— / 5</strong> Reviews</p>
+{% else %}
+<ul class="sc-reviews__histogram" data-review-histogram aria-label="Rating breakdown"></ul>
+{% endif %}

@@ -31,6 +31,10 @@ async def storefront_widget(request:Request):
         store=ReviewsStore()
         settings=await run_in_threadpool(load,store,('settings',),store.settings)
         if not settings['enabled']:return Response(status_code=404)
+        if request.query_params.get('summary')=='1':
+            from reviews_widget import published_summary
+            data=await run_in_threadpool(load,store,('widget-summary-v1',),lambda:published_summary(store),5)
+            return JSONResponse(jsonable_encoder(data),headers={'Access-Control-Allow-Origin':'*','Cache-Control':'public,max-age=5','X-Content-Type-Options':'nosniff'})
         country='US' if request.query_params.get('country')=='US' else 'AU'
         offset=int(request.query_params.get('offset','0'))
         if not 0<=offset<=50000:return Response(status_code=400)

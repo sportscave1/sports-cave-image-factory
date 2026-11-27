@@ -24,7 +24,7 @@ class NativeReviewMethods {
       entry.request.catch(() => { if (owner.nativeRequests.get(country) === entry) owner.nativeRequests.delete(country); });
     }
     const data = await entry.request;
-    this.nativeSummary(data.summary);
+    this.nativeSummary(data.summary,data.as_of);
     return data;
   }
 
@@ -57,7 +57,7 @@ class NativeReviewMethods {
 
   nativeApply(data, append = false) {
     if (!this.controller || this.controller.signal.aborted) return;
-    this.nativeSummary(data.summary);
+    this.nativeSummary(data.summary,data.as_of);
     if (!append) {
       this.renderCarousel(this.nativeRows(data.featured, true));
       if (this.querySelector('[data-review-histogram]')) this.renderHistogram(data.histogram, data.summary.count);

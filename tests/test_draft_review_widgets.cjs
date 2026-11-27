@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const enabled=Boolean(process.env.REVIEW_DRAFT_WIDGET_SOURCE&&process.env.REVIEW_PLAYWRIGHT_MODULE);
 for(const country of ['AU','US'])test(`draft ${country}: one initial request, stable country cards and recoverable pagination`,{skip:!enabled},async()=>{
- const {chromium}=require(process.env.REVIEW_PLAYWRIGHT_MODULE),browser=await chromium.launch({channel:'msedge',headless:true});
+ const {chromium}=require(process.env.REVIEW_PLAYWRIGHT_MODULE),browser=await chromium.launch({channel:process.env.REVIEW_BROWSER_CHANNEL||'msedge',headless:true});
  try{
   const page=await browser.newPage({viewport:{width:390,height:844}}),requests=[],errors=[];
   page.on('pageerror',e=>errors.push(e.message));let failMore=true;
