@@ -9,7 +9,7 @@ PYTHON=['test_orders_release_gate.py','test_prodigi_signin.py','test_prodigi_upl
  'test_prodigi_verified_sibling.py','test_inbox_companion.py','test_prodigi_product_browser.py','test_prodigi_browser.py','test_prodigi_dashboard_qa.py',
  'test_prodigi_order_group.py','test_prodigi_submission.py','test_prodigi_stage.py','test_prodigi_reset.py',
  'test_orders_fast_handoffs.py','test_orders_runtime.py','test_orders_qa_scaling.py','test_orders_prodigi_grid.py',
- 'test_orders_feed.py','test_orders_fragment_context.py','test_orders_wake.py','test_orders_auto_jpg.py','test_companion_poll_transaction.py','test_orders_release_package.py']
+ 'test_orders_feed.py','test_orders_fragment_context.py','test_orders_wake.py','test_orders_auto_jpg.py','test_companion_poll_transaction.py','test_orders_release_package.py','test_orders_customer_hold.py']
 NODE=['test_email_phase4_operations.cjs','test_email_phase3_experience.cjs','test_email_phase2_timing.cjs','test_email_companion_receipts.cjs','test_support_email_component.cjs','test_email_reader_component.cjs','test_email_send_status.cjs',
  'test_prodigi_upload_stall.cjs','test_prodigi_page_recovery.cjs','test_prodigi_signin_recovery.cjs','test_prodigi_upload_recovery.cjs','test_prodigi_signin.cjs','test_inbox_companion.cjs','test_orders_progress.cjs','test_prodigi_wait.cjs','test_orders_fault_soak.cjs','test_prodigi_browser.cjs',
  'test_orders_companion.cjs','test_prodigi_dashboard_qa.cjs','test_orders_wake.cjs','test_queue_wake_lifetime.cjs',

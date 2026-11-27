@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 import re
 from time import monotonic
+from zoneinfo import ZoneInfo
 
 import os_accounts
 import human_work
@@ -2192,7 +2193,7 @@ def _cycle_week_daily_rows(sheets, timers, week_start, today):
             for sheet in day_sheets
             for timer in timer_by_sheet.get(str(sheet.get("id") or ""), [])
         ]
-        summary = daily_execution_weekly_summary(
+        summary = _daily_execution_weekly_summary_from_rows(
             day_sheets,
             day_timers,
             today=today,
@@ -2254,7 +2255,7 @@ def load_twelve_week_progress(user, anchor_date=None):
         ]
         selected_ids = {str(sheet.get("id") or "") for sheet in selected_sheets}
         selected_timers = [timer for timer in timers if str(timer.get("sheet_id") or "") in selected_ids]
-        daily = daily_execution_weekly_summary(selected_sheets, selected_timers, today=today)
+        daily = _daily_execution_weekly_summary_from_rows(selected_sheets, selected_timers, today=today)
         tactic = weekly_tactic_execution_summary(plan)
         weeks.append(
             {
@@ -2878,7 +2879,11 @@ def daily_execution_all_mips_complete(sheet):
 
 
 def _daily_execution_named_tasks(sheet):
-    normalised = _normalise_daily_sheet(sheet)
+    yield from _daily_execution_named_tasks_from_row(_normalise_daily_sheet(sheet))
+
+
+def _daily_execution_named_tasks_from_row(normalised):
+    """Iterate a sheet already normalised within this read operation."""
     for index, task in enumerate(normalised.get("top_tasks") or []):
         if _compact_text(task.get("task") or ""):
             yield "top", index, dict(task)
@@ -2997,18 +3002,29 @@ def _planned_hours(value):
 
 def daily_execution_weekly_task_instances(sheets, timers=None, *, today=None):
     """Return deduplicated, non-future planned task instances for weekly analytics."""
-    local_today = today or datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
-    if not isinstance(local_today, date):
-        local_today = date.fromisoformat(str(local_today))
+    return _daily_execution_weekly_task_instances_from_rows(
+        [_normalise_daily_sheet(sheet) for sheet in sheets or []], timers, today=today
+    )
+
+
+def _daily_execution_past_rows(sheets, today):
     rows = []
-    for raw in sheets or []:
-        sheet = _normalise_daily_sheet(raw)
+    for sheet in sheets:
         try:
             sheet_date = date.fromisoformat(str(sheet.get("sheet_date") or ""))
         except ValueError:
             continue
-        if sheet_date <= local_today:
+        if sheet_date <= today:
             rows.append(sheet)
+    return rows
+
+
+def _daily_execution_weekly_task_instances_from_rows(sheets, timers=None, *, today=None):
+    """Reuse normalised rows; retain independent task copies and carry semantics."""
+    local_today = today or datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
+    if not isinstance(local_today, date):
+        local_today = date.fromisoformat(str(local_today))
+    rows = _daily_execution_past_rows(sheets, local_today)
     rows.sort(key=lambda row: str(row.get("sheet_date") or ""))
     timer_lookup = {
         (
@@ -3024,7 +3040,7 @@ def daily_execution_weekly_task_instances(sheets, timers=None, *, today=None):
             _compact_text(task.get("task") or task.get("details") or "").casefold(),
         )
         for sheet in rows
-        for _task_type, _task_index, task in _daily_execution_named_tasks(sheet)
+        for _task_type, _task_index, task in _daily_execution_named_tasks_from_row(sheet)
         if task.get("carried_from")
     }
     legacy_carry_names = {
@@ -3049,7 +3065,7 @@ def daily_execution_weekly_task_instances(sheets, timers=None, *, today=None):
     for sheet in rows:
         owner_key = str(sheet.get("user_id") or sheet.get("user_name") or "")
         sheet_date = str(sheet.get("sheet_date") or "")
-        for task_type, task_index, task in _daily_execution_named_tasks(sheet):
+        for task_type, task_index, task in _daily_execution_named_tasks_from_row(sheet):
             name = _compact_text(task.get("task") or task.get("details") or "Daily Planner task")
             name_key = name.casefold()
             carried_from = _compact_text(task.get("carried_from") or "")
@@ -3112,19 +3128,18 @@ def daily_execution_weekly_task_instances(sheets, timers=None, *, today=None):
 
 
 def daily_execution_weekly_summary(sheets, timers=None, *, today=None):
+    return _daily_execution_weekly_summary_from_rows(
+        [_normalise_daily_sheet(sheet) for sheet in sheets or []], timers, today=today
+    )
+
+
+def _daily_execution_weekly_summary_from_rows(sheets, timers=None, *, today=None):
+    """Compute report summaries without re-normalising the same saved tasks."""
     local_today = today or datetime.now(sports_sales_calendar.SYDNEY_TIMEZONE).date()
     if not isinstance(local_today, date):
         local_today = date.fromisoformat(str(local_today))
-    rows = []
-    for raw in sheets or []:
-        sheet = _normalise_daily_sheet(raw)
-        try:
-            sheet_date = date.fromisoformat(str(sheet.get("sheet_date") or ""))
-        except ValueError:
-            continue
-        if sheet_date <= local_today:
-            rows.append(sheet)
-    instances = daily_execution_weekly_task_instances(rows, timers, today=local_today)
+    rows = _daily_execution_past_rows(sheets, local_today)
+    instances = _daily_execution_weekly_task_instances_from_rows(rows, timers, today=local_today)
     completed_count = sum(row["outcome"] == "completed" for row in instances)
     did_not_finish_count = sum(row["outcome"] == "did_not_finish" for row in instances)
     skipped_count = sum(row["outcome"] == "skipped" for row in instances)

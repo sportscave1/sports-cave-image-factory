@@ -310,3 +310,23 @@ def review(actor,key):
             raise ValueError('Wait for the current request to finish before reviewing.')
         job.update(state='reviewed',reviewed_by=str(actor['id']),reviewed_at=prep.now())
         save(q,key,job);flag(q,job,'Customer request reviewed · supplier hold unchanged',blocking=False)
+        current=read(FLAG+job['shopify_order_id'],q)
+        if current.get('request')==key and current.get('blocking') is False:
+            # Resume only work stopped solely by this reviewed request. Fresh QA
+            # rechecks source/address before the configured submission worker;
+            # no artwork, supplier hold, email or submission is replayed here.
+            from prodigi_dashboard_qa import CHECKS
+            identity=order_identity(job['shopify_order_id'])
+            q.execute("SELECT value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%' AND value->'snapshot'->'identity'->>'order_id'=ANY(%s) FOR UPDATE NOWAIT",
+                      ([identity,'gid://shopify/Order/'+identity],))
+            for row in q.fetchall():
+                unit=row['value']
+                if (unit.get('status')!='Needs QA' or unit.get('message')!='Paused customer request — review the Inbox Companion flag before submission.'
+                    or unit.get('submission') or unit.get('last_failure') or unit.get('merge_pending') or unit.get('hidden')
+                    or (unit.get('browser') or {}).get('verified') is not True
+                    or (unit.get('dashboard_qa') or {}).get('verified') is not True
+                    or not all((unit.get('checks') or {}).get(k) is True for k in CHECKS)):continue
+                unit.pop('dashboard_qa',None)
+                unit.update(status='Checking QA',message='Customer request reviewed. Refreshing QA before configured submission; numbered artwork is preserved.')
+                unit.setdefault('history',[]).append(dict(at=prep.now(),event='reviewed_customer_request_qa_queued',request=key))
+                prep.save(q,unit)

@@ -27,8 +27,33 @@ ERRORS = {
     'The woken order page did not expose its identity.',
     'Prodigi sign-in expired. Sign into Prodigi in Edge, then recheck this same order to resume. No supplier action was repeated.',
     'The draft changed before Save.',
+    'The supplier browser response was interrupted. Verify the saved order before continuing.',
+    'The supplier order tab closed. Verify its saved state before continuing.',
+    'Prodigi image processing stopped responding before Save.',
 }
 STAGES = {'download','open','signin','readiness','row','editor','picker','transfer','uploaded','orientation','permit'}
+LEGACY_READBACK_MESSAGE = 'Supplier order changed or Save was not permitted. Review this exact draft. Browser stage: readback.'
+
+
+def recoverable_receipt(value):
+    receipt=value.get('browser') or {}
+    if receipt.get('last_stage') in STAGES and receipt.get('client_error') in ERRORS:return True
+    # Older workers resumed a persisted plan without completion evidence as a
+    # bare readback. Recognise only that exact unchanged, unconsumed receipt;
+    # recover_one still revalidates the live source, order and empty asset slots.
+    failure=value.get('last_failure') or {}
+    return (receipt.get('last_stage')=='readback' and not receipt.get('client_error')
+        and receipt.get('readback_changed_fields')==[]
+        and failure.get('stage')=='artwork.readback' and failure.get('error_type')=='ValueError'
+        and failure.get('message')==LEGACY_READBACK_MESSAGE)
+
+
+def pending(value):
+    receipt=value.get('browser') or {}
+    return (value.get('upload_retry_pending') is True and value.get('status')=='Needs review'
+        and receipt.get('started') is False and not receipt.get('verified')
+        and recoverable_receipt(value)
+        and not any(value.get(k) for k in ('submission','write_intent','document_write_intent','hidden')))
 
 
 def reusable_asset(provider, filename, snap, *, assets=None):
@@ -75,11 +100,17 @@ def recover(user):
             AND value->>'status'='Needs review'
             AND value->'browser'->>'started'='false'
             AND COALESCE(value->'signin_wait'->>'state','')<>'waiting'
-            AND value->'browser'->>'last_stage'=ANY(%s)
-            AND value->'browser'->>'client_error'=ANY(%s)
+            AND ((value->'browser'->>'last_stage'=ANY(%s)
+                AND value->'browser'->>'client_error'=ANY(%s))
+              OR (value->'browser'->>'last_stage'='readback'
+                AND COALESCE(value->'browser'->>'client_error','')=''
+                AND value->'browser'->'readback_changed_fields'='[]'::jsonb
+                AND value->'last_failure'->>'stage'='artwork.readback'
+                AND value->'last_failure'->>'error_type'='ValueError'
+                AND value->'last_failure'->>'message'=%s))
             AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
             AND COALESCE((value->'upload_recovery'->>'retry_at')::timestamptz,'epoch')<now()
-            ORDER BY updated_at LIMIT 2""", (list(STAGES), list(ERRORS)))
+            ORDER BY updated_at LIMIT 2""", (list(STAGES), list(ERRORS), LEGACY_READBACK_MESSAGE))
         keys = [row['key'] for row in cur.fetchall()]
     recovered = 0
     for key in keys:
@@ -101,6 +132,7 @@ def defer(key):
     with stages.edit(browser.LOCK) as cur:
         value=browser.read(cur,key)
         if value.get('status')!='Needs review' or (value.get('browser') or {}).get('started') is not False:return
+        value.pop('upload_retry_pending',None) # A changed/unsupported candidate must stay visible for review.
         value.setdefault('upload_recovery',{})['retry_at']=(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat()
         browser.save(cur,key,value)
 
@@ -116,8 +148,8 @@ def recover_one(key):
         previous = value.get('upload_recovery') or {}
         if (value.get('status') != 'Needs review' or receipt.get('started') is not False
                 or (value.get('signin_wait') or {}).get('state') == 'waiting'
-                or receipt.get('verified') or receipt.get('last_stage') not in STAGES
-                or receipt.get('client_error') not in ERRORS or value.get('submission') or value.get('write_intent')):
+                or receipt.get('verified') or not recoverable_receipt(value)
+                or any(value.get(k) for k in ('submission','write_intent','document_write_intent','hidden'))):
             return False
         if previous.get('retry_at') and datetime.fromisoformat(previous['retry_at']) > datetime.now(timezone.utc):
             return False
@@ -137,6 +169,7 @@ def recover_one(key):
              'source_sha256':snap['output']['sha256']}])[-8:]
         # Removing the old token and recording the replacement proof commit together.
         value.pop('browser'); value.pop('last_failure', None)
+        value.pop('upload_retry_pending',None)
         value.update(upload_recovery=recovery, status=browser.WAITING,
             message='Recovering this unchanged empty item; reusing the verified uploaded JPG when available. No Save was repeated.')
         browser.save(cur, key, value)

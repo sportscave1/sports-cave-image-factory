@@ -114,6 +114,32 @@ test('authentication loss breaks a hung supplier message without another supplie
  await assert.rejects(pending,e=>e.code==='PRODIGI_SIGNIN_REQUIRED');
  assert(!w.actions.some(a=>a[0]==='create'||a[0]==='update'));
 });
+
+test('a frozen content timer wakes once and reports the real uploaded stage within three minutes',async()=>{
+ const w=worker(order);let clock=0,inspect,cleared=0;
+ w.context.Date={now:()=>clock};w.context.setInterval=fn=>{inspect=fn;return 1;};
+ w.context.clearInterval=()=>{cleared++;};
+ w.chrome.tabs.sendMessage=async()=>new Promise(()=>{});
+ vm.runInContext("prodigiBrowserTransfer={plan,tab:9,stage:'uploaded'}",w.context);
+ w.context.tab={id:9};
+ const pending=vm.runInContext("prodigiSigninHandoff(plan,tab,{type:'prodigi:upload'})",w.context);
+ const rejected=assert.rejects(pending,e=>e.prodigiStage==='uploaded'&&/processing stopped responding before Save/.test(e.message));
+ const tick=async ms=>{clock=ms;inspect();await new Promise(setImmediate);};
+ await tick(0);await tick(60000);await tick(90000);
+ assert.equal(w.actions.filter(a=>a[0]==='update').length,1);
+ assert(!w.actions.some(a=>a[0]==='create'||a[0]==='message'));
+ await tick(180000);await rejected;assert.equal(cleared,1);
+});
+
+test('navigation during a hung upload is distinct from an unchanged response interruption',async()=>{
+ const w=worker(order);let inspect;
+ w.context.setInterval=fn=>{inspect=fn;return 1;};w.context.clearInterval=()=>{};
+ w.chrome.tabs.sendMessage=async()=>new Promise(()=>{});w.context.tab={id:9};
+ const pending=vm.runInContext("prodigiSigninHandoff(plan,tab,{type:'prodigi:upload'})",w.context);
+ w.tabs.get(9).url='https://dashboard.prodigi.com/orders/other/detail';
+ const rejected=assert.rejects(pending,/order page changed during the supplier action/);
+ inspect();await rejected;assert(!w.actions.some(a=>a[0]==='update'));
+});
 test('a supplier verification page is preserved for manual completion without another login tab',async()=>{
  const w=worker('https://dashboard.prodigi.com/login/verification');
  await vm.runInContext('prodigiSigninRecover()',w.context);

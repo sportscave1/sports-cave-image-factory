@@ -462,18 +462,94 @@ def saved_readback_candidate(value):
         re.fullmatch(r'items\[\d+\]\.(?:unitPrice|lineTotal|assets|sizing)(?:[.\[].*)?',path) for path in paths))
 
 
+def missing_save_candidate(value):
+    receipt=value.get('browser') or {};previous=value.get('missing_save_recovery') or {}
+    eligible=bool(value.get('status')=='Needs review' and receipt.get('started') is True
+        and receipt.get('last_stage') in ('save','readback') and not receipt.get('verified')
+        and not receipt.get('client_error') and not value.get('submission') and not value.get('write_intent')
+        and not value.get('hidden') and previous.get('attempts',0)<1
+        and value.get('message','').startswith('Browser upload is not confirmed. No automatic retry will occur.'))
+    if not eligible:return False
+    try:
+        stamp=datetime.now(timezone.utc)
+        return ((stamp-datetime.fromisoformat(receipt['save_permitted_at'])).total_seconds()>=60
+            and (not previous.get('next_check_at') or datetime.fromisoformat(previous['next_check_at'])<=stamp))
+    except (KeyError,ValueError,TypeError):return False
+
+
+@stages.stale_result(False)
+def recover_missing_save(key):
+    """Two stable empty reads and verified library bytes precede a new permit."""
+    provider,resolver,_,sandbox=context(key)
+    if sandbox:return False
+    with stages.edit(LOCK) as q:
+        value=read(q,key)
+        if not missing_save_candidate(value):return False
+        receipt=value['browser'];stamp=datetime.now(timezone.utc)
+        try:age=(stamp-datetime.fromisoformat(receipt['save_permitted_at'])).total_seconds()
+        except (KeyError,TypeError,ValueError):return False
+        if age<60:return False
+        from inbox_companion import submission_guard
+        submission_guard(value)
+        snap,order,item=checked(value,provider,resolver,False)
+        current_business=business(order,item['id']);original_business=deepcopy(receipt['before'])
+        # A failed first Save can remove the placeholder and its calculated
+        # target prices. Identity, product, address and sibling values stay pinned.
+        comparable_business=deepcopy(current_business)
+        for view in (comparable_business,original_business):
+            for target in view.get('items',[]):
+                if str(target.get('id'))==str(item['id']):
+                    target.pop('unitPrice',None);target.pop('lineTotal',None)
+        if (has_existing_artwork(item) or has_existing_artwork({'assets':receipt.get('empty_slots',[])})
+            or (bool(item.get('assets')) and item['assets']!=receipt.get('empty_slots',[]))
+            or comparable_business!=original_business
+            or receipt.get('companion_sha256')!=snap['output']['sha256']):return False
+        previous=value.get('missing_save_recovery') or {}
+        observed=dict(business_hash=prep.digest(business(order,item['id'])),
+            slots_hash=prep.digest(item.get('assets') or []),source_sha256=snap['output']['sha256'])
+        if any(previous.get(k)!=v for k,v in observed.items()):
+            value['missing_save_recovery']=dict(**observed,observed_at=prep.now(),attempts=0,
+                next_check_at=(stamp+timedelta(seconds=30)).isoformat())
+            save(q,key,value);return False
+        try:elapsed=(stamp-datetime.fromisoformat(previous['observed_at'])).total_seconds()
+        except (KeyError,ValueError,TypeError):return False
+        if elapsed<30:return False
+        from prodigi_upload_recovery import reusable_asset
+        value['missing_save_recovery']['next_check_at']=(stamp+timedelta(seconds=60)).isoformat()
+        save(q,key,value)
+        try:asset_id=reusable_asset(provider,receipt['filename'],snap)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('ORDERS_MISSING_SAVE_LIBRARY deferred key=%s',key)
+            return False
+        # The previous Save is not replayed. Its token is retired atomically.
+        # A fresh handoff rechecks this exact empty item before one new Save.
+        value['browser_history']=(value.get('browser_history',[])+[dict(
+            claimed_at=receipt.get('claimed_at'),filename=receipt['filename'],started=True,
+            last_stage='save',recovery='confirmed_empty_after_save')])[-8:]
+        value['missing_save_recovery']={**previous,'attempts':1,'recovered_at':prep.now()}
+        value['upload_recovery']=dict(attempts=1,retry_at=prep.now(),
+            source_sha256=snap['output']['sha256'],filename=receipt['filename'],asset_id=asset_id,
+            before=deepcopy(business(order,item['id'])),empty_slots=deepcopy(item.get('assets') or []))
+        value.pop('browser');value.pop('last_failure',None)
+        value.update(status=WAITING,message='Two independent reads confirmed the unchanged empty item. '+
+            ('Reusing the checksum-verified JPG' if asset_id else 'Uploading the same checksum-pinned JPG under a new filename')+' with a fresh Save permit.')
+        save(q,key,value);return True
+
+
 def recover_saved_uploads(user):
-    """Reconcile a timed-out Save once using persisted proof; never issue a write."""
+    """Re-read uncertain Saves before any bounded, independently proved recovery."""
     prep.require_user(user)
     from companion_poll_transaction import connection
     with connection(prep.connect) as conn,conn.cursor() as cur:
         cur.execute("""SELECT key,value FROM app_settings WHERE key LIKE 'prodigi_prepare:%%'
           AND value->>'status'='Needs review' AND value->'browser'->>'started'='true'
-          AND value->'browser'->>'last_stage'='save'
-          AND COALESCE((value->>'saved_readback_recoveries')::int,0)<1
+          AND value->'browser'->>'last_stage' IN ('save','readback')
           AND NOT value ? 'submission' AND NOT COALESCE((value->>'hidden')::boolean,false)
           ORDER BY updated_at LIMIT 20""")
-        keys=[row['key'] for row in cur.fetchall() if saved_readback_candidate(row['value'])][:2]
+        rows=cur.fetchall()
+        keys=[row['key'] for row in rows if saved_readback_candidate(row['value'])][:2]
+        missing=[row['key'] for row in rows if missing_save_candidate(row['value'])][:2]
     recovered=0
     for key in keys:
         def receipt(q):
@@ -484,6 +560,23 @@ def recover_saved_uploads(user):
             return value
         result=_finish(key,receipt,'readback')
         recovered+=result.get('status') not in ('Needs review','Handoff unavailable')
+    for key in missing:
+        def receipt(q):
+            value=read(q,key)
+            if not missing_save_candidate(value):
+                raise PermissionError('Missing artwork recovery is unavailable.')
+            return value
+        # A delayed supplier attachment must be verified, never overwritten.
+        try:
+            result=_finish(key,receipt,'readback')
+            if result.get('status') not in ('Needs review','Handoff unavailable'):
+                recovered+=1
+                continue
+            recovered+=bool(recover_missing_save(key))
+        except (ValueError,PermissionError):pass
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('ORDERS_MISSING_SAVE_RECOVERY deferred key=%s',key)
     return recovered
 
 
@@ -556,6 +649,7 @@ def _finish(key,read_receipt,stage,client_error=''):
         if client_error:value['browser']['client_error']=str(client_error)[:240]
         if value['browser'].get('verified'):
             return {'status':value['status']}
+        value.pop('upload_retry_pending',None)
         try:
             snap,order,item=checked(value,provider,resolver,sandbox)
             # Saving the first artwork makes Prodigi calculate target-item prices.
@@ -571,24 +665,30 @@ def _finish(key,read_receipt,stage,client_error=''):
                 value['browser']['readback_changed_fields']=changed_fields(expected_business,current_business)
                 page_wait=(stage in ('open','readiness') and client_error in (
                     'The woken order page did not expose its identity.',
-                    'The exact Prodigi order page did not become ready; check its loading or sign-in state.'))
+                    'The exact Prodigi order page did not become ready; check its loading or sign-in state.',
+                    'The supplier browser response was interrupted. Verify the saved order before continuing.',
+                    'The supplier order tab closed. Verify its saved state before continuing.'))
                 upload_wait=(stage=='uploaded' and client_error in (
                     'Prodigi image upload did not finish within the allowed time.',
                     'Prodigi image library stayed busy after the uploaded image became available.',
                     'Prodigi image selection did not finish after the verified library image became ready.',
                     'The uploaded image did not become available in the Prodigi picker.',
-                    'The expected Prodigi control did not finish loading.'))
+                    'The expected Prodigi control did not finish loading.',
+                    'Prodigi image processing stopped responding before Save.',
+                    'The supplier browser response was interrupted. Verify the saved order before continuing.',
+                    'The supplier order tab closed. Verify its saved state before continuing.'))
                 if (value['browser']['started'] is False and (page_wait or upload_wait)
                         and business(order,item['id'])==before
                         and not has_existing_artwork(item)
                         and (item.get('assets') or [])==value['browser'].get('empty_slots',[])):
+                    value['upload_retry_pending']=True
                     reason='page stopped responding' if page_wait else 'upload or image selection did not complete'
                     raise ValueError('The supplier '+reason+' before artwork Save. The saved draft is unchanged; safe recovery is pending.')
                 raise ValueError('Supplier order changed or Save was not permitted. Review this exact draft.')
             if value['browser'].get('companion_sha256')!=snap['output']['sha256']:
                 raise ValueError('The paired companion source checksum was not confirmed.')
             assets=item.get('assets') or []
-            if len(assets)!=1 or assets[0].get('printArea')!='default':
+            if len(assets)!=1 or assets[0].get('printArea')!='default' or not has_existing_artwork(item):
                 raise ValueError('Browser upload is not confirmed. No automatic retry will occur.')
             asset_id,raw_verified=verify_original(provider,original_file(assets[0]['url'],snap['dimensions']),
                 value['browser']['filename'],snap['output'],snap['dimensions'])

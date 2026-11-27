@@ -256,3 +256,45 @@ def test_page_wait_recovery_requires_fixed_page_ready_companion(store,monkeypatc
     assert qa.recover_waiting_item_qa({'id':'fixture'})==0
     assert qa.recover_waiting_item_qa({'id':'fixture'},page_supported=True)==1
     assert prep.read(1)['browser']['verified'] and not p.writes
+
+
+def test_shipping_reprice_gets_one_fresh_permit_not_approval_or_another_upload(store,monkeypatch):
+    value,snap,p,evidence=fixture();key=prep.PREFIX+'1'
+    p.data['items'][0].update(unitPrice=dict(amount='64.22',currency='USD'),lineTotal=dict(amount='64.22',currency='USD'))
+    monkeypatch.setattr(browser,'context',lambda _:(p,lambda _:snap,None,False))
+    monkeypatch.setattr(qa,'identity_proof',lambda _:True)
+    with store() as c,c.cursor() as q:prep.save(q,value)
+    plan=qa.claim();qa.permit(key,plan['token'],dict(options=options(),current='standard',target='budget'))
+    p.data['shippingMethod']='Budget'
+    for field in ('unitPrice','lineTotal'):p.data['items'][0][field]['amount']='64.27'
+    evidence['shipping']['options'][0]['cents']=501
+    assert qa.finish(key,plan['token'],evidence)['status']==qa.WAITING
+    saved=prep.read(1)
+    assert saved['qa_shipping_reprice_rechecks']==1 and saved['browser']['verified']
+    assert 'dashboard_qa' not in saved and not p.writes
+    assert qa.finish(key,plan['token'],evidence)['status']=='Handoff unavailable'
+    fresh=qa.claim();assert fresh['token']!=plan['token']
+    qa.permit(key,fresh['token'],dict(options=evidence['shipping']['options'],current='budget',target='budget'))
+    assert qa.finish(key,fresh['token'],evidence)['status']=='Ready for manual payment'
+    assert all(prep.read(1)['checks'].values()) and not p.writes
+
+
+@pytest.mark.parametrize('change',[
+    lambda v,o:o['recipient']['address'].update(line1='Changed'),
+    lambda v,o:o['items'][0].update(sku='OTHER'),
+    lambda v,o:o['items'][0]['attributes'].update(color='black'),
+    lambda v,o:o['items'][0]['assets'][0].update(url='https://fixture/other'),
+    lambda v,o:o['items'][0]['unitPrice'].update(currency='AUD'),
+    lambda v,o:o['items'][0]['unitPrice'].update(amount='NaN'),
+    lambda v,o:o['items'][0]['unitPrice'].update(amount='-1'),
+    lambda v,o:o.update(charges=[{'amount':'1'}]),
+    lambda v,o:v.update(qa_shipping_reprice_rechecks=1),
+    lambda v,o:v['dashboard_qa']['before'].update(shippingMethod='Budget'),
+])
+def test_shipping_reprice_never_masks_business_changes_or_retries_forever(change):
+    value,snap,p,evidence=fixture()
+    p.data['items'][0].update(unitPrice=dict(amount='64.22',currency='USD'),lineTotal=dict(amount='64.22',currency='USD'))
+    value['dashboard_qa']=dict(started=True,before=deepcopy(p.data),shipping=dict(target='budget',options=options()))
+    p.data['shippingMethod']='Budget';p.data['items'][0]['unitPrice']['amount']='64.27'
+    change(value,p.data)
+    assert not qa.shipping_reprice_recheck(value,p.data,evidence)

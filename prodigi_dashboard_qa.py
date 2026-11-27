@@ -53,6 +53,37 @@ def pinned_order(order):
     return result
 
 
+def shipping_reprice_recheck(value,order,evidence):
+    """Allow one new QA pass, never approval, after permitted shipping repricing."""
+    from decimal import Decimal, InvalidOperation
+    receipt=value.get('dashboard_qa') or {};before=receipt.get('before') or {}
+    planned=receipt.get('shipping') or {};target=planned.get('target')
+    if (receipt.get('started') is not True or value.get('qa_shipping_reprice_rechecks',0)>=1
+            or clean(before.get('shippingMethod'))==target or clean(order.get('shippingMethod'))!=target
+            or not prep.editable_order(order)):
+        return False
+    shipping=evidence.get('shipping') if isinstance(evidence,dict) else None
+    if not isinstance(shipping,dict) or set(shipping)!={'options','selected'}:return False
+    try:
+        if shipping['selected']!=target or shipping_choice(shipping['options'],intent(value['snapshot'].get('shipping')),shipping['selected'])!=target:return False
+    except (ValueError,KeyError):return False
+    original,current=pinned_order(before),pinned_order(order)
+    changed=original!=current or shipping['options']!=planned.get('options')
+    for pinned in (original,current):
+        for item in pinned['items']:
+            for key in ('unitPrice','lineTotal'):
+                money=item.get(key)
+                if money is None:continue
+                if not isinstance(money,dict) or set(money)!={'amount','currency'}:return False
+                try:amount=Decimal(str(money['amount']))
+                except (InvalidOperation,ValueError):return False
+                if not amount.is_finite() or amount<0 or not __import__('re').fullmatch('[A-Z]{3}',str(money['currency'])):return False
+                # Supplier-calculated amounts may settle when shipping changes.
+                # Currency and every other order/item field remain pinned.
+                money.pop('amount')
+    return changed and original==current
+
+
 def current_for_order(value,order,resolver):
     snap=browser.snapshot(value,resolver,False)
     item=prep.validate_order(order,snap,value['order_id'],value['item_id'],binding=value.get('consolidation_binding'))
@@ -387,7 +418,7 @@ def evaluate(value,snapshot,order,item,evidence,*,identity_verified,asset_resolv
     assets=item.get('assets') or []
     checks=item_checks(value,snapshot,order,item,evidence,identity_verified=identity_verified)
     checks.update(shipping=quote_ok,certificate=selected,packing_slip=selected,inserts_available=available)
-    checks['final_check']=all(checks.values()) and not order.get('issues') and (order.get('status')=='draft' or bool(value.get('consolidation_binding') and value.get('merge_pending') and order.get('status')=='paused'))
+    checks['final_check']=all(checks.values()) and not order.get('issues') and (prep.editable_order(order) or bool(value.get('consolidation_binding') and value.get('merge_pending') and order.get('status')=='paused'))
     labels={'product_option':'Product/SKU differs.','frame':'Frame colour differs.','size':'Size mapping differs.',
         'artwork_upload':'Exact saved design is not verified.','edition_number':'Allocated edition number is not verified.',
         'sent_to_production':'Full-image fit/orientation is not verified.','image_quality':'Prodigi image quality must show Excellent.',
@@ -442,6 +473,18 @@ def finish(key,token,evidence,error=''):
                     raise ValueError('Grouped QA item IDs differ from the pinned order.')
             elif rows is not None:raise ValueError('Unexpected grouped QA evidence.')
             stamp=prep.now();updates=[]
+            # Shipping can reroute production and recalculate prices/FX quotes.
+            # Retire this receipt and obtain a fresh permit/DOM check; never
+            # approve different prices using the previous quote or replay a JPG.
+            if all(shipping_reprice_recheck(unit,order,evidence) for unit in values):
+                for unit in values:
+                    unit.setdefault('dashboard_qa_history',[]).append(dict(
+                        reason='supplier_shipping_reprice',checked_at=stamp,verified=False))
+                    unit.pop('dashboard_qa')
+                    unit.update(qa_shipping_reprice_rechecks=unit.get('qa_shipping_reprice_rechecks',0)+1,
+                        status=WAITING,message='Prodigi recalculated prices after shipping selection; rechecking current quotes and all saved order details.')
+                    browser.save(q,prep.PREFIX+str(unit['allocation_id']),unit)
+                return {'status':WAITING}
             for unit in values:
                 other=unit['dashboard_qa']
                 if not other.get('started'):raise ValueError('A grouped QA shipping permit is missing.')

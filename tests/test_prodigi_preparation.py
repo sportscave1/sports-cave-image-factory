@@ -61,7 +61,7 @@ class Provider:
 
 @pytest.mark.parametrize('change,reason', [
     (lambda o:o.update(id='100'), 'different order'),
-    (lambda o:o.update(status='paused'), 'editable draft'),
+    (lambda o:o.update(status='in_production'), 'editable draft'),
     (lambda o:o.update(allowedActions=['resume']), 'editable draft'),
     (lambda o:o.update(merchantReference='wrong'), 'order reference'),
     (lambda o:o['items'][0].update(quantity=2), 'one separately'),
@@ -232,8 +232,12 @@ def test_normal_dashboard_link_and_companion_login_isolation():
     assert supplier_scripts[0]['matches']==['https://dashboard.prodigi.com/orders/*/detail',
         'https://sandbox-beta-dashboard.pwinty.com/orders/*/detail']
     scripts=[match for content in manifest['content_scripts'] for match in content['matches']]
-    assert not any('<all_urls>' in match or '/login' in match for match in scripts)
-    assert {match for match in scripts if 'prodigi' in match or 'pwinty' in match}==set(supplier_scripts[0]['matches'])
+    assert not any('<all_urls>' in match for match in scripts)
+    # The existing sign-in recovery is restricted to this exact supplier host.
+    assert [match for match in scripts if '/login' in match] == ['https://dashboard.prodigi.com/login*']
+    login_scripts=[content for content in manifest['content_scripts'] if 'https://dashboard.prodigi.com/login*' in content['matches']]
+    assert login_scripts[0]['js']==['prodigi-signin-page.js']
+    assert {match for match in scripts if 'prodigi' in match or 'pwinty' in match}==set(supplier_scripts[0]['matches'])|{'https://dashboard.prodigi.com/login*'}
     import io,zipfile
     from upload_companion_page import extension_package
     with zipfile.ZipFile(io.BytesIO(extension_package())) as archive:

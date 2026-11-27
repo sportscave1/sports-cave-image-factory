@@ -56,7 +56,7 @@ def save(value):
 @pytest.mark.parametrize('change',[
     lambda v,p:v.update(submission={'intent_at':'recorded'}),
     lambda v,p:p.data.update(charges=[{'id':'paid'}]),
-    lambda v,p:p.data.update(status='paused'),
+    lambda v,p:p.data.update(status='on_hold'),
     lambda v,p:p.data.update(shipments=[{'id':'shipped'}]),
     lambda v,p:p.data.update(statusHistory=[dict(status='in_production')]),
     lambda v,p:p.data['items'][0].update(merchantReference='another-line'),

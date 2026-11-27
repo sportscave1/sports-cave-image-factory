@@ -21,6 +21,8 @@ def reset_order(user,allocation_id):
     if not old:return prep.request(user,aid)
     if old.get('submission') or old.get('status') in ('Complete','Certificate pending','Submitted','Submitting','Submission uncertain'):
         raise ValueError('This order already has a submission intent. Reset cannot change submitted or production orders.')
+    from inbox_companion import submission_guard
+    submission_guard(old)
     receipt=old.get('browser') or {}
     if receipt.get('started') and not receipt.get('verified'):
         # Readback only. Do not revoke a Save that might still be in flight.

@@ -13,6 +13,22 @@ from test_prodigi_preparation import store
 
 OLD=dict(name='Fixture Customer',email='fixture@example.test',phoneNumber='+61000000000',
          address=dict(line1='1 Old Street',line2='Unit 1',townOrCity='Sydney',stateOrCounty='NSW',postalOrZipCode='2000',countryCode='AU'))
+
+@pytest.mark.parametrize('body',['My billing address is incorrect','My billing address is incorrect\u00a0','The billing address was wrong.'])
+def test_explicit_billing_only_correction_does_not_hold_shipping(body):
+    result=policy.classify('',body)
+    assert result['kind']=='ignore' and result['reason']=='billing_only'
+
+@pytest.mark.parametrize('subject,body',[
+    ('','My billing address is incorrect. Please change my shipping address too.'),
+    ('','My billing address is incorrect. Cancel the order.'),
+    ('Change shipping address','My billing address is incorrect'),
+    ('Order cancellation','My billing address is incorrect'),
+    ('Wrong artwork','My billing address is incorrect'),
+    ('','My address is incorrect'),
+])
+def test_billing_guard_never_suppresses_delivery_or_ambiguous_requests(subject,body):
+    assert policy.classify(subject,body)['kind']!='ignore'
 ADDRESS='Please update my shipping address:\nAddress: 2 New Street\nCity: Mount Lawley\nState: WA\nPostcode: 6050\nCountry: Australia'
 
 @pytest.fixture(autouse=True)

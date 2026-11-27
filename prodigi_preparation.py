@@ -201,7 +201,9 @@ def shopify_recipient(raw, order_id):
     address=address if isinstance(address,dict) else {}
     name=source.get('shipping_name') or address.get('name') or ' '.join(str(address.get(k) or '') for k in
         (('firstName','lastName') if 'firstName' in address else ('first_name','last_name'))).strip()
-    recipient={'name':name,'address':{'line1':address.get('address1'),'line2':address.get('address2'),
+    # Prodigi imports a company into line 2 when Shopify has no apartment line.
+    # Preserve an explicit apartment/unit; never weaken the full-address comparison.
+    recipient={'name':name,'address':{'line1':address.get('address1'),'line2':address.get('address2') or address.get('company'),
         'townOrCity':address.get('city'),'stateOrCounty':address.get('province'),
         'postalOrZipCode':address.get('zip'),'countryCode':address.get('countryCodeV2') or address.get('country_code') or address.get('countryCode')},
         'state_aliases':[address.get('province'),address.get('provinceCode') or address.get('province_code')]}
@@ -226,14 +228,32 @@ def restore_missing_recipient(value,resolver=None):
     return True
 
 
+
+def editable_order(order):
+    """Supplier-authorised unpaid editor, including an explicitly resumable hold."""
+    state=order.get('status');actions=order.get('allowedActions') or []
+    if state not in ('draft','paused','on_hold'):return False
+    if state=='on_hold' and not {'update','resume'}.issubset(actions):return False
+    if 'update' not in actions and not (state=='paused' and 'resume' in actions):return False
+    if order.get('charges') or order.get('shipments') or order.get('issues'):return False
+    for event in order.get('statusHistory') or []:
+        if not isinstance(event,dict):return False
+        if any(event.get(k) in ('in_production','partially_shipped','shipped','completed')
+               for k in ('status','toStatus','fromStatus','stage')):return False
+    return True
+
+
 def validate_order(order, snapshot, order_id, item_id, *, allow_unselected=False, binding=None):
     if binding:
         from prodigi_consolidation import bound_order
         order=bound_order(order,snapshot,binding,item_id)
     if str(order.get('id')) != str(order_id):
         raise ProdigiError('Prodigi returned a different order ID.')
-    if order.get('status') != 'draft' or 'update' not in order.get('allowedActions', []):
-        raise ProdigiError('Artwork can only be prepared on an editable draft. Open the existing order for manual handling.')
+    if not editable_order(order):
+        actions=order.get('allowedActions') or []
+        raise ProdigiError('Artwork requires an unpaid editable draft or pause window with no production history. '
+            f"Supplier status: {str(order.get('status'))[:24]}; update: {'update' in actions}; resume: {'resume' in actions}; "
+            f"charges: {bool(order.get('charges'))}; shipments: {bool(order.get('shipments'))}; issues: {bool(order.get('issues'))}.")
     refs = {str(snapshot['identity']['order_id']), str(snapshot['identity']['order_id']).rsplit('/', 1)[-1],
             str(snapshot['order_reference']), str(snapshot['order_reference']).lstrip('#')}
     if str(order.get('merchantReference')) not in refs:

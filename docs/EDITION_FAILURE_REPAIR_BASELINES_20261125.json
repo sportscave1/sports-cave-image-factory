@@ -1,0 +1,17 @@
+[
+  {
+    "path": "prodigi_preparation.py",
+    "revision": "2acd8e00b4b9c4ee8dda4fc9ea6f7045d83c8fee",
+    "sha256": "81c30d12a715e6df038cd384fd8759d900d71bcaa5bcffac81c35d291453f61a"
+  },
+  {
+    "path": "prodigi_qa.py",
+    "revision": "2acd8e00b4b9c4ee8dda4fc9ea6f7045d83c8fee",
+    "sha256": "1c778cd8b3ba14a33531d1ddd37d192ca449155233124ba991231e67f32b22a8"
+  },
+  {
+    "path": "windows-upload-companion/prodigi-browser.js",
+    "installed_version": "1.7.57",
+    "sha256": "3e16813fd122881a19af6a1df10dc1c134344118ae52dd92188a94dec70ba202"
+  }
+]

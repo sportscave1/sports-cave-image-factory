@@ -141,18 +141,38 @@ async function prodigiSigninRecover() {
   return {waiting:true};
 }
 async function prodigiSigninHandoff(plan,tab,message){
-  let timer;const deadline=Date.now()+900000;
+  let timer,stage='open',stageAt=Date.now(),woke=false,checking=false,settled=false;
+  const deadline=Date.now()+900000;
+  const interrupted=message=>Object.assign(Error(message),{prodigiStage:stage});
   const signedOut=new Promise((_,reject)=>{timer=setInterval(()=>{
+    if(checking||settled)return;checking=true;
     void chrome.storage.local.get('ordersWorkerTabs').then(async state=>{
+      if(settled)return;
       if(state.ordersWorkerTabs?.[plan.order_url]!==tab.id){reject(Error('The worker order tab changed during the supplier action.'));return;}
       const current=await chrome.tabs.get(tab.id);
+      if(settled)return;
       if(prodigiLoginAddress(current.pendingUrl||current.url,plan.order_url))reject(prodigiSignInRequired());
-      else if(!prodigiOrderAddress(current.pendingUrl||current.url,plan.order_url)||Date.now()>deadline)
-        reject(Error('The supplier browser response was interrupted. Verify the saved order before continuing.'));
-    }).catch(()=>reject(Error('The supplier order tab closed. Verify its saved state before continuing.')));
+      else if(!prodigiOrderAddress(current.pendingUrl||current.url,plan.order_url))
+        reject(Error('The supplier order page changed during the supplier action.'));
+      else {
+        const transfer=typeof prodigiBrowserTransfer==='undefined'?null:prodigiBrowserTransfer;
+        if(transfer?.plan.token===plan.token&&transfer.tab===tab.id&&transfer.stage&&transfer.stage!==stage){
+          stage=transfer.stage;stageAt=Date.now();
+        }
+        if(message.type==='prodigi:upload'&&stage==='uploaded'){
+          // Content timers can freeze while the service worker remains alive.
+          // Wake only our exact owned page, then retire a stalled pre-Save plan
+          // through server readback. The old token can never permit a later Save.
+          if(!woke&&Date.now()-stageAt>=60000){woke=true;await prodigiWakeOwnedTab(tab,plan.order_url);}
+          if(Date.now()-stageAt>=180000)reject(interrupted('Prodigi image processing stopped responding before Save.'));
+        }
+        if(Date.now()>deadline)reject(interrupted('The supplier browser response was interrupted. Verify the saved order before continuing.'));
+      }
+    }).catch(()=>reject(interrupted('The supplier order tab closed. Verify its saved state before continuing.')))
+      .finally(()=>{checking=false;});
   },1000);});
   try{return await Promise.race([chrome.tabs.sendMessage(tab.id,message,{frameId:0}),signedOut]);}
-  finally{clearInterval(timer);}
+  finally{settled=true;clearInterval(timer);}
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(message?.type!=='prodigi:signin:ready'||sender.id!==chrome.runtime.id||sender.frameId!==0||
