@@ -16,15 +16,10 @@ from design_review_metadata import (
 )
 from product_upload_dropbox import REVIEW, approved, select, within
 from product_upload_intake import Intakes, action_mode, stored_mode
+from design_review_validation import final_psd
 from psd_directory import REVIEW_METADATA_FOLDER
 
 _HANDOFF_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='review-handoff')
-
-
-def final_psd(entry):
-    return bool(approved(entry) and within(entry['path_display'], REVIEW)
-                and entry.get('rev')
-                and not is_working_file(entry['name']))
 
 
 def _folder_entries(provider, path):

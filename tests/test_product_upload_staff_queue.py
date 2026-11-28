@@ -16,7 +16,7 @@ def store(database, monkeypatch):
     cursor.execute(sql.with_name('20261118070000_product_upload_manual_restart.sql').read_text(encoding='utf8'))
     cursor.execute('CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz DEFAULT now())')
     monkeypatch.setattr(queue, 'connect', jobs.connect)
-    monkeypatch.setattr('design_review_page.final_psd', lambda source: True)
+    monkeypatch.setattr('design_review_validation.final_psd', lambda source: True)
     return jobs.connect
 
 
@@ -140,7 +140,7 @@ def test_success_requires_live_product_and_exact_mapped_master(store, monkeypatc
 
 def test_many_publish_requests_wait_and_advance_after_failure_or_verified_success(store, monkeypatch):
     import design_review_page
-    monkeypatch.setattr(design_review_page, 'final_psd', lambda source: True)
+    monkeypatch.setattr('design_review_validation.final_psd', lambda source: True)
     keys = [queue.enqueue({'id':'staff'}, {'id':f'id:art-{n}','rev':'R1'}, f'Artwork {n}', 'Basketball') for n in range(5)]
     token = queue.pair({'id':'desktop'})
     first = queue.tick(token, {})['job']['id']

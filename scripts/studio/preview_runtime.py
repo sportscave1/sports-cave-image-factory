@@ -29,7 +29,7 @@ except urllib.error.HTTPError as error:
     sys.exit(1)
 """
 
-def options(image,name,task):
+def options(image,name,task,*,artwork_scratch=False):
     if profile_digest()!=PROFILE_SHA256:
         raise RuntimeError("Unreviewed preview seccomp policy.")
     args=boundary.hardened(image,name,task)
@@ -37,16 +37,20 @@ def options(image,name,task):
     args[args.index("64")]="192"
     args[args.index("/tmp:rw,noexec,nosuid,nodev,size=16777216,uid=65532,gid=65532,mode=700")]=\
         "/tmp:rw,noexec,nosuid,nodev,size=536870912,uid=65532,gid=65532,mode=700"
+    if artwork_scratch:
+        args[args.index("1g")]="2g"
+        args[args.index("/tmp:rw,noexec,nosuid,nodev,size=536870912,uid=65532,gid=65532,mode=700")]="/tmp:rw,noexec,nosuid,nodev,size=6442450944,uid=65532,gid=65532,mode=700"
     args[-1:-1]=["--security-opt","seccomp="+str(PROFILE.resolve())]
     return args
 
-def validate_runtime(config,image,task):
+def validate_runtime(config,image,task,*,artwork_scratch=False):
     # Reuse core checks without accepting unbounded resource overrides.
     import copy
     h=config["HostConfig"]
-    if h["Memory"]!=1073741824 or h["PidsLimit"]!=192:
+    if h["Memory"]!=(2147483648 if artwork_scratch else 1073741824) or h["PidsLimit"]!=192:
         raise RuntimeError("Preview resource policy changed.")
-    if h.get("Tmpfs")!={"/tmp":"rw,noexec,nosuid,nodev,size=536870912,uid=65532,gid=65532,mode=700"}:
+    scratch_size=6442450944 if artwork_scratch else 536870912
+    if h.get("Tmpfs")!={"/tmp":f"rw,noexec,nosuid,nodev,size={scratch_size},uid=65532,gid=65532,mode=700"}:
         raise RuntimeError("Preview storage policy changed.")
     seccomp=[s[len("seccomp="):] for s in h["SecurityOpt"] if s.startswith("seccomp=")]
     if len(seccomp)!=1 or json.loads(seccomp[0])!=json.loads(PROFILE.read_text(encoding="utf-8-sig")):
@@ -62,7 +66,9 @@ def validate_runtime(config,image,task):
     return boundary.validate(checked,image,task)
 
 class Preview:
-    def __init__(self,home,task,owner,source_provider=None):
+    def __init__(self,home,task,owner,source_provider=None,*,artwork_scratch=False):
+        # Sparse tmpfs capacity for synthetic PSD guards; resident memory remains bounded to 2GiB.
+        self.artwork_scratch=artwork_scratch
         self.home,self.task,self.owner=home,task,owner
         self.source_provider=source_provider
         self.name=None
@@ -118,7 +124,7 @@ class Preview:
         archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture(self.home,self.task,self.owner))
         image=json.loads(self._docker("image","inspect",IMAGE_TAG).stdout)[0]["Id"]
         name="sc-studio-preview-"+uuid.uuid4().hex[:12]
-        self._docker("create",*options(image,name,self.task),"sleep","900")
+        self._docker("create",*options(image,name,self.task,artwork_scratch=self.artwork_scratch),"sleep","900")
         self.name=name
         with studio.locked(self.home) as file:
             registry=studio.read(file)
@@ -129,7 +135,7 @@ class Preview:
             studio.atomic(file,registry)
         try:
             config=json.loads(self._docker("inspect",name).stdout)[0]
-            policy=validate_runtime(config,image,self.task)
+            policy=validate_runtime(config,image,self.task,artwork_scratch=self.artwork_scratch)
             if not re.fullmatch('[a-f0-9]{64}',config.get('Id','')):
                 raise RuntimeError('Immutable container identity missing.')
             self.container_id=config['Id']
@@ -238,7 +244,7 @@ class Preview:
         self._scope()
         archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture_delta(self.home,self.task,self.owner,paths,self.manifest) if paths else preview_export.capture(self.home,self.task,self.owner))
         config=json.loads(self._docker("inspect",self.name).stdout)[0]
-        validate_runtime(config,self.evidence["image"],self.task)
+        validate_runtime(config,self.evidence["image"],self.task,artwork_scratch=self.artwork_scratch)
         result=subprocess.run(["docker",*(["--context",self.docker_context] if self.docker_context else []),"exec","-i",self.container_id or self.name,"python","-B","-c",
             "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],
             input=archive,capture_output=True,timeout=30, **studio.quiet_process())

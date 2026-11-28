@@ -94,3 +94,20 @@ class SyntheticCookieTests(unittest.TestCase):
             route=Mock();route.request.url=url;route.request.method=method
             self.handler()(route)
             route.abort.assert_called_once();route.fulfill.assert_not_called()
+
+
+class ArtworkScratchTests(unittest.TestCase):
+    def test_artwork_capacity_is_opt_in_with_unchanged_limits(self):
+        normal=runtime.options("sha256:fake","name","task")
+        artwork=runtime.options("sha256:fake","name","task",artwork_scratch=True)
+        self.assertEqual(artwork, ["2g" if v=="1g" else v.replace("size=536870912,", "size=6442450944,") for v in normal])
+        self.assertEqual(artwork[artwork.index("--memory")+1], "2g")
+
+    def test_mismatched_and_unbounded_storage_refused_before_other_checks(self):
+        for opt_in in (False, True):
+            expected=6442450944 if opt_in else 536870912
+            for capacity in (0, expected+1, 536870912 if opt_in else 6442450944):
+                config={"HostConfig":{"Memory":2147483648 if opt_in else 1073741824,"PidsLimit":192,
+                    "Tmpfs":{"/tmp":f"rw,noexec,nosuid,nodev,size={capacity},uid=65532,gid=65532,mode=700"}}}
+                with self.assertRaisesRegex(RuntimeError,"storage policy"):
+                    runtime.validate_runtime(config,"sha256:fake","task",artwork_scratch=opt_in)

@@ -28,7 +28,7 @@ def enqueue(user, source, title, sport, *, ad_country=None, start=False):
     if ad_country is not None:
         import design_publish_ad as ad
         sport, ad_country = ad.check_request(user, sport, ad_country)
-    from design_review_page import final_psd
+    from design_review_validation import final_psd
     if not final_psd(source) or not source.get('id') or not source.get('rev'):
         raise ValueError('Choose a current PSD from Design Studio Review.')
     resume = start and can_control_queues(user)
